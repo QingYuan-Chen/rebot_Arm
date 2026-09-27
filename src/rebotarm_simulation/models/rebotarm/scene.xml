@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 桌面工作台标准场景：机器人 + 桌子 + 作为抓取目标的瓶子代理 + 一个固定相机。
-     机器人本体由同目录的 robot.xml 提供，本文件只负责环境、光照、相机与初始关键帧。
+<!-- 桌面工作台标准场景：机器人 + 桌子 + 作为抓取目标的瓶子代理。
+     机器人本体由同目录的 robot.xml 提供，本文件只负责环境、光照与初始关键帧。
      单位：长度 m、角度 rad。 -->
 <mujoco model="rebotarm_tabletop_scene">
   <include file="robot.xml"/>
@@ -8,7 +8,7 @@
        implicitfast 积分器对阻尼与约束力做隐式处理，接触场景下比显式积分更稳定。 -->
   <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>
   <!-- 自由相机与被动物体自动取景的统计中心（工作台附近）与范围（m）。
-       只影响 MuJoCo 查看器的默认视角，不影响物理与虚拟相机。 -->
+       只影响 MuJoCo 查看器的默认视角，不影响物理。 -->
   <statistic center="0.15 0 0.18" extent="0.8"/>
   <visual>
     <!-- 默认头灯：环境光 0.25、漫反射 0.65、镜面 0.15，保证无额外光源时也能看清。
@@ -19,18 +19,6 @@
   <worldbody>
     <!-- 主方向光：位置与方向定义了照射方向，directional 表示平行光（距离无关）。 -->
     <light name="key_light" pos="0.2 -0.5 1.5" dir="0.1 0.2 -1" directional="true"/>
-    <!-- 固定相机（场景内定义，供查看器或离屏渲染使用）。
-         pos 是相机光心在世界系的位置（m）；
-         xyaxes 依次给出相机 +x 与 +y 轴在世界系中的单位向量，+z 由叉乘得到，
-         即光轴指向。改这里会同时改变出图视角与虚拟相机外参。 -->
-    <!-- Repository reference K from camera_ubuntu.yaml ordinary_grasp (NOT a live SDK calibration).
-         Pixel-center convention: cx=(w-1)/2-principalpixel_x, cy=(h-1)/2+principalpixel_y.
-         This is an ideal undistorted camera; real lens D is not simulated. -->
-    <camera name="fixed_camera" pos="0.85 -0.90 0.55" xyaxes="0.727 0.686 0 -0.245 0.260 0.934"
-            resolution="640 480" sensorsize="0.0064 0.0048"
-            focalpixel="519.422 519.17" principalpixel="-1.181 1.862"/>
-    <!-- 地面：位于 z=-0.75 m 的无限平面，contype/conaffinity=1 表示与默认碰撞组互相作用。
-         size 前两项是可视范围（m），最后一项为平面厚度提示（仅渲染用）。 -->
     <geom name="floor" type="plane" pos="0 0 -0.75" size="2 2 0.1" rgba="0.18 0.2 0.22 1" contype="1" conaffinity="1"/>
     <!-- 桌子：body 原点在桌面几何中心（z=-0.025），因此桌面顶面恰好在 z=0，
          即机械臂基座与工作台面同高，抓取目标直接放在 z=0 平面上。 -->

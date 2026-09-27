@@ -42,7 +42,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ExecutePose.srv"
   "srv/PublishTrajectoryPreview.srv"
   "srv/SetGripper.srv"
-  "srv/GetSimulationGraspState.srv"
   "srv/GraspGripper.srv"
   "action/ExecuteGrasp.action"
   "action/MoveRelative.action"

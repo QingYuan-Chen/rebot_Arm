@@ -34,17 +34,12 @@
   <exec_depend>rebotarm_msgs</exec_depend>
   <!-- 运动规划配置包：提供 URDF、SRDF 与网格，仿真模型与关节限位一致性检查都读它。 -->
   <exec_depend>rebotarm_moveit_config</exec_depend>
-  <!-- Offline MJCF generation reads handeye.yaml and camera profile resources only;
-       no perception nodes or Python implementation are imported or started. -->
-  <exec_depend>rebotarm_vision</exec_depend>
   <!-- 仿真时钟消息 /clock，保证规划与执行共用仿真时间。 -->
   <exec_depend>rosgraph_msgs</exec_depend>
-  <!-- 图像、相机内参与关节状态消息（虚拟相机与关节状态发布）。 -->
+  <!-- 关节状态消息。 -->
   <exec_depend>sensor_msgs</exec_depend>
   <!-- 标准服务类型（如 Trigger），用于停止/复位类服务。 -->
   <exec_depend>std_srvs</exec_depend>
-  <!-- 静态坐标变换广播，把虚拟相机坐标系接入 TF 树。 -->
-  <exec_depend>tf2_ros</exec_depend>
   <!-- 轨迹消息类型（JointTrajectoryPoint 等）。 -->
   <exec_depend>trajectory_msgs</exec_depend>
 

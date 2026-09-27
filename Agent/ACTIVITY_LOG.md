@@ -924,3 +924,10 @@
 - 2026-09-26T13:38:31+08:00 | actor=codex | event=complete | note=相机调试标记和自身外壳传感器渲染修正，夹爪可见，物理与手眼不变 | verification=render ID/depth/model invariance;MuJoCo12;layering18;755 passed21 skipped;build/compileall/diff
 - 2026-09-26T13:41:25+08:00 | actor=codex | event=start | note=提交推送当前仿真与相机工作进度到origin/main | verification=-
 - 2026-09-26T13:43:39+08:00 | actor=codex | event=checkpoint | note=提交前验证通过，保存当前59文件工作进度并推送origin/main | verification=755 passed21 skipped;layering18;compileall/diff;未发现凭据模式
+- 2026-09-27T16:29:47+08:00 | actor=Codex | event=complete | note=完成只读RGB-D同步目标点云到MuJoCo代理场景一次性采集工具 | verification=synthetic ROS end-to-end 900 points; simulation build; layering 18; full 758 passed 21 skipped; MuJoCo 5 passed; compileall; diff check
+- 2026-09-27T16:44:22+08:00 | actor=Codex | event=start | note=按用户确认删除MuJoCo瓶子接触试验、多姿态搜索及RGB-D点云代理，保留示教预演 | verification=-
+- 2026-09-27T16:52:12+08:00 | actor=Codex | event=complete | note=删除MuJoCo三项实验原型并保留示教预演 | verification=4 packages rebuild; ROS entry/interface absence; layering 18; full 751 passed 19 skipped; MuJoCo 17 passed; compileall; diff check
+- 2026-09-27T17:04:36+08:00 | actor=codex | event=start | note=按用户要求移除仿真虚拟RGBD视觉链，保留相机支架实体负载与真实视觉 | verification=-
+- 2026-09-27T17:10:39+08:00 | actor=codex | event=complete | note=移除虚拟视觉链完成，实体相机支架负载保留，仿真运行与回归通过 | verification=build;ROS无camera/TF发布;744 passed14 skipped;MuJoCo9;layering18;compileall/MJCF/diff
+- 2026-09-27T17:12:54+08:00 | actor=codex | event=start | note=提交推送当前仿真清理进度到GitHub | verification=-
+- 2026-09-27T17:13:25+08:00 | actor=codex | event=checkpoint | note=当前清理进度已验证，准备提交推送origin/main | verification=744 passed14 skipped;layering18;MuJoCo9;build/runtime/compileall/MJCF/diff

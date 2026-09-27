@@ -36,25 +36,3 @@ rebotarm_mujoco_node:
     # 动作反馈发布频率（Hz）。它同时决定执行循环的休眠步长上限，
     # 因此也是"取消请求最长响应延迟"的量级，调低会让取消变迟钝。
     feedback_rate_hz: 20.0
-    # 离屏传感默认关闭：纯运动仿真因此不依赖 EGL/GPU 渲染，无显卡环境也能直接跑。
-    virtual_camera.enabled: false
-    # 场景 XML 中定义的相机名，必须与模型里的 <camera name=...> 一致。
-    virtual_camera.camera_name: wrist_camera
-    # 发布图像时使用的光学坐标系名；下游按该 frame_id 做 TF 查询。
-    virtual_camera.frame_id: mujoco_wrist_camera_optical_frame
-    # 相机在物理模型中所挂载的 body 名（模型内部坐标系）。
-    virtual_camera.parent_body_name: end_link
-    # 相机静态 TF 的父坐标系名（ROS 侧）；图像据此接入 TF 树，
-    # 与 parent_body_name 不一致时视觉结果会整体偏移。
-    virtual_camera.parent_frame_id: end_link
-    # 离屏图像宽度（像素）。与高度一起决定渲染开销与内参。
-    virtual_camera.width: 640
-    # 离屏图像高度（像素）。
-    virtual_camera.height: 480
-    # 虚拟相机出图频率（Hz）。应不高于物理推进频率，否则会重复渲染同一物理状态。
-    virtual_camera.rate_hz: 15.0
-    # 深度图有效上限（m）：超过该距离的像素视为无效，
-    # 调大能看得更远但深度精度下降，需与真实相机的量程对齐。
-    virtual_camera.max_depth_m: 2.0
-    # 需要输出真值标注（检测框/掩码）的模型 body 名列表，仅仿真可用。
-    virtual_camera.annotation_bodies: [bottle]

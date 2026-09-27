@@ -75,7 +75,6 @@
                     </body>
                     <site name="ee_site" pos="-0.04 0 0" size="0.008" />
                     <site name="wrist_camera_mount" pos="-0.04 0 0.04" quat="1 0 0 0" size="0.005" />
-                    <camera name="wrist_camera" pos="-0.085 0.01 0.045" quat="0.52309281087 0.476997913881 -0.405717913899 -0.578134824856" resolution="640 480" sensorsize="0.0064 0.0048" focalpixel="519.422 519.17" principalpixel="-1.181 1.862" />
                     <body name="gemini2_mount" pos="-0.08630933 0.00020790689328 7.587263523e-07" quat="0.5 0.5 0.5 0.5">
                       <body name="gemini2_mount_part0">
                         <inertial pos="0.00173054255996 0.0527321114727 -0.013516537449" mass="0.022" fullinertia="4.47569786106e-06 1.42079810965e-05 1.71545232971e-05 -2.01204022696e-07 -2.42559046932e-07 -2.26879380975e-08" />

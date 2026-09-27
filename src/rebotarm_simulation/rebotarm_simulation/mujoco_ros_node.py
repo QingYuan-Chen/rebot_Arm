@@ -28,7 +28,6 @@ from enum import Enum, auto
 from typing import Any, Sequence
 
 from .trajectory_sampler import ARM_JOINT_NAMES, NamedTrajectoryPoint, TrajectorySampler
-from .virtual_camera import VirtualCameraConfig, VirtualCameraWorker
 
 
 # 单条轨迹允许的最大路点数：防止畸形/恶意目标用超大点数耗尽内存与规划时间。
@@ -452,19 +451,16 @@ def create_node_class():
     import rclpy
     from control_msgs.action import FollowJointTrajectory
     from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-    from geometry_msgs.msg import TransformStamped
     from rclpy.action import ActionServer, CancelResponse, GoalResponse
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
     from rclpy.clock import Clock as RclpyClock
     from rclpy.clock import ClockType
     from rclpy.node import Node
-    from rclpy.qos import qos_profile_sensor_data
-    from rebotarm_msgs.msg import Detection2D, Detection2DArray, JointMotorState
-    from rebotarm_msgs.srv import GetSimulationGraspState, SetGripper
+    from rebotarm_msgs.msg import JointMotorState
+    from rebotarm_msgs.srv import SetGripper
     from rosgraph_msgs.msg import Clock
-    from sensor_msgs.msg import CameraInfo, Image, JointState
+    from sensor_msgs.msg import JointState
     from std_srvs.srv import Trigger
-    from tf2_ros import StaticTransformBroadcaster
     from trajectory_msgs.msg import JointTrajectoryPoint
 
     from .mujoco_sim import RebotArmMujoco
@@ -517,29 +513,6 @@ def create_node_class():
                 value = float(self.get_parameter(name).value)
                 if not math.isfinite(value) or value <= 0.0:
                     raise ValueError(f"{name} must be positive and finite")
-            # 虚拟 RGB-D 相机默认关闭：仅运动仿真时不需要 EGL/离屏渲染能力。
-            self.declare_parameter("virtual_camera.enabled", False)
-            # MuJoCo 模型里的相机名（仅作渲染视角，不改物理）。
-            self.declare_parameter("virtual_camera.camera_name", "wrist_camera")
-            # 发布的彩色/深度图 frame_id（相机光学坐标系，已按 ROS 约定翻转轴向）。
-            self.declare_parameter(
-                "virtual_camera.frame_id", "mujoco_wrist_camera_optical_frame"
-            )
-            # 外参计算所参照的 MuJoCo body 名与对应的 ROS 父坐标系名。
-            self.declare_parameter("virtual_camera.parent_body_name", "end_link")
-            self.declare_parameter("virtual_camera.parent_frame_id", "end_link")
-            # 图像分辨率（像素）与出图频率（Hz，上限 120）。
-            self.declare_parameter("virtual_camera.width", 640)
-            self.declare_parameter("virtual_camera.height", 480)
-            self.declare_parameter("virtual_camera.rate_hz", 15.0)
-            # 深度有效上限，单位 m；超过该值的像素按无效置 0（上限来自 16 位毫米表示）。
-            self.declare_parameter("virtual_camera.max_depth_m", 2.0)
-            # 需要输出真值标注的 MuJoCo body 名列表（用于仿真检测真值）。
-            self.declare_parameter("virtual_camera.annotation_bodies", ["bottle"])
-            # 真值检测结果发布话题；空字符串会在启动时报错（见下方校验）。
-            self.declare_parameter(
-                "virtual_camera.annotation_topic", "/grasp/ground_truth_detections"
-            )
             # 以下三项是启动前的硬门：参数不合法直接抛错终止，绝不带着错误配置跑仿真。
             if self.get_parameter("backend").value != "mujoco":
                 raise ValueError("simulation backend must be mujoco")
@@ -598,34 +571,6 @@ def create_node_class():
             self._physics_clock = RclpyClock(clock_type=ClockType.STEADY_TIME)
             # 对外时间戳单调递增（见 MonotonicStamp 说明）。
             self._stamp = MonotonicStamp()
-            self._virtual_camera_worker = None
-            self._virtual_camera_config = None
-            # 下一次应当触发虚拟相机渲染的仿真时刻，单位 s；初始 0 表示开机即出第一帧。
-            self._next_virtual_camera_time = 0.0
-            # 虚拟相机为可选能力：关闭时不创建任何相机发布者与工作线程。
-            if bool(self.get_parameter("virtual_camera.enabled").value):
-                self._virtual_camera_config = VirtualCameraConfig(
-                    camera_name=str(
-                        self.get_parameter("virtual_camera.camera_name").value
-                    ),
-                    frame_id=str(self.get_parameter("virtual_camera.frame_id").value),
-                    parent_body_name=str(
-                        self.get_parameter("virtual_camera.parent_body_name").value
-                    ),
-                    parent_frame_id=str(
-                        self.get_parameter("virtual_camera.parent_frame_id").value
-                    ),
-                    width=int(self.get_parameter("virtual_camera.width").value),
-                    height=int(self.get_parameter("virtual_camera.height").value),
-                    rate_hz=float(self.get_parameter("virtual_camera.rate_hz").value),
-                    max_depth_m=float(
-                        self.get_parameter("virtual_camera.max_depth_m").value
-                    ),
-                    annotation_bodies=tuple(
-                        self.get_parameter("virtual_camera.annotation_bodies").value
-                    ),
-                )
-
             # 只读反馈话题：关节状态、夹爪状态与仿真时钟。队列深度 10 足以吸收
             # 短暂抖动，仿真时间由 /clock 统一对外，供 use_sim_time 的节点对齐。
             self._joint_pub = self.create_publisher(
@@ -638,56 +583,6 @@ def create_node_class():
             self._diagnostic_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
             self._diagnostic_last_wall = time.monotonic()
             self._diagnostic_last_sim = 0.0
-            # 虚拟相机发布者默认全部为空，仅在开启相机时创建，便于用同一套
-            # 清理路径处理"未启用"的情况。
-            self._color_pub = None
-            self._depth_pub = None
-            self._color_info_pub = None
-            self._depth_info_pub = None
-            self._annotation_pub = None
-            self._virtual_camera_tf_broadcaster = None
-            if self._virtual_camera_config is not None:
-                # 图像类数据用 sensor_data QoS（尽力而为、深度小），与真实相机
-                # 驱动的 QoS 保持一致，避免上层订阅端因 QoS 不兼容收不到数据。
-                self._color_pub = self.create_publisher(
-                    Image, "/camera/color/image_raw", qos_profile_sensor_data
-                )
-                self._depth_pub = self.create_publisher(
-                    Image, "/camera/depth/image_raw", qos_profile_sensor_data
-                )
-                self._color_info_pub = self.create_publisher(
-                    CameraInfo, "/camera/color/camera_info", qos_profile_sensor_data
-                )
-                self._depth_info_pub = self.create_publisher(
-                    CameraInfo, "/camera/depth/camera_info", qos_profile_sensor_data
-                )
-                annotation_topic = str(
-                    self.get_parameter("virtual_camera.annotation_topic").value
-                ).strip()
-                # 空话题名会让发布者创建失败，这里提前拒绝而不是留到运行期。
-                if not annotation_topic:
-                    raise ValueError("virtual_camera.annotation_topic must be non-empty")
-                self._annotation_pub = self.create_publisher(
-                    Detection2DArray, annotation_topic, qos_profile_sensor_data
-                )
-                # 相机相对父连杆固定，广播 end_link -> optical 静态TF；
-                # 末端的世界位姿由机器人状态TF链更新。
-                self._virtual_camera_tf_broadcaster = StaticTransformBroadcaster(self)
-                self._virtual_camera_worker = VirtualCameraWorker(
-                    self._sim_access,
-                    self._virtual_camera_config,
-                    on_frame=self._publish_virtual_frame,
-                    on_ready=self._virtual_camera_ready,
-                    on_error=self._virtual_camera_error,
-                )
-                self.get_logger().info(
-                    "MuJoCo virtual RGB-D configured: "
-                    f"camera={self._virtual_camera_config.camera_name}, "
-                    f"size={self._virtual_camera_config.width}x"
-                    f"{self._virtual_camera_config.height}, "
-                    f"rate={self._virtual_camera_config.rate_hz:g} Hz, "
-                    f"frame={self._virtual_camera_config.frame_id}"
-                )
             # 与真实控制器同名的轨迹动作接口：上层运动/示教代码无需区分真机与仿真。
             self._action_server = ActionServer(
                 self,
@@ -710,12 +605,6 @@ def create_node_class():
                 SetGripper,
                 f"/{self._arm_namespace}/gripper/set",
                 self._gripper_service,
-                callback_group=self._callback_group,
-            )
-            self.create_service(
-                GetSimulationGraspState,
-                f"/{self._arm_namespace}/sim/grasp_state",
-                self._grasp_state_service,
                 callback_group=self._callback_group,
             )
             # 每次定时器回调推进足够多的固定物理步，使其时长与配置的发布周期一致；
@@ -849,47 +738,6 @@ def create_node_class():
                 return response
             response.success = True
             response.reached_position = float(reached)
-            return response
-
-        def _grasp_state_service(self, _request, response):
-            state, contacts = self._sim_access.run(
-                lambda sim: (sim.get_state(), sim.get_contacts())
-            )
-            bottle_pose = state.object_poses.get("bottle")
-            if bottle_pose is None:
-                response.message = "loaded MuJoCo scene has no free bottle"
-                return response
-            response.success = True
-            response.message = "simulation observation"
-            seconds, nanoseconds = seconds_to_stamp_parts(state.simulation_time)
-            response.simulation_stamp.sec = seconds
-            response.simulation_stamp.nanosec = nanoseconds
-            response.bottle_pose.position.x = bottle_pose[0]
-            response.bottle_pose.position.y = bottle_pose[1]
-            response.bottle_pose.position.z = bottle_pose[2]
-            response.bottle_pose.orientation.x = bottle_pose[3]
-            response.bottle_pose.orientation.y = bottle_pose[4]
-            response.bottle_pose.orientation.z = bottle_pose[5]
-            response.bottle_pose.orientation.w = bottle_pose[6]
-            response.gripper_width_m = state.gripper_width
-            bottle_contacts = tuple(
-                contact for contact in contacts if "bottle" in (contact.body1, contact.body2)
-            )
-            response.bottle_contact_count = len(bottle_contacts)
-            response.left_finger_contact_count = sum(
-                "left_finger_link" in (contact.body1, contact.body2)
-                for contact in bottle_contacts
-            )
-            response.right_finger_contact_count = sum(
-                "right_finger_link" in (contact.body1, contact.body2)
-                for contact in bottle_contacts
-            )
-            response.max_bottle_contact_force_n = max(
-                (contact.force for contact in bottle_contacts), default=0.0
-            )
-            response.max_bottle_penetration_m = max(
-                (contact.penetration_depth for contact in bottle_contacts), default=0.0
-            )
             return response
 
         @staticmethod
@@ -1074,172 +922,10 @@ def create_node_class():
             gripper.status_code = 0
             self._gripper_pub.publish(gripper)
 
-            self._publish_virtual_camera(state.simulation_time, stamp.clock)
-
-        def _publish_virtual_camera(self, simulation_time: float, stamp) -> None:
-            """按相机频率把渲染请求投递给虚拟相机工作线程（不阻塞定时器）。
-
-            节流基准是仿真时间而非墙钟：相机频率通常低于物理步进频率，因此多数
-            回调直接返回。若渲染落后超过一个周期，则直接跳到下一个对齐时刻，
-            只保留最新请求，避免渲染积压拖慢仿真。
-            """
-            if self._virtual_camera_worker is None or self._virtual_camera_config is None:
-                return
-            # 1e-12 的容差用于吸收浮点累加误差，避免恰好到点的帧被误判为未到点。
-            if simulation_time + 1e-12 < self._next_virtual_camera_time:
-                return
-            period = 1.0 / self._virtual_camera_config.rate_hz
-            self._next_virtual_camera_time += period
-            if self._next_virtual_camera_time <= simulation_time:
-                # 已落后：计算需要跳过几个周期，把下一个触发点对齐到当前时间之后。
-                skipped = math.floor(
-                    (simulation_time - self._next_virtual_camera_time) / period
-                ) + 1
-                self._next_virtual_camera_time += skipped * period
-            self._virtual_camera_worker.submit((stamp.sec, stamp.nanosec))
-
-        def _publish_virtual_frame(self, frame, intrinsics, stamp_parts) -> None:
-            """把渲染线程产出的 RGB-D 帧与真值标注打包成 ROS 消息发布。
-
-            在虚拟相机工作线程的上下文中调用（不是定时器线程）：彩色图 rgb8、
-            深度图 mono16（单位毫米）、彩色/深度各一份相机内参，外加一帧真值检测。
-            时间戳沿用提交渲染时的仿真时刻，保证图像与关节状态可对齐。
-            """
-            stamp_sec, stamp_nanosec = stamp_parts
-            # 彩色图：rgb8，每像素 3 字节，step = 宽 * 3。
-            color = Image()
-            color.header.stamp.sec = stamp_sec
-            color.header.stamp.nanosec = stamp_nanosec
-            color.header.frame_id = self._virtual_camera_config.frame_id
-            color.height = self._virtual_camera_config.height
-            color.width = self._virtual_camera_config.width
-            color.encoding = "rgb8"
-            color.is_bigendian = 0
-            color.step = self._virtual_camera_config.width * 3
-            color.data = frame.rgb.tobytes()
-            self._color_pub.publish(color)
-
-            # 深度图：mono16，单位毫米，每像素 2 字节；无效像素（超距/无几何）为 0。
-            depth = Image()
-            depth.header.stamp.sec = stamp_sec
-            depth.header.stamp.nanosec = stamp_nanosec
-            depth.header.frame_id = self._virtual_camera_config.frame_id
-            depth.height = self._virtual_camera_config.height
-            depth.width = self._virtual_camera_config.width
-            depth.encoding = "mono16"
-            depth.is_bigendian = 0
-            depth.step = self._virtual_camera_config.width * 2
-            depth.data = frame.depth_mm.tobytes()
-            self._depth_pub.publish(depth)
-
-            # 彩色与深度共用同一组针孔内参（无畸变），分别发布以匹配真实相机的话题结构。
-            self._color_info_pub.publish(
-                self._camera_info_message(stamp_parts, intrinsics)
-            )
-            self._depth_info_pub.publish(
-                self._camera_info_message(stamp_parts, intrinsics)
-            )
-
-            # 真值检测：来自 MuJoCo 分割渲染，confidence 固定 1.0（非模型推断结果），
-            # 掩膜用包围盒四角表示，因此 has_obb 恒为 false。
-            annotations = Detection2DArray()
-            annotations.header.stamp.sec = stamp_sec
-            annotations.header.stamp.nanosec = stamp_nanosec
-            annotations.header.frame_id = self._virtual_camera_config.frame_id
-            for item in frame.annotations:
-                detection = Detection2D()
-                detection.header.stamp.sec = stamp_sec
-                detection.header.stamp.nanosec = stamp_nanosec
-                detection.header.frame_id = self._virtual_camera_config.frame_id
-                detection.class_name = item.class_name
-                detection.confidence = 1.0
-                detection.center_u = item.center_u
-                detection.center_v = item.center_v
-                detection.x_min = item.x_min
-                detection.y_min = item.y_min
-                detection.x_max = item.x_max
-                detection.y_max = item.y_max
-                detection.has_obb = False
-                detection.obb_points_xy = []
-                detection.has_mask = True
-                detection.mask_polygon_xy = list(item.mask_polygon_xy)
-                annotations.detections.append(detection)
-            self._annotation_pub.publish(annotations)
-
-        def _camera_info_message(self, stamp_parts, intrinsics):
-            """用针孔内参构造相机信息消息（K/R/P 矩阵与畸变参数）。
-
-            约定：畸变模型 plumb_bob 且畸变系数全 0（仿真渲染无镜头畸变）；
-            R 为单位阵；P 为去畸变后的投影矩阵。fx/fy 单位为像素，cx/cy 为
-            主点像素坐标（取图像尺寸中心）。
-            """
-            message = CameraInfo()
-            message.header.stamp.sec = stamp_parts[0]
-            message.header.stamp.nanosec = stamp_parts[1]
-            message.header.frame_id = self._virtual_camera_config.frame_id
-            message.height = intrinsics.height
-            message.width = intrinsics.width
-            message.distortion_model = "plumb_bob"
-            message.d = [0.0] * 5
-            message.k = [
-                intrinsics.fx, 0.0, intrinsics.cx,
-                0.0, intrinsics.fy, intrinsics.cy,
-                0.0, 0.0, 1.0,
-            ]
-            message.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-            message.p = [
-                intrinsics.fx, 0.0, intrinsics.cx, 0.0,
-                0.0, intrinsics.fy, intrinsics.cy, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-            ]
-            return message
-
-        def _virtual_camera_ready(self, intrinsics, extrinsics) -> None:
-            """渲染器初始化完成回调：广播父坐标系到相机光学坐标系的静态 TF。
-
-            平移单位为 m，旋转为 xyzw 四元数；外参由虚拟相机的光学变换计算得到，
-            因此整条链路（像素 → 相机系 → 机器人基座）与真实相机保持一致。
-            另外打印内参，便于现场核对标定数值。
-            """
-            transform = TransformStamped()
-            transform.header.frame_id = extrinsics.parent_frame_id
-            transform.child_frame_id = extrinsics.child_frame_id
-            transform.transform.translation.x = extrinsics.translation_xyz[0]
-            transform.transform.translation.y = extrinsics.translation_xyz[1]
-            transform.transform.translation.z = extrinsics.translation_xyz[2]
-            transform.transform.rotation.x = extrinsics.rotation_xyzw[0]
-            transform.transform.rotation.y = extrinsics.rotation_xyzw[1]
-            transform.transform.rotation.z = extrinsics.rotation_xyzw[2]
-            transform.transform.rotation.w = extrinsics.rotation_xyzw[3]
-            self._virtual_camera_tf_broadcaster.sendTransform(transform)
-            self.get_logger().info(
-                "MuJoCo virtual RGB-D renderer ready: "
-                f"fx={intrinsics.fx:.3f}, fy={intrinsics.fy:.3f}, "
-                f"cx={intrinsics.cx:.3f}, cy={intrinsics.cy:.3f}, "
-                f"tf={extrinsics.parent_frame_id}->{extrinsics.child_frame_id}"
-            )
-
-        def _virtual_camera_error(self, exc: BaseException) -> None:
-            """虚拟相机工作线程异常回调：只上报错误，不中断物理仿真与轨迹执行。"""
-            self.get_logger().error(
-                "MuJoCo virtual camera worker failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
 
         def destroy_node(self):
-            """按安全顺序释放资源：动作服务端 → 相机工作线程 → 仿真实例。
-
-            必须先停相机线程再关仿真：渲染线程会经 _sim_access 访问仿真，
-            顺序颠倒会导致关闭后的渲染调用。相机线程超时未退出只记录错误，
-            不阻塞节点销毁。
-            """
+            """释放动作服务端与仿真实例。"""
             self._action_server.destroy()
-            if self._virtual_camera_worker is not None:
-                stopped = self._virtual_camera_worker.close()
-                if not stopped:
-                    self.get_logger().error(
-                        "MuJoCo virtual camera worker did not stop within timeout"
-                    )
             self._sim_access.run(lambda sim: sim.close())
             return super().destroy_node()
 

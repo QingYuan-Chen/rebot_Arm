@@ -1,7 +1,7 @@
 # rebotarm_teach
 
 示教 JSONL 可通过 `rebotarm_mujoco_teach_preview` 在独立 MuJoCo 实例中预演；
-操作说明见 [MuJoCo 离线预演](../../docs/mujoco_grasp_search_and_teach_preview.md)。
+操作说明见 [MuJoCo 离线预演](../../docs/mujoco_teach_preview.md)。
 
 示教录制、轨迹预处理和安全回放工作流包。它拥有示教文件与回放生命周期，但把重定时、起点对齐、碰撞预检和运行时跟踪能力交给 `rebotarm_motion`；不实现 Dashboard 页面，也不直接访问电机 SDK。
 

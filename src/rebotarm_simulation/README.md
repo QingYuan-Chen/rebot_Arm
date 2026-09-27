@@ -1,18 +1,12 @@
 # rebotarm_simulation
 
-MuJoCo 离线物理与 ROS 2 仿真后端包。它提供模型、物理步进、仿真控制器、虚拟相机、Viewer 和离线指标；不导入真实电机 SDK，不启动 `rebotarmcontroller`，也不依赖 `rebotarm_motion` 的实现。详细安装与运行说明见 [`README_mujoco.md`](README_mujoco.md)。
+MuJoCo 离线物理与 ROS 2 仿真后端包。它提供模型、物理步进、仿真控制器、Viewer 和离线指标；不导入真实电机 SDK，不启动 `rebotarmcontroller`，也不依赖 `rebotarm_motion` 的实现。详细安装与运行说明见 [`README_mujoco.md`](README_mujoco.md)。
 
 默认瓶子场景可用 `RebotArmMujoco.randomize_bottle_pose(seed=...)` 做可复现的位姿变化；
 `save_state` / `restore_state` 可回放同一仿真状态。接触快照包含力、法向与穿透深度，
 ROS 节点在 `/diagnostics` 发布仿真控制与接触告警。
 
-点云重建的第一阶段提供 `rebotarm_mujoco_pointcloud_proxy`：它接收已转换到
-`base_link` 的目标 Nx3 点云，生成独立盒状碰撞代理场景，不改写规范瓶子模型。
-
-已知瓶位的纯 MuJoCo 接触试验见 [操作说明](../../docs/mujoco_bottle_trial.md)。
-多姿态搜索与示教轨迹预演见 [离线仿真工作流](../../docs/mujoco_grasp_search_and_teach_preview.md)。
-RGB-D 点云转 MuJoCo 碰撞代理的最小工具为 `rebotarm_mujoco_pointcloud_proxy`；输入点必须
-已经由相机坐标系转换到 `base_link`，输出是独立场景，不会改写规范瓶子场景。
+示教轨迹的独立 MuJoCo 预演见 [操作说明](../../docs/mujoco_teach_preview.md)。
 
 ## 目录结构
 
@@ -24,7 +18,6 @@ rebotarm_simulation/
 │   ├── mujoco_adapter_core.py       # ROS/仿真状态适配公共逻辑
 │   ├── mujoco_ros_node.py           # ROS 2 MuJoCo 状态、服务和轨迹 Action
 │   ├── sim_trajectory_controller_node.py # 轻量仿真 FollowJointTrajectory 服务端
-│   ├── virtual_camera.py             # MuJoCo 虚拟 RGB-D/CameraInfo 发布
 │   ├── sim_gripper.py                # 仿真夹爪状态与开口控制
 │   ├── motor_control.py              # 仿真关节/执行器控制
 │   ├── trajectory_sampler.py         # 轨迹采样
@@ -74,9 +67,3 @@ ros2 run rebotarm_simulation rebotarm_urdf_to_mjcf -- --repo-root . --check
 ```
 
 运行 MuJoCo 前需选择包含 `mujoco` 的解释器；launch 支持 `python_executable` 或 `REBOTARM_MUJOCO_PYTHON`。仿真联调必须明确 `use_hardware:=false`，并保证 `/rebotarm/follow_joint_trajectory` 只有一个服务端。
-
-纯仿真瓶子接触试验：只运行 `mujoco_headless.launch.py`，再在另一终端执行
-`ros2 run rebotarm_motion rebotarm_mujoco_bottle_trial --timeout 30`。试验从只读
-`/rebotarm/sim/grasp_state` 获取瓶位，分阶段由 MoveIt 规划并让 MuJoCo 执行，
-闭合夹爪后记录同帧双侧接触、接触力、穿透与瓶子位移。`ok=true` 表示试验流程
-完成；`grasp_result=bilateral_contact_without_lift` 不表示瓶子已被抓起。

@@ -4,6 +4,10 @@
 
 ## 当前焦点
 
+- 2026-09-27：按用户明确决定删除三项暂不使用的 MuJoCo 原型：已知瓶位接触试验、多姿态规则搜索、RGB-D点云/AABB代理生成。删除各自源码、ROS入口、专属GetSimulationGraspState接口、工具、文档与测试；将共用文档中的示教预演说明独立为 `docs/mujoco_teach_preview.md`，保留 `rebotarm_teach.mujoco_preview` 及仿真包 `offline_trajectory`。历史实验记录保留，不作为现行功能清单。`rebotarm_msgs`旧build/install生成包与两个旧console脚本定向移入回收站后重建msgs/motion/simulation/teach；安装入口和Python接口已核验旧项消失、示教预演仍可用。分层18、全量751 passed/19 skipped、MuJoCo专项17 passed、compileall/diff通过。未运行真机。
+
+- 2026-09-27：完成只读 `tools/mujoco_rgbd_proxy_capture.py`：复用已安装 GraspNet `build_detection_cloud()` 从同期RGB/深度/CameraInfo/YOLO检测取目标点云，检测与彩色图、深度与内参分别检查frame_id；在深度帧时间查询`base_link <- depth frame` TF并生成base-frame点云、独立MuJoCo代理场景和报告。默认还要求新鲜无错真实arm_status与joint_states，合成/rosbag仅能显式 `--allow-unverified-tf` 且报告标记false；无硬件动作客户端。合成ROS跨进程烟测收到900目标点并写出场景/报告，点云代理测试与ROS同步/TF纯函数检查通过。规范scene.xml原位不改；生成代理的freebody质心移到代理中心，避免源模型质心偏移。`rebotarm_simulation`已重建，layering18、全量758 passed/21 skipped、MuJoCo相关5、compileall/diff通过。本机当前无相机/控制器进程或录制RGB-D，因此尚未做真实相机样本验收，也未接MoveIt规划场景或抓取复核。
+
 - 2026-09-24：开始RGB-D→MuJoCo物体重建最小闭环。新增 `rebotarm_mujoco_pointcloud_proxy` 与 `pointcloud_proxy.py`：输入已转到 `base_link` 的目标Nx3 `.npy/.npz/.json` 点云，按nearest quantile边界+margin估计AABB，输出独立场景并把同一代理中心写入home freejoint；规范 `scene.xml` 不修改、不推断隐藏表面/质量/摩擦。合成点云生成代理并经MuJoCo health加载成功。系统全量752 passed/13 skipped，分层18，MuJoCo相关6，build/compileall/diff通过。下一步将视觉现有 `build_detection_cloud()` 的camera-frame点云按TF转换到base_link后接此工具；未操作真机。
 
 - 2026-09-24：按用户要求新增无需训练的MuJoCo多姿态搜索与示教轨迹预演。`tools/mujoco_grasp_search.py`在仅MoveIt假状态环境中枚举9个瓶子候选，逐段做IK、状态有效性和规划；每候选使用独立MuJoCo实例执行预抓取/接近/抬升、闭合夹爪并按分阶段双侧接触、最终抬升、横移和穿透评分。隔离domain206实际9/9候选完成评估，稳定抬升0；最高分仅相对排名，闭合/抬升中接触但保持阶段失去接触，不能宣称成功抓取。`rebotarm_teach.mujoco_preview`读取原示教JSONL，复用现有平滑/滤波/重采样/重定时，只在独立MuJoCo实例播放并报告跟踪、接触、瓶位变化，支持桌面Viewer；合成20帧记录经96个重定点完成headless与Viewer测试，原文件保持不变。说明见docs/mujoco_grasp_search_and_teach_preview.md。仿真/motion/teach三包重建，layering18、系统全量751 passed/12 skipped、MuJoCo环境相关8 passed、compileall/diff通过。未运行真机/未自动修改真机参数；需后续改进候选/夹爪接触模型才可能稳定抬升。
@@ -831,3 +835,7 @@ Dashboard 的 `TeachReplayWorkflow` 已定为唯一正式示教回放实现，�
 - 2026-09-26 腕部传感器画面修正：球体确认为wrist_camera_mount site，上方灰区为gemini2_camera_visual。渲染器三通道统一禁sites与group3碰撞代理；wrist相机使用私有model副本排除自身粗略外壳（无光学孔模型），保持物理/总览外壳、夹爪和支架以及手眼位姿。此为显式渲染近似，不宣称修正机械装配与光学标定吻合。图像已目视检查，分割ID/深度/共享模型不变测试通过；MuJoCo相机12、layering18、全量755 passed21 skipped、build/compileall/diff通过。
 
 - 2026-09-26 用户授权上传当前进度：待提交范围包含仿真抓取/预演/点云代理、旧版Gemini2附件和22g支架、腕部光学相机/传感器渲染、TOTG→Ruckig、参数审计与用户授权TODO。提交前系统755 passed/21 skipped、分层18、compileall/diff通过；本轮未硬件操作。
+
+- 2026-09-27 用户明确不做仿真完整视觉链，暂时移除虚拟相机：删除virtual_camera模块及专属测试、ROS图像/CameraInfo/标注/静态TF发布、launch参数和YAML、生成器腕部光学相机与scene固定相机；移除simulation对vision标定资源及tf2_ros依赖。保留相机/旧支架实体和98g/22g负载、机械Viewer及真实YOLO/GraspNet/手眼配置，真实RGBD只读检查工具保留。已保留当前其它未提交删除原型的用户工作。删除文件与安装残留备份/tmp/removed-virtual-camera-20260927；未来可从2f706be恢复。simulation重建、安装ROS节点joint_states且无camera/TF发布实测通过，layering18、全量744 passed14 skipped、MuJoCo9、compileall/MJCF/diff通过；未操作硬件，未提交推送。
+
+- 2026-09-27 用户授权将当前仿真清理进度提交推送GitHub：范围包含此前授权删除的瓶位试验/规则搜索/点云代理，以及本轮虚拟视觉链删除；保留示教预演、相机支架实体负载与真实视觉。已有验证744 passed/14 skipped、layering18、MuJoCo9、simulation build/ROS无camera发布、compileall/MJCF/diff通过。

@@ -39,7 +39,6 @@ setup(
             "PoseExecutionNode = rebotarm_motion.pose_execution_node:main",
             "rebotarm_visual_ready = rebotarm_motion.visual_ready_node:main",
             "rebotarm_mujoco_moveit_acceptance = rebotarm_motion.mujoco_moveit_acceptance:main",
-            "rebotarm_mujoco_bottle_trial = rebotarm_motion.mujoco_bottle_trial:main",
         ],
     },
 )

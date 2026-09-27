@@ -1,5 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -50,16 +49,3 @@ def test_teach_preview_rejects_structural_record_error(tmp_path: Path):
     path.write_text("\n".join(encode_teach_sample(_sample(i, positions)) for i in (0, 1, 1)) + "\n")
     with pytest.raises(ValueError, match="timestamps"):
         preview_record(path)
-
-
-def test_physics_trial_starts_from_clean_state_and_does_not_claim_success():
-    pytest.importorskip("mujoco")
-    from rebotarm_simulation.grasp_search_physics import evaluate_grasp_paths
-
-    start = (0, -.1, -.2, .2, 0, 0)
-    path = SimpleNamespace(joint_names=JOINTS, points=[(0.1, start)])
-    first = evaluate_grasp_paths([path, path, path], initial_arm_positions=start, close_sec=.05, hold_sec=.05)
-    second = evaluate_grasp_paths([path, path, path], initial_arm_positions=start, close_sec=.05, hold_sec=.05)
-    assert first["stable_lift"] is False
-    assert first["final_bottle_lift_m"] == pytest.approx(second["final_bottle_lift_m"], abs=1e-9)
-    assert first["hold_bilateral_steps"] == 0

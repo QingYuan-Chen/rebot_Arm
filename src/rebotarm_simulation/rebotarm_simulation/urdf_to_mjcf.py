@@ -128,7 +128,6 @@ def generate_mjcf_bytes(repo_root: Path) -> bytes:
         _add_contact_exclusions(root)
         _add_finger_coupling(root)
         _add_sites(root)
-        _add_wrist_camera(root, repo_root)
         _add_joint_dynamics(root, _load_joint_dynamics(repo_root))
         _add_actuators(root, urdf_root, repo_root)
         _add_sensors(root)
@@ -265,39 +264,6 @@ def _add_sites(root: ET.Element) -> None:
         "site",
         {"name": "wrist_camera_mount", "pos": "-0.04 0 0.04", "quat": "1 0 0 0", "size": "0.005"},
     )
-
-
-def _add_wrist_camera(root: ET.Element, repo_root: Path) -> None:
-    """Generate eye-in-hand optical pose from the existing calibration source.
-
-    ROS optical axes (right, down, forward) become MuJoCo camera axes
-    (right, up, backward) by a local 180-degree X rotation. No factory D2C
-    extrinsic is composed a second time. Runtime only needs the generated MJCF.
-    """
-    handeye = yaml.safe_load((repo_root / "src/rebotarm_vision/config/handeye.yaml").read_text())["handeye"]
-    parent = root.find(f'.//body[@name="{handeye["parent_frame"]}"]')
-    if parent is None:
-        raise ValueError("handeye parent absent from simulation model")
-    t = [float(handeye["translation"][k]) for k in "xyz"]
-    q = [float(handeye["rotation"][k]) for k in "xyzw"]
-    import math
-    if not all(math.isfinite(v) for v in t + q):
-        raise ValueError("nonfinite handeye transform")
-    norm = math.sqrt(sum(v*v for v in q))
-    if abs(norm-1) > 1e-5:
-        raise ValueError("handeye quaternion must be unit length")
-    x,y,z,w = [v/norm for v in q]
-    # q_optical * q_x(pi), serialized in MuJoCo wxyz order.
-    q_mj = [-x, w, z, -y]
-    reference = yaml.safe_load((repo_root / "src/rebotarm_vision/config/camera_ubuntu.yaml").read_text())
-    k = reference["rebotarm_ordinary_grasp_node"]["ros__parameters"]
-    cfg = reference["rebotarm_vision_node"]["ros__parameters"]
-    width, height = int(cfg["camera.color_width"]), int(cfg["camera.color_height"])
-    fx,fy,cx,cy = [float(k["ordinary_grasp."+v]) for v in ("fx","fy","cx","cy")]
-    ET.SubElement(parent, "camera", name="wrist_camera",
-        pos=" ".join(f"{v:.12g}" for v in t), quat=" ".join(f"{v:.12g}" for v in q_mj),
-        resolution=f"{width} {height}", sensorsize=f"{width*1e-5:g} {height*1e-5:g}",
-        focalpixel=f"{fx:g} {fy:g}", principalpixel=f"{(width-1)/2-cx:g} {cy-(height-1)/2:g}")
 
 
 def _load_joint_dynamics(repo_root: Path) -> dict[str, dict[str, float]]:
