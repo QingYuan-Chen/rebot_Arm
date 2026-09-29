@@ -7,11 +7,12 @@
 
 | 内容 | 入口 |
 | --- | --- |
-| 环境、依赖与 MotorBridge 安装 | [本机环境说明](docs/local_setup_zh.md) |
-| 网页遥操作、RViz 与实机操作 | [功能操作手册](docs/rebotarm_feature_commands.md) |
+| 环境、依赖与 MotorBridge 安装 | [本机环境说明](docs/setup/ubuntu_ros2_jazzy.md) |
+| 网页遥操作、RViz 与实机操作 | [功能命令参考](docs/reference/commands/rebotarm_feature_commands.md) |
 | 控制器接口 | [ROS SDK 说明](README_zh.md) |
 | 仿真 | [MuJoCo 使用说明](src/rebotarm_simulation/README_mujoco.md) |
-| 包职责与依赖边界 | [架构说明](docs/architecture.md) |
+| Gymnasium / PPO 强化学习 | [训练与评估命令](docs/reference/commands/mujoco_rl.md) |
+| 包职责与依赖边界 | [架构说明](docs/implemented/architecture.md) |
 | 当前阶段及验收依据 | [Agent 状态](Agent/README.md) |
 | 其他文档 | [文档索引](docs/README_zh.md) |
 
@@ -33,8 +34,9 @@
 ## 环境与构建
 
 基线为 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。先按
-[安装说明](docs/local_setup_zh.md) 准备系统依赖和所需运行组件；
-五份 `requirements-*.txt` 按控制器、视觉、GraspNet、MuJoCo、TensorRT 拆分，
+[安装说明](docs/setup/ubuntu_ros2_jazzy.md) 准备系统依赖和所需运行组件；
+`requirements-*.txt` 按控制器、视觉、GraspNet、MuJoCo、TensorRT 拆分；
+`requirements-rl.txt` 在 MuJoCo 环境中追加 GPU 强化学习依赖。其它用途的依赖
 不要合并安装到同一个环境。
 
 ```bash
@@ -46,8 +48,8 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests -q
 
 在未激活其他虚拟环境的新终端构建。源码构建不要求相机、GPU、TensorRT engine
 或 GraspNet 权重；视觉依赖安装脚本不再重建工作区。检测启动时才检查模型，
-可用现有 `.pt` 或显式指定本机 engine，见 [视觉安装与模型准备](docs/ubuntu_vision_setup_zh.md)。
-运行时按节点设置 [解释器参数](docs/launch_python_configuration.md)，不要全局注入视觉依赖。
+可用现有 `.pt` 或显式指定本机 engine，见 [视觉安装与模型准备](docs/setup/ubuntu_vision_setup_zh.md)。
+运行时按节点设置 [解释器参数](docs/setup/launch_python_configuration.md)，不要全局注入视觉依赖。
 完整回归还需要已构建的 ROS 消息及固定厂商 SDK；纯源码构建通过不代表真机验收。
 
 视觉只支持 Ubuntu 原生 Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/detections -> 本机

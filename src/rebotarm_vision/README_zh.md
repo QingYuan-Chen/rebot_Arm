@@ -6,10 +6,10 @@
 
 ## 当前文档
 
-- 安装、模型和相机：`docs/ubuntu_vision_setup_zh.md`
-- 视觉启动、MuJoCo benchmark 和真机边界：`docs/visual_grasp_commands.md`
-- 候选、IK、workspace、夹爪和执行参数：`docs/visual_grasp_seven_layer_params.md`
-- 分进程 Python 解释器：`docs/launch_python_configuration.md`
+- 安装、模型和相机：`docs/setup/ubuntu_vision_setup_zh.md`
+- 视觉启动、MuJoCo benchmark 和真机边界：`docs/reference/commands/visual_grasp_commands.md`
+- 候选、IK、workspace、夹爪和执行参数：以 `src/rebotarm_bringup/launch/visual_grasp_system.launch.py` 和 `src/rebotarm_vision/config/` 当前源码为准
+- 分进程 Python 解释器：`docs/setup/launch_python_configuration.md`
 
 ## V1.1 稳定性检查
 

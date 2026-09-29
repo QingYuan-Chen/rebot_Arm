@@ -1,5 +1,7 @@
 # reBotArm 本机环境与配置
 
+> 状态：SETUP；类型：环境与构建操作；适用范围：Ubuntu 24.04 / ROS 2 Jazzy；最后核对：2026-09。
+
 本文记录本仓库在 Ubuntu 24.04 / ROS 2 Jazzy 上的本地运行基线。
 
 > 当前状态：P0-P6 已按用户确认的工程范围关闭，未执行项不冒充通过。
@@ -20,7 +22,8 @@
 | `requirements-runtime.txt` | 控制器 MotorBridge 基础依赖，随后必须安装本地审查补丁 | 系统 Python；本节命令 |
 | `requirements-vision.txt` | 相机、YOLO、OpenCV，固定 NumPy 1.x 兼容 ROS cv_bridge | `.venv-vision`；`tools/setup_ubuntu_vision.sh` |
 | `requirements-graspnet.txt` | GraspNet 抓取候选、点云及固定 PyTorch/CUDA 依赖 | `.venv-graspnet`；`tools/setup_ubuntu_graspnet.sh` |
-| `requirements-mujoco.txt` | MuJoCo 仿真与模型工具 | `third_party/rebotarm_mujoco_venv`；见 `mujoco_sim.md` |
+| `requirements-mujoco.txt` | MuJoCo 仿真与模型工具 | `third_party/rebotarm_mujoco_venv`；见仿真包 README |
+| `requirements-rl.txt` | MuJoCo + Gymnasium + GPU PPO（包含物理依赖） | 同一 MuJoCo venv；见 `../reference/commands/mujoco_rl.md` |
 | `requirements-tensorrt.txt` | TensorRT 推理扩展，单独以 `--no-deps` 安装以避免拉取额外 CUDA 工具链 | 与 vision 共用环境；由视觉安装脚本调用 |
 
 GraspNet 与 MuJoCo 的 PyYAML 固定版本分别为6.0.1和6.0.3；直接合并会产生
@@ -249,8 +252,8 @@ Ubuntu 物理机直连 Gemini2 并在本机运行 CUDA YOLO 时，使用：
 
 上述命令只启动相机和YOLO，不启动机械臂。CPU可改为`yolo_device:=cpu`。
 使用TensorRT前应在目标机器准备兼容engine并显式传入路径，安装脚本不会下载或导出模型。
-GraspNet独立环境、模型输入和完整视觉launch见 `docs/ubuntu_vision_setup_zh.md`。
-逐进程解释器设置见 `docs/launch_python_configuration.md`。
+GraspNet独立环境、模型输入和完整视觉launch见 `docs/setup/ubuntu_vision_setup_zh.md`。
+逐进程解释器设置见 `docs/setup/launch_python_configuration.md`。
 
 视觉相机配置使用 `src/rebotarm_vision/config/camera_ubuntu.yaml`，通过本机
 Gemini 2 SDK 获取 RGB-D；不再配置远端 HTTP/MJPEG/JSON 服务。
@@ -295,6 +298,10 @@ auto_enable:=false
 ## 6. 历史 P0 验收工具
 
 P0 Gate B/C 自动使能、保持与失能验收工具已于 2026-09-19 移除，不再作为日常测试步骤。
-历史报告保留在 `Agent/evidence/P0/`，仅用于追溯，不代表当前硬件通过验收。
+历史报告已从工作树清理；如需追溯，可从 Git 历史恢复。它们仅用于历史审计，不代表当前硬件通过验收。
 控制器的显式使能、反馈校验、失败回滚和停止保护继续保留。
-真机操作与停机步骤见 [功能开启指令](rebotarm_feature_commands.md#moveit-实机操作与停机)。
+真机操作与停机步骤见 [功能命令参考](../reference/commands/rebotarm_feature_commands.md#moveit-实机操作与停机)。
+
+## 可选：MuJoCo 强化学习
+
+按 [强化学习命令参考](../reference/commands/mujoco_rl.md) 安装根目录 `requirements-rl.txt`，并检查 Reach 环境。纯离线训练无需启动 ROS 或连接真机。

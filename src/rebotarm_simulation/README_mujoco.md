@@ -2,7 +2,8 @@
 
 本目录提供可独立使用的 MuJoCo 物理仿真核心、桌面 Viewer 和 ROS 2
 适配层。已验证的目标环境是 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。
-本阶段尚未实现强化学习训练、Gymnasium 环境或奖励函数；云端训练是后续工作。
+已提供基于现有物理核心的 Gymnasium 末端位姿 Reach 环境与 GPU PPO 训练入口。
+克隆后配置、环境契约和验证步骤见 [强化学习命令参考](../../docs/reference/commands/mujoco_rl.md)。
 
 ## 安装与构建
 
@@ -10,7 +11,7 @@ ROS launch 的解释器可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYT
 环境变量指定；未设置时，MuJoCo launch 默认使用仓库中的
 `third_party/rebotarm_mujoco_venv/bin/python`，避免误用不含 `mujoco` 的系统
 `python3`。从其他工作目录启动时请传绝对路径或设置环境变量。
-混合视觉入口的配置见 [启动解释器说明](../../docs/launch_python_configuration.md)。
+混合视觉入口的配置见 [启动解释器说明](../../docs/setup/launch_python_configuration.md)。
 
 `mujoco_moveit_sim.launch.py` 默认同时打开原生 MuJoCo viewer，便于桌面联调
 观察物理模型；ROS 适配节点仍是独立的 headless 节点，负责 ROS action 和状态
@@ -29,7 +30,7 @@ ros2 launch rebotarm_simulation mujoco_headless.launch.py
 ```
 
 在当前工作区根目录、未激活venv的新终端执行。系统依赖按
-[安装说明](../../docs/local_setup_zh.md)准备；源码统一由系统Python构建，
+[安装说明](../../docs/setup/ubuntu_ros2_jazzy.md)准备；源码统一由系统Python构建，
 MuJoCo虚拟环境只用于运行，不需要相机、视觉权重或历史上游副本。
 
 ```bash
@@ -184,17 +185,10 @@ API 边界转换。`save_state()`/`restore_state()` 只允许同一模型实例�
 `set_object_pose()` 只接受带 free joint 的物体，四元数也使用 XYZW。
 
 后续架构是云服务器运行无界面 MuJoCo 并行训练，本地 Ubuntu VM 做模型验证、
-ROS 2 联调和策略推理。现在只提供可复用物理/API 底座，不宣称训练可用。
+ROS 2 联调和策略推理。现已提供本地 GPU Reach 训练基线；云端并行训练尚未验证。
 
 模型在 `end_link` 下提供命名坐标系 `wrist_camera_mount`，作为后续手眼/末端 RGB-D
 相机的稳定安装基准。当前阶段只定义安装位，不绑定具体相机型号、内参或渲染传感器。
-
-## 双端同步规则
-
-Windows 仓库是受版本控制的主副本，Ubuntu VM 是构建与运行环境。每次同步前
-先备份 VM 上将被覆盖的明确文件；只传输本次文件清单，传后比较 SHA-256 哈希。
-禁止使用带 `--delete` 的目录镜像，也不反向同步 `.venv-mujoco-ros`、
-`build/`、`install/`、`log/` 或缓存。
 
 ## 排障
 

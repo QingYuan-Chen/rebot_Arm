@@ -1,59 +1,85 @@
 # reBotArm 文档索引
 
-本文档用于区分当前有效说明、目标规划和历史实施记录，避免把计划中的能力误认为已经实现。
+> 状态：REFERENCE；类型：文档总索引；适用范围：`docs/` 全部分类入口。
 
-## 当前依据
+本文档用于区分已实现功能、环境配置、设计方案、参考资料和历史记录。新接手者先看：
 
-- Agent 实时状态、完成度和阻塞：[`../Agent/README.md`](../Agent/README.md)
-- 已关闭阶段的验收清单与依据：[`../Agent/PROJECT_STATUS.md`](../Agent/PROJECT_STATUS.md)
-- package ownership / 包职责和依赖边界：[`architecture.md`](architecture.md)
-- 项目术语：[`../CONTEXT.md`](../CONTEXT.md)
-- coding agent / 编码代理规则：[`../AGENTS.md`](../AGENTS.md)
+1. [`../Agent/CURRENT_STATUS.md`](../Agent/CURRENT_STATUS.md)：当前项目状态、验收和安全边界；
+2. [`MAINTENANCE.md`](MAINTENANCE.md)：文档分类和长期维护规则；
+3. 本页对应类别和具体文档。
 
-如文档之间发生冲突：
+## 新用户最快阅读路线
 
-1. 安全约束以 `AGENTS.md`、`architecture.md` 和当前代码事实为准；
-2. 新任务优先级和范围以用户最新明确要求为准；已完成阶段以 `Agent/PROJECT_STATUS.md` 为准；
-3. 操作命令必须同时满足当前代码参数和文档中的阶段状态；
-4. 历史设计文档与 Git 中保留的旧规划仅供追溯，不覆盖当前状态。
+```text
+第一次接手 -> setup/ -> implemented/architecture.md
+了解功能 -> implemented/features/system_capabilities.md
+准备运行 -> reference/topology/system_dataflow.md
+复制命令 -> reference/commands/README.md
+查看详细证据 -> Agent/evidence/
+```
 
-项目实施完成度不在本文手工维护，读取 [`../Agent/STATE.json`](../Agent/STATE.json)。
+## 文档分类
 
-## 当前状态说明
+| 类别 | 入口 | 用途 |
+| --- | --- | --- |
+| 已实现功能 | [`implemented/`](implemented/) | 当前代码已有并经过软件/仿真验证的功能说明 |
+| 环境配置 | [`setup/`](setup/) | clone、第三方依赖、构建和运行环境 |
+| 当前设计 | [`design/`](design/) | 尚在讨论或实施中的技术路线和接口 |
+| 参考资料 | [`reference/`](reference/) | 参数、拓扑和审计参考 |
+| 用户维护 | [`user/`](user/) | 用户本人维护的硬件和工程待办 |
 
-P0-P6 已按用户确认的工程范围关闭，等待用户提供新规划，不自行创建 P7。
-根目录两份旧规划已清理，历史内容保留在 Git 中。各阶段验收依据、豁免和
-未实测边界见 `Agent/PROJECT_STATUS.md`，后续维护事实见 `Agent/MEMORY.md`。
+## 当前状态和规则
 
-## 架构与环境
+- 当前主线是 MuJoCo/Gymnasium Reach；Reach 训练链路已通过基线验证，但策略尚未稳定收敛。
+- P0-P6 是已关闭的历史工程基线，不自动授权新的真实机械臂动作。
+- 当前真实视觉、硬件和 RL 的边界以代码、测试、用户最新决定和 `Agent/CURRENT_STATUS.md` 为准。
+- 文档中的“计划”“有功能”“软件验证”不等于真实硬件验收或任务成功。
 
-- [`architecture.md`](architecture.md)：ROS 2 package ownership、依赖方向和执行权限。
-- [`node_topology.mermaid`](node_topology.mermaid)：当前与目标后端选择拓扑。
-- [`local_setup_zh.md`](local_setup_zh.md)：Ubuntu 24.04 / ROS 2 Jazzy 本机环境、构建和安全顺序。
-- [`ubuntu_vision_setup_zh.md`](ubuntu_vision_setup_zh.md)：Gemini 2 + YOLO + GraspNet 的原生环境、模型准备及逐进程启动。
-- [`launch_python_configuration.md`](launch_python_configuration.md)：系统Python构建与分环境运行的解释器契约。
+## 当前有效文档
 
-## MuJoCo
+### 架构、环境和启动
 
-- [`仿真包README`](../src/rebotarm_simulation/README_mujoco.md)：当前MuJoCo安装、物理后端和启动方式。
-- [`mujoco_sim.md`](mujoco_sim.md)：早期模型、adapter和离线分析记录，旧命令不作为当前部署入口。
-- [`mujoco_upstream_sources.md`](mujoco_upstream_sources.md)：固定上游版本、许可证证据和禁止复制边界。
-- [`mujoco_sim_to_real_params.md`](mujoco_sim_to_real_params.md)：仿真参数到真机参数的映射边界。
+- [`implemented/architecture.md`](implemented/architecture.md)：ROS 2 包职责、依赖方向、权限和工作流边界。
+- [`setup/ubuntu_ros2_jazzy.md`](setup/ubuntu_ros2_jazzy.md)：Ubuntu 24.04 / ROS 2 Jazzy 环境、构建和安全顺序。
+- [`setup/launch_python_configuration.md`](setup/launch_python_configuration.md)：MuJoCo、视觉和 GraspNet 的解释器配置契约。
 
-## 操作手册
+### 当前操作
 
-- [`rebotarm_common_commands.md`](rebotarm_common_commands.md)：网页、键盘、示教和状态检查命令。
-- [`rebotarm_feature_commands.md`](rebotarm_feature_commands.md)：RViz MoveIt 和网页遥操作入口。
-- [`visual_grasp_commands.md`](visual_grasp_commands.md)：视觉抓取的当前过渡链路、安全预览和阶段门。
+- [`implemented/features/hardware_execution.md`](implemented/features/hardware_execution.md)：真机控制器、反馈、夹爪和执行边界。
+- [`implemented/features/moveit_planning.md`](implemented/features/moveit_planning.md)：MoveIt 规划、碰撞和轨迹执行。
+- [`implemented/features/operator_control.md`](implemented/features/operator_control.md)：网页、键盘和 RViz 操作。
+- [`implemented/features/teach_replay.md`](implemented/features/teach_replay.md)：示教录制、准备和回放。
+- [`implemented/features/visual_grasp.md`](implemented/features/visual_grasp.md)：视觉候选、规划和阶段编排。
+- [`setup/ubuntu_vision_setup_zh.md`](setup/ubuntu_vision_setup_zh.md)：Gemini 2、YOLO、GraspNet 环境和启动。
+- [`implemented/features/vision_readonly.md`](implemented/features/vision_readonly.md)：Ubuntu 原生视觉只读链路的功能和边界。
+- [`implemented/features/mujoco_rl.md`](implemented/features/mujoco_rl.md)：MuJoCo/Gymnasium Reach 已实现能力和训练边界。
+- [`implemented/features/mujoco_teach_preview.md`](implemented/features/mujoco_teach_preview.md)：MuJoCo 示教预演已实现能力和边界。
 
-所有涉及真机的命令都必须先阅读对应文档顶部的安全状态说明。
+### 当前软件验收和参数参考
 
-## 视觉抓取设计
+- [`implemented/features/calibration_acceptance.md`](implemented/features/calibration_acceptance.md)：标定网页软件验收边界，不代表物理标定完成。
+- [`reference/commands/README.md`](reference/commands/README.md)：按用户任务分类的唯一命令入口。
+- [`reference/topology/system_dataflow.md`](reference/topology/system_dataflow.md)：节点与数据流。
+- [`reference/parameters/current_parameter_sources.md`](reference/parameters/current_parameter_sources.md)：参数来源和维护边界。
 
-- [`visual_grasp_seven_layer_params.md`](visual_grasp_seven_layer_params.md)：视觉候选、IK、workspace、夹爪和执行参数分层。
+## 设计文档和历史说明
 
-参数设计文档描述结构和约束，不代表其中所有默认值都已经通过真机标定。
+- [`design/calibration_web_plan.md`](design/calibration_web_plan.md)：网页手眼标定完整技术路线；软件链路已实现，真实设备和物理精度仍在后续开发/验收范围。
+- 历史迁移快照和已删除文档当前不在工作树；需要追溯时从 Git 历史恢复，不作为当前源码清单。
 
-## 历史计划与规格
+## 用户维护
 
-历史 implementation plan / 实施计划、design spec / 设计规格和阶段实验报告仅本机留存，不随当前源码发布。过去已提交的版本可从 Git 历史追溯，不作为当前运行手册。
+- [`user/USER_MAINTAINED_TODO.md`](user/USER_MAINTAINED_TODO.md)：用户维护的待完善事项；代理不得擅自修改。
+
+## 冲突处理顺序
+
+如果文档互相矛盾，按以下顺序判断：
+
+1. 当前代码和测试；
+2. `AGENTS.md`、`docs/implemented/architecture.md` 的安全和包边界；
+3. 用户最新明确决定；
+4. `Agent/CURRENT_STATUS.md`、`Agent/STATE.json`；
+5. 当前操作文档；
+6. 历史设计、迁移报告和旧实验记录。
+
+详细分类和修改规则见 [`MAINTENANCE.md`](MAINTENANCE.md)。

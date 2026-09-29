@@ -13,6 +13,7 @@ from typing import Any
 AGENT_DIR = Path(__file__).resolve().parent
 ROOT = AGENT_DIR.parent
 PROJECT_STATUS = AGENT_DIR / "PROJECT_STATUS.md"
+CURRENT_STATUS = AGENT_DIR / "CURRENT_STATUS.md"
 EXECUTION_FLOW = AGENT_DIR / "EXECUTION_FLOW.md"
 MEMORY = AGENT_DIR / "MEMORY.md"
 ACTIVITY_LOG = AGENT_DIR / "ACTIVITY_LOG.md"
@@ -103,10 +104,34 @@ def parse_numbered_queue() -> list[str]:
 
 
 def parse_active_phase() -> str | None:
-    for line in MEMORY.read_text(encoding="utf-8").splitlines():
-        if line.startswith("- Active phase / 当前阶段："):
+    for line in CURRENT_STATUS.read_text(encoding="utf-8").splitlines():
+        if line.startswith("- 当前阶段："):
             return line.split("：", 1)[1].rstrip("。").strip()
     return None
+
+
+def parse_current_checklist() -> dict[str, Any]:
+    done = total = 0
+    active = False
+    for line in CURRENT_STATUS.read_text(encoding="utf-8").splitlines():
+        if line == "## 当前验收清单":
+            active = True
+            continue
+        if active and line.startswith("## "):
+            break
+        if not active:
+            continue
+        match = CHECK_RE.match(line)
+        if not match:
+            continue
+        total += 1
+        if match.group(1).lower() == "x":
+            done += 1
+    return {
+        "completed_items": done,
+        "total_items": total,
+        "completion_percent": round(100.0 * done / total, 1) if total else 0.0,
+    }
 
 
 def clean_field(value: str) -> str:
@@ -134,6 +159,7 @@ def last_event() -> str | None:
 
 def build_state() -> dict[str, Any]:
     phases = parse_phases()
+    current_checklist = parse_current_checklist()
     total_weight = sum(phase["weight"] for phase in phases)
     weighted = sum(
         phase["weight"] * phase["completion_percent"] / 100.0
@@ -144,9 +170,11 @@ def build_state() -> dict[str, Any]:
         "schema_version": 1,
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "plan_source": str(PROJECT_STATUS.relative_to(ROOT)),
+        "current_status_source": str(CURRENT_STATUS.relative_to(ROOT)),
         "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
         "overall_completion_percent": round(100.0 * weighted / total_weight, 1) if total_weight else 0.0,
         "active_phase": parse_active_phase(),
+        "current_checklist": current_checklist,
         "phases": phases,
         "blockers": parse_section_bullets(MEMORY, "## 当前阻塞"),
         "next_actions": parse_numbered_queue(),

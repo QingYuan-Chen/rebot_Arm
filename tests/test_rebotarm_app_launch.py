@@ -160,7 +160,7 @@ def test_dashboard_hides_and_blocks_hardware_only_commands_in_simulation() -> No
     assert "button.disabled = !useHardware ||" in html
 
 def test_common_commands_document_recommends_one_entrypoint() -> None:
-    doc = _read("docs/rebotarm_common_commands.md")
+    doc = _read("docs/reference/commands/rebotarm_common_commands.md")
 
     assert "rebotarm_app.launch.py" in doc
     assert "mode:=" not in doc
@@ -174,7 +174,7 @@ def test_common_commands_document_recommends_one_entrypoint() -> None:
 
 
 def test_feature_commands_document_web_teleop_next_to_rviz_drag() -> None:
-    doc = _read("docs/rebotarm_feature_commands.md")
+    doc = _read("docs/reference/commands/rebotarm_feature_commands.md")
 
     assert "## RViz MoveIt 末端拖动" in doc
     assert "## 网页遥操作" in doc

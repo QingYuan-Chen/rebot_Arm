@@ -196,7 +196,7 @@ def test_retired_interactive_control_config_is_not_loaded() -> None:
 
 
 def test_architecture_document_defines_package_responsibilities_and_rules() -> None:
-    architecture = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "docs/implemented/architecture.md").read_text(encoding="utf-8")
     context = (ROOT / "CONTEXT.md").read_text(encoding="utf-8")
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
@@ -217,14 +217,14 @@ def test_architecture_document_defines_package_responsibilities_and_rules() -> N
 
     assert "Teach Replay" in context
     assert "Point-to-Point Execution" in context
-    assert "docs/architecture.md" in agents
+    assert "docs/implemented/architecture.md" in agents
     assert "rebotarm_interactive_control" not in architecture
     assert "rebotarm_interactive_control" not in context
     assert "rebotarm_interactive_control" not in agents
 
 
 def test_rviz_moveit_drag_entrypoints_use_visible_native_goal_marker() -> None:
-    feature_doc = (ROOT / "docs/rebotarm_feature_commands.md").read_text(
+    feature_doc = (ROOT / "docs/reference/commands/rebotarm_feature_commands.md").read_text(
         encoding="utf-8"
     )
     rviz_config = (

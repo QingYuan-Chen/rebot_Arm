@@ -91,4 +91,4 @@ POST /api/calibration/gravity
 
 默认不会自动启动相机、标定节点或机械臂控制器，也不会自动应用外参。网页关闭不会
 改变机器人模式；Gravity Stop 后还必须等待新鲜 IDLE 反馈，才能解除标定控制占用。
-操作顺序、安全边界和真实硬件测试见 [网页标定说明](../../docs/calibration_web_usage.md)。
+操作顺序、安全边界和真实硬件测试见 [网页标定命令参考](../../docs/reference/commands/calibration_web.md)。

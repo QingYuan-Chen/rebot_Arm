@@ -1,5 +1,7 @@
 # Ubuntu 原生 Gemini2 与 YOLO 环境
 
+> 状态：SETUP；类型：Ubuntu 视觉环境和启动说明；适用范围：Gemini 2、YOLO、GraspNet；真实设备结论需看最新证据。
+
 > 当前状态：Ubuntu原生Gemini2、YOLO和同进程GraspNet已集成到
 > `visual_grasp_system.launch.py` 的 `vision_profile:=ubuntu_native`。
 > P0-P6已按当前范围关闭；新设备仍需复核相机、模型、手眼标定和现场条件，
@@ -17,7 +19,7 @@ Windows 服务及远端 HTTP 输入已删除。Ubuntu 原生链路使用 `camera
 
 ## 1. 安装
 
-先按 [本机安装说明](local_setup_zh.md) 安装系统依赖并构建ROS工作区，
+先按 [本机安装说明](ubuntu_ros2_jazzy.md) 安装系统依赖并构建ROS工作区，
 再从仓库根目录安装视觉运行环境：
 
 ```bash

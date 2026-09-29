@@ -2,6 +2,16 @@
 
 ## 当前执行队列
 
+> 状态更新时间：2026-09-28。P0-P6 及瓶子分级实机流程均为已关闭或历史记录；本队列只描述当前仿真/RL 工作，不授权任何真机动作。
+
+1. [已完成] MuJoCo/Gymnasium `RebotArmReachEnv` 首个末端位姿 Reach 任务：位置+姿态观测、奖励、成功门、碰撞/超时处理、Gymnasium/SB3 检查和 GPU PPO 链路已验证。
+2. [进行中] 继续优化 Reach 训练质量：固定训练/评估口径，记录多种随机种子和成功率；当前策略尚未学会稳定到达目标。
+3. [待规划] 在仿真侧先定义 action/observation、控制周期、关节顺序、限位和安全约束，再评估后续 sim-to-real 或 LeRobot 数据接口。
+4. [待设备] 真实 Gemini 2 的当前 K/D、畸变和 RGB-D 一致性复核仅在设备连接后进行；不得用 MuJoCo 参考内参代替实机证据。
+5. [安全边界] 当前无新的真机 enable、trajectory、gripper、approach、lift、retreat 或接触授权；Reach/RL 保持纯仿真。
+
+## 历史执行队列（已封存）
+
 1. [已完成] P1：upstream-only 收尾；active `rebotarm_simulation` 只安装/启动 package-owned upstream MuJoCo node，current 实现仅留归档，不再是可选 backend。完整测试、MuJoCo 专项、构建、Viewer smoke 和 ROS action 验收通过；证据：`Agent/evidence/P1/2026-08-07-p1-upstream-only-closeout.md`。
 2. [已完成] P2：同一 serial Gemini 2 的设备/profile/calibration metadata/depth scale、连续 RGB-D、ROS 双 CameraInfo/timestamp、gross alignment 和两分钟 short soak 已形成当前硬件证据；用户接受沿用既有 calibration 并豁免重复 pixel-level/多距离 ground-truth，P2 以 8/8 关闭。证据：`Agent/evidence/P2/2026-08-07-p2-closeout-accepted-calibration.md`。
 3. [已完成] P3：接入显式 `vision_profile:=ubuntu_native`，native camera-only/main bringup 运行并发布 RGB/depth/双 CameraInfo/detections/annotated/tf_static；native path 不依赖 Windows；非法 profile fail closed。证据：`Agent/evidence/P3/2026-08-07-ubuntu-native-preflight.md`。
@@ -104,7 +114,7 @@
 
 ## 每次任务开始
 
-1. 阅读 `AGENTS.md`、`docs/architecture.md` 和 `CONTEXT.md`；
+1. 阅读 `AGENTS.md`、`docs/implemented/architecture.md` 和 `CONTEXT.md`；
 2. 阅读 `Agent/MEMORY.md`、`Agent/PROJECT_STATUS.md` 和 `Agent/STATE.json`；
 3. 检查 Git 分支、工作区已有修改和当前阻塞；
 4. 确认任务属于哪个 P 阶段和 package owner；

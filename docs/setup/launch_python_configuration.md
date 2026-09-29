@@ -1,5 +1,7 @@
 # 启动解释器显式配置
 
+> 状态：SETUP；类型：启动解释器和环境配置契约；适用范围：MuJoCo、视觉和 GraspNet 进程。
+
 2026-09-06 起，MuJoCo、视觉、GraspNet 的 ROS launch 不再向上搜索工作区内的
 `.venv-*` 或 `third_party/rebotarm_mujoco_venv`，也不向整组节点注入视觉
 `site-packages/PYTHONPATH`。每类 Python 节点使用自己的解释器 prefix。

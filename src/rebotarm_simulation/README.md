@@ -6,7 +6,7 @@ MuJoCo 离线物理与 ROS 2 仿真后端包。它提供模型、物理步进、
 `save_state` / `restore_state` 可回放同一仿真状态。接触快照包含力、法向与穿透深度，
 ROS 节点在 `/diagnostics` 发布仿真控制与接触告警。
 
-示教轨迹的独立 MuJoCo 预演见 [操作说明](../../docs/mujoco_teach_preview.md)。
+示教轨迹的独立 MuJoCo 预演见 [操作说明](../../docs/reference/commands/mujoco_teach_preview.md)。
 
 ## 目录结构
 

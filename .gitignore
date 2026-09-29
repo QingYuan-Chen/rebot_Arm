@@ -66,3 +66,6 @@ third_party/rebotarm_ros2_mujoco_snapshot/**/*.py[cod]
 # OS-generated files
 .DS_Store
 Thumbs.db
+
+# Local reinforcement-learning outputs
+/runs/

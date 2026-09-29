@@ -1,9 +1,11 @@
 # Ubuntu 视觉只读测试手册
 
+> 状态：REFERENCE；类型：只读视觉验证；适用范围：Gemini 2/YOLO/GraspNet；不授权机械臂运动。
+
 本手册只启动 Gemini 2、YOLO、ROS RGB-D/CameraInfo/detection 和本地 GraspNet
 候选发布，不启动机械臂控制器，不调用 enable，不发送轨迹。
 
-## 1. 先准备环境
+## 前置条件与环境准备
 
 ```bash
 cd /home/huangbin/robotarm_ros2
@@ -23,7 +25,7 @@ export GRASPNET_MODEL_ROOT=/absolute/path/to/graspnet-model-root
 export GRASPNET_CHECKPOINT_PATH=/absolute/path/to/checkpoint-rs.tar
 ```
 
-## 2. 启动视觉只读链路
+## 操作步骤：启动视觉只读链路
 
 模型路径和推理设备使用仓库默认值，不需要再输入参数：
 
@@ -45,7 +47,7 @@ export GRASPNET_CHECKPOINT_PATH=/absolute/path/to/checkpoint-rs.tar
 未知模型继续验收。更换模型或机器时，使用完整 launch 参数覆盖即可，但不属于
 日常测试命令。
 
-## 3. 查看 YOLO 分割画面
+## 检查：YOLO 分割画面
 
 另开终端：
 
@@ -70,7 +72,7 @@ ros2 topic echo /camera/depth/camera_info --once
 正常现象是 RGB、depth、annotated 频率持续更新，分割图上出现检测框/掩码，
 检测消息的时间戳和 frame_id 有效。此步骤不代表 GraspNet 已成功。
 
-## 4. 查看 GraspNet 候选和夹爪位姿
+## 检查：GraspNet 候选和夹爪位姿
 
 检查候选消息：
 
@@ -105,7 +107,7 @@ ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
 窗口显示完整点云和实体夹爪，不在 GraspNet 推理回调里运行。无桌面环境或不需要
 Open3D 时传 `start_open3d_viewer:=false`。
 
-## 5. 验收顺序
+## 验证顺序与判定
 
 ```text
 相机 RGB/depth 持续发布
@@ -127,7 +129,7 @@ ros2 topic echo /grasp/detections --once
 
 候选为空时仍属于 fail-closed，不得因此直接开放真机执行。
 
-## 6. 停止
+## 停止与安全
 
 使用 `Ctrl-C` 停止视觉终端和 RViz。整个手册流程不需要连接机械臂，
 也不需要调用 `/rebotarm/enable`。

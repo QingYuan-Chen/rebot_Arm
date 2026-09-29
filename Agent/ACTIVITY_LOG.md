@@ -931,3 +931,74 @@
 - 2026-09-27T17:10:39+08:00 | actor=codex | event=complete | note=移除虚拟视觉链完成，实体相机支架负载保留，仿真运行与回归通过 | verification=build;ROS无camera/TF发布;744 passed14 skipped;MuJoCo9;layering18;compileall/MJCF/diff
 - 2026-09-27T17:12:54+08:00 | actor=codex | event=start | note=提交推送当前仿真清理进度到GitHub | verification=-
 - 2026-09-27T17:13:25+08:00 | actor=codex | event=checkpoint | note=当前清理进度已验证，准备提交推送origin/main | verification=744 passed14 skipped;layering18;MuJoCo9;build/runtime/compileall/MJCF/diff
+- 2026-09-27T17:29:05+08:00 | actor=codex | event=start | note=规划 MuJoCo 强化学习训练起步路线 | verification=-
+- 2026-09-27T17:42:51+08:00 | actor=codex | event=start | note=安装RL依赖、维护克隆配置文档、实现并验证MuJoCo Reach Gymnasium环境 | verification=-
+- 2026-09-27T17:49:16+08:00 | actor=codex | event=complete | note=RL依赖已安装，克隆配置文档和Reach环境完成；干净venv及短训练链路验证通过，无硬件操作 | verification=layering18; full744passed15skipped; Reach7passed; Gymnasium/SB3 check; clean venv pip check; simulation build; compileall; diff check
+- 2026-09-27T18:17:32+08:00 | actor=codex | event=start | note=将MuJoCo强化学习PyTorch从CPU版改为GPU版，并验证CUDA训练 | verification=-
+- 2026-09-27T18:29:21+08:00 | actor=codex | event=complete | note=CUDA 12.1 PyTorch GPU版、SB3/Gymnasium兼容版本及文档已更新；RTX 4060张量与PPO训练、隔离环境重装验证通过 | verification=CUDA tensor; GPU PPO 512 steps and eval; clean venv pip check and check_env; Reach7; layering18; full744passed15skipped; simulation build; compileall; diff check
+- 2026-09-28T15:43:13+08:00 | actor=codex | event=start | note=评估当前项目是否可接入 LeRobot 框架 | verification=-
+- 2026-09-28T15:48:16+08:00 | actor=codex | event=complete | note=完成 LeRobot 接入可行性审查：仿真训练层可适配，真实控制与数据集需新增外部 Robot/数据转换/安全桥接；未修改业务代码 | verification=只读审查完成；系统 Python 的 tests/test_gym_reach.py 因 gymnasium 未安装跳过；仓库现有 MuJoCo RL 文档记录隔离环境验证
+- 2026-09-28T15:54:26+08:00 | actor=codex | event=start | note=为当前项目制定清晰的强化学习推进路线，区分 MuJoCo/Gymnasium/LeRobot、任务定义与 sim-to-real 阶段 | verification=-
+- 2026-09-28T16:01:33+08:00 | actor=codex | event=start | note=推进第一个RL任务：六轴机械臂从home到附近目标末端位姿 | verification=-
+- 2026-09-28T16:04:38+08:00 | actor=codex | event=complete | note=完成首个末端目标位姿Reach任务：位置+姿态观测、奖励和成功门，GPU PPO链路验证通过，无真机 | verification=Reach7; Gymnasium/SB3 check; full744passed15skipped; GPU PPO512; simulation build; compileall; diff check
+- 2026-09-28T16:06:35+08:00 | actor=codex | event=start | note=查看 Agent 文件夹内容并说明用途 | verification=-
+- 2026-09-28T16:07:13+08:00 | actor=codex | event=complete | note=已查看 Agent 目录结构并完成用途概括 | verification=目录清单、核心状态文件和 evidence 统计已核对
+- 2026-09-28T16:12:04+08:00 | actor=codex | event=start | note=整理 Agent 状态文档：区分历史 P0-P6 与当前 MuJoCo RL/维护阶段 | verification=-
+- 2026-09-28T16:13:21+08:00 | actor=codex | event=checkpoint | note=完成 Agent 当前队列、当前阶段、TCP口径和历史证据说明整理 | verification=state queue regenerated after documentation update
+- 2026-09-28T16:14:12+08:00 | actor=codex | event=complete | note=Agent 状态文档整理完成，历史队列已封存，当前 Reach/RL 阶段已生效 | verification=state regenerated; git diff --check passed
+- 2026-09-28T16:33:18+08:00 | actor=codex | event=checkpoint | note=建立 Agent 当前状态单一入口和历史归档规则 | verification=update_state.py py_compile; current status schema regenerated
+- 2026-09-28T16:35:37+08:00 | actor=codex | event=complete | note=完成 Agent 目录长期维护结构设计与当前状态入口重构 | verification=CURRENT_STATUS 4/7; historical P0-P6 100%; update_state py_compile; git diff --check
+- 2026-09-28T16:46:10+08:00 | actor=codex | event=checkpoint | note=将 evidence 明确分类为当前有效基线与历史归档两类 | verification=分类索引、current/archive说明与接手入口已更新
+- 2026-09-28T16:46:24+08:00 | actor=codex | event=complete | note=完成 evidence 当前有效基线/历史归档分类说明 | verification=evidence indexes added; original evidence paths preserved; git diff --check passed
+- 2026-09-28T16:50:04+08:00 | actor=codex | event=complete | note=核对 P0 evidence 与 Gate B/C 删除边界 | verification=P0 11 records: 2 passed, 7 failed, 2 aborted; Gate B/C tool removal confirmed in docs and activity log
+- 2026-09-28T16:52:08+08:00 | actor=codex | event=complete | note=按用户要求清理 P0 Gate B/C 历史证据 | verification=11 JSON moved recoverably to desktop trash; safety code untouched; references synchronized; git diff --check
+- 2026-09-28T17:02:53+08:00 | actor=codex | event=complete | note=完成 docs 分类索引、维护原则和文档状态标注整理 | verification=docs index links checked; git diff --check passed; no hardware action
+- 2026-09-28T17:07:39+08:00 | actor=codex | event=complete | note=按用户要求删除已移除虚拟相机的三份维护证据 | verification=3 untracked JSON moved recoverably to trash; MotorBridge/TOTG evidence retained; classification updated; git diff --check
+- 2026-09-28T17:11:16+08:00 | actor=codex | event=start | note=删除 TOTG/Ruckig 运行日志并将验证报告中文化 | verification=-
+- 2026-09-28T17:11:57+08:00 | actor=codex | event=complete | note=删除 TOTG/Ruckig 原始运行日志并完成验证报告中文化 | verification=报告翻译完成；runtime log 已移入回收站；git diff --check
+- 2026-09-28T17:16:02+08:00 | actor=codex | event=start | note=正式迁移 docs 文档到 current/design/reference/archive | verification=-
+- 2026-09-28T17:21:32+08:00 | actor=codex | event=complete | note=完成 docs 文档实体迁移与全量引用更新 | verification=current/design/reference/archive 实体归类完成；Markdown 链接检查42份无断链；package layering 18 passed；受影响测试111 passed，1项因环境缺少 rebotarm_msgs 未通过；git diff --check
+- 2026-09-28T17:28:39+08:00 | actor=codex | event=start | note=将 Agent evidence maintenance 证据迁移到 current | verification=-
+- 2026-09-28T17:29:17+08:00 | actor=codex | event=complete | note=完成 evidence 维护证据实体迁移 | verification=两份维护证据已迁入 evidence/current；maintenance 目录已移除；无残留路径引用；git diff --check
+- 2026-09-28T17:41:31+08:00 | actor=codex | event=complete | note=按用户定义重组 docs/reference：迁移系统命令参考并恢复节点拓扑图 | verification=reference 命令/拓扑/数据流资料集中完成；Markdown 42份无断链；受影响测试38 passed；git diff --check
+- 2026-09-28T17:41:55+08:00 | actor=codex | event=start | note=将 USER_MAINTAINED_TODO 迁移到 docs/user | verification=-
+- 2026-09-28T17:42:25+08:00 | actor=codex | event=complete | note=完成用户维护待办文档迁移到 docs/user | verification=USER_MAINTAINED_TODO 已迁移；索引和维护规则已更新；Markdown 无断链；git diff --check
+- 2026-09-28T17:43:19+08:00 | actor=codex | event=complete | note=完成用户维护待办文档迁移到 docs/user | verification=USER_MAINTAINED_TODO 已迁移；索引和维护规则已更新；Markdown 无断链；git diff --check
+- 2026-09-28T17:56:12+08:00 | actor=codex | event=start | note=按最终文档边界重组 implemented/setup/design/reference/user/archive | verification=-
+- 2026-09-28T17:59:54+08:00 | actor=codex | event=complete | note=完成 docs 最终边界重组：implemented/setup/design/reference/user/archive | verification=已实现功能、环境配置、设计缺口、参考约束和用户待办实体归类；Markdown 41份无断链；受影响测试38 passed；git diff --check
+- 2026-09-28T18:05:56+08:00 | actor=codex | event=start | note=将网页手眼标定技术路线移入 design | verification=-
+- 2026-09-28T18:08:18+08:00 | actor=codex | event=complete | note=将网页手眼标定技术路线移入 design 并明确未完成真实设备边界 | verification=设计文档、索引和包README已更新；Markdown无断链；git diff --check
+- 2026-09-28T18:14:21+08:00 | actor=codex | event=start | note=整理文档命令单一来源：reference/commands 与 implemented 功能说明分离 | verification=-
+- 2026-09-28T18:16:46+08:00 | actor=codex | event=complete | note=完成命令单一来源整理：reference/commands 与 implemented 功能说明分离 | verification=命令集中、implemented 去重并建立链接；Markdown 44份无断链；受影响测试38 passed；git diff --check
+- 2026-09-28T18:33:06+08:00 | actor=codex | event=start | note=翻译 RGB-D 审计并重分类视觉抓取参数文档 | verification=-
+- 2026-09-28T18:35:44+08:00 | actor=codex | event=complete | note=完成 RGB-D 审计中文化、视觉七层参数设计归档和当前参数参考建立 | verification=审计已中文化；七层设计移入 design；current params 依据 launch/YAML 建立；Markdown 无断链；git diff --check
+- 2026-09-28T18:36:28+08:00 | actor=codex | event=complete | note=完成 RGB-D 审计中文化、视觉七层参数设计归档和当前参数参考建立 | verification=审计已中文化；七层设计移入 design；current params 依据 launch/YAML 建立；当前拓扑图已恢复；Markdown 无断链；git diff --check
+- 2026-09-28T18:45:20+08:00 | actor=codex | event=complete | note=核对用户删除后的 implemented/reference 链接并清理残留引用 | verification=已确认 implemented/reference 边界；删除文件残留引用已移除；Markdown 42份无断链；git diff --check
+- 2026-09-28T18:51:24+08:00 | actor=codex | event=start | note=移除 docs/archive 历史资料目录并改用 Git 历史追溯 | verification=-
+- 2026-09-28T18:53:14+08:00 | actor=codex | event=complete | note=按用户要求移除 docs/archive，历史文档统一从 Git history 追溯 | verification=docs/archive 已移入可恢复回收站；docs 维护规则和索引已更新；Markdown 41份无断链；git diff --check
+- 2026-09-28T19:37:51+08:00 | actor=codex | event=start | note=翻译 docs/implemented/architecture.md 为中文 | verification=-
+- 2026-09-28T19:40:08+08:00 | actor=codex | event=complete | note=完成 implemented architecture 中文化 | verification=架构文档普通说明已翻译；技术标识符保留；Markdown 链接和 git diff --check 通过
+- 2026-09-28T19:42:36+08:00 | actor=codex | event=start | note=盘点并更新 docs/implemented 与 docs/reference/commands 的功能覆盖 | verification=-
+- 2026-09-28T19:45:05+08:00 | actor=codex | event=complete | note=补齐 implemented 功能总览与系统命令覆盖 | verification=新增 system_capabilities.md 和 system_runtime.md；Markdown 链接0断链；分层测试18 passed；compileall与diff检查通过
+- 2026-09-28T19:48:31+08:00 | actor=codex | event=start | note=统一 docs 下 Markdown 文档格式 | verification=-
+- 2026-09-28T19:50:39+08:00 | actor=codex | event=complete | note=统一 docs Markdown 格式与状态元数据 | verification=统一状态/类型/适用范围元数据，补充 docs 维护模板；Markdown 28份0断链；分层18 passed；compileall和diff检查通过；全量pytest因未加载构建后的rebotarm_msgs在收集阶段2个ImportError
+- 2026-09-28T19:52:24+08:00 | actor=codex | event=start | note=按正文模板重排 implemented 与 reference 文档 | verification=-
+- 2026-09-28T19:56:12+08:00 | actor=codex | event=complete | note=按统一正文模板重排 implemented 与 reference 文档 | verification=implemented 功能文档统一为功能概述/当前实现/验证结果/边界/运行入口；reference 命令文档统一为适用范围/前置条件/操作步骤/检查结果/停止安全；Markdown 0断链，分层18 passed，compileall与diff检查通过
+- 2026-09-28T19:57:40+08:00 | actor=codex | event=start | note=统一 calibration_acceptance.md 功能文档结构 | verification=-
+- 2026-09-28T19:58:35+08:00 | actor=codex | event=complete | note=统一 calibration_acceptance 功能文档结构 | verification=改为功能概述/当前实现/验证结果/边界与未完成/运行入口与相关文档；Markdown 0断链；分层18 passed；diff检查通过
+- 2026-09-28T20:02:35+08:00 | actor=codex | event=start | note=审计并重新规划 docs/implemented 与 docs/reference 架构 | verification=-
+- 2026-09-28T20:05:05+08:00 | actor=codex | event=complete | note=完成 implemented/reference 目录级架构重构 | verification=implemented补齐硬件/MoveIt/操作/示教/视觉抓取专题；reference新增commands/topology/parameters索引与系统数据流；Markdown 39份0断链；分层18 passed；compileall与diff检查通过
+- 2026-09-28T20:08:09+08:00 | actor=codex | event=start | note=盘点 implemented 当前已实现功能并生成用户核对清单 | verification=-
+- 2026-09-28T20:08:40+08:00 | actor=codex | event=complete | note=完成 implemented 当前功能核对清单 | verification=依据 system_capabilities 与专题文档列出当前实现能力及未完成边界
+- 2026-09-28T20:15:16+08:00 | actor=codex | event=start | note=按用户确认的架构重构 implemented 与 reference 文档 | verification=-
+- 2026-09-28T20:19:23+08:00 | actor=codex | event=complete | note=完成 docs 文档易用性重构 | verification=implemented 功能说明简化；reference 命令按任务收口；详细审计和旧命令细节迁移至 Agent/evidence/current；Markdown 46份0断链；分层18 passed；compileall与diff检查通过
+- 2026-09-29T10:40:48+08:00 | actor=codex | event=start | note=补齐视觉抓取 plan_only 预览与真机执行命令 | verification=-
+- 2026-09-29T10:41:50+08:00 | actor=codex | event=complete | note=补齐视觉抓取 plan-only 预览与真机执行命令 | verification=plan-only 触发服务、真机 execution launch、enable/execute/stop/disable 命令已核对源码；Markdown 0断链；分层18 passed
+- 2026-09-29T10:43:33+08:00 | actor=codex | event=start | note=复核 implemented 与 reference command 的功能和入口覆盖 | verification=-
+- 2026-09-29T10:49:24+08:00 | actor=codex | event=verified | note=复核 implemented 与 reference/commands：补齐入口覆盖表、基础 bringup、teleop_system、MuJoCo 维护与 Viewer/ROS 后端、手眼残差和 TCP 独立命令；断链和分层测试通过，全量测试受未构建 rebotarm_msgs 阻塞 | verification=package_layering=18 passed; markdown_links=0; compileall=passed; full_pytest=blocked_missing_rebotarm_msgs
+- 2026-09-29T10:55:55+08:00 | actor=codex | event=start | note=检查仓库 log 与 Log 目录用途 | verification=-
+- 2026-09-29T10:56:35+08:00 | actor=codex | event=complete | note=完成 log 与 Log 目录用途说明 | verification=确认 Log 为 Orbbec SDK 日志，log 为 colcon 构建/测试日志，均已被 .gitignore 忽略；另区分 .git/logs reflog
+- 2026-09-29T11:01:40+08:00 | actor=codex | event=complete | note=设置 log 目录定期清理 | verification=已创建每日凌晨3点执行的自动任务，仅清理 /home/huangbin/robotarm_ros2/log/ 中超过两天的文件与空目录；不触碰 Log、.git/logs 或其他路径
+- 2026-09-29T11:03:59+08:00 | actor=codex | event=start | note=审查 visual_grasp_system.launch.py 参数冗余与节点解耦 | verification=-
+- 2026-09-29T11:05:40+08:00 | actor=codex | event=complete | note=完成 visual_grasp_system.launch.py 参数与解耦审查 | verification=确认134个LaunchArgument全部被读取；识别参数转发、节点生命周期、策略YAML、硬编码话题和未使用配置等耦合点；未修改源码
+- 2026-09-29T11:08:48+08:00 | actor=codex | event=start | note=检查当前变更并准备上传 GitHub | verification=-

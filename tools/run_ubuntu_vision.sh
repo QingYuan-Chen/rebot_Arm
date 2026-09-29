@@ -11,7 +11,7 @@ if ! command -v "${REBOTARM_VISION_PYTHON}" >/dev/null; then
   exit 1
 fi
 if [[ ! -f "${repo_root}/install/setup.bash" ]]; then
-  echo "ROS workspace is not built. Follow docs/local_setup_zh.md before starting vision." >&2
+  echo "ROS workspace is not built. Follow docs/setup/ubuntu_ros2_jazzy.md before starting vision." >&2
   exit 1
 fi
 

@@ -433,7 +433,7 @@ def test_visual_grasp_benchmark_returns_ready_between_attempts():
 def test_hybrid_grasp_sim_benchmark_waits_for_fresh_filtered_plan_before_execute():
     scripts = _console_scripts("src/rebotarm_vision/setup.py")
     benchmark_text = _read("src/rebotarm_vision/rebotarm_vision/hybrid_grasp_sim_benchmark.py")
-    doc_text = _read("docs/visual_grasp_commands.md")
+    doc_text = _read("docs/reference/commands/visual_grasp_commands.md")
 
     assert "rebotarm_hybrid_grasp_sim_benchmark" in scripts
     assert 'self.create_subscription(GraspPlan, self._plan_topic, self._on_plan, 10)' in benchmark_text
@@ -453,7 +453,7 @@ def test_hybrid_grasp_sim_benchmark_waits_for_fresh_filtered_plan_before_execute
 
 
 def test_visual_grasp_commands_document_strict_stability_test():
-    doc_text = _read("docs/visual_grasp_commands.md")
+    doc_text = _read("docs/reference/commands/visual_grasp_commands.md")
     readme_text = _read("src/rebotarm_vision/README_zh.md")
 
     assert "rebotarm_visual_grasp_benchmark" in doc_text

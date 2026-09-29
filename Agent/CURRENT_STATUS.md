@@ -1,0 +1,41 @@
+# 当前项目状态
+
+> 这是接手项目时优先阅读的文件。更新时间：2026-09-28。
+> 本文件只描述当前范围；历史 P0-P6 见 `PROJECT_STATUS.md`，过程记录见 `MEMORY.md` 和 `ACTIVITY_LOG.md`。
+
+## 当前阶段
+
+- 当前阶段：MuJoCo/Gymnasium Reach 软件基线完成，正在进行训练质量评估和 sim-to-real 接口规划。
+- 当前范围：纯仿真、RL 环境、训练/评估口径和后续接口设计。
+- 当前安全状态：没有新的真实机械臂 enable、trajectory、gripper、approach、lift、retreat 或接触授权。
+
+## 当前验收清单
+
+- [x] Reach 环境可启动并完成基本 reset/step。
+- [x] 位置与姿态观测、奖励、成功门、碰撞和超时处理已实现。
+- [x] Gymnasium/SB3 环境检查通过。
+- [x] GPU PyTorch 与 PPO 训练/保存/加载链路通过。
+- [ ] 多随机种子训练和固定评估集尚未完成。
+- [ ] Reach 成功率尚未达到预设验收门槛；当前策略不能宣称已经学会。
+- [ ] sim-to-real 的 action、observation、控制周期、关节顺序和限位合同尚未冻结。
+
+## 当前阻塞与风险
+
+- Reach 策略目前只是证明训练链路可运行，尚未稳定收敛。
+- 真实 Gemini 2 的最新 K/D、畸变和 RGB-D 一致性需要设备连接后重新核对；不能使用 MuJoCo 参考内参代替实机证据。
+
+## 当前下一步
+
+1. 固定 Reach 的训练集、评估集、随机种子、成功率和碰撞统计口径。
+2. 运行多种随机种子的短训练/评估，判断是否需要修改 reward、目标采样或动作尺度。
+3. 在仿真侧冻结 sim-to-real 合同，再决定是否设计 LeRobot 数据转换或真实控制桥接。
+4. 只有在用户明确授权后，另行进行真实相机或机械臂验证。
+
+## 证据入口
+
+- 当前任务队列：`EXECUTION_FLOW.md` 的“当前执行队列”。
+- 当前/历史证据分类：`evidence/README.md`，再按 `evidence/current/` 或 `evidence/archive/` 阅读。
+- 历史 P0-P6：`PROJECT_STATUS.md`。
+- 详细事实、决策和历史上下文：`MEMORY.md`。
+- 追加式操作日志：`ACTIVITY_LOG.md`。
+- 机器可读快照：`STATE.json`，由 `update_state.py` 生成。

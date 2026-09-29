@@ -1,8 +1,6 @@
 # 网页手眼标定技术路线
 
-> 状态：软件实现与软件验收已完成，本文件现作为技术路线和实现检查点归档。文中各个
-> “待实现/待验证”句子属于当时的历史记录，不代表当前软件缺口。真实相机、重力补偿
-> 和物理精度仍属于需要单独授权的现场验收范围。
+> 状态：DESIGN；类型：网页手眼标定技术路线；适用范围：真实相机、真实机械臂和物理精度缺口；软件链路已实现并通过合成/替身验证，但不代表所有阶段已经结束。
 
 ## 目标和边界
 
@@ -79,16 +77,16 @@ Dashboard 只调用 ROS 接口和读取状态，不导入标定算法。标定�
 `reason_code`，而不是让网页解析异常字符串。`finish_session` 只生成候选报告；只有
 操作者明确确认并且报告所有门通过，session 才能进入 `accepted`，这仍不等于自动部署。
 
-## 当前实现
+## 当前实现与剩余路线
 
-软件范围已完成验收，见验收清单的最终审计。以下“实现检查点”为按时间保留的历史记录，
-其中“待实现/待验证”描述当时状态，不代表当前缺口。现场验收未执行且需要单独授权。
+软件范围的主要链路已完成验收，见 `docs/implemented/features/calibration_acceptance.md`。
+以下实现检查点同时保留已完成软件项和仍未完成的现场/物理边界；不能把软件验收扩展为真实设备验收。
 
 当前正式会话实现为 `SessionStore`，负责状态转换、幂等、版本、人工确认和持久化。
 Phase 0 的未接线 `CalibrationSession` 原型已移除，避免维护两套接受规则。
 采集由 `HandeyeCaptureNode`、页面由 Dashboard 持有。当前验收进度见
-[calibration_acceptance.md](calibration_acceptance.md)，操作步骤见
-[calibration_web_usage.md](calibration_web_usage.md)。
+[当前软件验收边界](../implemented/features/calibration_acceptance.md)，操作步骤见
+[当前网页操作命令参考](../reference/commands/calibration_web.md)。
 
 ## 实现检查点：离线求解与持久化
 
