@@ -75,7 +75,7 @@ ros2 service call /rebotarm/visual_grasp/execute std_srvs/srv/Trigger "{}"
 ## 仿真执行
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py use_rviz:=true
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true
 ```
 
 在 RViz 中先 `Plan` 再 `Execute`。仿真 Action 应保持唯一：
@@ -83,6 +83,24 @@ ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py use_rviz:=true
 ```bash
 ros2 action list | grep follow_joint_trajectory
 ```
+
+## 稳定性 benchmark
+
+软件侧可运行多次只读视觉抓取 benchmark，确认每次等待新鲜过滤计划后再进入执行阶段：
+
+```bash
+rebotarm_visual_grasp_benchmark --attempts 20 --return-ready-before-each --wait-enter
+rebotarm_hybrid_grasp_sim_benchmark --return-ready-after-each
+```
+
+benchmark 只记录成功率和 `failed_stage`，不替代真机安全验收。
+
+稳定性测试还应保留候选过滤参数，例如
+`candidate_max_joint6_delta_rad:=1.5708` 和
+`candidate_joint6_symmetry_enabled:=true`；涉及夹爪时明确设置
+`gripper_grasp_enabled:=false`。涉及真机或多次尝试时，使用
+`/rebotarm/visual_ready/move` 和 `/rebotarm/visual_grasp/execute` 两个阶段接口，
+并记录每次的 `failed_stage`。
 
 ## 真机执行
 

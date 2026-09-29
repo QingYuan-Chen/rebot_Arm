@@ -8,7 +8,7 @@ planning_scene_monitor_options:
   name: planning_scene_monitor
   # 机器人描述参数名：从中读取 URDF 文本，必须与启动文件下发的参数名一致（不可写成路径）。
   robot_description: robot_description
-  # 关节状态话题：控制器/仿真发布的六轴关节反馈；demo.launch.py 会把它重映射到
+  # 关节状态话题：控制器/仿真发布的六轴关节反馈；moveit_demo.launch.py 会把它重映射到
   # /<arm_namespace>/visual_joint_states（含手指关节），以便 RViz 中的手指 link 也能动。
   joint_state_topic: /rebotarm/joint_states
   # 附加/分离碰撞物体的话题：外部节点通过它把被抓物体挂到机械臂上或摘下来。

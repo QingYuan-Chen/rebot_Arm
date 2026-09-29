@@ -19,9 +19,11 @@
 cd /home/huangbin/robotarm_ros2
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-third_party/rebotarm_mujoco_venv/bin/python -m rebotarm_teach.mujoco_preview \
+ros2 run rebotarm_simulation rebotarm_mujoco_teach_preview \
   /你的/示教记录.jsonl --viewer
 ```
+
+预演执行与 viewer 生命周期由 `rebotarm_simulation` 管理。
 
 ## 输出与失败条件
 

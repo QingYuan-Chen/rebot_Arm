@@ -6,6 +6,7 @@
 """
 
 import math
+from collections.abc import Sequence
 
 from .teach_recording import TeachSample
 
@@ -13,6 +14,26 @@ from .teach_recording import TeachSample
 def stamp_nanoseconds(stamp) -> int:
     """把 ROS 时间戳（``sec`` + ``nanosec``）折算成整数纳秒，便于做同批次相等比较。"""
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+
+
+def ordered_feedback_vector(
+    values: Sequence[float],
+    *,
+    source_names: Sequence[str],
+    source_indices: Sequence[int],
+) -> tuple[float, ...]:
+    """按目标关节顺序重排反馈向量，并拒绝无效数值。
+
+    该函数只处理已经完成关节名匹配的数值向量，因此不依赖 ROS 消息，
+    可单独测试。``source_indices`` 通常由 ``feedback_teach_sample`` 根据
+    ``joint_names`` 计算得到。
+    """
+    if len(values) != len(source_names):
+        raise ValueError("joint feedback vector length mismatch")
+    result = tuple(float(values[index]) for index in source_indices)
+    if not all(math.isfinite(value) for value in result):
+        raise ValueError("joint feedback contains non-finite values")
+    return result
 
 
 def feedback_teach_sample(
@@ -56,16 +77,6 @@ def feedback_teach_sample(
     # 记录每列在消息中的下标，下面按期望关节顺序重排所有向量。
     indices = [names.index(name) for name in joint_names]
 
-    def ordered(values):
-        """按 ``joint_names`` 顺序重排一个向量，并校验长度与非有限值。"""
-        if len(values) != len(names):
-            raise ValueError("joint feedback vector length mismatch")
-        result = tuple(float(values[i]) for i in indices)
-        # NaN/Inf 一旦写进记录文件会污染后续质量分析与重定时，必须在入口拦住。
-        if not all(math.isfinite(value) for value in result):
-            raise ValueError("joint feedback contains non-finite values")
-        return result
-
     if require_motor_status:
         # 时间戳必须与关节状态完全一致，才能保证"位置"与"健康状态"属于同一帧反馈。
         if any(motor_stamps.get(name) != stamp for name in joint_names):
@@ -75,9 +86,20 @@ def feedback_teach_sample(
             raise ValueError("motor feedback is unknown or unhealthy")
     return TeachSample(
         stamp=(stamp - started_ns) / 1_000_000_000,
-        joint_names=tuple(joint_names), positions=ordered(msg.position),
-        velocities=ordered(msg.velocity) if msg.velocity else (),
-        efforts=ordered(msg.effort) if msg.effort else (),
+        joint_names=tuple(joint_names),
+        positions=ordered_feedback_vector(
+            msg.position, source_names=names, source_indices=indices
+        ),
+        velocities=(
+            ordered_feedback_vector(msg.velocity, source_names=names, source_indices=indices)
+            if msg.velocity
+            else ()
+        ),
+        efforts=(
+            ordered_feedback_vector(msg.effort, source_names=names, source_indices=indices)
+            if msg.effort
+            else ()
+        ),
         # 只保留本次记录关节范围内的状态，避免把夹爪等无关电机带进样本。
         motor_status={name: motor_status[name] for name in joint_names if name in motor_status},
         arm_state=arm_state,

@@ -47,7 +47,7 @@ from typing import Callable, Protocol, Mapping
 from control_msgs.action import FollowJointTrajectory
 from moveit_msgs.srv import GetStateValidity
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-from rebotarm_motion.collision_precheck import CollisionPrecheckConfig, CollisionPrechecker
+from rebotarm_motion.collision_precheck import CollisionPrechecker
 from rebotarm_motion.replay_runtime_monitor import ReplayRuntimeMonitor, ReplayRuntimeMonitorConfig
 from .teach_replay_client import TeachReplayClient
 from .teach_replay_coordinator import TeachReplayCoordinator, TeachReplayLimits
@@ -64,16 +64,16 @@ from rebotarm_teach.teach_recording import (
     write_prepared_teach_record,
 )
 from rebotarm_teach.teach_replay_settings import TeachReplaySettingsProvider
-from rebotarm_motion.teach_replay_start_align_precheck import (
-    MoveItStartAlignPrecheckConfig,
-    MoveItStartAlignPrechecker,
-)
-from rebotarm_motion.teach_replay_start_alignment import MoveItStartAligner, MoveItStartAlignmentConfig
+from rebotarm_motion.teach_replay_start_align_precheck import MoveItStartAlignPrechecker
+from rebotarm_motion.teach_replay_start_alignment import MoveItStartAligner
 from rebotarm_teach.teach_replay_trajectory_builder import (
     TeachReplayTrajectoryBuilder,
     TeachReplayTrajectoryConfig,
 )
 from rebotarm_motion.moveit_planner import MoveItMotionPlanner
+
+from .replay_action_lifecycle import ReplayActionLifecycleMixin
+from .replay_moveit_precheck import ReplayMoveItPrecheckMixin
 
 
 class ReplaySnapshot(Protocol):
@@ -97,7 +97,7 @@ def _is_number_like(value) -> bool:
     return True
 
 
-class TeachReplayWorkflow:
+class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin):
     """示教回放全流程编排器。
 
     生命周期
@@ -352,64 +352,9 @@ class TeachReplayWorkflow:
             large_motion_max_speed=float(self.get_parameter("large_motion_max_speed").value),
         )
 
-    def _moveit_align_summary(self, info_payload: dict, samples=None, *, plan: bool = False) -> dict:
-        """汇总"是否需要并能否完成 MoveIt 起始对齐"的判定结果。
 
-        ``plan=False`` 只做可用性检查（服务是否就绪、起始误差是否已小于跳过阈值），
-        用于 execute 前的轻量评估；``plan=True`` 时额外真的规划一次到记录首点的关节空间
-        轨迹，用于 dry-run 给出可信结论。起始误差小于 ``moveit_start_skip_threshold``
-        （rad）时直接判为 skipped，不调用规划服务。
-        """
-        return self._moveit_start_align_prechecker.summary(
-            info_payload,
-            config=MoveItStartAlignPrecheckConfig(
-                enabled=bool(self.get_parameter("use_moveit_start_align").value),
-                service=str(self.get_parameter("moveit_planning_service").value),
-                skip_threshold=float(self.get_parameter("moveit_start_skip_threshold").value),
-                # 关节目标容差 rad，以及规划的速度/加速度缩放（0~1，越小越慢越稳）。
-                joint_goal_tolerance=float(self.get_parameter("moveit_joint_goal_tolerance").value),
-                velocity_scaling=float(self.get_parameter("moveit_velocity_scaling").value),
-                acceleration_scaling=float(self.get_parameter("moveit_acceleration_scaling").value),
-            ),
-            samples=samples,
-            plan=plan,
-        )
 
-    def _collision_precheck(self, samples) -> dict:
-        """对预处理后的样本序列做碰撞预检（逐采样点检查关节位置是否有效）。"""
-        if not samples:
-            # 没有样本时仍走统一入口：由预检器返回 unknown，避免"空输入=无碰撞"的误判。
-            return self._collision_precheck_positions((), [])
-        first = samples[0]
-        positions = [tuple(sample.positions) for sample in samples]
-        return self._collision_precheck_positions(tuple(first.joint_names), positions)
 
-    def _collision_precheck_trajectory(self, trajectory: JointTrajectory) -> dict:
-        """对最终要下发的轨迹点做碰撞预检（真实回放前的最后一道门）。"""
-        positions = [
-            tuple(point.positions)
-            for point in getattr(trajectory, "points", [])
-            if getattr(point, "positions", None)
-        ]
-        return self._collision_precheck_positions(tuple(trajectory.joint_names), positions)
-
-    def _collision_precheck_positions(self, joint_names: tuple[str, ...], positions_list: list[tuple[float, ...]]) -> dict:
-        """以节点参数构造碰撞预检配置并执行检查（关节位置单位 rad）。"""
-        default_joint_positions = self._collision_default_joint_positions(joint_names)
-        return self._collision_prechecker.check_positions(
-            joint_names=joint_names,
-            positions_list=positions_list,
-            config=CollisionPrecheckConfig(
-                enabled=bool(self.get_parameter("collision_check_enabled").value),
-                service=str(self.get_parameter("collision_check_service").value),
-                group_name=str(self.get_parameter("collision_group_name").value),
-                # 采样上限至少 1 个；上限越大越保险，但每次调用服务的次数线性增加。
-                max_samples=max(int(self.get_parameter("collision_check_max_samples").value), 1),
-                # 整轮预检总超时秒数，下限 0.1 s，防止配置成 0 导致必然超时。
-                timeout_sec=max(float(self.get_parameter("collision_check_timeout_sec").value), 0.1),
-                default_joint_positions=default_joint_positions,
-            ),
-        )
 
     def _teach_replay_limits(self) -> TeachReplayLimits:
         """本次回放的硬性上限（预处理跳变 rad、加速度 rad/s^2、急动度 rad/s^3）。
@@ -747,158 +692,9 @@ class TeachReplayWorkflow:
             final_hold_sec=final_hold_sec,
         )
 
-    def _append_moveit_start_alignment(
-        self,
-        trajectory: JointTrajectory,
-        *,
-        current_positions: tuple[float, ...],
-        first_positions: tuple[float, ...],
-    ) -> float:
-        """起始对齐回调：把规划出的对齐段追加到轨迹前部，返回对齐段结束时刻（秒）。
 
-        起始误差小于 ``moveit_start_skip_threshold``（rad）时跳过规划，只做保持点；
-        规划失败会抛异常向上传播，由调用方按"构造失败=阻断"处理。
-        """
-        return self._moveit_start_aligner.append(
-            trajectory,
-            current_positions=current_positions,
-            first_positions=first_positions,
-            config=MoveItStartAlignmentConfig(
-                start_hold_sec=float(self.get_parameter("start_hold_sec").value),
-                first_hold_sec=float(self.get_parameter("first_hold_sec").value),
-                skip_threshold=float(self.get_parameter("moveit_start_skip_threshold").value),
-                joint_goal_tolerance=float(self.get_parameter("moveit_joint_goal_tolerance").value),
-                velocity_scaling=float(self.get_parameter("moveit_velocity_scaling").value),
-                acceleration_scaling=float(self.get_parameter("moveit_acceleration_scaling").value),
-            ),
-        )
 
-    def _on_teach_replay_goal_response(self, future, info_payload: dict, points: int, trajectory: JointTrajectory) -> None:
-        """目标响应回调：登记活动回放并发布 ``replaying`` 状态，随后挂结果回调。
 
-        只有目标被接受才登记句柄、活动轨迹与单调起始时刻，并复位运行时监控器；
-        被拒绝或异常只发状态、不登记（避免 stop/监控操作一个不存在的目标）。
-        """
-        try:
-            goal_handle = future.result()
-        except Exception as exc:
-            self._publish_status("replay", {"state": "failed", "message": str(exc)})
-            return
-        if goal_handle is None or not goal_handle.accepted:
-            self._publish_status("replay", {"state": "rejected", "message": "teach replay goal rejected"})
-            return
-        with self._teach_replay_lock:
-            self._teach_replay_goal_handle = goal_handle
-            self._active_teach_replay_trajectory = trajectory
-            # 用单调时钟记录起点，供跟踪监控计算"已回放多久"，不受系统时间调整影响。
-            self._active_teach_replay_started_at = time.monotonic()
-            self._replay_runtime_monitor.reset()
-        self._publish_status(
-            "replay",
-            {
-                "state": "replaying",
-                "message": "teach replay goal accepted",
-                "record_path": str(info_payload.get("path", "")),
-                "start_band": str(info_payload.get("start_band", "")),
-                "max_error": info_payload.get("max_error"),
-                "trajectory_points": points,
-                # 回放进行中就把本次监控阈值一起下发，界面可据此显示判据；
-                # 判定与停止只发生在 check_tracking 中。
-                "runtime_monitor": {
-                    "enabled": bool(self.get_parameter("replay_monitor_enabled").value),
-                    "max_tracking_error_rad": float(self.get_parameter("max_tracking_error_rad").value),
-                    "max_live_velocity_rad_s": float(self.get_parameter("max_live_velocity_rad_s").value),
-                },
-                "dry_run": False,
-            },
-        )
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(lambda fut: self._on_teach_replay_result(fut, info_payload, points))
-
-    def _on_teach_replay_cancel_response(self, future) -> None:
-        """取消响应回调：区分"取消已受理"与"取消前目标已结束"两种情况。"""
-        try:
-            response = future.result()
-            goals_canceling = len(getattr(response, "goals_canceling", []))
-        except Exception as exc:
-            self._publish_status("replay", {"state": "failed", "message": str(exc)})
-            return
-        state = "cancel_requested" if goals_canceling else "done"
-        message = (
-            "teach replay cancel accepted"
-            if goals_canceling
-            else "teach replay already finished before cancel"
-        )
-        self._publish_status("replay", {"state": state, "message": message})
-        if not goals_canceling:
-            # 没有目标被取消说明回放已自然结束：结果回调可能不会再来，这里兜底清理状态。
-            with self._teach_replay_lock:
-                self._teach_replay_goal_handle = None
-                self._active_teach_replay_trajectory = None
-                self._active_teach_replay_started_at = None
-                self._replay_runtime_monitor.reset()
-
-    def _on_teach_replay_result(self, future, info_payload: dict, points: int) -> None:
-        """回放结果回调：把动作终态翻译成界面状态，并清理活动回放登记。
-
-        状态码按动作规范解释：``status == 4``（SUCCEEDED）且 ``error_code == 0`` 记 ``done``；
-        ``status == 5``（CANCELED）时，如果运行时监控器已请求过停止则记 ``safety_stop``
-        （这是我们主动刹停，不是操作员取消），否则记 ``canceled``；其余记 ``failed``。
-        """
-        previous_replay = self._snapshot().teleop.get("replay", {})
-        with self._teach_replay_lock:
-            monitor_stop_requested = self._replay_runtime_monitor.stop_requested
-        try:
-            wrapped_result = future.result()
-            status = int(getattr(wrapped_result, "status", -1))
-            result = getattr(wrapped_result, "result", None)
-            error_code = int(getattr(result, "error_code", 0)) if result is not None else 0
-            error_string = str(getattr(result, "error_string", "")) if result is not None else ""
-        except Exception as exc:
-            self._publish_status("replay", {"state": "failed", "message": str(exc)})
-            with self._teach_replay_lock:
-                self._teach_replay_goal_handle = None
-                self._active_teach_replay_trajectory = None
-                self._active_teach_replay_started_at = None
-                self._replay_runtime_monitor.reset()
-            return
-        if status == 4 and error_code == 0:
-            state = "done"
-        elif status == 5:
-            state = "safety_stop" if monitor_stop_requested else "canceled"
-        else:
-            state = "failed"
-        message = f"teach replay result status={status}, error_code={error_code}: {error_string}"
-        # 保留进行中发布的监控明细（原因/最差关节/实测误差），便于事后定位安全停止原因。
-        runtime_monitor = previous_replay.get("runtime_monitor") if isinstance(previous_replay, dict) else None
-        if status == 5 and monitor_stop_requested:
-            # 安全停止时用监控器留下的说明覆盖通用结果文本，明确"是监控刹停导致的取消"。
-            previous_message = str(previous_replay.get("message", "")) if isinstance(previous_replay, dict) else ""
-            message = (
-                f"action canceled after runtime monitor stop: {previous_message}"
-                if previous_message
-                else "action canceled after runtime monitor stop"
-            )
-        self._publish_status(
-            "replay",
-            {
-                "state": state,
-                "message": message,
-                "record_path": str(info_payload.get("path", "")),
-                "start_band": str(info_payload.get("start_band", "")),
-                "max_error": info_payload.get("max_error"),
-                "trajectory_points": points,
-                "runtime_monitor": runtime_monitor,
-                "dry_run": False,
-            },
-        )
-        # 无论成功、失败还是取消，活动回放登记必须清空，否则会导致后续 stop/监控操作
-        # 指向已结束的目标。
-        with self._teach_replay_lock:
-            self._teach_replay_goal_handle = None
-            self._active_teach_replay_trajectory = None
-            self._active_teach_replay_started_at = None
-            self._replay_runtime_monitor.reset()
 
     def check_tracking(self) -> None:
         """运行时跟踪监控（由上层按 ``replay_monitor_period_sec`` 周期调用）。

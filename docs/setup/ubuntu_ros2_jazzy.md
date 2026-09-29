@@ -108,7 +108,7 @@ sudo apt install ros-jazzy-moveit-simple-controller-manager
 cd /home/huangbin/robotarm_ros2
 source tools/source_local_environment.bash
 export ROS_DOMAIN_ID=173
-ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py
 ```
 
 应不再出现插件加载失败或空控制器列表；确认唯一 Action server 后，

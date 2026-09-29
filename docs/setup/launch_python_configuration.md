@@ -61,8 +61,8 @@ MuJoCo 模型资源的选择方式保持原有契约；本次只解除解释器�
 
 覆盖入口：
 
-- `rebotarm_simulation`: `mujoco_sim.launch.py`、`mujoco_moveit_sim.launch.py`
-- `rebotarm_bringup`: `visual_grasp_system.launch.py`
+- `rebotarm_simulation`: `mujoco_sim.launch.py`
+- `rebotarm_bringup`: `visual_grasp_system.launch.py`、`mujoco_moveit_sim.launch.py`
 - `rebotarm_vision`: `vision.launch.py`、`vision_ubuntu.launch.py`
 
 旧 `mujoco_ros_adapter_node.py` 和快照进程转发器 `upstream_backend.py` 已退出

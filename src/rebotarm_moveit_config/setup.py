@@ -26,8 +26,6 @@ setup(
         (f"share/{package_name}/config", glob("config/*")),
         # URDF 引用的 STL 网格文件。
         (f"share/{package_name}/meshes", glob("meshes/*")),
-        # 启动文件；只匹配 *.launch.py，避免打包无关的 Python 产物。
-        (f"share/{package_name}/launch", glob("launch/*.launch.py")),
         # RViz MotionPlanning 面板配置。
         (f"share/{package_name}/rviz", glob("rviz/*.rviz")),
     ],

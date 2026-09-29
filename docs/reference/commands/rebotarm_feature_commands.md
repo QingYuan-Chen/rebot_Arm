@@ -22,6 +22,21 @@ ros2 launch rebotarm_bringup rviz_ee_drag_sim.launch.py
 
 在 RViz MotionPlanning 中选择规划组，设置目标姿态，点击 `Plan`，确认轨迹后点击 `Execute`。
 
+## RViz MoveIt 末端拖动
+
+当前推荐使用 `rebotarm_bringup` 的 MoveIt 组合入口；历史上的
+`rviz_ee_drag_real.launch.py` 已移除，真机使用 `moveit_hardware.launch.py`。
+网页关节 Preview / Execute / Stop 与 RViz 拖动属于独立操作入口。
+
+## 网页遥操作
+
+网页入口使用 `rebotarm_app.launch.py`，真机可显式设置 `channel:=auto` 或指定串口。
+
+```bash
+ros2 launch rebotarm_bringup rebotarm_app.launch.py \
+  use_hardware:=true channel:=/dev/ttyACM0 web_execute_enabled:=true
+```
+
 检查仿真 Action：
 
 ```bash

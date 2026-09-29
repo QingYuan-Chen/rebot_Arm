@@ -22,7 +22,7 @@ def test_active_source_contains_upstream_core_without_current_runtime_entrypoint
 
 
 def test_moveit_sim_wrapper_is_upstream_only():
-    launch_text = (ACTIVE / "launch/mujoco_moveit_sim.launch.py").read_text(encoding="utf-8")
+    launch_text = (ROOT / "src/rebotarm_bringup/launch/mujoco_moveit_sim.launch.py").read_text(encoding="utf-8")
 
     assert 'executable="rebotarm_mujoco_node"' in launch_text
     assert "simulation_backend" not in launch_text

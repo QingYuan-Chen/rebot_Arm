@@ -1,0 +1,32 @@
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Public compatibility exports are intentionally imported for downstream callers.
+"src/rebotarm_teach/rebotarm_teach/teach_recording.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# Enable mypy per pure module after ROS message types have usable stubs.
+[tool.mypy]
+python_version = "3.12"
+files = [
+    "src/rebotarm_teach/rebotarm_teach/teach_models.py",
+    "src/rebotarm_teach/rebotarm_teach/teach_replay_gates.py",
+]
+check_untyped_defs = true
+warn_unused_ignores = true

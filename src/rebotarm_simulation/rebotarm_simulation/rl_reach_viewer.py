@@ -8,7 +8,7 @@ import mujoco
 import numpy as np
 
 from .gym_reach import RebotArmReachEnv, _rotate_points
-from .mujoco_viewer import _close_viewer_then_sim
+from .mujoco_viewer import close_passive_viewer_safely
 
 
 def _draw_goal(viewer, env):
@@ -97,7 +97,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        _close_viewer_then_sim(viewer, env.sim, model, data)
+        close_passive_viewer_safely(viewer, env.sim, model, data)
 
 
 if __name__ == "__main__":

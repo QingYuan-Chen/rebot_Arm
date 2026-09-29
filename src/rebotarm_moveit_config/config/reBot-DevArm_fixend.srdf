@@ -8,7 +8,7 @@
 <robot name="reBot-DevArm_fixend">
   <!-- 虚拟关节：把固定基座机械臂挂到世界坐标系上，parent_frame=world、child_link=base_link。
        type="fixed" 表示两者之间没有自由度，它同时定义了规划场景里的“世界”连接点。
-       demo.launch.py 里另有 static_transform_publisher 发布同一对坐标系的 TF，
+       moveit_demo.launch.py 里另有 static_transform_publisher 发布同一对坐标系的 TF，
        因此 RViz 的 Fixed Frame 可以选择 world。 -->
   <virtual_joint name="world_joint" type="fixed" parent_frame="world" child_link="base_link" />
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,7 +26,7 @@ def _sample(index, position):
 
 def test_teach_preview_uses_prepared_path_without_touching_record(tmp_path: Path):
     pytest.importorskip("mujoco")
-    from rebotarm_teach.mujoco_preview import preview_record
+    from rebotarm_simulation.teach_preview import preview_record
     from rebotarm_teach.teach_recording import encode_teach_sample
 
     path = tmp_path / "teach.jsonl"
@@ -40,8 +41,43 @@ def test_teach_preview_uses_prepared_path_without_touching_record(tmp_path: Path
     assert path.read_bytes() == original
 
 
+def test_teach_preview_does_not_reach_into_private_viewer_state():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/rebotarm_simulation/rebotarm_simulation/teach_preview.py"
+    ).read_text(encoding="utf-8")
+    assert "_RETAINED_UNSAFE_VIEWERS" not in source
+    assert "close_passive_viewer_safely" in source
+
+
+def test_public_viewer_close_waits_for_native_release():
+    pytest.importorskip("mujoco")
+    from rebotarm_simulation.mujoco_viewer import close_passive_viewer_safely
+
+    events = []
+    viewer = SimpleNamespace(m=object())
+    viewer.close = lambda: (events.append("viewer.close"), setattr(viewer, "m", None))
+    sim = SimpleNamespace(close=lambda: events.append("sim.close"))
+    close_passive_viewer_safely(viewer, sim, object(), object())
+    assert events == ["viewer.close", "sim.close"]
+
+
+def test_public_viewer_close_timeout_preserves_simulation():
+    pytest.importorskip("mujoco")
+    from rebotarm_simulation.mujoco_viewer import close_passive_viewer_safely
+
+    events = []
+    viewer = SimpleNamespace(m=object(), close=lambda: events.append("viewer.close"))
+    sim = SimpleNamespace(close=lambda: events.append("sim.close"))
+    with pytest.raises(TimeoutError):
+        close_passive_viewer_safely(
+            viewer, sim, object(), object(), clock=lambda: 1.0, timeout=0.0
+        )
+    assert events == ["viewer.close"]
+
+
 def test_teach_preview_rejects_structural_record_error(tmp_path: Path):
-    from rebotarm_teach.mujoco_preview import preview_record
+    from rebotarm_simulation.teach_preview import preview_record
     from rebotarm_teach.teach_recording import encode_teach_sample
 
     path = tmp_path / "bad.jsonl"

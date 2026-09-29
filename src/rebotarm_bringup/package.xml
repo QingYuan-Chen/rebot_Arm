@@ -19,6 +19,12 @@
   <exec_depend>joint_state_publisher</exec_depend>
   <!-- 规划配置构建工具：在启动时组装规划器所需的模型/语义/运动学参数 -->
   <exec_depend>moveit_configs_utils</exec_depend>
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>moveit_ros_planning</exec_depend>
+  <exec_depend>moveit_ros_planning_interface</exec_depend>
+  <exec_depend>moveit_ros_visualization</exec_depend>
+  <exec_depend>moveit_kinematics</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
   <!-- 读取 YAML 配置所需（部分启动文件在运行期解析参数文件） -->
   <exec_depend>python3-yaml</exec_depend>
   <!-- ROS 版启动能力：Node、FindPackageShare 等基于 ROS 的替换与动作 -->

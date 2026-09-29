@@ -1381,10 +1381,8 @@ def test_teach_replay_has_runtime_tracking_guard_for_web():
 
 
 def test_status_panel_preserves_runtime_safety_stop_result_reason():
-    panel_text = _read("src/rebotarm_dashboard/rebotarm_dashboard/teleop_status_panel_node.py")
-    result_body = panel_text.split("def _on_teach_replay_result", 1)[1].split(
-        "\n    def check_tracking", 1
-    )[0]
+    lifecycle_text = _read("src/rebotarm_teach/rebotarm_teach/replay_action_lifecycle.py")
+    result_body = lifecycle_text.split("def _on_teach_replay_result", 1)[1]
 
     assert "previous_replay = self._snapshot().teleop.get(\"replay\", {})" in result_body
     assert "self._replay_runtime_monitor.stop_requested" in result_body
@@ -1418,7 +1416,7 @@ def test_teach_trajectory_curve_card_shows_prepared_curve_without_duplicate_chec
 
 
 def test_moveit_demo_standalone_publishes_fake_visual_joint_state_source():
-    demo_text = _read("src/rebotarm_moveit_config/launch/demo.launch.py")
+    demo_text = _read("src/rebotarm_bringup/launch/moveit_demo.launch.py")
     hardware_text = _read("src/rebotarm_bringup/launch/moveit_hardware.launch.py")
     interactive_text = _read("src/rebotarm_bringup/launch/interactive_system.launch.py")
 

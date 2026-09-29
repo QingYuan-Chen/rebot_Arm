@@ -43,12 +43,44 @@ def test_motion_package_exports_core_modules() -> None:
 
 def test_teach_package_exports_core_modules() -> None:
     import rebotarm_teach.teach_recording as teach_recording
+    import rebotarm_teach.teach_models as teach_models
     import rebotarm_teach.teach_replay_coordinator as teach_replay_coordinator
     import rebotarm_teach.teach_replay_settings as teach_replay_settings
 
     assert hasattr(teach_recording, "TeachSample")
+    assert teach_recording.TeachSample is teach_models.TeachSample
+    assert teach_recording.PreparedTeachReplay is teach_models.PreparedTeachReplay
+    from rebotarm_teach.teach_record_io import encode_teach_sample
+    from rebotarm_teach.teach_replay_gates import validate_teach_replay_execute_request
+
+    assert teach_recording.encode_teach_sample is encode_teach_sample
+    assert teach_recording.validate_teach_replay_execute_request is validate_teach_replay_execute_request
     assert hasattr(teach_replay_coordinator, "TeachReplayCoordinator")
     assert hasattr(teach_replay_settings, "TeachReplaySettingsProvider")
+
+
+def test_teach_preview_entrypoint_is_owned_by_simulation() -> None:
+    teach = ROOT / "src/rebotarm_teach"
+    simulation = ROOT / "src/rebotarm_simulation"
+    assert not (teach / "rebotarm_teach/mujoco_preview.py").exists()
+    assert "rebotarm_mujoco_teach_preview" not in (teach / "setup.py").read_text(encoding="utf-8")
+    assert "rebotarm_simulation.teach_preview:main" in (simulation / "setup.py").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_motion_does_not_import_teach_implementation() -> None:
+    for source in (ROOT / "src/rebotarm_motion/rebotarm_motion").rglob("*.py"):
+        assert "rebotarm_teach" not in source.read_text(encoding="utf-8"), source
+
+
+def test_moveit_config_has_no_teleop_launch_owner() -> None:
+    package = ROOT / "src/rebotarm_moveit_config"
+    assert not (package / "launch/demo.launch.py").exists()
+    assert "rebotarm_teleop" not in (package / "package.xml").read_text(encoding="utf-8")
+    demo = (ROOT / "src/rebotarm_bringup/launch/moveit_demo.launch.py").read_text(encoding="utf-8")
+    assert 'package="rebotarm_teleop"' in demo
+    assert 'package_name="rebotarm_moveit_config"' in demo
 
 
 def test_teleop_package_exports_command_adapters() -> None:

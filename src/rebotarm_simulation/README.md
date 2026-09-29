@@ -38,12 +38,11 @@ rebotarm_simulation/
 ├── rebotarm_simulation/assets/       # 随 Python 包安装的 XML 片段
 ├── config/                           # 仿真和电机标定参数
 ├── launch/
-│   ├── mujoco_sim.launch.py          # 单独 MuJoCo ROS 后端
-│   ├── mujoco_headless.launch.py     # 无头入口
-│   ├── mujoco_rviz_viewer.launch.py  # MuJoCo + 桌面 Viewer/RViz 组合
-│   └── mujoco_moveit_sim.launch.py   # MuJoCo + MoveIt 仿真组合
+│   └── mujoco_sim.launch.py          # 单独 MuJoCo ROS 后端
 └── setup.py / package.xml / requirements-mujoco.txt
 ```
+
+MuJoCo + MoveIt、无头和桌面组合入口位于 `rebotarm_bringup/launch`。
 
 ## 对外入口
 
@@ -60,8 +59,8 @@ rebotarm_urdf_to_mjcf              -> URDF/MJCF 生成与一致性检查
 常用命令：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_headless.launch.py
-ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py
+ros2 launch rebotarm_bringup mujoco_headless.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py
 ros2 run rebotarm_simulation rebotarm_mujoco_health -- --renderer-timeout 30
 ros2 run rebotarm_simulation rebotarm_urdf_to_mjcf -- --repo-root . --check
 ```

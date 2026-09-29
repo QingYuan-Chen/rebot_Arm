@@ -21,16 +21,15 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, replace
 import importlib
 import math
-from queue import Empty, SimpleQueue
 import sys
 import time
+from dataclasses import dataclass, replace
+from queue import Empty, SimpleQueue
 from typing import Callable, Sequence
 
 from .mujoco_sim import ARM_JOINT_NAMES, RebotArmMujoco
-
 
 # 键盘操作帮助文本：随状态一起打印到状态流（默认 stderr），也是查看器内唯一
 # 的按键说明来源。`[`/`]` 或 1-6 选择关节，按住 J/K 反向/正向点动关节，
@@ -440,6 +439,32 @@ def _close_viewer_then_sim(
     sim.close()
 
 
+def close_passive_viewer_safely(
+    viewer,
+    sim,
+    model,
+    data,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    timeout: float = 5.0,
+) -> None:
+    """Close a passive viewer before releasing its MuJoCo resources.
+
+    This public wrapper keeps ownership-retention details inside the simulation
+    package so callers do not depend on ``_RETAINED_UNSAFE_VIEWERS``.
+    """
+    _close_viewer_then_sim(
+        viewer,
+        sim,
+        model,
+        data,
+        clock=clock,
+        sleep=sleep,
+        timeout=timeout,
+    )
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -540,7 +565,7 @@ def main(
             return 130
     finally:
         # 无论正常退出还是异常，都在确认查看器放手后释放仿真资源。
-        _close_viewer_then_sim(
+        close_passive_viewer_safely(
             viewer,
             sim,
             model,
@@ -548,7 +573,6 @@ def main(
             clock=clock,
             sleep=sleep,
         )
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

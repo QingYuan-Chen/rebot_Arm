@@ -1434,8 +1434,10 @@ class TeleopStatusPanelNode(Node):
         source_age = (self.get_clock().now().nanoseconds - source_ns) / 1e9
         self._arm_status_received_at = (now - max(0., source_age)
             if source_ns > 0 and -.05 <= source_age <= .5 else None)
-        if str(msg.state_machine) == 'GRAVITY_COMP':
-            self._calibration_gravity_owned = True
+        # GRAVITY_COMP is also the normal teach-recording mode.  It does not by
+        # itself prove that calibration requested ownership; ownership is set
+        # only by _handle_calibration_gravity(start).  Otherwise teach recording
+        # would permanently block its own stop and dry-run HTTP routes.
         self._store.update_arm_status(
             mode=str(msg.mode),
             enabled=bool(msg.enabled),

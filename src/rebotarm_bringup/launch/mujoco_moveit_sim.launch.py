@@ -6,11 +6,11 @@
     真实硬件通道在本文件中完全没有被拉起。
 
 节点组合
-    1. 仿真节点 ``rebotarm_mujoco_node``（属本仿真包）：按物理模型推进关节状态、
+    1. 仿真节点 ``rebotarm_mujoco_node``（属 rebotarm_simulation）：按物理模型推进关节状态、
        发布关节状态并提供轨迹执行动作；此处以 ``backend="mujoco"``、
-       ``headless=True`` 启动，模型指向本包自带的桌面场景
+       ``headless=True`` 启动，模型指向仿真包自带的桌面场景
        ``models/rebotarm/scene.xml``（机器人 + 桌面 + 被操作物代理）。
-    2. 运动规划配置包的演示启动 ``demo.launch.py``：拉起规划节点与可选可视化，
+    2. bringup 的运动规划演示启动 ``moveit_demo.launch.py``：拉起规划节点与可选可视化，
        使用同一命名空间与仿真时钟。
 
 后端选择逻辑
@@ -22,7 +22,7 @@
       否则规划会基于与仿真不一致的状态；
     - ``use_sim_time=true``：规划与执行统一使用仿真时钟，避免墙钟漂移影响轨迹判定；
     - ``use_rviz`` 默认 true，只影响可视化，不影响控制；
-    - ``use_mujoco_viewer`` 默认 true，仅打开本地查看器；无显示环境应改用同包的无头
+    - ``use_mujoco_viewer`` 默认 true，仅打开本地查看器；无显示环境应改用bringup 包的无头
       启动文件；
     - ``python_executable`` 默认取环境变量 ``REBOTARM_MUJOCO_PYTHON``，否则回退到当前
       工作目录下的第三方虚拟环境解释器；该解释器必须装有物理引擎依赖，用它启动可
@@ -43,8 +43,8 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    # 两个 share 目录：前者提供规划演示启动，后者提供本包自带的场景模型。
-    moveit_share = FindPackageShare("rebotarm_moveit_config")
+    # 两个 share 目录：bringup 提供规划演示入口，simulation 提供场景模型。
+    bringup_share = FindPackageShare("rebotarm_bringup")
     simulation_share = FindPackageShare("rebotarm_simulation")
     arm_namespace = LaunchConfiguration("arm_namespace")
     publish_rate_hz = LaunchConfiguration("publish_rate_hz")
@@ -114,7 +114,7 @@ def generate_launch_description():
             # 让规划读取仿真节点发布的真实状态。
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
-                    PathJoinSubstitution([moveit_share, "launch", "demo.launch.py"])
+                    PathJoinSubstitution([bringup_share, "launch", "moveit_demo.launch.py"])
                 ),
                 launch_arguments={
                     "use_rviz": use_rviz,

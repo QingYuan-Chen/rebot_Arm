@@ -19,6 +19,10 @@ src/rebotarm_bringup/launch/
 ├── hardware_controller.launch.py
 ├── bringup.launch.py
 ├── moveit_hardware.launch.py
+├── moveit_demo.launch.py
+├── mujoco_moveit_sim.launch.py
+├── mujoco_headless.launch.py
+├── mujoco_rviz_viewer.launch.py
 ├── interactive_system.launch.py
 ├── rebotarm_app.launch.py
 ├── teleop_keyboard.launch.py
@@ -51,6 +55,8 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 | `hardware_controller.launch.py` | 底层片段 | 唯一直接启动 `reBotArmController` 的文件；统一串口、反馈频率、夹爪保护、仲裁、命名空间和坐标系参数 |
 | `bringup.launch.py` | 基础真机入口 | 硬件、夹爪可视化状态桥、TF 和可选基础 RViz；不启动 MoveIt |
 | `moveit_hardware.launch.py` | 唯一真机 MoveIt 用户入口 | 薄包装 `interactive_system.launch.py`，固定真机、MoveIt、真实关节状态和唯一状态源；启动后仍需显式 Enable |
+| `moveit_demo.launch.py` | 离线 MoveIt 演示入口 | 使用 `rebotarm_moveit_config` 的模型与规划参数，启动 MoveIt、RViz 和夹爪可视化桥；不接真机 |
+| `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 启动唯一 MuJoCo 执行后端并包含本包的 MoveIt 演示入口；无头和桌面薄入口位于同目录 |
 | `interactive_system.launch.py` | 共享实现 | 统一拥有状态发布、MoveIt、RViz 以及真机/无硬件状态源的互斥选择；不建议用户手写其内部组合参数启动真机 |
 | `rebotarm_app.launch.py` | 完整真机入口 | 包含真机 MoveIt 组合，再增加示教录制、Dashboard 和状态 RViz；不启动键盘节点 |
 | `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认不接真机。无硬件模式使用轻量仿真轨迹控制器，按键可以改变 RViz 姿态，但不代表物理仿真 |

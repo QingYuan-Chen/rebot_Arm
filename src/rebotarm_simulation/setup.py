@@ -7,7 +7,7 @@
 资源安装策略
     ``package_data`` 收进 Python 包内部的 ``assets/*.xml``（随代码一起导入的自带
     物理模型）；``install_resources`` 则把 ``models/`` 下的 XML 模型、STL 网格、
-    ``config/*.yaml`` 与 ``launch/*.launch.py`` 按"源目录 → 同名安装目录"归并后
+    ``config/*.yaml`` 与保留的 ``launch/*.launch.py`` 按"源目录 → 同名安装目录"归并后
     安装到 ``share/<包名>/<原相对目录>``。运行期通过 ament 资源索引按相对路径定位，
     因此模型/网格必须与代码同版本安装，否则会加载到旧模型或找不到网格。
 
@@ -65,7 +65,6 @@ setup(
     + install_resources("models/**/*.txt")
     + install_resources("models/**/*.step")
     + install_resources("config/*.yaml")
-    + install_resources("launch/*.launch.py")
     + [(f"share/{package_name}/launch", sorted(launch_files))],
     install_requires=["setuptools", "mujoco>=3.3,<4", "numpy>=1.26", "PyYAML>=6"],
     zip_safe=True,
@@ -80,6 +79,7 @@ setup(
             "rebotarm_mujoco_cli = rebotarm_simulation.mujoco_cli:main",
             "rebotarm_mujoco = rebotarm_simulation.mujoco_cli:main",
             "rebotarm_mujoco_viewer = rebotarm_simulation.mujoco_viewer:main",
+            "rebotarm_mujoco_teach_preview = rebotarm_simulation.teach_preview:main",
             "rebotarm_mujoco_node = rebotarm_simulation.mujoco_ros_node:main",
             "rebotarm_urdf_to_mjcf = rebotarm_simulation.urdf_to_mjcf:main",
         ],

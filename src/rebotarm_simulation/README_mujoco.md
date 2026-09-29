@@ -20,13 +20,13 @@ ROS launch 的解释器可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYT
 日常桌面联调可直接使用专用入口：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_rviz_viewer.launch.py
+ros2 launch rebotarm_bringup mujoco_rviz_viewer.launch.py
 ```
 
 服务器、CI 或只做后台物理测试使用：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_headless.launch.py
+ros2 launch rebotarm_bringup mujoco_headless.launch.py
 ```
 
 在当前工作区根目录、未激活venv的新终端执行。系统依赖按

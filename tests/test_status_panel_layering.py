@@ -546,6 +546,26 @@ def test_teach_record_client_stop_stops_recording_and_gravity() -> None:
     assert gravity_stop.calls == 1
 
 
+def test_teach_record_client_does_not_start_recording_when_gravity_start_fails() -> None:
+    gravity = _TriggerClient(success=False, message="gravity service unavailable")
+    record = _TriggerClient()
+    client = TeachRecordClient(
+        set_path_client=_SetPathClient(),
+        start_client=record,
+        stop_client=_TriggerClient(),
+        gravity_start_client=gravity,
+        gravity_stop_client=_TriggerClient(),
+        record_path_request_factory=_RecordPathRequest,
+    )
+
+    result = client.start({"record_path": "teach1.jsonl"})
+
+    assert result["accepted"] is False
+    assert result["state"] == "blocked"
+    assert result["record_started"] is False
+    assert record.calls == 0
+
+
 def test_web_teleop_client_builds_and_sends_joint_trajectory() -> None:
     action_client = _ActionClient()
     client = WebTeleopClient(

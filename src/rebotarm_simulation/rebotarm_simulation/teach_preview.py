@@ -7,31 +7,37 @@ import json
 import math
 import time
 from pathlib import Path
+from typing import Sequence
 
-from .teach_recording import load_teach_samples, prepare_teach_replay_samples
-
+from rebotarm_teach.teach_recording import load_teach_samples, prepare_teach_replay_samples
 
 JOINTS = tuple(f"joint{index}" for index in range(1, 7))
 
 
-def preview_record(record_path: str | Path, *, viewer: bool = False) -> dict:
+def preview_record(record_path: str | Path, *, viewer: bool = False) -> dict[str, object]:
     samples = load_teach_samples(record_path)
     if len(samples) < 2:
         raise ValueError("teach record needs at least two samples")
     if any(tuple(sample.joint_names) != JOINTS for sample in samples):
         raise ValueError("teach record must use joint1..joint6 in canonical order")
-    if any(len(sample.positions) != 6 or not all(math.isfinite(float(v)) for v in sample.positions) for sample in samples):
+    if any(
+        len(sample.positions) != 6
+        or not all(math.isfinite(float(value)) for value in sample.positions)
+        for sample in samples
+    ):
         raise ValueError("teach record positions must be six finite values")
     if any(right.stamp <= left.stamp for left, right in zip(samples, samples[1:])):
         raise ValueError("teach timestamps must increase")
     prepared = prepare_teach_replay_samples(samples, retime_enabled=True)
     if prepared.raw_quality.risk_level == "red" or prepared.after_quality.risk_level == "red":
-        raise ValueError("teach record has red quality and cannot be previewed as an executable path")
+        raise ValueError(
+            "teach record has red quality and cannot be previewed as an executable path"
+        )
     if not prepared.retimed_points:
         raise ValueError("teach preparation produced no retimed path")
 
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
-    from rebotarm_simulation.offline_trajectory import play_path
+    from .mujoco_sim import RebotArmMujoco
+    from .offline_trajectory import play_path
 
     sim = RebotArmMujoco()
     window = None
@@ -46,7 +52,10 @@ def preview_record(record_path: str | Path, *, viewer: bool = False) -> dict:
             nonlocal max_bottle_force
             for contact in contacts:
                 bodies = {contact.body1, contact.body2}
-                robot = any(body.startswith("link") or body == "end_link" or "finger_link" in body for body in bodies)
+                robot = any(
+                    body.startswith("link") or body == "end_link" or "finger_link" in body
+                    for body in bodies
+                )
                 if "table" in bodies and robot:
                     contact_counts["table_arm"] += 1
                 if "bottle" in bodies:
@@ -61,6 +70,9 @@ def preview_record(record_path: str | Path, *, viewer: bool = False) -> dict:
         try:
             if viewer:
                 import mujoco.viewer
+
+                from .mujoco_viewer import close_passive_viewer_safely
+
                 window = mujoco.viewer.launch_passive(sim._model, sim._data)
             def on_step(_sim):
                 if window is not None:
@@ -73,22 +85,10 @@ def preview_record(record_path: str | Path, *, viewer: bool = False) -> dict:
             final = sim.get_state()
         finally:
             if window is not None:
-                try:
-                    window.close()
-                except BaseException:
-                    from rebotarm_simulation.mujoco_viewer import _RETAINED_UNSAFE_VIEWERS
-                    _RETAINED_UNSAFE_VIEWERS.append((window, sim, sim._model, sim._data))
-                    release_sim = False
-                    raise
-                deadline = time.monotonic() + 5.0
-                while getattr(window, "m", None) is not None and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                if getattr(window, "m", None) is not None:
-                    # Keep native model/data alive if the passive viewer has not released them.
-                    from rebotarm_simulation.mujoco_viewer import _RETAINED_UNSAFE_VIEWERS
-                    _RETAINED_UNSAFE_VIEWERS.append((window, sim, sim._model, sim._data))
-                    release_sim = False
-                    raise RuntimeError("MuJoCo viewer did not finish closing")
+                # The helper owns closing or retaining sim on every outcome.
+                # The outer finally must never close it a second time.
+                release_sim = False
+                close_passive_viewer_safely(window, sim, sim._model, sim._data)
         return {
             "record_path": str(Path(record_path).resolve()),
             "raw_samples": len(samples),
@@ -109,7 +109,7 @@ def preview_record(record_path: str | Path, *, viewer: bool = False) -> dict:
             sim.close()
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("record", type=Path, help="existing teach JSONL record")
     parser.add_argument("--viewer", action="store_true", help="show playback in a MuJoCo window")

@@ -55,13 +55,13 @@ ros2 launch rebotarm_bringup bringup.launch.py \
 无 RViz 的 headless 物理检查：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_headless.launch.py
+ros2 launch rebotarm_bringup mujoco_headless.launch.py
 ```
 
 带 MoveIt/RViz Plan & Execute 的仿真入口：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py use_rviz:=true
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true
 ```
 
 RViz 末端拖动专用入口（包含仿真轨迹控制器）：
@@ -74,7 +74,7 @@ MuJoCo Viewer 与单独 ROS 后端也可以分别启动。它们不会打开真�
 
 ```bash
 # MuJoCo Viewer + RViz 组合
-ros2 launch rebotarm_simulation mujoco_rviz_viewer.launch.py
+ros2 launch rebotarm_bringup mujoco_rviz_viewer.launch.py
 
 # 只启动 MuJoCo ROS 后端（维护/调试入口）
 ros2 launch rebotarm_simulation mujoco_sim.launch.py

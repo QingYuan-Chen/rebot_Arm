@@ -148,6 +148,9 @@ Ready-pose 运动（`visual_ready_node` 及其参数 profile）位于 `rebotarm_
 - headless 物理检查和可选 Viewer 集成
 - 离线 Gymnasium 任务、仿真奖励以及可选的 RL 训练/评估
 - 轨迹指标、阶跃响应 benchmark 和仿真接触反馈
+- 示教轨迹的 MuJoCo 预演执行与 Viewer 生命周期管理
+
+示教预演从 `rebotarm_teach` 读取 JSONL 并复用轨迹准备逻辑，执行入口由 `rebotarm_simulation` 提供。MoveIt 演示及 MuJoCo 后端启动组合由 `rebotarm_bringup` 提供。
 
 不得导入或调用真实电机 SDK。仿真 launch 不得启动 `rebotarmcontroller`、打开硬件通道，或以相同名称暴露第二个活动 `FollowJointTrajectory` server。
 
@@ -196,7 +199,7 @@ rebotarm_teach -> rebotarm_motion
 rebotarm_teleop -> 使用旧 interactive preview 辅助工具时依赖 rebotarm_motion
 rebotarm_vision -> 为验证和执行依赖 rebotarm_motion / MoveIt 接口
 rebotarm_bringup -> 仅依赖各包的 launch 入口和配置
-rebotarm_simulation -> 仅依赖 ROS 消息和仿真执行库
+rebotarm_simulation -> rebotarm_teach（仅复用示教记录读取与轨迹准备）、ROS 消息和仿真执行库
 ```
 
 已退役的 MuJoCo ROS adapter 不再随活动包发布；`rebotarm_simulation` 不得导入或声明对 `rebotarm_motion` 的依赖。Launch 解释器必须通过 launch 参数或环境变量按进程显式选择，不能探测工作区虚拟环境目录，也不能把视觉 site-packages 注入整个 launch group。参见 [launch Python 配置](../setup/launch_python_configuration.md)。

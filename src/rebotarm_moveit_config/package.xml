@@ -16,31 +16,7 @@
   <!-- 构建工具：本包是 Python 包（setup.py + setup.cfg），用 ament_python 构建。 -->
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- 以下全部是运行时依赖（exec_depend），按用途分组：
-       [启动与配置解析] launch / launch_ros / ament_index_python / python3-yaml
-       —— 启动文件用 launch 与 launch_ros 组织节点，用 ament 索引定位 share 目录，
-          config/ 下的 YAML 需要 python3-yaml 解析（含中文注释，按 UTF-8 读取）。 -->
-  <exec_depend>launch</exec_depend>
-  <exec_depend>ament_index_python</exec_depend>
-  <exec_depend>python3-yaml</exec_depend>
-  <exec_depend>launch_ros</exec_depend>
-  <!-- [MoveIt 规划与执行] move_group 本体、规划管线、规划接口与可视化插件。
-       moveit_configs_utils 提供 MoveItConfigsBuilder，用于把 config/ 下的文件整理成参数树；
-       moveit_kinematics 提供 kinematics.yaml 里配置的 KDL 逆解插件。 -->
-  <exec_depend>moveit_ros_move_group</exec_depend>
-  <exec_depend>moveit_ros_planning</exec_depend>
-  <exec_depend>moveit_ros_planning_interface</exec_depend>
-  <exec_depend>moveit_ros_visualization</exec_depend>
-  <exec_depend>moveit_configs_utils</exec_depend>
-  <exec_depend>moveit_kinematics</exec_depend>
-  <!-- [状态与显示] 假关节状态源（离线调试）与 TF 发布；RViz 用于 MotionPlanning 面板。 -->
-  <exec_depend>joint_state_publisher</exec_depend>
-  <exec_depend>robot_state_publisher</exec_depend>
-  <!-- [同层适配] 操作交互包提供的夹爪可视化关节桥节点会随本包的演示启动文件一起拉起，
-       用于把六轴关节状态与夹爪开口合成为可视关节状态。 -->
-  <exec_depend>rebotarm_teleop</exec_depend>
-  <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>rviz2</exec_depend>
+  <!-- This package only installs URDF, SRDF, planning config, meshes, and RViz resources. -->
 
   <!-- 导出构建类型：ament 依此选择构建插件，必须与上面的 buildtool_depend 一致。 -->
   <export>

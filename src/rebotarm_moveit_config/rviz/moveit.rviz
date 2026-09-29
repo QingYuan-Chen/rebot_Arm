@@ -1,6 +1,6 @@
 # MoveIt MotionPlanning 可视化配置（moveit.rviz）
 #
-# 用途：由 demo.launch.py 以 `rviz2 -d` 加载，为离线调试提供「网格 + 机器人模型 + TF +
+# 用途：由 moveit_demo.launch.py 以 `rviz2 -d` 加载，为离线调试提供「网格 + 机器人模型 + TF +
 #       运动规划面板」的最小界面；真机与仿真场景也复用同一份配置，只是通过 launch 参数
 #       切换关节状态来源。
 # 关键约定：

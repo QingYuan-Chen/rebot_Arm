@@ -66,8 +66,8 @@ for relative in (".venv-graspnet/bin/python", ".venv-vision/lib/python3.12/site-
     target.touch()
 
 files = {
-    "rebotarm_simulation": ["mujoco_sim.launch.py", "mujoco_moveit_sim.launch.py"],
-    "rebotarm_bringup": ["visual_grasp_system.launch.py"],
+    "rebotarm_simulation": ["mujoco_sim.launch.py"],
+    "rebotarm_bringup": ["visual_grasp_system.launch.py", "mujoco_moveit_sim.launch.py"],
     "rebotarm_vision": ["vision.launch.py", "vision_ubuntu.launch.py"],
 }
 seen = set()

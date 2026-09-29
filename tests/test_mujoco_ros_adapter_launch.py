@@ -19,10 +19,10 @@ def test_upstream_mujoco_entrypoint_and_launch_are_installed():
 
 def test_mujoco_specialized_launches_select_desktop_or_headless_mode():
     desktop_text = (
-        ROOT / "src/rebotarm_simulation/launch/mujoco_rviz_viewer.launch.py"
+        ROOT / "src/rebotarm_bringup/launch/mujoco_rviz_viewer.launch.py"
     ).read_text(encoding="utf-8")
     headless_text = (
-        ROOT / "src/rebotarm_simulation/launch/mujoco_headless.launch.py"
+        ROOT / "src/rebotarm_bringup/launch/mujoco_headless.launch.py"
     ).read_text(encoding="utf-8")
 
     assert '"use_rviz": "true"' in desktop_text
@@ -56,13 +56,13 @@ def test_simulation_has_no_virtual_vision_publishers_or_launch_options():
 
 def test_mujoco_moveit_launch_starts_upstream_node_and_moveit_without_fake_joint_states():
     launch_text = (
-        ROOT / "src/rebotarm_simulation/launch/mujoco_moveit_sim.launch.py"
+        ROOT / "src/rebotarm_bringup/launch/mujoco_moveit_sim.launch.py"
     ).read_text(encoding="utf-8")
 
     assert 'executable="rebotarm_mujoco_node"' in launch_text
     assert "rebotarm_mujoco_adapter" not in launch_text
     assert "simulation_backend" not in launch_text
-    assert 'demo.launch.py' in launch_text
+    assert 'moveit_demo.launch.py' in launch_text
     assert '"use_fake_joint_states": "false"' in launch_text
     assert '"show_viewer": use_mujoco_viewer' in launch_text
     assert 'DeclareLaunchArgument(' in launch_text

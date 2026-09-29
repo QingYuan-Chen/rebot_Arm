@@ -25,7 +25,7 @@
   <exec_depend>diagnostic_msgs</exec_depend>
   <!-- 位姿、变换等几何消息。 -->
   <exec_depend>geometry_msgs</exec_depend>
-  <!-- 启动描述与节点编排（launch 文件使用）。 -->
+  <!-- 保留的 MuJoCo 单节点启动文件仍使用 ROS launch。 -->
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <!-- Python 客户端库，仿真节点的运行时基础。 -->
@@ -34,6 +34,8 @@
   <exec_depend>rebotarm_msgs</exec_depend>
   <!-- 运动规划配置包：提供 URDF、SRDF 与网格，仿真模型与关节限位一致性检查都读它。 -->
   <exec_depend>rebotarm_moveit_config</exec_depend>
+  <!-- 示教预演复用 JSONL 读取与轨迹准备；仿真执行仍由本包拥有。 -->
+  <exec_depend>rebotarm_teach</exec_depend>
   <!-- 仿真时钟消息 /clock，保证规划与执行共用仿真时间。 -->
   <exec_depend>rosgraph_msgs</exec_depend>
   <!-- 关节状态消息。 -->

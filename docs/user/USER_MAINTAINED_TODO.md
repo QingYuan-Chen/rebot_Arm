@@ -67,17 +67,6 @@
 - 当前说明：已完成静态审查，确认当前文件声明 134 个 launch 参数且存在参数转发、生命周期和硬编码话题等耦合问题；尚未修改源码，也不代表解耦已经完成。
 - 设计方案、实施记录、测试结果及最终结论：待补充。
 
-### 8. `rebotarm_teach` 解耦与代码规范
-
-- 状态：结构基本合格，维护性改进未完成。
-- 待办 1：拆分过大的 `teach_recording.py`（当前约 2000 行），按数据模型、文件存储、质量评估、预处理和回放门控拆分为职责清晰的模块。
-- 待办 2：拆分过大的 `teach_replay_workflow.py`（当前约 940 行），将 Action 生命周期、MoveIt 预检和回放编排细节进一步分离。
-- 待办 3：移除 `mujoco_preview.py` 对 `rebotarm_simulation.mujoco_viewer` 私有变量 `_RETAINED_UNSAFE_VIEWERS` 的直接依赖，改为公开的 viewer 生命周期接口。
-- 待办 4：保持依赖方向为 `rebotarm_teach -> rebotarm_motion`，禁止 `rebotarm_motion` 反向依赖 `rebotarm_teach`，避免循环依赖。
-- 待办 5：增加统一的 Ruff/Black/isort（必要时 mypy）配置，逐步清理超过约 100 字符的代码行，并将无必要的 `except Exception` 收窄为明确异常类型。
-- 当前说明：上述问题不阻塞当前功能；现有示教专项测试已通过，重构前必须保持既有 JSONL、dry-run、Execute 门控和安全边界不变。
-- 设计方案、拆分记录、静态检查结果、回归测试及最终结论：待补充。
-
 ### 9. `rebotarm_vision` 解耦、冗余与代码规范
 
 - 状态：主链路结构基本合格，维护性审计和清理未完成。
@@ -102,4 +91,5 @@
 | 2026-09-26 | Codex（用户明确授权） | 将原电机 MuJoCo 泛项细化为 D4、D5、D6，并增加左右活动手指总成参数待办 |
 | 2026-09-29 | Codex（用户明确授权） | 增加 `visual_grasp_system.launch.py` 参数与节点解耦待办 |
 | 2026-09-29 | Codex（用户明确授权） | 增加 `rebotarm_teach` 模块拆分、跨包私有接口和代码规范待办 |
+| 2026-09-29 | Codex（用户明确授权） | 第八项 `rebotarm_teach` 解耦与代码规范已完成并移除 |
 | 2026-09-29 | Codex（用户明确授权） | 增加 `rebotarm_vision` 解耦、legacy/Benchmark 分类、依赖审计和代码规范待办 |

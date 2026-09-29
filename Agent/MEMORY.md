@@ -4,6 +4,12 @@
 
 ## 当前焦点
 
+- 2026-09-29：用户真机工作台日志显示 `TeachRecorderNode` 导入失败，源码第 380 行被误改为 `return5420、`，导致 SyntaxError；MoveIt/控制器已启动但录制节点死亡，日志中控制器状态为 `CONNECTED_DISABLED`，不构成示教功能通过。已恢复原有 `return`，teach 包重建、安装模块导入、compileall、分层 21 通过；全量 747 passed/18 skipped/4 项既有文档断言失败。未在真机重新启动工作台或执行 Enable；需用户重新启动后确认 recorder 节点存活及状态反馈，再继续录制测试。
+
+- 2026-09-29：审查本机可访问项目、备份及当前仓库脚本后，未发现旧 teach 预演入口的实际调用；旧 Python 转发模块、teach console entry 和 install 中对应旧脚本已移除。新入口仍为 `ros2 run rebotarm_simulation rebotarm_mujoco_teach_preview`。teach/simulation 重建通过；分层 21、MuJoCo 专项 6 通过；全量 747 passed、18 skipped、4 项既有文档断言失败，compileall/diff 通过。其他机器或未挂载环境的调用方不在本机可验证范围；未操作真机。
+
+- 2026-09-29：示教包分阶段重构已完成软件迁移：记录模型、JSONL 存储、质量评估、预处理、回放门控拆分，旧 `teach_recording` 导入保留；回放 Action 生命周期和 MoveIt 预检从 workflow 拆出，ROS 服务与安全门保持。MuJoCo 示教预演执行及 Viewer 生命周期归 `rebotarm_simulation`；simulation 仅为复用示教记录读取/轨迹准备而依赖 teach。MoveIt demo 与 MuJoCo 组合 launch 归 bringup，旧 moveit_config demo launch 不再发布。四包重建、分层 20、MuJoCo 专项 7、核心 Ruff/compileall/diff 通过；全量测试 747 passed、18 skipped、4 个既有文档断言失败，未操作真机。随后审查本机可访问项目和备份，未发现仓库外旧 teach 预演入口实际调用，已删除旧 Python/命令入口及 install 中对应旧脚本；不可证明其他机器或未挂载环境的调用情况。
+
 - 2026-09-29：诊断 `runs/reach/pose_100k_seed7.zip`：100回合 success=0、collision=0、mean final position error=0.07283m、orientation error=14.6639deg。对同一评估种子10000–10019比较，zero-action保持home约0.04103m/8.196deg，PPO约0.07590m/13.335deg，说明策略尚未学到有效目标→关节映射且劣于基线，不是单纯接近成功门。SB3 GPU warning仅是小MLP GPU利用率低/可能更慢，不是效果原因。当前主要训练质量风险：100k约400回合样本不足、绝对位姿观测未显式提供相对误差/未归一化、姿态奖励权重相对位置过弱、无进度奖励/课程学习、成功门较硬且隐藏低层控制器积分状态。下一步应先固定zero-action基线与多种子指标，再改相对误差观测、progress shaping、课程半径/姿态范围、VecNormalize/更长训练；未改代码、未接真机。
 
 ### 当前状态快照（2026-09-28）

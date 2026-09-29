@@ -20,6 +20,30 @@ def test_dispatch_blocks_conflicting_start():
     assert dispatch_post_request(node,'/api/keyboard_enable',lambda:{})['state']=='blocked'
 
 
+def test_dispatch_allows_teach_record_stop_during_gravity_compensation():
+    from rebotarm_dashboard.status_panel_api import dispatch_post_request
+    from types import SimpleNamespace
+
+    node = SimpleNamespace(
+        _calibration_gravity_owned=True,
+        _handle_teach_record_stop=lambda: {"accepted": True, "state": "stopped"},
+    )
+    result = dispatch_post_request(node, '/api/teach_record_stop', lambda: {})
+    assert result == {"accepted": True, "state": "stopped"}
+
+
+def test_dispatch_allows_teach_dry_run_during_gravity_compensation():
+    from rebotarm_dashboard.status_panel_api import dispatch_post_request
+    from types import SimpleNamespace
+
+    node = SimpleNamespace(
+        _calibration_gravity_owned=True,
+        _handle_teach_dry_run=lambda payload: {"accepted": True, "state": "dry_run"},
+    )
+    result = dispatch_post_request(node, '/api/teach_dry_run', lambda: {})
+    assert result == {"accepted": True, "state": "dry_run"}
+
+
 def test_timeout_retains_future_and_requires_post_completion_feedback():
     from concurrent.futures import Future
     from types import SimpleNamespace as NS

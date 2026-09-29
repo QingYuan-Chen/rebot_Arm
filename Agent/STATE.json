@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-29T17:05:16+08:00",
+  "generated_at": "2026-09-29T23:46:38+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -79,8 +79,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "0b050dd",
+    "head": "19f2939",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-09-29T17:05:16+08:00 | actor=codex | event=start | note=按用户要求检查并上传当前代码进度到 GitHub | verification=-"
+  "last_event": "- 2026-09-29T23:46:38+08:00 | actor=codex | event=verified | note=示教 Dashboard 收尾完成：文档回归修复、6包构建、754测试通过、18跳过、编译和diff检查通过 | verification=PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests -q: 754 passed, 18 skipped"
 }
