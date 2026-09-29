@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-29T11:10:48+08:00",
+  "generated_at": "2026-09-29T11:13:38+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -79,8 +79,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "7445824",
+    "head": "7472445",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-09-29T11:10:48+08:00 | actor=codex | event=start | note=确认当前项目进度并上传 GitHub | verification=-"
+  "last_event": "- 2026-09-29T11:13:38+08:00 | actor=codex | event=complete | note=已将 visual_grasp_system.launch.py 解耦列入用户代办 | verification=更新 docs/user/USER_MAINTAINED_TODO.md；未修改源码；git diff --check"
 }

@@ -1003,3 +1003,5 @@
 - 2026-09-29T11:05:40+08:00 | actor=codex | event=complete | note=完成 visual_grasp_system.launch.py 参数与解耦审查 | verification=确认134个LaunchArgument全部被读取；识别参数转发、节点生命周期、策略YAML、硬编码话题和未使用配置等耦合点；未修改源码
 - 2026-09-29T11:08:48+08:00 | actor=codex | event=start | note=检查当前变更并准备上传 GitHub | verification=-
 - 2026-09-29T11:10:48+08:00 | actor=codex | event=start | note=确认当前项目进度并上传 GitHub | verification=-
+- 2026-09-29T11:13:08+08:00 | actor=codex | event=start | note=将 visual_grasp_system.launch.py 解耦列入用户代办 | verification=-
+- 2026-09-29T11:13:38+08:00 | actor=codex | event=complete | note=已将 visual_grasp_system.launch.py 解耦列入用户代办 | verification=更新 docs/user/USER_MAINTAINED_TODO.md；未修改源码；git diff --check
