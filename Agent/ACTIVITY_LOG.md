@@ -1005,3 +1005,5 @@
 - 2026-09-29T11:10:48+08:00 | actor=codex | event=start | note=确认当前项目进度并上传 GitHub | verification=-
 - 2026-09-29T11:13:08+08:00 | actor=codex | event=start | note=将 visual_grasp_system.launch.py 解耦列入用户代办 | verification=-
 - 2026-09-29T11:13:38+08:00 | actor=codex | event=complete | note=已将 visual_grasp_system.launch.py 解耦列入用户代办 | verification=更新 docs/user/USER_MAINTAINED_TODO.md；未修改源码；git diff --check
+- 2026-09-29T11:15:01+08:00 | actor=codex | event=start | note=检查 rebotarm_bringup 是否缺少 README | verification=-
+- 2026-09-29T11:15:44+08:00 | actor=codex | event=complete | note=确认并补充 rebotarm_bringup 包 README | verification=新增 src/rebotarm_bringup/README.md；说明包边界、入口、安全约束与验证命令；git diff --check

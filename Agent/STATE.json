@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-29T11:13:38+08:00",
+  "generated_at": "2026-09-29T11:15:44+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -79,8 +79,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "7472445",
+    "head": "031e954",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-09-29T11:13:38+08:00 | actor=codex | event=complete | note=已将 visual_grasp_system.launch.py 解耦列入用户代办 | verification=更新 docs/user/USER_MAINTAINED_TODO.md；未修改源码；git diff --check"
+  "last_event": "- 2026-09-29T11:15:44+08:00 | actor=codex | event=complete | note=确认并补充 rebotarm_bringup 包 README | verification=新增 src/rebotarm_bringup/README.md；说明包边界、入口、安全约束与验证命令；git diff --check"
 }
