@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-29T11:35:43+08:00",
+  "generated_at": "2026-09-29T12:03:50+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -79,8 +79,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "911675f",
+    "head": "7298b1e",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-09-29T11:35:43+08:00 | actor=codex | event=complete | note=完成 MoveIt config demo launch 与 bringup 关系核查 | verification=确认 interactive_system、moveit_hardware、visual_grasp_system 和 MuJoCo 入口均对 demo.launch.py 存在条件包含或直接复用"
+  "last_event": "- 2026-09-29T12:03:50+08:00 | actor=codex | event=verified | note=已将 vision 包审计问题加入用户维护清单第9项 | verification=git_diff_check=passed"
 }

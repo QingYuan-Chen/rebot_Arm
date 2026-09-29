@@ -1011,3 +1011,11 @@
 - 2026-09-29T11:28:39+08:00 | actor=codex | event=complete | note=完成 rebotarm_moveit_config 功能包职责说明 | verification=检查 README、README_zh、package.xml、demo.launch.py、URDF/SRDF及规划配置
 - 2026-09-29T11:33:54+08:00 | actor=codex | event=start | note=核查 MoveIt config launch 与 bringup 入口关系 | verification=-
 - 2026-09-29T11:35:43+08:00 | actor=codex | event=complete | note=完成 MoveIt config demo launch 与 bringup 关系核查 | verification=确认 interactive_system、moveit_hardware、visual_grasp_system 和 MuJoCo 入口均对 demo.launch.py 存在条件包含或直接复用
+- 2026-09-29T11:42:15+08:00 | actor=codex | event=start | note=审计 rebotarm_teach 包的解耦性与代码规范 | verification=-
+- 2026-09-29T11:44:21+08:00 | actor=codex | event=verified | note=完成 rebotarm_teach 解耦与规范审计：包边界总体符合，纯数据层/ROS适配/回放编排分层清晰；主要改进项为 teach_recording.py 1999 行、teach_replay_workflow.py 939 行、缺少统一 lint 配置和少量宽行/宽泛异常捕获 | verification=teach-focused tests=137 passed, 1 skipped; compileall=passed; no direct dashboard/controller/teleop imports
+- 2026-09-29T11:50:23+08:00 | actor=codex | event=start | note=将 teach 包解耦与规范问题写入用户维护清单 | verification=-
+- 2026-09-29T11:53:54+08:00 | actor=codex | event=verified | note=已将 teach 包审计出的解耦与代码规范问题加入用户维护清单第8项 | verification=git_diff_check=passed
+- 2026-09-29T11:59:47+08:00 | actor=codex | event=start | note=审计 rebotarm_vision 包的解耦性、代码规范和冗余 | verification=-
+- 2026-09-29T12:01:29+08:00 | actor=codex | event=verified | note=完成视觉包审计：策略层基本解耦，但发现节点间共享工具耦合、GraspNet复用legacy普通抓取helper、两个超大节点、manifest疑似冗余依赖及legacy/benchmark入口需分类 | verification=compileall=passed; vision tests=77 passed, 28 blocked by missing rebotarm_msgs, 1 skipped
+- 2026-09-29T12:03:25+08:00 | actor=codex | event=start | note=将 vision 包解耦、冗余和代码规范问题写入用户维护清单 | verification=-
+- 2026-09-29T12:03:50+08:00 | actor=codex | event=verified | note=已将 vision 包审计问题加入用户维护清单第9项 | verification=git_diff_check=passed

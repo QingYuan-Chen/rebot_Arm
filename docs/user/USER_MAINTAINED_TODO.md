@@ -67,6 +67,31 @@
 - 当前说明：已完成静态审查，确认当前文件声明 134 个 launch 参数且存在参数转发、生命周期和硬编码话题等耦合问题；尚未修改源码，也不代表解耦已经完成。
 - 设计方案、实施记录、测试结果及最终结论：待补充。
 
+### 8. `rebotarm_teach` 解耦与代码规范
+
+- 状态：结构基本合格，维护性改进未完成。
+- 待办 1：拆分过大的 `teach_recording.py`（当前约 2000 行），按数据模型、文件存储、质量评估、预处理和回放门控拆分为职责清晰的模块。
+- 待办 2：拆分过大的 `teach_replay_workflow.py`（当前约 940 行），将 Action 生命周期、MoveIt 预检和回放编排细节进一步分离。
+- 待办 3：移除 `mujoco_preview.py` 对 `rebotarm_simulation.mujoco_viewer` 私有变量 `_RETAINED_UNSAFE_VIEWERS` 的直接依赖，改为公开的 viewer 生命周期接口。
+- 待办 4：保持依赖方向为 `rebotarm_teach -> rebotarm_motion`，禁止 `rebotarm_motion` 反向依赖 `rebotarm_teach`，避免循环依赖。
+- 待办 5：增加统一的 Ruff/Black/isort（必要时 mypy）配置，逐步清理超过约 100 字符的代码行，并将无必要的 `except Exception` 收窄为明确异常类型。
+- 当前说明：上述问题不阻塞当前功能；现有示教专项测试已通过，重构前必须保持既有 JSONL、dry-run、Execute 门控和安全边界不变。
+- 设计方案、拆分记录、静态检查结果、回归测试及最终结论：待补充。
+
+### 9. `rebotarm_vision` 解耦、冗余与代码规范
+
+- 状态：主链路结构基本合格，维护性审计和清理未完成。
+- 待办 1：将坐标变换公共函数从 `grasp_preview_sender_node.py` 提取到独立工具模块，禁止其他节点依赖节点文件中的私有函数 `_transform_from_msg`。
+- 待办 2：将 `depth_image_to_array()` 从 `ordinary_grasp_node.py` 提取到通用图像转换模块，解除当前 GraspNet 主链路对 legacy 普通抓取节点的依赖。
+- 待办 3：拆分过大的 `visual_grasp_executor_node.py`（当前约 1400 行）和 `candidate_ik_filter_node.py`（当前约 800 行），将 ROS 适配、阶段编排、MoveIt 服务交互、执行状态和策略逻辑分离。
+- 待办 4：明确 `ordinary_grasp` 为 legacy/可选备用路线；确认是否继续保留其外部 `ordinary_grasp_root` 适配、launch 参数、配置和测试，或从当前活动入口中移除并仅通过 Git 历史追溯。
+- 待办 5：明确 `GraspNetBaselineBackend` 与 `InProcessGraspNetBackend` 的正式性，确定唯一推荐的 Ubuntu 运行后端，兼容后端需标注维护边界。
+- 待办 6：把视觉入口分类为正式运行、只读诊断、开发调试、Benchmark 和 legacy 兼容，避免 `setup.py` 中大量入口被误认为同等正式功能。
+- 待办 7：审计 `camera/base.py`、`handeye_config.py`、`aruco_reference.py` 等可疑未使用模块，以及 `package.xml` 中未被源码直接使用的 `rebotarm_calibration`、`rebotarm_motion` 依赖；确认后再决定保留、迁移或删除。
+- 待办 8：增加统一 Ruff/Black/isort（必要时 mypy）配置，逐步清理过长代码行和无必要的 `except Exception`。
+- 当前说明：上述问题不阻塞当前 Ubuntu 视觉主链路；重构或清理前必须保持 Gemini 2 → YOLO → ROS → GraspNet → 候选过滤 → plan-only/受控执行的数据流、安全门和只读默认值不变。
+- 设计方案、入口分类表、依赖审计、拆分记录、静态检查结果、回归测试及最终结论：待补充。
+
 以上是待完善清单，不构成自动启动硬件、使能、运动或厂家参数辨识的授权；真实采集按项目安全流程另行安排。
 
 ## 维护记录
@@ -76,3 +101,5 @@
 | 2026-09-21 | 用户 | 建立待完善事项清单 |
 | 2026-09-26 | Codex（用户明确授权） | 将原电机 MuJoCo 泛项细化为 D4、D5、D6，并增加左右活动手指总成参数待办 |
 | 2026-09-29 | Codex（用户明确授权） | 增加 `visual_grasp_system.launch.py` 参数与节点解耦待办 |
+| 2026-09-29 | Codex（用户明确授权） | 增加 `rebotarm_teach` 模块拆分、跨包私有接口和代码规范待办 |
+| 2026-09-29 | Codex（用户明确授权） | 增加 `rebotarm_vision` 解耦、legacy/Benchmark 分类、依赖审计和代码规范待办 |
