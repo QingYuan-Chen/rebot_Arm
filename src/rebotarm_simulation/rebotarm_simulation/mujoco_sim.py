@@ -109,7 +109,7 @@ class RebotArmMujoco:
 
     joint_names = JOINT_NAMES
 
-    def __init__(self, model_path: str | os.PathLike[str] | None = None) -> None:
+    def __init__(self, model_path: str | os.PathLike[str] | None = None, *, collisionless: bool = False) -> None:
         """加载 MuJoCo 模型并完成控制器与初始状态同步。
 
         model_path 为 None 时按 _default_scene_path() 的优先级搜索默认场景，
@@ -127,6 +127,11 @@ class RebotArmMujoco:
         self.model_path = str(Path(model_path) if model_path is not None else _default_scene_path())
         # MjModel 是不可变的模型定义；MjData 保存逐次步进的运行时状态。
         self._model = self._mj.MjModel.from_xml_path(self.model_path)
+        if collisionless:
+            # Reach-only opt-in: visual meshes and inertial properties remain;
+            # costly self-mesh contact is omitted from this contact-free task.
+            self._model.geom_contype[:] = 0
+            self._model.geom_conaffinity[:] = 0
         self._data = self._mj.MjData(self._model)
         self._closed = False
         # 复现用随机数发生器；reset(seed=...) 会按给定种子重建它。

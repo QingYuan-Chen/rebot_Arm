@@ -41,8 +41,16 @@ def test_invalid_action_does_not_advance_physics(action):
         assert env.sim.get_state() == before
 
 
-def test_collision_and_success_are_distinct(monkeypatch):
+def test_reach_scene_is_contact_free_and_success_is_pose_based():
+    import mujoco
     with RebotArmReachEnv() as env:
+        model = env.sim._model
+        assert "reach_scene.xml" in env.sim.model_path
+        assert all("table" not in name and "bottle" not in name for name in (
+            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) or ""
+            for i in range(model.nbody)))
+        assert not np.any(model.geom_contype)
+        assert not np.any(model.geom_conaffinity)
         env.reset(seed=10)
         current = env.sim.get_state()
         env._goal = np.array(current.end_effector_position)
@@ -52,13 +60,23 @@ def test_collision_and_success_are_distinct(monkeypatch):
             assert not result[2]
         result = env.step(np.zeros(6))
         assert result[2] and result[4]["is_success"]
-        env.reset(seed=10)
-        monkeypatch.setattr(env, "_collision", lambda: True)
-        result = env.step(np.zeros(6))
-        assert result[2] and result[4]["collision"] and not result[4]["is_success"]
+        assert not result[4]["collision"]
 
 
 def test_gymnasium_checker():
     from gymnasium.utils.env_checker import check_env
     with RebotArmReachEnv() as env:
         check_env(env, skip_render_check=True)
+
+
+def test_replay_goal_and_easy_stage_limits():
+    with RebotArmReachEnv(curriculum_stage="local_easy") as env:
+        _, start = env.reset(seed=17)
+        goal_q = env._goal_q.copy()
+        assert 0.02 <= start["distance_m"] <= 0.05
+        assert start["orientation_error_rad"] <= np.deg2rad(8.0)
+        obs, replay = env.reset(options={"goal_q": goal_q})
+        assert env.observation_space.contains(obs)
+        assert replay["distance_m"] == pytest.approx(start["distance_m"])
+        with pytest.raises(ValueError):
+            env.reset(options={"goal_q": np.zeros(5)})

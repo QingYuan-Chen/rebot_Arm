@@ -1019,3 +1019,33 @@
 - 2026-09-29T12:01:29+08:00 | actor=codex | event=verified | note=完成视觉包审计：策略层基本解耦，但发现节点间共享工具耦合、GraspNet复用legacy普通抓取helper、两个超大节点、manifest疑似冗余依赖及legacy/benchmark入口需分类 | verification=compileall=passed; vision tests=77 passed, 28 blocked by missing rebotarm_msgs, 1 skipped
 - 2026-09-29T12:03:25+08:00 | actor=codex | event=start | note=将 vision 包解耦、冗余和代码规范问题写入用户维护清单 | verification=-
 - 2026-09-29T12:03:50+08:00 | actor=codex | event=verified | note=已将 vision 包审计问题加入用户维护清单第9项 | verification=git_diff_check=passed
+- 2026-09-29T12:07:49+08:00 | actor=codex | event=start | note=说明目标位姿Reach任务的训练、评估和效果查看流程 | verification=-
+- 2026-09-29T12:08:27+08:00 | actor=codex | event=complete | note=已说明Reach位姿任务训练、数值评估与当前可视化边界；本轮未改代码、未启动真机 | verification=核对 docs/reference/commands/mujoco_rl.md 与 rl_reach.py 现行入口
+- 2026-09-29T12:21:56+08:00 | actor=codex | event=start | note=诊断pose Reach 100k PPO成功率为0的训练质量问题 | verification=-
+- 2026-09-29T12:23:20+08:00 | actor=codex | event=complete | note=完成pose Reach 100k模型效果诊断：PPO劣于zero-action基线，定位训练预算、观测/奖励/课程设计问题；未改代码未接真机 | verification=同种子20回合 zero-action vs PPO 对照；现有100回合评估结果；代码与SB3配置审查
+- 2026-09-29T12:39:05+08:00 | actor=codex | event=start | note=按Isaac Lab Reach思路改造MuJoCo Reach：固定目标课程、相对观测、keypoint风格奖励、动作平滑 | verification=-
+- 2026-09-29T12:45:51+08:00 | actor=codex | event=start | note=按用户同意的 Isaac Lab Reach 顺序改造 MuJoCo Reach：相对观测、fixed/local 课程、keypoint/progress/action-rate 奖励；确认标准 MuJoCo CPU 与 MJX GPU 边界 | verification=-
+- 2026-09-29T12:47:32+08:00 | actor=codex | event=verified | note=Reach改造验证完成：MuJoCo专项7通过，Gymnasium/SB3 checker通过，simulation colcon build成功；全量测试在正确ROS overlay下740 passed/15 skipped，但4个既有文档断言失败，与本次改动无关。标准MuJoCo物理仍CPU，MJX需单独迁移。 | verification=tests/test_gym_reach.py: 7 passed; rl_reach check: gymnasium_check=true,sb3_check=true; colcon rebotarm_simulation: finished; compileall: passed; full tests: 740 passed, 15 skipped, 4 pre-existing documentation assertion failures
+- 2026-09-29T13:15:58+08:00 | actor=codex | event=verified | note=fixed 500k最终模型100回合评估：success=0，位置0.95mm，姿态3.316度，姿态门槛3度未到；后续训练入口增加定期checkpoint和独立评估选best，现有运行不受影响。 | verification=fixed_seed7.zip eval 100 episodes success=0 collision=0 distance=0.000949829m orientation=3.31594deg; 20-episode trajectory audit max hold=0; Reach 7 passed, Gym/SB3 checker passed, layering 18 passed, simulation build passed
+- 2026-09-29T13:18:17+08:00 | actor=codex | event=start | note=按用户要求评估并实现 MuJoCo+MJX GPU Reach 训练路径，核对本机依赖和仿真控制器等价性，仅纯仿真 | verification=-
+- 2026-09-29T14:01:49+08:00 | actor=codex | event=checkpoint | note=MJX GPU批量Reach路径已实现并验证运行，但32环境PPO约293 steps/s，尚未实现训练加速；原场景碰撞不受MJX 3.3支持，使用实验性Reach专用碰撞profile。 | verification=JAX CUDA GPU detected; MJX test 1 passed; 32-env PPO 16384-step smoke saved; simulation build passed; full tests 740 passed/16 skipped/4 existing doc assertion failures
+- 2026-09-29T14:07:26+08:00 | actor=codex | event=verified | note=MJX批量Reach实现完成：CUDA GPU物理128并行，端到端短训练约1213 steps/s，原单环境PPO约415 steps/s；碰撞profile是Reach专用，模型需原MuJoCo复评。 | verification=JAX CudaDevice(0); MJX 128-env 65536-step PPO saved; CPU 8192-step PPO comparator; MJX parity test 1 passed; Reach tests 7 passed; layering 18 passed; simulation colcon build passed; full tests 740 passed/16 skipped/4 existing documentation assertions failed
+- 2026-09-29T14:15:15+08:00 | actor=codex | event=start | note=为六轴Reach建立无桌子瓶子的专用MuJoCo/MJX场景，验证128并行在RTX4060上的实际显存与训练吞吐 | verification=-
+- 2026-09-29T14:30:23+08:00 | actor=codex | event=verified | note=Reach 使用无桌子瓶子的专用场景；RTX 4060 Laptop 上 128 MJX 环境短训通过；碰撞关闭并更新文档 | verification=Reach 7 pass; MJX 1 pass; layering 18 pass; full 740 pass 16 skip 4 pre-existing doc failures; simulation build and compileall pass; 32768-step GPU smoke pass
+- 2026-09-29T14:32:54+08:00 | actor=codex | event=start | note=诊断 MJX Reach 同名模型路径被空检查点目录占用的问题 | verification=-
+- 2026-09-29T14:33:08+08:00 | actor=codex | event=verified | note=确认仅有空检查点目录占用 MJX 模型名，已安全移除，原训练命令可重试 | verification=同名 final/best/检查点目录均不存在；未发现实际训练进程
+- 2026-09-29T15:12:17+08:00 | actor=codex | event=start | note=评估用户完成的 MJX Reach fixed 训练 best 与 final 模型 | verification=-
+- 2026-09-29T15:13:25+08:00 | actor=codex | event=verified | note=用户 MJX fixed 训练 best/final 均100%固定目标成功；CPU物理复评与零动作对照完成 | verification=MJX100回合 best/final success=1；CPU单轨迹均20步成功；zero-action失败；评估JSON已保存
+- 2026-09-29T15:18:23+08:00 | actor=codex | event=start | note=为 Reach 训练策略添加 MuJoCo Viewer 回放及 episodes 说明 | verification=-
+- 2026-09-29T15:21:18+08:00 | actor=codex | event=complete | note=Reach 策略 MuJoCo Viewer 回放入口与 episodes 文档完成 | verification=本机原生Viewer一回合20步成功；simulation build pass; layering18 pass; compile/diff pass; full740 pass16 skip4 pre-existing doc failures
+- 2026-09-29T15:26:18+08:00 | actor=codex | event=start | note=开始第二阶段随机附近末端位姿 Reach：对齐 MJX 目标采样并训练评估 | verification=-
+- 2026-09-29T15:39:17+08:00 | actor=codex | event=verified | note=第二阶段local随机Reach采样对齐并完成首轮327680步训练及MJX/CPU独立评估，尚未收敛 | verification=Reach9 pass; layering18 pass; simulation build/compile/diff pass; full740 pass16 skip4 pre-existing doc failures; MJX local100 success2%; CPU local100 success0%
+- 2026-09-29T15:47:31+08:00 | actor=codex | event=start | note=建立 MJX/CPU 同目标 Reach 诊断并依据失败分布调整第二阶段训练 | verification=-
+- 2026-09-29T16:19:29+08:00 | actor=codex | event=verified | note=完成同目标诊断和奖励课程训练，完整范围复评28%，位置精度仍为瓶颈 | verification=CPU/MJX paired100 success28%; Reach11 layering18 build/compile/diff pass; full740 pass16 skip4 pre-existing failures
+- 2026-09-29T16:29:48+08:00 | actor=codex | event=start | note=分析pose_v3位置失败分桶、目标限幅、超时后进展和已知可达构型控制对照 | verification=-
+- 2026-09-29T16:33:00+08:00 | actor=codex | event=verified | note=完成第二阶段位置失败分桶、方向、限幅、延长回合与底层控制对照分析 | verification=同100目标CPU MuJoCo逐步报告；向上47目标0成功；延长至500步无新增成功；限幅仅3目标；无训练或硬件改动
+- 2026-09-29T16:35:48+08:00 | actor=codex | event=start | note=试验基于每回合初始目标距离的自适应位置奖励，并与pose_v3同目标对照 | verification=-
+- 2026-09-29T16:49:37+08:00 | actor=codex | event=verified | note=初始距离自适应位置奖励试验完成，同目标100回合成功率28%到54%，向上目标仍为主要缺口 | verification=CPU/MJX paired100 success54%; Reach12 pass; layering18 pass; simulation build/compile/diff pass; full740 pass16 skip4 pre-existing failures
+- 2026-09-29T16:51:12+08:00 | actor=codex | event=start | note=运行相同步数旧pose_v3奖励对照，与自适应初始距离奖励比较 | verification=-
+- 2026-09-29T17:01:36+08:00 | actor=codex | event=verified | note=同等步数旧奖励对照完成并更新MuJoCo RL文档：同100目标CPU final pose_v3 61/100，adaptive 54/100；仅纯仿真。 | verification=两组各327680训练步；目标数组完全相同；CPU/MJX独立复评；分层18通过；全量740 passed/16 skipped/4既有其他命令文档断言失败；compileall与git diff --check通过。
+- 2026-09-29T17:05:16+08:00 | actor=codex | event=start | note=按用户要求检查并上传当前代码进度到 GitHub | verification=-

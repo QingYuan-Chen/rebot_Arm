@@ -4,6 +4,8 @@
 
 ## 当前焦点
 
+- 2026-09-29：诊断 `runs/reach/pose_100k_seed7.zip`：100回合 success=0、collision=0、mean final position error=0.07283m、orientation error=14.6639deg。对同一评估种子10000–10019比较，zero-action保持home约0.04103m/8.196deg，PPO约0.07590m/13.335deg，说明策略尚未学到有效目标→关节映射且劣于基线，不是单纯接近成功门。SB3 GPU warning仅是小MLP GPU利用率低/可能更慢，不是效果原因。当前主要训练质量风险：100k约400回合样本不足、绝对位姿观测未显式提供相对误差/未归一化、姿态奖励权重相对位置过弱、无进度奖励/课程学习、成功门较硬且隐藏低层控制器积分状态。下一步应先固定zero-action基线与多种子指标，再改相对误差观测、progress shaping、课程半径/姿态范围、VecNormalize/更长训练；未改代码、未接真机。
+
 ### 当前状态快照（2026-09-28）
 
 - 当前工作已从旧 P0-P6 验收队列切换到 MuJoCo/Gymnasium Reach 仿真与后续 sim-to-real 规划；旧 P0-P6、瓶子抓取、TCP 接触、虚拟视觉链和分级实机动作均只保留为历史证据，不构成当前待办或硬件授权。
@@ -852,3 +854,25 @@ Dashboard 的 `TeachReplayWorkflow` 已定为唯一正式示教回放实现，�
 - 2026-09-27 用户明确不做仿真完整视觉链，暂时移除虚拟相机：删除virtual_camera模块及专属测试、ROS图像/CameraInfo/标注/静态TF发布、launch参数和YAML、生成器腕部光学相机与scene固定相机；移除simulation对vision标定资源及tf2_ros依赖。保留相机/旧支架实体和98g/22g负载、机械Viewer及真实YOLO/GraspNet/手眼配置，真实RGBD只读检查工具保留。已保留当前其它未提交删除原型的用户工作。删除文件与安装残留备份/tmp/removed-virtual-camera-20260927；未来可从2f706be恢复。simulation重建、安装ROS节点joint_states且无camera/TF发布实测通过，layering18、全量744 passed14 skipped、MuJoCo9、compileall/MJCF/diff通过；未操作硬件，未提交推送。
 
 - 2026-09-27 用户授权将当前仿真清理进度提交推送GitHub：范围包含此前授权删除的瓶位试验/规则搜索/点云代理，以及本轮虚拟视觉链删除；保留示教预演、相机支架实体负载与真实视觉。已有验证744 passed/14 skipped、layering18、MuJoCo9、simulation build/ROS无camera发布、compileall/MJCF/diff通过。
+
+- 2026-09-29：Reach 环境第一阶段改造完成：新增 `curriculum_stage=fixed|local`，观测改为24维相对形式（q-home、dq、目标位置误差、目标姿态旋转向量、控制目标-home），奖励加入四点 TCP keypoint 误差、指数精度、误差进展、动作 L2 和 action-rate L2。`rl_reach` 增加课程参数，文档补充 fixed→local 顺序与标准 MuJoCo CPU/MJX GPU 边界。纯 MuJoCo 专项7项、Gymnasium/SB3 checker通过；尚未完成500k训练收敛验证，无真机操作。
+
+- 2026-09-29：用户 fixed 课程 500k 训练完成，最终模型 `runs/reach/fixed_seed7.zip` 独立种子10000起100回合确定性评估 success=0、collision=0、平均最终位置误差0.000949829m、姿态误差3.31594deg。固定目标下不同种子结果完全相同；前20回合均未同时满足位置<1cm与姿态<3deg，最大成功保持计数0，最小曾到3.02814deg。训练中约0.3的成功率可能来自随机动作的滚动窗口，与确定性最终评估不可直接等同；本轮旧脚本只在结束保存final，不能找回中途策略。后续 `rl_reach train` 已加入每25k步检查点和独立确定性评估，以成功率为主、距离为次选best；不影响已完成运行。下一步应改善姿态奖励/精度并以固定目标独立评估对比，不可仅凭增加训练步数推断收敛。无真机。
+
+- 2026-09-29：用户要求优先改 MuJoCo+MJX 以加快训练。已在现有 `rebotarm_mujoco_venv` 添加 JAX 0.4.35 CUDA 12 / MJX 3.3.0，RTX 4060 GPU 识别通过，新增独立 `MJXReachVecEnv` 和 `rl_reach_mjx` 批量训练入口、`requirements-mjx.txt`、操作文档及 GPU/CPU 短轨迹对照测试。原完整场景 `mjx.put_model` 因 cylinder–mesh 接触不支持而失败；Reach 专用私有模型停用 mesh/cylinder/ellipsoid 碰撞，不改 MJCF，故无机器人碰撞终止保证。固定目标零动作和50步随机动作与 CPU MuJoCo 短期位置/关节轨迹误差很小；MJX 32环境烟测16384步保存/加载通过，但 PPO总吞吐第二批约293 policy steps/s，低于单环境CPU裸仿真约822 steps/s，尚未达到加速目标；JIT冷启动约30秒。MJX GPU专项1通过、原Reach7通过、分层18、simulation build/compileall通过；全量740 passed/16 skipped/4既有文档断言失败。MJX local目标未复刻2–10cm接受门，不宜宣称等价；最终模型需原完整CPU MuJoCo复评。无真机。
+
+- 2026-09-29：按用户要求把 Reach 独立为无桌子/瓶子/地面的 `reach_scene.xml`，CPU Gymnasium 与 MJX 均加载此场景且在各自模型副本禁用全部接触；原 `scene.xml` 留给其他仿真任务。Reach 的 `collision_rate` 恒 0，不代表避障；旧策略模型来自不同任务定义，需重训。RTX 4060 Laptop 8GB 上 128 环境 check 通过（128x24，有限值），32,768 policy steps 短训及 25,088 步独立评估完成，短训 fps 554（含 JIT/评估），0.25 秒间隔进程显存采样最高 388 MiB，未证明长期峰值或收敛；短训成功率 0。`XLA_PYTHON_CLIENT_PREALLOCATE=false` 在导入 JAX 前默认设置。CPU Reach 7、MJX 1、分层18通过；simulation build、compileall、diff通过；overlay 后全量 740 passed/16 skipped/4 个既有命令文档断言失败。无真机操作。
+
+- 2026-09-29：用户完成无接触 Reach fixed 128 环境训练。final 实际327680步（300000预算按128*256 rollout向上取整），best275072步。MJX seed20000起100确定性回合：两者success=1.0；best位置1.52584mm/姿态1.68934deg，final1.14313mm/1.48276deg。固定home/目标无随机性，100回合为重复确定性任务，不代表local泛化。标准CPU MuJoCo同任务单轨迹复评：best1.52699mm/1.69016deg，final1.13612mm/1.48338deg，均20策略步成功（0.4秒、保持10步）；零动作250步失败，30.85579mm/5.89783deg。报告runs/reach/mjx_reach_only_fixed_seed7_eval_mjx.json和_eval_cpu.json。final此评估略优于best，可作当前固定目标候选。未运行local训练；MJX local仍需对齐CPU 2–10cm目标筛选，无碰撞或真机证据。
+
+- 2026-09-29：新增纯仿真 `rl_reach_viewer` 模块，加载保存PPO并在CPU MuJoCo Reach单环境用确定性动作回放，CUDA推理；目标TCP黄色球和RGB姿态轴为user_scn绘制，无物理影响。episodes默认5、speed默认0.25、开始/结束pause默认1秒，窗口关闭/Ctrl+C退出，复用既有viewer先关闭再释放sim的生命周期函数。本机DISPLAY=:1实际启动1回合成功20步/1.13612mm/1.48338deg；simulation build、分层18、compileall/diff通过；全量740 passed/16 skipped/4既有其他命令文档断言失败。操作与episodes含义已写入docs/reference/commands/mujoco_rl.md；未硬件操作。
+
+- 2026-09-29：第二阶段 local Reach：MJX采样改为关节home±0.12rad、拒绝关节越限、FK目标距home 2–10cm、最多100次；极罕见全失败退回固定合法目标（CPU全失败报错）。并行评估按lane预分配回合额度，避免只取最先结束而偏向易目标。训练新增--init-model，从fixed final初始化，local 128 env/300000预算实际327680步、seed7，输出runs/reach/mjx_reach_local_stage2_seed7.zip及best/checkpoints/log。未参与选模seed20000起100回合MJX initial/best/final成功1%/2%/2%，位置误差50.1/40.8/40.2mm，姿态11.79/14.91/14.46deg；CPU标准MuJoCo相同分布但不同随机序列100回合成功全0，位置58.5/47.2/46.2mm，姿态12.74/16.07/15.53deg。故任务未学会，位置略改善而姿态退化；不可宣称泛化或真机可用。local测试128个目标均在距离带内且多样；Reach专项9通过、分层18、仿真build、compileall、diff通过；全量仍740 passed/16 skipped/4既有其他命令文档断言失败。报告runs/reach/mjx_reach_local_stage2_seed7_eval_mjx.json与_eval_cpu.json。
+
+- 2026-09-29：新增rl_reach_diagnose同目标CPU/MJX评估。上一轮local final同目标100回合两后端成功0%、位置合格2%、姿态合格0%，误差一致。新增local_easy（home±0.06rad、TCP2–5cm、初始姿态≤8deg）和pose_v2（独立位置exp(-d/0.03)+0.5姿态exp(-angle/0.1)）；训练327680步后easy同目标100回合起始/best/final成功15/45/47%，姿态合格100%，完整local成功5%。pose_v3将位置项改exp(-d/0.015)，继续完整local训练327680步；同100完整目标起始/best/final成功5/24/28%，MJX与CPU一致；final位置21.4mm、姿态0.92deg、姿态合格100%、位置合格28%。随机目标尚未达到可用成功率，剩余瓶颈位置1cm精度。Reach11、分层18通过；simulation build/compile/diff通过；全量740 passed/16 skipped/4既有其他命令文档断言失败。报告runs/reach/mjx_reach_local_stage2_paired_diagnosis.json、mjx_reach_local_easy_pose_v2_seed11_paired_comparison.json、mjx_reach_local_pose_v3_seed13_paired_comparison.json。无真机。
+
+- 2026-09-29：对pose_v3 final同100 local目标进行CPU MuJoCo逐步位置失败分析，原始runs/reach/mjx_reach_local_pose_v3_position_analysis.json。初始目标距离2–3.5/3.5–5/5–7/7–10cm各26/27/29/18个，成功9/9/9/1，末误差14.4/18.6/21.8/35.1mm。按delta Z：向下53个成功28、末误差11.8mm；向上47个成功0、末误差32.2mm，两组初距均值48.5/52.7mm。延长250到500策略步成功仍28，失败目标平均误差无改善；控制目标限幅仅3目标均关节4。向上目标末速很低且实际q跟上策略targets，但targets显著偏离采样目标构型，尤其关节3/4，提示策略方向映射偏差。直接命令采样goal_q的底层控制对照5秒后仅39/100位置<1cm，该对照非策略成功上界（12目标策略成功但直接命令未达标），提示控制跟踪亦有独立限制。仅诊断，无奖励/训练/真机改动。
+
+- 2026-09-29：用户提议按初始目标距离自适应位置奖励。新增MJX adaptive_position：d0每回合固定，s=clip(0.4*d0,.015,.04)，位置项=.5exp(-d/s)+.5exp(-d/.015)，姿态/进展/动作/成功项沿pose_v3，旧profile保留。从pose_v3 final续训local 128环境327680步seed17；同未参与选模100 goal_q，起始/best/final CPU与MJX均成功28/52/54%，最终位置21.4/13.1/12.3mm，姿态.92/.90/.88deg。向下53目标成功28→50，向上47目标0→4；≥7cm目标18个成功1→4。改动有助于当前同目标集，但一次续训不能隔离奖励与额外步数的因果影响，仍有向上/远目标缺口。模型runs/reach/mjx_reach_local_adaptive_seed17.zip，报告对应_paired_comparison.json。Reach专项12、分层18、simulation build/compile/diff通过；全量740 passed/16 skipped/4既有文档断言失败。无真机。
+
+- 2026-09-29：完成同等训练步数旧奖励对照，修正上一条“自适应奖励有助于同目标集”的因果解读。从相同pose_v3 final、local目标、128环境、seed17、eval频率与实际327680步出发，仅旧奖励pose_v3与adaptive_position不同；同seed20000起100个goal_q完全相同。CPU MuJoCo最终模型旧奖励/自适应成功61/54，MJX为60/54；CPU位置误差11.1/12.3mm、姿态0.82/0.88deg。旧奖励best/自适应best为56/52。CPU逐目标：自适应成功54个旧奖励全部成功，旧奖励另成功7个；向下53目标53/50、向上47目标8/4、初距≥7cm的18目标7/4。此前自适应相对初始的改善可以由继续训练解释，本次单seed对照没有显示其优于旧奖励；不推广到所有seed。模型runs/reach/mjx_reach_local_pose_v3_control_seed17.zip，报告对应_paired_comparison.json，日志对应.log；仅无接触仿真，无真机。
