@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-29T11:28:39+08:00",
+  "generated_at": "2026-09-29T11:35:43+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -79,8 +79,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "e6cfe11",
+    "head": "911675f",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-09-29T11:28:39+08:00 | actor=codex | event=complete | note=完成 rebotarm_moveit_config 功能包职责说明 | verification=检查 README、README_zh、package.xml、demo.launch.py、URDF/SRDF及规划配置"
+  "last_event": "- 2026-09-29T11:35:43+08:00 | actor=codex | event=complete | note=完成 MoveIt config demo launch 与 bringup 关系核查 | verification=确认 interactive_system、moveit_hardware、visual_grasp_system 和 MuJoCo 入口均对 demo.launch.py 存在条件包含或直接复用"
 }

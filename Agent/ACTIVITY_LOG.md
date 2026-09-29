@@ -1009,3 +1009,5 @@
 - 2026-09-29T11:15:44+08:00 | actor=codex | event=complete | note=确认并补充 rebotarm_bringup 包 README | verification=新增 src/rebotarm_bringup/README.md；说明包边界、入口、安全约束与验证命令；git diff --check
 - 2026-09-29T11:28:19+08:00 | actor=codex | event=start | note=说明 rebotarm_moveit_config 功能包职责 | verification=-
 - 2026-09-29T11:28:39+08:00 | actor=codex | event=complete | note=完成 rebotarm_moveit_config 功能包职责说明 | verification=检查 README、README_zh、package.xml、demo.launch.py、URDF/SRDF及规划配置
+- 2026-09-29T11:33:54+08:00 | actor=codex | event=start | note=核查 MoveIt config launch 与 bringup 入口关系 | verification=-
+- 2026-09-29T11:35:43+08:00 | actor=codex | event=complete | note=完成 MoveIt config demo launch 与 bringup 关系核查 | verification=确认 interactive_system、moveit_hardware、visual_grasp_system 和 MuJoCo 入口均对 demo.launch.py 存在条件包含或直接复用
