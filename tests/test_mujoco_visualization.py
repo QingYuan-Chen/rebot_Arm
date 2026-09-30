@@ -61,8 +61,8 @@ def test_ghost_overlay_adds_only_transparent_visual_group_geoms() -> None:
     overlay = GhostArmOverlay(model)
 
     assert overlay.update(viewer, (0.0, -0.8, -1.0, 0.3, 0.0, 0.0))
-    assert overlay.geom_count == 10
-    assert viewer.user_scn.ngeom == 10
+    assert overlay.geom_count == 12  # ten arm visuals plus camera and bracket
+    assert viewer.user_scn.ngeom == 12
     for index in range(viewer.user_scn.ngeom):
         geom = viewer.user_scn.geoms[index]
         assert int(model.geom_group[geom.objid]) == 2

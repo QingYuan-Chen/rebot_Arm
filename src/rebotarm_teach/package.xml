@@ -23,6 +23,7 @@
   <exec_depend>rebotarm_msgs</exec_depend>
   <!-- 重定时/时间参数化等运动层工具（回放轨迹生成依赖）。 -->
   <exec_depend>rebotarm_motion</exec_depend>
+  <exec_depend>rebotarm_simulation</exec_depend>
   <!-- 关节状态等传感器消息类型。 -->
   <exec_depend>sensor_msgs</exec_depend>
   <!-- 基础消息类型（状态发布）。 -->

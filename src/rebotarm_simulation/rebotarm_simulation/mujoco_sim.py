@@ -89,7 +89,14 @@ def _bounds3(
 class RebotArmMujoco:
     joint_names = JOINT_NAMES
 
-    def __init__(self, model_path: str | os.PathLike[str] | None = None) -> None:
+    def __init__(self, model_path: str | os.PathLike[str] | None = None, *, collisionless: bool = False) -> None:
+        """加载 MuJoCo 模型并完成控制器与初始状态同步。
+
+        model_path 为 None 时按 _default_scene_path() 的优先级搜索默认场景，
+        找不到则抛 FileNotFoundError。构造末尾调用 reset()：把控制目标对齐到
+        初始 qpos、清零控制量，并预置重力补偿力矩，避免第一步出现下坠冲击。
+        """
+        # 延迟导入 MuJoCo：缺失时给出可执行的安装提示，而不是裸 ImportError。
         try:
             self._mj = importlib.import_module("mujoco")
         except (ImportError, ModuleNotFoundError) as exc:
@@ -99,6 +106,11 @@ class RebotArmMujoco:
             ) from exc
         self.model_path = str(Path(model_path) if model_path is not None else _default_scene_path())
         self._model = self._mj.MjModel.from_xml_path(self.model_path)
+        if collisionless:
+            # Reach-only opt-in: visual meshes and inertial properties remain;
+            # costly self-mesh contact is omitted from this contact-free task.
+            self._model.geom_contype[:] = 0
+            self._model.geom_conaffinity[:] = 0
         self._data = self._mj.MjData(self._model)
         self._closed = False
         self._randomization_baseline = {
@@ -321,12 +333,17 @@ class RebotArmMujoco:
         """Reset the arm exactly while rejecting limits instead of clamping."""
         values = _finite_vector(positions, 6, "joint positions")
         self._ensure_open()
-        for name, value, joint_id in zip(ARM_JOINT_NAMES, values, self._joint_ids[:6]):
-            lower, upper = self._model.jnt_range[joint_id]
-            if not lower <= value <= upper:
-                raise ValueError(f"{name} position outside joint limits")
-        self.reset()
-        for value, joint_id in zip(values, self._joint_ids[:6]):
+        values = _finite_vector(positions, len(ARM_JOINT_NAMES), "joint positions")
+        for index, (joint_id, value) in enumerate(zip(self._joint_ids[:6], values)):
+            # 先做限位校验（而不是裁剪）：回放起点来自实机，越限说明数据或模型不匹配，
+            # 此时静默裁剪会掩盖问题，因此直接报错。
+            lower, upper = (float(bound) for bound in self._model.jnt_range[joint_id])
+            if value < lower or value > upper:
+                raise ValueError(
+                    f"{ARM_JOINT_NAMES[index]} position {value} outside [{lower}, {upper}]"
+                )
+        # Reject the whole reset before changing any joint state.
+        for joint_id, value in zip(self._joint_ids[:6], values):
             self._data.qpos[int(self._model.jnt_qposadr[joint_id])] = value
         self._data.qvel[:] = 0.0
         return self._finish_reset()
@@ -847,6 +864,15 @@ class RebotArmMujoco:
             reach_target_position=target,
             seed=seed,
         )
+
+    def randomize_bottle_pose(self, seed: int | None = None) -> tuple[float, ...]:
+        """Place the canonical bottle reproducibly within the tabletop workspace."""
+        self._ensure_open()
+        if "bottle" not in self._free_bodies:
+            raise ValueError("the loaded scene has no free bottle")
+        rng = np.random.default_rng(seed) if seed is not None else self._rng
+        position = (float(rng.uniform(0.22, 0.38)), float(rng.uniform(-0.14, 0.14)), 0.0)
+        return self.set_object_pose("bottle", position, (0.0, 0.0, 0.0, 1.0))
 
     def close(self) -> None:
         if self._closed:

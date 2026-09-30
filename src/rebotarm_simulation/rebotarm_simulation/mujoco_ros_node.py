@@ -15,7 +15,6 @@ from enum import Enum, auto
 from typing import Any, Sequence
 
 from .trajectory_sampler import ARM_JOINT_NAMES, NamedTrajectoryPoint, TrajectorySampler
-from .virtual_camera import VirtualCameraConfig, VirtualCameraWorker
 
 
 DEFAULT_MAX_TRAJECTORY_POINTS = 10_000
@@ -33,20 +32,6 @@ def normalize_ros_control_mode(mode: Any) -> str:
             "raw_torque is available only through the local diagnostic API"
         )
     return value
-
-
-def _status_value(status: Any, name: str, default: Any) -> Any:
-    if status is None:
-        return default
-    if isinstance(status, dict):
-        return status.get(name, default)
-    return getattr(status, name, default)
-
-
-def _bool_count(value: Any) -> int:
-    if isinstance(value, (tuple, list)):
-        return sum(bool(item) for item in value)
-    return int(bool(value))
 
 
 class SimulationControlApi:
@@ -402,22 +387,20 @@ def create_node_class():
     import rclpy
     from control_msgs.action import FollowJointTrajectory
     from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-    from geometry_msgs.msg import TransformStamped
     from rclpy.action import ActionServer, CancelResponse, GoalResponse
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
     from rclpy.clock import Clock as RclpyClock
     from rclpy.clock import ClockType
     from rclpy.node import Node
-    from rclpy.qos import qos_profile_sensor_data
-    from rebotarm_msgs.msg import Detection2D, Detection2DArray, JointMotorState
+    from rebotarm_msgs.msg import JointMotorState
     from rebotarm_msgs.srv import SetGripper, SetMode
     from rosgraph_msgs.msg import Clock
-    from sensor_msgs.msg import CameraInfo, Image, JointState
+    from sensor_msgs.msg import JointState
     from std_srvs.srv import Trigger
-    from tf2_ros import StaticTransformBroadcaster
     from trajectory_msgs.msg import JointTrajectoryPoint
 
     from .mujoco_sim import RebotArmMujoco
+    from .ros_diagnostics import build_control_diagnostic
 
     class RebotArmMujocoNode(Node):
         def __init__(self) -> None:
@@ -438,21 +421,11 @@ def create_node_class():
             self.declare_parameter("diagnostic_rate_hz", 1.0)
             self.declare_parameter("max_contact_force_n", 200.0)
             self.declare_parameter("max_contact_penetration_m", 0.005)
-            self.declare_parameter("virtual_camera.enabled", False)
-            self.declare_parameter("virtual_camera.camera_name", "fixed_camera")
-            self.declare_parameter(
-                "virtual_camera.frame_id", "mujoco_fixed_camera_optical_frame"
-            )
-            self.declare_parameter("virtual_camera.parent_body_name", "base_link")
-            self.declare_parameter("virtual_camera.parent_frame_id", "base_link")
-            self.declare_parameter("virtual_camera.width", 640)
-            self.declare_parameter("virtual_camera.height", 480)
-            self.declare_parameter("virtual_camera.rate_hz", 15.0)
-            self.declare_parameter("virtual_camera.max_depth_m", 2.0)
-            self.declare_parameter("virtual_camera.annotation_bodies", ["test_cube"])
-            self.declare_parameter(
-                "virtual_camera.annotation_topic", "/grasp/ground_truth_detections"
-            )
+            for name in ("diagnostic_rate_hz", "max_contact_force_n", "max_contact_penetration_m"):
+                value = float(self.get_parameter(name).value)
+                if not math.isfinite(value) or value <= 0.0:
+                    raise ValueError(f"{name} must be positive and finite")
+            # 以下三项是启动前的硬门：参数不合法直接抛错终止，绝不带着错误配置跑仿真。
             if self.get_parameter("backend").value != "mujoco":
                 raise ValueError("simulation backend must be mujoco")
             if self.get_parameter("headless").value is not True:
@@ -518,32 +491,8 @@ def create_node_class():
             self._timer_callback_group = MutuallyExclusiveCallbackGroup()
             self._physics_clock = RclpyClock(clock_type=ClockType.STEADY_TIME)
             self._stamp = MonotonicStamp()
-            self._virtual_camera_worker = None
-            self._virtual_camera_config = None
-            self._next_virtual_camera_time = 0.0
-            if bool(self.get_parameter("virtual_camera.enabled").value):
-                self._virtual_camera_config = VirtualCameraConfig(
-                    camera_name=str(
-                        self.get_parameter("virtual_camera.camera_name").value
-                    ),
-                    frame_id=str(self.get_parameter("virtual_camera.frame_id").value),
-                    parent_body_name=str(
-                        self.get_parameter("virtual_camera.parent_body_name").value
-                    ),
-                    parent_frame_id=str(
-                        self.get_parameter("virtual_camera.parent_frame_id").value
-                    ),
-                    width=int(self.get_parameter("virtual_camera.width").value),
-                    height=int(self.get_parameter("virtual_camera.height").value),
-                    rate_hz=float(self.get_parameter("virtual_camera.rate_hz").value),
-                    max_depth_m=float(
-                        self.get_parameter("virtual_camera.max_depth_m").value
-                    ),
-                    annotation_bodies=tuple(
-                        self.get_parameter("virtual_camera.annotation_bodies").value
-                    ),
-                )
-
+            # 只读反馈话题：关节状态、夹爪状态与仿真时钟。队列深度 10 足以吸收
+            # 短暂抖动，仿真时间由 /clock 统一对外，供 use_sim_time 的节点对齐。
             self._joint_pub = self.create_publisher(
                 JointState, f"/{self._arm_namespace}/joint_states", 10
             )
@@ -552,49 +501,9 @@ def create_node_class():
             )
             self._clock_pub = self.create_publisher(Clock, "/clock", 10)
             self._diagnostic_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
-            self._color_pub = None
-            self._depth_pub = None
-            self._color_info_pub = None
-            self._depth_info_pub = None
-            self._annotation_pub = None
-            self._virtual_camera_tf_broadcaster = None
-            if self._virtual_camera_config is not None:
-                self._color_pub = self.create_publisher(
-                    Image, "/camera/color/image_raw", qos_profile_sensor_data
-                )
-                self._depth_pub = self.create_publisher(
-                    Image, "/camera/depth/image_raw", qos_profile_sensor_data
-                )
-                self._color_info_pub = self.create_publisher(
-                    CameraInfo, "/camera/color/camera_info", qos_profile_sensor_data
-                )
-                self._depth_info_pub = self.create_publisher(
-                    CameraInfo, "/camera/depth/camera_info", qos_profile_sensor_data
-                )
-                annotation_topic = str(
-                    self.get_parameter("virtual_camera.annotation_topic").value
-                ).strip()
-                if not annotation_topic:
-                    raise ValueError("virtual_camera.annotation_topic must be non-empty")
-                self._annotation_pub = self.create_publisher(
-                    Detection2DArray, annotation_topic, qos_profile_sensor_data
-                )
-                self._virtual_camera_tf_broadcaster = StaticTransformBroadcaster(self)
-                self._virtual_camera_worker = VirtualCameraWorker(
-                    self._sim_access,
-                    self._virtual_camera_config,
-                    on_frame=self._publish_virtual_frame,
-                    on_ready=self._virtual_camera_ready,
-                    on_error=self._virtual_camera_error,
-                )
-                self.get_logger().info(
-                    "MuJoCo virtual RGB-D configured: "
-                    f"camera={self._virtual_camera_config.camera_name}, "
-                    f"size={self._virtual_camera_config.width}x"
-                    f"{self._virtual_camera_config.height}, "
-                    f"rate={self._virtual_camera_config.rate_hz:g} Hz, "
-                    f"frame={self._virtual_camera_config.frame_id}"
-                )
+            self._diagnostic_last_wall = time.monotonic()
+            self._diagnostic_last_sim = 0.0
+            # 与真实控制器同名的轨迹动作接口：上层运动/示教代码无需区分真机与仿真。
             self._action_server = ActionServer(
                 self,
                 FollowJointTrajectory,
@@ -626,14 +535,15 @@ def create_node_class():
             # configured publication period; simulation time remains the
             # authoritative trajectory clock.
             self._steps_per_tick = max(1, round((1.0 / rate) / self._sim.timestep))
-            self._configured_rate_hz = rate
-            self._diagnostic_period = 1.0 / diagnostic_rate
-            self._next_diagnostic_time = 0.0
-            self._last_tick_wall_time: float | None = None
-            self._measured_rate_hz = 0.0
             self.create_timer(
                 1.0 / rate,
                 self._timer_callback,
+                callback_group=self._timer_callback_group,
+                clock=self._physics_clock,
+            )
+            self.create_timer(
+                1.0 / float(self.get_parameter("diagnostic_rate_hz").value),
+                self._publish_diagnostics,
                 callback_group=self._timer_callback_group,
                 clock=self._physics_clock,
             )
@@ -691,6 +601,37 @@ def create_node_class():
             response.success = True
             response.message = "simulation trajectory stop requested" if stopped else "no active trajectory"
             return response
+
+        def _publish_diagnostics(self):
+            state, contacts, status = self._sim_access.run(
+                lambda sim: (
+                    sim.get_state(),
+                    sim.get_contacts(),
+                    self._control.get_control_status(),
+                )
+            )
+            now = time.monotonic()
+            elapsed = max(now - self._diagnostic_last_wall, 1e-9)
+            physics_rate = (state.simulation_time - self._diagnostic_last_sim) / elapsed / self._sim.timestep
+            self._diagnostic_last_wall, self._diagnostic_last_sim = now, state.simulation_time
+            summary = build_control_diagnostic(
+                arm_namespace=self._arm_namespace,
+                configured_rate_hz=1.0 / self._sim.timestep,
+                measured_rate_hz=physics_rate,
+                state=state,
+                status=status,
+                contacts=contacts,
+                max_contact_force_n=self.get_parameter("max_contact_force_n").value,
+                max_contact_penetration_m=self.get_parameter("max_contact_penetration_m").value,
+            )
+            msg = DiagnosticArray()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            item = DiagnosticStatus()
+            item.level = DiagnosticStatus.WARN if summary.warning else DiagnosticStatus.OK
+            item.name, item.hardware_id, item.message = summary.name, summary.hardware_id, summary.message
+            item.values = [KeyValue(key=value.key, value=value.value) for value in summary.values]
+            msg.status = [item]
+            self._diagnostic_pub.publish(msg)
 
         def _gripper_service(self, request, response):
             try:
@@ -844,22 +785,7 @@ def create_node_class():
                 self._active.finish(token)
 
         def _timer_callback(self) -> None:
-            now = time.monotonic()
-            if self._last_tick_wall_time is not None and now > self._last_tick_wall_time:
-                instantaneous = 1.0 / (now - self._last_tick_wall_time)
-                self._measured_rate_hz = (
-                    instantaneous
-                    if self._measured_rate_hz == 0.0
-                    else 0.9 * self._measured_rate_hz + 0.1 * instantaneous
-                )
-            self._last_tick_wall_time = now
-            state, status, contacts = self._sim_access.run(
-                lambda sim: (
-                    sim.step(self._steps_per_tick),
-                    self._control.get_control_status(),
-                    sim.get_contacts(),
-                )
-            )
+            state = self._sim_access.run(lambda sim: sim.step(self._steps_per_tick))
             stamp = Clock()
             seconds, nanoseconds = self._stamp.update(state.simulation_time)
             stamp.clock.sec = seconds
@@ -883,183 +809,10 @@ def create_node_class():
             gripper.status_code = 0
             self._gripper_pub.publish(gripper)
 
-            if now >= self._next_diagnostic_time:
-                self._publish_diagnostics(stamp.clock, state, status, contacts)
-                self._next_diagnostic_time = now + self._diagnostic_period
-
-            self._publish_virtual_camera(state.simulation_time, stamp.clock)
-
-        def _publish_virtual_camera(self, simulation_time: float, stamp) -> None:
-            if self._virtual_camera_worker is None or self._virtual_camera_config is None:
-                return
-            if simulation_time + 1e-12 < self._next_virtual_camera_time:
-                return
-            period = 1.0 / self._virtual_camera_config.rate_hz
-            self._next_virtual_camera_time += period
-            if self._next_virtual_camera_time <= simulation_time:
-                skipped = math.floor(
-                    (simulation_time - self._next_virtual_camera_time) / period
-                ) + 1
-                self._next_virtual_camera_time += skipped * period
-            self._virtual_camera_worker.submit((stamp.sec, stamp.nanosec))
-
-        def _publish_virtual_frame(self, frame, intrinsics, stamp_parts) -> None:
-            stamp_sec, stamp_nanosec = stamp_parts
-            color = Image()
-            color.header.stamp.sec = stamp_sec
-            color.header.stamp.nanosec = stamp_nanosec
-            color.header.frame_id = self._virtual_camera_config.frame_id
-            color.height = self._virtual_camera_config.height
-            color.width = self._virtual_camera_config.width
-            color.encoding = "rgb8"
-            color.is_bigendian = 0
-            color.step = self._virtual_camera_config.width * 3
-            color.data = frame.rgb.tobytes()
-            self._color_pub.publish(color)
-
-            depth = Image()
-            depth.header.stamp.sec = stamp_sec
-            depth.header.stamp.nanosec = stamp_nanosec
-            depth.header.frame_id = self._virtual_camera_config.frame_id
-            depth.height = self._virtual_camera_config.height
-            depth.width = self._virtual_camera_config.width
-            depth.encoding = "mono16"
-            depth.is_bigendian = 0
-            depth.step = self._virtual_camera_config.width * 2
-            depth.data = frame.depth_mm.tobytes()
-            self._depth_pub.publish(depth)
-
-            self._color_info_pub.publish(
-                self._camera_info_message(stamp_parts, intrinsics)
-            )
-            self._depth_info_pub.publish(
-                self._camera_info_message(stamp_parts, intrinsics)
-            )
-
-            annotations = Detection2DArray()
-            annotations.header.stamp.sec = stamp_sec
-            annotations.header.stamp.nanosec = stamp_nanosec
-            annotations.header.frame_id = self._virtual_camera_config.frame_id
-            for item in frame.annotations:
-                detection = Detection2D()
-                detection.header.stamp.sec = stamp_sec
-                detection.header.stamp.nanosec = stamp_nanosec
-                detection.header.frame_id = self._virtual_camera_config.frame_id
-                detection.class_name = item.class_name
-                detection.confidence = 1.0
-                detection.center_u = item.center_u
-                detection.center_v = item.center_v
-                detection.x_min = item.x_min
-                detection.y_min = item.y_min
-                detection.x_max = item.x_max
-                detection.y_max = item.y_max
-                detection.has_obb = False
-                detection.obb_points_xy = []
-                detection.has_mask = True
-                detection.mask_polygon_xy = list(item.mask_polygon_xy)
-                annotations.detections.append(detection)
-            self._annotation_pub.publish(annotations)
-
-        def _camera_info_message(self, stamp_parts, intrinsics):
-            message = CameraInfo()
-            message.header.stamp.sec = stamp_parts[0]
-            message.header.stamp.nanosec = stamp_parts[1]
-            message.header.frame_id = self._virtual_camera_config.frame_id
-            message.height = intrinsics.height
-            message.width = intrinsics.width
-            message.distortion_model = "plumb_bob"
-            message.d = [0.0] * 5
-            message.k = [
-                intrinsics.fx, 0.0, intrinsics.cx,
-                0.0, intrinsics.fy, intrinsics.cy,
-                0.0, 0.0, 1.0,
-            ]
-            message.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-            message.p = [
-                intrinsics.fx, 0.0, intrinsics.cx, 0.0,
-                0.0, intrinsics.fy, intrinsics.cy, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-            ]
-            return message
-
-        def _virtual_camera_ready(self, intrinsics, extrinsics) -> None:
-            transform = TransformStamped()
-            transform.header.frame_id = extrinsics.parent_frame_id
-            transform.child_frame_id = extrinsics.child_frame_id
-            transform.transform.translation.x = extrinsics.translation_xyz[0]
-            transform.transform.translation.y = extrinsics.translation_xyz[1]
-            transform.transform.translation.z = extrinsics.translation_xyz[2]
-            transform.transform.rotation.x = extrinsics.rotation_xyzw[0]
-            transform.transform.rotation.y = extrinsics.rotation_xyzw[1]
-            transform.transform.rotation.z = extrinsics.rotation_xyzw[2]
-            transform.transform.rotation.w = extrinsics.rotation_xyzw[3]
-            self._virtual_camera_tf_broadcaster.sendTransform(transform)
-            self.get_logger().info(
-                "MuJoCo virtual RGB-D renderer ready: "
-                f"fx={intrinsics.fx:.3f}, fy={intrinsics.fy:.3f}, "
-                f"cx={intrinsics.cx:.3f}, cy={intrinsics.cy:.3f}, "
-                f"tf={extrinsics.parent_frame_id}->{extrinsics.child_frame_id}"
-            )
-
-        def _virtual_camera_error(self, exc: BaseException) -> None:
-            self.get_logger().error(
-                "MuJoCo virtual camera worker failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
-
-        def _publish_diagnostics(self, stamp, state, status, contacts) -> None:
-            mode = str(_status_value(status, "mode", "unknown"))
-            targets = tuple(_status_value(status, "joint_targets", state.joint_positions[:6]))
-            if len(targets) != 6:
-                targets = tuple(state.joint_positions[:6])
-            max_error = max(
-                abs(float(target) - float(actual))
-                for target, actual in zip(targets, state.joint_positions[:6])
-            )
-            saturated_count = _bool_count(
-                _status_value(status, "saturated", _status_value(status, "saturation", False))
-            )
-            watchdog_value = _status_value(status, "watchdog_remaining_s", 0.0)
-            watchdog = 0.0 if watchdog_value is None else float(watchdog_value)
-            max_force = max((float(contact.force) for contact in contacts), default=0.0)
-            max_penetration = max(
-                (float(contact.penetration_depth) for contact in contacts), default=0.0
-            )
-            contact_anomaly = (
-                max_force > self._max_contact_force
-                or max_penetration > self._max_contact_penetration
-            )
-            level = DiagnosticStatus.WARN if saturated_count or contact_anomaly else DiagnosticStatus.OK
-            message = "contact anomaly" if contact_anomaly else (
-                "actuator saturation" if saturated_count else "simulation control healthy"
-            )
-            item = DiagnosticStatus()
-            item.level = level
-            item.name = f"{self._arm_namespace}/mujoco_control"
-            item.hardware_id = "mujoco"
-            item.message = message
-            item.values = [
-                KeyValue(key="mode", value=mode),
-                KeyValue(key="configured_rate_hz", value=f"{self._configured_rate_hz:.3f}"),
-                KeyValue(key="measured_rate_hz", value=f"{self._measured_rate_hz:.3f}"),
-                KeyValue(key="saturated_actuators", value=str(saturated_count)),
-                KeyValue(key="watchdog_remaining_s", value=f"{max(0.0, watchdog):.6f}"),
-                KeyValue(key="max_tracking_error_rad", value=f"{max_error:.6f}"),
-                KeyValue(key="contact_anomaly", value="true" if contact_anomaly else "false"),
-            ]
-            message_array = DiagnosticArray()
-            message_array.header.stamp = stamp
-            message_array.status = [item]
-            self._diagnostic_pub.publish(message_array)
 
         def destroy_node(self):
+            """释放动作服务端与仿真实例。"""
             self._action_server.destroy()
-            if self._virtual_camera_worker is not None:
-                stopped = self._virtual_camera_worker.close()
-                if not stopped:
-                    self.get_logger().error(
-                        "MuJoCo virtual camera worker did not stop within timeout"
-                    )
             self._sim_access.run(lambda sim: sim.close())
             return super().destroy_node()
 

@@ -38,7 +38,7 @@
 先启动视觉、MoveIt 和硬件支撑链。串口仍由启动命令显式指定：
 
 ```bash
-cd /home/a/project/rebot_Arm-worktrees/upstream-baseline-migration
+cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 export RMW_FASTRTPS_USE_SHM=0
@@ -53,7 +53,7 @@ ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
 确认现场安全、候选正确并取得本轮实机动作授权后，在第二个终端执行一次：
 
 ```bash
-cd /home/a/project/rebot_Arm-worktrees/upstream-baseline-migration
+cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 

@@ -1,274 +1,46 @@
+"""Compatibility CLI forwarding to the motion-owned MoveIt acceptance probe.
+
+The optional probe runs in a separate process so the physics package does not
+import MoveIt adapters or duplicate their implementation. The motion probe
+verifies the unique headless MuJoCo action owner before sending any goal.
+"""
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import subprocess
 import sys
-import time
 from typing import Sequence
 
 
-ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
-MOVEIT_ACCEPTANCE_TARGET = (0.04, -0.12, -0.12, 0.06, 0.0, 0.0)
-
-
-def _positive_float(value: str) -> float:
-    number = float(value)
-    if not math.isfinite(number) or number <= 0.0:
-        raise argparse.ArgumentTypeError("must be a positive finite number")
-    return number
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Probe a running MoveIt + MuJoCo setup without hardware"
+def run_acceptance(*, timeout: float = 30.0) -> dict:
+    timeout = float(timeout)
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("timeout must be positive and finite")
+    result = subprocess.run(
+        [sys.executable, "-m", "rebotarm_motion.mujoco_moveit_acceptance",
+         "--timeout", str(timeout)],
+        capture_output=True, text=True, timeout=8 * timeout + 10,
     )
-    parser.add_argument("--timeout", type=_positive_float, default=30.0)
-    parser.add_argument("--planning-service", default="/plan_kinematic_path")
-    parser.add_argument("--action", default="/rebotarm/follow_joint_trajectory")
-    parser.add_argument("--joint-states", default="/rebotarm/joint_states")
-    parser.add_argument("--clock", default="/clock")
-    parser.add_argument("--group", default="arm")
-    return parser
-
-
-def _wait_until(predicate, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.02)
-    return bool(predicate())
-
-
-def _wait_future(future, timeout: float) -> bool:
-    return _wait_until(lambda: future.done(), timeout)
-
-
-def _stamp_seconds(stamp) -> float:
-    return float(stamp.sec) + float(stamp.nanosec) * 1e-9
-
-
-def _build_motion_plan_request(
-    *,
-    service_type,
-    joint_names: Sequence[str],
-    target_positions: Sequence[float],
-    group_name: str,
-    start_positions: Sequence[float] | None = None,
-):
-    from moveit_msgs.msg import Constraints, JointConstraint
-    from sensor_msgs.msg import JointState
-
-    request = service_type.Request()
-    motion_request = request.motion_plan_request
-    motion_request.group_name = group_name
-    motion_request.pipeline_id = "ompl"
-    motion_request.num_planning_attempts = 3
-    motion_request.allowed_planning_time = 5.0
-    motion_request.max_velocity_scaling_factor = 0.1
-    motion_request.max_acceleration_scaling_factor = 0.1
-    if start_positions is not None:
-        start_state = JointState()
-        start_state.name = list(joint_names)
-        start_state.position = [
-            0.0 if abs(float(value)) < 1e-9 else float(value)
-            for value in start_positions
-        ]
-        motion_request.start_state.joint_state = start_state
-    motion_request.start_state.is_diff = start_positions is None
-    constraints = Constraints()
-    for name, position in zip(joint_names, target_positions):
-        joint_constraint = JointConstraint()
-        joint_constraint.joint_name = str(name)
-        joint_constraint.position = float(position)
-        joint_constraint.tolerance_above = 0.01
-        joint_constraint.tolerance_below = 0.01
-        joint_constraint.weight = 1.0
-        constraints.joint_constraints.append(joint_constraint)
-    motion_request.goal_constraints = [constraints]
-    return request
-
-
-def run_acceptance(
-    *,
-    timeout: float = 30.0,
-    planning_service: str = "/plan_kinematic_path",
-    action_name: str = "/rebotarm/follow_joint_trajectory",
-    joint_states_topic: str = "/rebotarm/joint_states",
-    clock_topic: str = "/clock",
-    group_name: str = "arm",
-) -> dict:
-    import rclpy
-    from control_msgs.action import FollowJointTrajectory
-    from moveit_msgs.srv import GetMotionPlan
-    from rclpy.action import ActionClient
-    from rclpy.executors import MultiThreadedExecutor
-    from rclpy.node import Node
-    from rosgraph_msgs.msg import Clock
-    from sensor_msgs.msg import JointState
-
-    started_here = False
-    if not rclpy.ok():
-        rclpy.init()
-        started_here = True
-
-    node = None
-    executor = None
-    try:
-        node = Node("rebotarm_mujoco_moveit_acceptance_probe")
-        executor = MultiThreadedExecutor(num_threads=2)
-        executor.add_node(node)
-        joint_messages: list[JointState] = []
-        clock_messages: list[Clock] = []
-        node.create_subscription(
-            JointState,
-            joint_states_topic,
-            lambda msg: joint_messages.append(msg),
-            10,
-        )
-        node.create_subscription(
-            Clock,
-            clock_topic,
-            lambda msg: clock_messages.append(msg),
-            10,
-        )
-        planner = node.create_client(GetMotionPlan, planning_service)
-        action = ActionClient(node, FollowJointTrajectory, action_name)
-
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and (
-            len(joint_messages) < 2 or len(clock_messages) < 2
-        ):
-            executor.spin_once(timeout_sec=0.05)
-        remaining = max(0.1, deadline - time.monotonic())
-        planning_ready = bool(planner.wait_for_service(timeout_sec=remaining))
-        remaining = max(0.1, deadline - time.monotonic())
-        action_ready = bool(action.wait_for_server(timeout_sec=remaining))
-
-        plan_success = False
-        plan_error_code = None
-        planned_points = 0
-        trajectory = None
-        if planning_ready:
-            latest_positions_by_name = {
-                name: float(position)
-                for name, position in zip(joint_messages[-1].name, joint_messages[-1].position)
-            } if joint_messages else {}
-            start_positions = tuple(
-                latest_positions_by_name.get(name, 0.0) for name in ARM_JOINT_NAMES
-            )
-            request = _build_motion_plan_request(
-                service_type=GetMotionPlan,
-                joint_names=ARM_JOINT_NAMES,
-                target_positions=MOVEIT_ACCEPTANCE_TARGET,
-                group_name=group_name,
-                start_positions=start_positions,
-            )
-            future = planner.call_async(request)
-            while not future.done() and time.monotonic() < deadline:
-                executor.spin_once(timeout_sec=0.05)
-            if future.done():
-                response = future.result()
-                plan_error_code = int(response.motion_plan_response.error_code.val)
-                trajectory = response.motion_plan_response.trajectory.joint_trajectory
-                planned_points = len(trajectory.points)
-                plan_success = plan_error_code == 1 and planned_points > 0
-
-        action_accepted = False
-        action_success = False
-        action_error_code = None
-        if action_ready and plan_success:
-            goal = FollowJointTrajectory.Goal()
-            goal.trajectory = trajectory
-            future = action.send_goal_async(goal)
-            while not future.done() and time.monotonic() < deadline:
-                executor.spin_once(timeout_sec=0.05)
-            if future.done():
-                goal_handle = future.result()
-                action_accepted = bool(goal_handle.accepted)
-                if action_accepted:
-                    result_future = goal_handle.get_result_async()
-                    while not result_future.done() and time.monotonic() < deadline:
-                        executor.spin_once(timeout_sec=0.05)
-                    if result_future.done():
-                        result = result_future.result().result
-                        action_error_code = int(result.error_code)
-                        action_success = action_error_code == int(
-                            FollowJointTrajectory.Result.SUCCESSFUL
-                        )
-
-        post_deadline = time.monotonic() + min(2.0, timeout)
-        while time.monotonic() < post_deadline:
-            executor.spin_once(timeout_sec=0.05)
-
-        clock_progress = (
-            len(clock_messages) >= 2
-            and _stamp_seconds(clock_messages[-1].clock)
-            > _stamp_seconds(clock_messages[0].clock)
-        )
-        final_joint = joint_messages[-1] if joint_messages else None
-        final_error = None
-        if final_joint is not None and len(final_joint.position) >= 6:
-            by_name = {
-                name: float(position)
-                for name, position in zip(final_joint.name, final_joint.position)
-            }
-            if all(name in by_name for name in ARM_JOINT_NAMES):
-                final_error = max(
-                    abs(by_name[name] - target)
-                    for name, target in zip(ARM_JOINT_NAMES, MOVEIT_ACCEPTANCE_TARGET)
-                )
-        ok = bool(
-            len(joint_messages) >= 2
-            and clock_progress
-            and planning_ready
-            and action_ready
-            and plan_success
-            and action_accepted
-            and action_success
-            and final_error is not None
-            and final_error <= 0.05
-        )
-        return {
-            "ok": ok,
-            "joint_state_count": len(joint_messages),
-            "clock_count": len(clock_messages),
-            "clock_progress": clock_progress,
-            "planning_service_ready": planning_ready,
-            "moveit_plan_success": plan_success,
-            "moveit_plan_error_code": plan_error_code,
-            "moveit_planned_points": planned_points,
-            "trajectory_action_ready": action_ready,
-            "trajectory_action_accepted": action_accepted,
-            "trajectory_action_success": action_success,
-            "trajectory_error_code": action_error_code,
-            "final_max_joint_error_rad": final_error,
-        }
-    finally:
-        if executor is not None:
-            executor.shutdown()
-        if node is not None:
-            node.destroy_node()
-        if started_here and rclpy.ok():
-            rclpy.shutdown()
+    if result.returncode not in (0, 2):
+        raise RuntimeError(result.stderr.strip() or "motion acceptance probe failed")
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
+        raise RuntimeError("invalid motion acceptance result")
+    if result.returncode != (0 if payload["ok"] else 2):
+        raise RuntimeError("motion acceptance exit code disagrees with result")
+    return payload
 
 
 def main(argv: Sequence[str] | None = None, *, stdout=None, stderr=None) -> int:
-    args = build_parser().parse_args(argv)
-    if stdout is None:
-        stdout = sys.stdout
-    if stderr is None:
-        stderr = sys.stderr
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--timeout", type=float, default=30.0)
+    args = parser.parse_args(argv)
+    stdout = stdout or sys.stdout
+    stderr = stderr or sys.stderr
     try:
-        payload = run_acceptance(
-            timeout=args.timeout,
-            planning_service=args.planning_service,
-            action_name=args.action,
-            joint_states_topic=args.joint_states,
-            clock_topic=args.clock,
-            group_name=args.group,
-        )
+        payload = run_acceptance(timeout=args.timeout)
     except Exception as exc:
         print(f"error: {type(exc).__name__}: {exc}", file=stderr)
         return 1

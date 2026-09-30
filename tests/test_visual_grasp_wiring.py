@@ -433,7 +433,7 @@ def test_visual_grasp_benchmark_returns_ready_between_attempts():
 def test_hybrid_grasp_sim_benchmark_waits_for_fresh_filtered_plan_before_execute():
     scripts = _console_scripts("src/rebotarm_vision/setup.py")
     benchmark_text = _read("src/rebotarm_vision/rebotarm_vision/hybrid_grasp_sim_benchmark.py")
-    doc_text = _read("docs/visual_grasp_commands.md")
+    doc_text = _read("docs/reference/commands/visual_grasp_commands.md")
 
     assert "rebotarm_hybrid_grasp_sim_benchmark" in scripts
     assert 'self.create_subscription(GraspPlan, self._plan_topic, self._on_plan, 10)' in benchmark_text
@@ -453,7 +453,7 @@ def test_hybrid_grasp_sim_benchmark_waits_for_fresh_filtered_plan_before_execute
 
 
 def test_visual_grasp_commands_document_strict_stability_test():
-    doc_text = _read("docs/visual_grasp_commands.md")
+    doc_text = _read("docs/reference/commands/visual_grasp_commands.md")
     readme_text = _read("src/rebotarm_vision/README_zh.md")
 
     assert "rebotarm_visual_grasp_benchmark" in doc_text
@@ -1339,9 +1339,14 @@ def test_moveit_ompl_uses_ruckig_response_adapter_with_jerk_limits():
     joint_limits_text = _read("src/rebotarm_moveit_config/config/joint_limits.yaml")
     assert "default_planning_response_adapters/AddTimeOptimalParameterization" in ompl_text
     assert "default_planning_response_adapters/AddRuckigTrajectorySmoothing" in ompl_text
-    assert ompl_text.index("default_planning_response_adapters/AddRuckigTrajectorySmoothing") < ompl_text.index(
-        "default_planning_response_adapters/AddTimeOptimalParameterization"
-    )
+    import yaml
+    adapters = yaml.safe_load(ompl_text)["response_adapters"]
+    assert adapters == [
+        "default_planning_response_adapters/AddTimeOptimalParameterization",
+        "default_planning_response_adapters/AddRuckigTrajectorySmoothing",
+        "default_planning_response_adapters/ValidateSolution",
+        "default_planning_response_adapters/DisplayMotionPath",
+    ]
     assert "has_jerk_limits: true" in joint_limits_text
     assert "max_jerk: 20.0" in joint_limits_text
 

@@ -118,7 +118,7 @@ def test_vision_packaging_allows_missing_runtime_models(tmp_path, monkeypatch, m
 
 def test_install_docs_use_pinned_sdk_and_explicit_runtime_interpreters():
     readme = _read("README_zh.md")
-    vision = _read("docs/ubuntu_vision_setup_zh.md")
+    vision = _read("docs/setup/ubuntu_vision_setup_zh.md")
     simulation = _read("src/rebotarm_simulation/README_mujoco.md")
     assert "vcs import third_party < rebotarm_dependencies.repos" in readme
     assert "~/seeed/rebotarm_ros2" not in readme

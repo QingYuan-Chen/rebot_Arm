@@ -1,9 +1,16 @@
 # reBotArm 项目实施完成度
 
-> Source of truth / 完成度来源：本文件的已验证验收清单；P0-P6 已按用户确认的工程范围关闭。
+> 本文件主要保留 P0-P6 的历史验收清单；这些阶段已按用户确认的工程范围关闭，不代表当前 RL 任务或实时硬件状态。
 > 根目录两份旧规划已清理，历史内容可从 Git 追溯；新规划由用户另行提出。
 > 基线日期：2026-08-06
 > 说明：这里衡量的是有验收证据的实施完成度，不是代码量、文档完成度或主观进度。
+
+## 当前阶段（2026-09-28）
+
+- 当前主线是纯仿真的 MuJoCo/Gymnasium Reach 与后续 sim-to-real 接口规划。
+- Reach 软件环境、Gymnasium/SB3 检查和 GPU PPO 训练链路已完成基线验证；当前策略尚未稳定收敛。
+- 当前不授权真实机械臂或夹爪动作；P0-P6 只作为已关闭历史基线保存。
+- 当前源码中的真机视觉 `tcp_offset_xyz` 为 `[-0.04, 0.0, 0.0] m`；旧 `-0.105 m` 仅为历史 upstream nominal 值，不能写成当前实测 TCP。
 
 ## 计分规则
 
@@ -81,7 +88,7 @@ P2 已按用户 acceptance decision 以 `8/8` 关闭：当前 Ubuntu 已完成�
 - [x] 已有 hand-eye 配置加载与 TF 发布机制，但数据仅视为历史配置。
 - [x] 验证 SDK 相机内参、distortion、RGB-depth extrinsics、depth scale 和不同 profile；复用 P2 的同一 serial Gemini 2 硬件证据，不代表重新标定。证据：`Agent/evidence/P2/2026-08-07-gemini2-sdk-ros-acceptance.md`。
 - [x] 对当前实际安装完成 hand-eye 多姿态稳定性验收；SUBPIX DANIILIDIS candidate 部署后，三个全新 temporal holdouts 相对固定 training reference 的 position/rotation RMS为 `2.495 mm/0.359 deg`，rotation span `38.792 deg`，全部既定门通过。证据：`Agent/evidence/P5/2026-08-09-handeye-postdeploy-holdout-final.{md,json}`。
-- [x] 接受 upstream explicit nominal TCP / 上游显式标称工具中心点：`end_link -> grasp_tcp = [-0.105, 0.0, 0.0] m`。用户已明确取消实物 classic pivot calibration / 经典枢轴标定要求并确认以该值完成工程验收；这不表述为实机 TCP 标定通过。
+- [x] 历史阶段曾接受 upstream explicit nominal TCP `[-0.105, 0.0, 0.0] m` 作为工程口径；当前 active local source 已改为 `tcp_offset_xyz=[-0.04, 0.0, 0.0] m`，且没有新增 physical TCP measurement。旧值仅保留作历史 provenance，不表述为当前实测 TCP。
 - [x] 完成 MuJoCo 关节轴、零位、link、mesh、夹爪和场景几何验收。Robot body geometry / 机器人本体几何由active/upstream/CAD文件一致性及用户对当前装机revision、六轴zero convention和夹爪CAD结构参数的权威确认闭环；`scene.xml`按用户工程接受保留为canonical simulation workbench / 规范仿真工作台，不要求拟合真实工作场景，也不得当作真实场景标定证据。
 - [x] 接受 active upstream MuJoCo dynamics / 当前上游动力学参数为经过实机标定的权威基线。该 provenance / 来源由用户（硬件来源方）明确确认；仓库未保存原始标定数据，因此不表述为本轮独立重做标定。废弃的 downstream/current baseline 未经电机标定，不参与当前验收。active model 的 joint2 margin 与 joint4-6 `7 N.m` 仅是本地安全约束，不取代或否定上游动力学标定。
 

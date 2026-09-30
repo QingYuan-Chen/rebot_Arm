@@ -91,9 +91,9 @@ TCP/手眼采样失败只返回结构化错误并保留已持久化状态，不�
 软件回归主要位于 `tests/test_handeye_*.py`、`tests/test_calibration_*.py` 和
 `tests/test_tcp_*.py`。网页操作、安全顺序、真实相机预检和现场验收边界见：
 
-- [网页操作说明](../../docs/calibration_web_usage.md)
-- [软件验收清单](../../docs/calibration_acceptance.md)
-- [技术路线归档](../../docs/calibration_web_plan.md)
+- [网页操作命令参考](../../docs/reference/commands/calibration_web.md)
+- [软件验收清单](../../docs/implemented/features/calibration_acceptance.md)
+- [技术路线与后续缺口](../../docs/design/calibration_web_plan.md)
 
 软件测试或 MuJoCo 结果不等于真实相机、重力补偿、末端方向或物理精度验收；部署前必须
 进行独立多轴留出验证和现场测量。

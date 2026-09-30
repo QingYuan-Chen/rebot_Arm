@@ -16,14 +16,3 @@ rebotarm_mujoco_node:
     diagnostic_rate_hz: 1.0
     max_contact_force_n: 200.0
     max_contact_penetration_m: 0.005
-    # Offscreen sensing is opt-in so motion-only simulation does not require EGL.
-    virtual_camera.enabled: false
-    virtual_camera.camera_name: fixed_camera
-    virtual_camera.frame_id: mujoco_fixed_camera_optical_frame
-    virtual_camera.parent_body_name: base_link
-    virtual_camera.parent_frame_id: base_link
-    virtual_camera.width: 640
-    virtual_camera.height: 480
-    virtual_camera.rate_hz: 15.0
-    virtual_camera.max_depth_m: 2.0
-    virtual_camera.annotation_bodies: [test_cube]

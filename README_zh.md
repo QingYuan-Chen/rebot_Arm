@@ -16,7 +16,7 @@
 ## 项目介绍
 
 当前源码版本以 Git 提交为准。项目总览见 [README.md](README.md)，
-最新操作入口见 [功能操作手册](docs/rebotarm_feature_commands.md)。
+最新操作入口见 [功能命令参考](docs/reference/commands/rebotarm_feature_commands.md)。
 启动文件的分层、包含关系和功能边界见
 [启动结构与功能](src/rebotarm_bringup/launch/README.md)。
 
@@ -97,7 +97,7 @@ source tools/source_local_environment.bash
 ## 配置开发环境
 
 当前仓库的本机安装、硬件配置和视觉地址覆盖方式见
-[`docs/local_setup_zh.md`](docs/local_setup_zh.md)。
+[`docs/setup/ubuntu_ros2_jazzy.md`](docs/setup/ubuntu_ros2_jazzy.md)。
 
 ### Step 1. 安装 ROS2 依赖
 
@@ -124,7 +124,7 @@ python3 tools/setup_motorbridge_fresh_feedback.py --check-installed
 
 `--build-only` 只在临时 venv 验证 wheel，不修改用户 Python；
 `--check-installed` 不联网、不构建且不访问硬件。详细构建、检查和回退说明见
-[`docs/local_setup_zh.md`](docs/local_setup_zh.md)。
+[`docs/setup/ubuntu_ros2_jazzy.md`](docs/setup/ubuntu_ros2_jazzy.md)。
 
 ### Step 3. 获取底层 SDK
 
@@ -158,7 +158,7 @@ source install/setup.bash
 
 构建不要求视觉模型或GPU，现有模型可选打包；启用检测时必须提供实际模型路径。
 视觉、GraspNet和MuJoCo使用各自的运行解释器，不通过切换构建解释器选择环境。
-系统依赖、安装顺序及运行参数以 [本机安装说明](docs/local_setup_zh.md) 为准。
+系统依赖、安装顺序及运行参数以 [本机安装说明](docs/setup/ubuntu_ros2_jazzy.md) 为准。
 
 验证包和入口：
 
@@ -203,7 +203,7 @@ rebot_Arm/
 启动控制节点、`robot_state_publisher`，可选RViz；不包含网页或视觉。
 该入口会连接真机，使用前确认本轮授权和串口归属。
 完整网页遥操作入口为`rebotarm_app.launch.py`，见
-[功能手册](docs/rebotarm_feature_commands.md)。
+[功能命令参考](docs/reference/commands/rebotarm_feature_commands.md)。
 
 ```bash
 ros2 launch rebotarm_bringup bringup.launch.py

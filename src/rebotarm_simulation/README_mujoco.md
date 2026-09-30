@@ -1,9 +1,9 @@
 # reBotArm MuJoCo 仿真底座
 
 当前项目基线是 [`huangbinai/robotarm_ros2`](https://github.com/huangbinai/robotarm_ros2)
-`main@1749e3ab9db29d4998f860efb91cf2558b1a73e2`。本包在该新基线上选择性整合
+`main@19f2939e27c52e07f73e7ff1ab8f723c01852ce0`。本包在该新基线上选择性整合
 Viewer、Reach/Pick、Sim2Real、Real2Sim、诊断与批量验收能力，同时保留上游的
-包结构、启动组合、MoveIt 权威 URDF、虚拟 RGB-D 相机及安全限制。
+包结构、启动组合、MoveIt 权威 URDF及安全限制；虚拟 RGB-D 发布已随上游退役。
 
 实机状态驱动 MuJoCo 的只读 Real2Sim Bridge、mirror/physics 模式和 Viewer 使用方法见
 [`../../docs/real2sim_bridge_zh.md`](../../docs/real2sim_bridge_zh.md)。
@@ -17,18 +17,39 @@ Sim2Real/Real2Sim 的仿真侧随机化、JSONL 记录、确定性回放、轨�
 
 本目录提供可独立使用的 MuJoCo 物理仿真核心、桌面 Viewer 和 ROS 2
 适配层。已验证的目标环境是 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。
-本阶段尚未开始强化学习训练；已提供轻量 Gym 风格 Reach API 和 headless 批量
-rollout 入口，供后续云端训练/本地推理验证复用。当前环境不依赖 Gymnasium，
-奖励函数只覆盖 Reach 验证任务，不代表 Pick/精细抓取训练已经完成。
+已提供基于现有物理核心的 Gymnasium 末端位姿 Reach 环境与 GPU PPO 训练入口。
+克隆后配置、环境契约和验证步骤见 [强化学习命令参考](../../docs/reference/commands/mujoco_rl.md)。
 
 ## 安装与构建
 
-在 Ubuntu VM 的工作区根目录执行。先 source ROS，确保虚拟环境能看到 Jazzy
-的 `rclpy`；`--system-site-packages` 是必需的。colcon 当前需要兼容版本的
-setuptools，因此限定为 `setuptools>=68,<80`。
+ROS launch 的解释器可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYTHON`
+环境变量指定；未设置时，MuJoCo launch 默认使用仓库中的
+`third_party/rebotarm_mujoco_venv/bin/python`，避免误用不含 `mujoco` 的系统
+`python3`。从其他工作目录启动时请传绝对路径或设置环境变量。
+混合视觉入口的配置见 [启动解释器说明](../../docs/setup/launch_python_configuration.md)。
+
+`mujoco_moveit_sim.launch.py` 默认同时打开原生 MuJoCo viewer，便于桌面联调
+观察物理模型；ROS 适配节点仍是独立的 headless 节点，负责 ROS action 和状态
+发布。关闭 viewer 可传 `use_mujoco_viewer:=false`，适用于无图形界面或 CI。
+
+日常桌面联调可直接使用专用入口：
 
 ```bash
-cd /home/a/project/rebot_Arm-worktrees/upstream-baseline-migration
+ros2 launch rebotarm_simulation mujoco_rviz_viewer.launch.py
+```
+
+服务器、CI 或只做后台物理测试使用：
+
+```bash
+ros2 launch rebotarm_simulation mujoco_headless.launch.py
+```
+
+在当前工作区根目录、未激活venv的新终端执行。系统依赖按
+[安装说明](../../docs/setup/ubuntu_ros2_jazzy.md)准备；源码统一由系统Python构建，
+MuJoCo虚拟环境只用于运行，不需要相机、视觉权重或历史上游副本。
+
+```bash
+cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
 third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements-mujoco.txt
@@ -120,7 +141,7 @@ rebotarm_mujoco_acceptance --skip-renderer --include-ros --timeout 30
 ```
 
 MoveIt 联动验收需要先按下文启动 MuJoCo 后端和 MoveIt，再单独运行
-`rebotarm_mujoco_moveit_acceptance --timeout 30`，或对总验收追加 `--include-moveit`。
+`rebotarm_mujoco_moveit_acceptance --timeout 30`，（入口归属 `rebotarm_motion`），或对总验收追加 `--include-moveit`，由兼容入口转发至同一运动包实现。
 
 ## 桌面 Viewer
 
@@ -384,18 +405,10 @@ MuJoCo 的质量、阻尼、摩擦和 arm torque scale。日志格式不依赖 R
 或 sim-to-real 精度标定。
 
 后续架构是云服务器运行无界面 MuJoCo 并行训练，本地 Ubuntu VM 做模型验证、
-ROS 2 联调和策略推理。现在只提供可复用物理/API 底座和 Reach rollout 验证，
-不宣称已经有可用策略或训练收敛结果。
+ROS 2 联调和策略推理。现已提供本地 GPU Reach 训练基线；云端并行训练尚未验证。
 
 模型在 `end_link` 下提供命名坐标系 `wrist_camera_mount`，作为后续手眼/末端 RGB-D
-相机的稳定安装基准。当前阶段只定义安装位，不绑定具体相机型号、内参或渲染传感器。
-
-## 双端同步规则
-
-Windows 仓库是受版本控制的主副本，Ubuntu VM 是构建与运行环境。每次同步前
-先备份 VM 上将被覆盖的明确文件；只传输本次文件清单，传后比较 SHA-256 哈希。
-禁止使用带 `--delete` 的目录镜像，也不反向同步 `third_party/rebotarm_mujoco_venv`、
-`build/`、`install/`、`log/` 或缓存。
+相机的稳定安装基准。上游新增 Gemini 2/支架仿真负载（含质量、惯量与网格），不表示实机内参或手眼标定已验证。
 
 ## 排障
 
@@ -456,3 +469,12 @@ sha256sum src/rebotarm_simulation/models/rebotarm/robot.xml
 
 生成、检查和运行均不连接实机，不探测 CAN、串口或机械臂控制器；ROS 2 联调继续明确
 使用 `use_hardware:=false`。
+
+## 本地合并兼容说明
+
+默认 `scene.xml` 保留 cube 接触/Pick 与 Viewer 拖拽目标；瓶体随机化使用
+`scene_bottle.xml`，上游 Gymnasium/MJX Reach 使用独立无碰撞 `reach_scene.xml`。
+三类场景共享本轮更新的 `robot.xml` 和 Gemini 2 仿真负载。旧虚拟 RGB-D
+发布流程已退役。MoveIt 仿真验收统一由 `rebotarm_motion` 实现。
+
+本地软件回归不代表 GPU PPO/MJX 训练质量或实机验收。

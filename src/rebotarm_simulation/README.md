@@ -1,6 +1,12 @@
 # rebotarm_simulation
 
-MuJoCo 离线物理与 ROS 2 仿真后端包。它提供模型、物理步进、仿真控制器、虚拟相机、Viewer 和离线指标；不导入真实电机 SDK，不启动 `rebotarmcontroller`，也不依赖 `rebotarm_motion` 的实现。详细安装与运行说明见 [`README_mujoco.md`](README_mujoco.md)。
+MuJoCo 离线物理与 ROS 2 仿真后端包。它提供模型、物理步进、仿真控制器、Viewer 和离线指标；不导入真实电机 SDK，不启动 `rebotarmcontroller`，也不依赖 `rebotarm_motion` 的实现。详细安装与运行说明见 [`README_mujoco.md`](README_mujoco.md)。
+
+选择 `models/rebotarm/scene_bottle.xml` 后可用 `RebotArmMujoco.randomize_bottle_pose(seed=...)` 做可复现的位姿变化；
+`save_state` / `restore_state` 可回放同一仿真状态。接触快照包含力、法向与穿透深度，
+ROS 节点在 `/diagnostics` 发布仿真控制与接触告警。
+
+示教轨迹的独立 MuJoCo 预演见 [操作说明](../../docs/reference/commands/mujoco_teach_preview.md)。
 
 ## 目录结构
 
@@ -12,7 +18,6 @@ rebotarm_simulation/
 │   ├── mujoco_adapter_core.py       # ROS/仿真状态适配公共逻辑
 │   ├── mujoco_ros_node.py           # ROS 2 MuJoCo 状态、服务和轨迹 Action
 │   ├── sim_trajectory_controller_node.py # 轻量仿真 FollowJointTrajectory 服务端
-│   ├── virtual_camera.py             # MuJoCo 虚拟 RGB-D/CameraInfo 发布
 │   ├── sim_gripper.py                # 仿真夹爪状态与开口控制
 │   ├── motor_control.py              # 仿真关节/执行器控制
 │   ├── trajectory_sampler.py         # 轨迹采样

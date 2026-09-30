@@ -1,0 +1,35 @@
+# Old bracket: inner CAD mounting plane z=-16.9 mm mates to end X=-103.20933 mm.
+# CAD screw centers x=[-11.2079069,10.7920931], y=29.9992413 mm
+# map to end Y=[-11,11], Z=30 mm. This is model registration, not hand-eye calibration.
+enabled: true
+parent_body: end_link
+mount_position_m:
+- -0.08630933
+- 0.0002079068932795
+- 7.587263523e-07
+mount_quaternion_wxyz:
+- 0.5
+- 0.5
+- 0.5
+- 0.5
+camera_center_in_mount_m:
+- -4.0854564880999505e-05
+- 0.05702588478169489
+- 0.0017163083214418572
+camera_quaternion_wxyz:
+- -0.560984851944991
+- 0.43046021405962304
+- 0.43046021405962304
+- 0.560984851944991
+camera_mass_kg: 0.098
+camera_size_depth_width_height_m:
+- 0.03
+- 0.09
+- 0.025
+camera_mesh_center_m:
+- 0.0050999983213841915
+- -5.496665835380554e-06
+- 0.01249999776473487
+# User-measured printed bracket: 22 g; CAD COM/inertia distribution remains estimated.
+mount_part_masses_kg:
+- 0.022

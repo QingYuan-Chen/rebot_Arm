@@ -4,6 +4,10 @@
 
 ## 当前焦点
 
+- 2026-09-30：按用户授权在当前主目录整合上游 `main@19f2939`（10 个新提交）。已备份原 HEAD 到 `codex/pre-upstream-20260930`，合并前未提交的 Agent 状态已完整保留。保留本地 Viewer、Reach/Pick、Real2Sim/Sim2Real、单瓶抓取和受控回基线恢复；采用上游 Gemini 2 仿真负载、离线示教预演、Gymnasium/MJX Reach 和新文档布局。虚拟 RGB-D 发布随上游退役；MoveIt 仿真验收由运动包统一实现，仿真旧 Python 入口仅作进程转发。软件验证完成：完整测试 1164 passed/15 skipped（隔离域 119），分层 18 passed，required compileall 和 11 包 symlink-install 构建通过；两个 launch 参数检查、EGL health、Pick 1 回合/10 步安全检查通过。修复示教预演选择瓶体场景及 Gemini 2 负载资源的安装路径解析；新增负载后模型/Viewer/仿真规格测试已适配。单瓶抓取、失败恢复和硬件控制器源码与合并前相同。MuJoCo venv 新增 Gymnasium 1.2.3，GPU 训练依赖未安装、未验证策略收敛。上游训练和硬件历史不作为本地新验收，本轮不推送或操作实机。备份分支为 `codex/pre-upstream-20260930`，合并前未提交记录另保留在命名 stash 和 `/tmp/rebotarm-pre-upstream-20260930-wx_6pnsv`。
+
+- 2026-09-30：实时核对上游 `huangbinai/robotarm_ros2`：默认分支及最新分支仍为 `main`，HEAD 已从合并基线 `1749e3a` 前进到 `19f2939e27c52e07f73e7ff1ab8f723c01852ce0`（北京时间 2026-09-29 17:08:02）；GitHub compare 为 ahead 10/behind 0、121 个变更文件。主要新增 MuJoCo 工作流和腕部 Gemini 2 负载模型、MJX Reach 训练与评估；清理未使用的虚拟视觉/原型流程并重组文档。主目录仍为 `codex/upstream-baseline-integrated@c573636`，此前检查仅查询远端；现已进入用户授权的本地合并。
+
 - 2026-09-23：按用户要求完成主目录同级衍生目录清理，现在仅保留 `/home/a/project/rebot_Arm` 与从当前整合分支全新克隆的干净参考副本 `/home/a/project/rebot_refer`。已移入系统回收站的旧目录包括 `rebot_Arm-retired-src-before-upstream-baseline-20260923`、`rebot_Arm-worktrees`、旧 `rebot_refer` 和 `rebot_refer-backup-20260813-0130`；不是永久删除。移除 worktree 前已将 `codex/gripper-unified-bus-fix@6fc58e8` 推送远端，其他迁移/快照分支也保留在主仓库与远端；Git worktree 注册已收敛为主目录一个。新 refer 的 origin 为 `QingYuan-Chen/robot_Arm`，检出 `codex/upstream-baseline-integrated`，不包含 build/install/venv/模型缓存。本轮未操作实机。
 
 - 2026-09-23：已将 `codex/upstream-baseline-migration@3a25206` 以双父合并方式落到主目录分支 `codex/upstream-baseline-integrated`，最终源码文件树以上游迁移分支为准；合并前主目录完整状态保存在远端 `codex/main-before-upstream-20260923@dfb9494`。主目录旧 `build/install/log` 已分别改名为 `*_before_upstream_baseline_20260923`，并按当前 11 包结构全新 symlink-install 构建；退役的 interactive-control/voice 残留缓存及两个被忽略的旧测试移至仓库外可恢复备份。与迁移工作树一致的 125 个测试文件完成标准回归 1145 passed/14 skipped（隔离 ROS 域 119），分层 18 passed，compileall、两个 launch `--show-args`、EGL health 和退役包安装缺失检查通过。未连接串口或实机；自动测试不构成新基线实机验收。

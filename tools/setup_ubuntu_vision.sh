@@ -39,7 +39,7 @@ PY
 
 echo
 echo "Environment ready."
-echo "Build the ROS workspace separately with system Python; see docs/local_setup_zh.md."
+echo "Build the ROS workspace separately with system Python; see docs/setup/ubuntu_ros2_jazzy.md."
 echo "No models are downloaded or exported. Select a model using yolo_model_path."
 echo "Install the Orbbec udev rule once after connecting the camera:"
 echo "  ${repo_root}/tools/install_orbbec_udev_rules.sh"

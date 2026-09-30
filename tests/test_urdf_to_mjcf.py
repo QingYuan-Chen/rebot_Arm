@@ -60,6 +60,7 @@ def test_generated_model_preserves_named_bodies_and_joint_interface() -> None:
     assert body_names == {
         "base_link", "link1", "link2", "link3", "link4", "link5", "link6",
         "end_link", "left_finger_link", "right_finger_link",
+        "gemini2_camera", "gemini2_mount", "gemini2_mount_part0",
     }
     assert joint_names == {
         "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
@@ -84,9 +85,11 @@ def test_generated_model_preserves_mesh_visuals_and_uses_hybrid_collisions() -> 
     expected_meshes = {
         "base_link", "link1", "link2", "link3", "link4", "link5", "link6",
         "gripper_base", "left_finger", "right_finger",
+        "gemini2_shell", "gemini2_mount_part0",
     }
     visuals = root.findall('.//geom[@class="visual"]')
-    collisions = root.findall('.//geom[@class="collision"]')
+    collisions = [geom for geom in root.findall('.//geom[@class="collision"]')
+                  if not geom.attrib.get("name", "").startswith("gemini2_")]
 
     assert {geom.attrib["mesh"] for geom in visuals} == expected_meshes
     assert {geom.attrib["mesh"] for geom in collisions if geom.attrib["type"] == "mesh"} == {
@@ -96,8 +99,9 @@ def test_generated_model_preserves_mesh_visuals_and_uses_hybrid_collisions() -> 
         "box", "capsule", "cylinder", "mesh",
     }
     assert len(collisions) == 10
-    assert all(geom.attrib.get("contype") == "0" for geom in visuals)
-    assert all(geom.attrib.get("conaffinity") == "0" for geom in visuals)
+    visual_defaults = root.find('default/default[@class="visual"]/geom')
+    assert all(geom.attrib.get("contype", visual_defaults.attrib["contype"]) == "0" for geom in visuals)
+    assert all(geom.attrib.get("conaffinity", visual_defaults.attrib["conaffinity"]) == "0" for geom in visuals)
     assert all(geom.attrib.get("contype") == "1" for geom in collisions)
     assert all(geom.attrib.get("conaffinity") == "1" for geom in collisions)
     assert all("rgba" not in geom.attrib for geom in collisions)
@@ -118,8 +122,8 @@ def test_generated_model_adds_mujoco_control_and_observation_contract() -> None:
     ]
     assert all(actuator.attrib["ctrllimited"] == "true" for actuator in actuators)
     assert all(actuator.attrib["forcelimited"] == "true" for actuator in actuators)
-    assert actuators[-2].attrib["ctrlrange"] == "-20.0 20.0"
-    assert actuators[-1].attrib["forcerange"] == "-20.0 20.0"
+    assert actuators[-2].attrib["ctrlrange"] == "-1.5 1.5"
+    assert actuators[-1].attrib["forcerange"] == "-1.5 1.5"
     dynamics = {joint.attrib["name"]: joint for joint in root.findall("worldbody//joint")}
     assert dynamics["joint1"].attrib["damping"] == "10"
     assert dynamics["joint4"].attrib["damping"] == "3"

@@ -39,8 +39,10 @@
   <exec_depend>python3-yaml</exec_depend>
   <!-- rclpy：客户端库（节点、参数、话题订阅、动作客户端、执行器）。 -->
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
   <!-- rebotarm_msgs：本仓库自定义的服务/消息接口（例如位姿执行服务）。 -->
   <exec_depend>rebotarm_msgs</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
   <!-- sensor_msgs：关节状态等传感器消息。 -->
   <exec_depend>sensor_msgs</exec_depend>
   <!-- shape_msgs：碰撞检测用的几何实体形状（实体基元）。 -->

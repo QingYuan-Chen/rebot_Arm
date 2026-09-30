@@ -25,6 +25,7 @@ setup(
         # 控制台入口：安装后可执行文件名 -> 模块:入口函数。
         # TeachRecorderNode：示教录制节点（重力补偿示教，写 JSONL 记录）。
         "console_scripts": [
+            "rebotarm_mujoco_teach_preview = rebotarm_teach.mujoco_preview:main",
             "TeachRecorderNode = rebotarm_teach.teach_recorder_node:main",
         ],
     },

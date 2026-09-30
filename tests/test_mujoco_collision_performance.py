@@ -150,7 +150,8 @@ def test_arm_collision_contract_avoids_high_triangle_mesh_geoms() -> None:
     import xml.etree.ElementTree as ET
 
     robot = ET.parse(ROBOT_PATH).getroot()
-    collisions = robot.findall('.//geom[@class="collision"]')
+    collisions = [geom for geom in robot.findall('.//geom[@class="collision"]')
+                  if not geom.attrib.get("name", "").startswith("gemini2_")]
     mesh_collisions = [geom for geom in collisions if geom.attrib.get("type") == "mesh"]
 
     assert len(collisions) == 10

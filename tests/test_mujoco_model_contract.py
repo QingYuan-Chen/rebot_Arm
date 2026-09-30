@@ -148,6 +148,7 @@ def test_robot_model_uses_original_meshes_for_visuals_and_hybrid_collisions() ->
     expected_assets = {
         "base_link", "link1", "link2", "link3", "link4", "link5", "link6",
         "gripper_base", "left_finger", "right_finger",
+        "gemini2_shell", "gemini2_mount_part0",
     }
     assert set(assets) == expected_assets
     for mesh in assets.values():
@@ -155,7 +156,8 @@ def test_robot_model_uses_original_meshes_for_visuals_and_hybrid_collisions() ->
         assert path.is_file()
 
     visual_geoms = robot.findall('.//geom[@class="visual"]')
-    collision_geoms = robot.findall('.//geom[@class="collision"]')
+    collision_geoms = [geom for geom in robot.findall('.//geom[@class="collision"]')
+                       if not geom.attrib.get("name", "").startswith("gemini2_")]
     assert {geom.attrib["mesh"] for geom in visual_geoms} == expected_assets
     assert collision_geoms
     assert {geom.attrib["mesh"] for geom in collision_geoms if geom.attrib["type"] == "mesh"} == {
@@ -242,7 +244,7 @@ def test_torque_actuator_force_limits_match_urdf_effort_limits() -> None:
     assert set(actuators) == set(JOINTS)
     for joint_name, effort in efforts.items():
         actuator = actuators[joint_name]
-        expected_effort = 20.0 if joint_name in FINGER_JOINTS else effort
+        expected_effort = 1.5 if joint_name in FINGER_JOINTS else effort
         assert actuator.attrib["forcelimited"] == "true"
         assert _numbers(actuator.attrib["forcerange"]) == pytest.approx((-expected_effort, expected_effort))
         assert actuator.attrib["ctrllimited"] == "true"

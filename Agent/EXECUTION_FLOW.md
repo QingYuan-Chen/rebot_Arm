@@ -2,6 +2,15 @@
 
 ## 当前执行队列
 
+> 更新时间：2026-09-30。当前只执行本地上游整合和软件验证。
+
+1. [已完成] 保留合并前 HEAD 和未提交 Agent 状态，拉取上游 main@19f2939 并解决接口冲突。
+2. [已完成] 验证本地扩展与新增负载/离线示教/Gymnasium Reach 的兼容性，适配新文档路径。
+3. [已完成] 完整回归 1164 passed/15 skipped，分层 18 passed、编译、11 包构建和 MuJoCo 物理/EGL 检查。
+4. [安全边界] 不启动真实控制器、不访问串口，不推送远端；GPU 训练质量和实机另行验收。
+
+## 历史执行队列（已封存）
+
 1. [已完成] P1：upstream-only 收尾；active `rebotarm_simulation` 只安装/启动 package-owned upstream MuJoCo node，current 实现仅留归档，不再是可选 backend。完整测试、MuJoCo 专项、构建、Viewer smoke 和 ROS action 验收通过；证据：`Agent/evidence/P1/2026-08-07-p1-upstream-only-closeout.md`。
 2. [已完成] P2：同一 serial Gemini 2 的设备/profile/calibration metadata/depth scale、连续 RGB-D、ROS 双 CameraInfo/timestamp、gross alignment 和两分钟 short soak 已形成当前硬件证据；用户接受沿用既有 calibration 并豁免重复 pixel-level/多距离 ground-truth，P2 以 8/8 关闭。证据：`Agent/evidence/P2/2026-08-07-p2-closeout-accepted-calibration.md`。
 3. [已完成] P3：接入显式 `vision_profile:=ubuntu_native`，native camera-only/main bringup 运行并发布 RGB/depth/双 CameraInfo/detections/annotated/tf_static；native path 不依赖 Windows；非法 profile fail closed。证据：`Agent/evidence/P3/2026-08-07-ubuntu-native-preflight.md`。
@@ -104,7 +113,7 @@
 
 ## 每次任务开始
 
-1. 阅读 `AGENTS.md`、`docs/architecture.md` 和 `CONTEXT.md`；
+1. 阅读 `AGENTS.md`、`docs/implemented/architecture.md` 和 `CONTEXT.md`；
 2. 阅读 `Agent/MEMORY.md`、`Agent/PROJECT_STATUS.md` 和 `Agent/STATE.json`；
 3. 检查 Git 分支、工作区已有修改和当前阻塞；
 4. 确认任务属于哪个 P 阶段和 package owner；

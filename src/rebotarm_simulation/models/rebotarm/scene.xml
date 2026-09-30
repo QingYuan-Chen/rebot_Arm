@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 桌面工作台标准场景：机器人 + 桌子 + 供本地接触/Pick 验证的方块。
+     机器人本体由同目录的 robot.xml 提供，本文件只负责环境、光照与初始关键帧。
+     单位：长度 m、角度 rad。 -->
 <mujoco model="rebotarm_tabletop_scene">
   <include file="robot.xml"/>
   <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>
+  <!-- 自由相机与被动物体自动取景的统计中心（工作台附近）与范围（m）。
+       只影响 MuJoCo 查看器的默认视角，不影响物理。 -->
   <statistic center="0.15 0 0.18" extent="0.8"/>
   <visual>
     <headlight ambient="0.25 0.25 0.25" diffuse="0.65 0.65 0.65" specular="0.15 0.15 0.15"/>

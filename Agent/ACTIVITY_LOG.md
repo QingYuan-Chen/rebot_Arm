@@ -871,3 +871,201 @@
 - 2026-09-23T05:13:31+08:00 | actor=codex | event=start | note=清理主目录同级衍生目录并从当前主目录重建 rebot_refer | verification=-
 - 2026-09-23T05:15:02+08:00 | actor=codex | event=complete | note=清理主目录同级衍生目录并保留远端分支，准备重建唯一 rebot_refer | verification=old sibling directories moved to system trash; gripper branch 6fc58e8 pushed; only main worktree registered; no hardware
 - 2026-09-23T05:16:05+08:00 | actor=codex | event=verified | note=完成唯一 rebot_refer 的干净克隆并核对主目录与参考副本提交一致 | verification=main and refer cloned from origin codex/upstream-baseline-integrated; sibling directories only rebot_Arm and rebot_refer; no hardware
+- 2026-09-23T05:32:19+08:00 | actor=codex | event=start | note=审计当前仓库相对上游 main 基线的新增功能与主要修改 | verification=-
+- 2026-09-23T05:34:52+08:00 | actor=codex | event=verified | note=完成当前仓库相对上游 main 基线的功能增量审计 | verification=117 files differ: 77 added, 40 modified; changes concentrated in simulation, vision, motion and tests; rebotarmcontroller unchanged; no hardware
+- 2026-09-30T13:54:30+08:00 | actor=codex | event=start | note=核对上游 robotarm_ros2 是否有新提交 | verification=-
+- 2026-09-30T13:56:43+08:00 | actor=codex | event=verified | note=确认上游 main 有 10 个新增提交，最新 19f2939，尚未拉取或合并 | verification=live ls-remote and GitHub compare: main 19f2939, ahead 10, behind 0, 121 changed files; latest commit 2026-09-29 17:08:02 Asia/Shanghai
+- 2026-09-30T14:03:36+08:00 | actor=codex | event=start | note=在当前主目录合并上游 main@19f2939，保留本地仿真、视觉抓取与恢复保护并验证 | verification=-
+- 2026-09-22T19:24:42+08:00 | actor=Codex | event=start | note=迁移旧仓库 MuJoCo 扩展功能，保留当前接口与虚拟相机，修复并验证 | verification=-
+- 2026-09-22T19:47:42+08:00 | actor=Codex | event=complete | note=旧仓库MuJoCo扩展迁移完成；功能清单见docs/mujoco_migration.md，仅软件与仿真验证 | verification=749 passed/22 skipped; MuJoCo 34 passed; layering 18; 5 packages build; ROS action/MoveIt/RGB-D/EGL/viewer/Real2Sim/Sim2Real smoke; compileall; MJCF check; diff check
+- 2026-09-23T13:25:00+08:00 | actor=Codex | event=start | note=按用户确认清理旧仓库迁入的暂不用 MuJoCo 扩展功能 | verification=-
+- 2026-09-23T13:38:08+08:00 | actor=Codex | event=complete | note=按确认范围清理暂不用MuJoCo实验功能，保留当前瓶子仿真主链 | verification=4 packages build; layering 18; full 746 passed 10 skipped; MuJoCo 16 passed; diagnostics runtime; MJCF check; compileall; diff check
+- 2026-09-23T14:15:04+08:00 | actor=codex | event=start | note=Explain package-local launch files versus rebotarm_bringup launch files | verification=-
+- 2026-09-23T14:27:02+08:00 | actor=Codex | event=start | note=实现已知瓶位的纯 MuJoCo 抓取动作和接触结果测试 | verification=-
+- 2026-09-23T14:38:39+08:00 | actor=codex | event=start | note=解释 MuJoCo 能力及本项目应用 | verification=-
+- 2026-09-23T14:39:07+08:00 | actor=codex | event=complete | note=已核对官方 MuJoCo 概述与本地仿真包，说明能力、现有接口与扩展边界；未运行仿真或实机 | verification=-
+- 2026-09-23T16:29:10+08:00 | actor=Codex | event=complete | note=已知瓶位纯MuJoCo接触试验实现并完成端到端仿真验证 | verification=MuJoCo pregrasp/grasp Action 4/0; same-frame bilateral contact; no lift; 3 packages build; layering 18; full 749 passed 10 skipped; compileall; diff check
+- 2026-09-23T16:34:34+08:00 | actor=Codex | event=start | note=修正MuJoCo瓶子试验可视化启动说明与服务预检 | verification=-
+- 2026-09-23T16:38:40+08:00 | actor=Codex | event=complete | note=修正瓶子试验可视化启动与grasp_state服务预检说明 | verification=layering 18 passed; full 749 passed 10 skipped; compileall; diff check
+- 2026-09-24T13:01:36+08:00 | actor=Codex | event=start | note=实现多姿态MuJoCo搜索与示教轨迹预演 | verification=-
+- 2026-09-24T13:28:25+08:00 | actor=Codex | event=complete | note=多姿态MuJoCo搜索与示教轨迹预演已实现并软件验证 | verification=search 9 candidates 0 stable lifts; teach headless+Viewer smoke; 3 packages build; layering 18; full 751 passed 12 skipped; MuJoCo 8 passed; compileall; diff check
+- 2026-09-24T18:28:15+08:00 | actor=Codex | event=start | note=实现RGB-D观测目标几何到MuJoCo碰撞代理的只读最小闭环 | verification=-
+- 2026-09-24T18:40:51+08:00 | actor=Codex | event=start | note=实现RGB-D目标点云到MuJoCo碰撞代理的最小闭环 | verification=-
+- 2026-09-24T18:50:23+08:00 | actor=Codex | event=complete | note=完成RGB-D目标点云到独立MuJoCo碰撞代理的最小闭环 | verification=pointcloud proxy synthetic smoke; MuJoCo health proxy scene; full 752 passed 13 skipped; layering 18; build; compileall; diff check
+- 2026-09-24T19:43:33+08:00 | actor=codex | event=start | note=只读盘点强化学习仿真 B C D E F 参数及校准依据 | verification=-
+- 2026-09-24T19:46:06+08:00 | actor=codex | event=complete | note=完成B C D E F参数文件盘点，区分已填写、历史来源确认与当前缺失实测依据；未启动硬件或仿真 | verification=XML静态解析及配置/SDK调用链核对；只读审计未运行测试或构建
+- 2026-09-24T20:32:52+08:00 | actor=codex-side | event=start | note=将Gemini2及Seeed支架加入当前MuJoCo模型，纯软件验证，不操作硬件 | verification=-
+- 2026-09-24T20:42:43+08:00 | actor=codex-side | event=complete | note=Gemini2与Seeed支架接入当前MuJoCo；估计质量/位姿明确标注，MoveIt与真机未改 | verification=754 passed/14 skipped; layering18; MuJoCo focused3; compileall/diff; simulation build; installed MJCF load
+- 2026-09-24T20:44:47+08:00 | actor=codex-side | event=start | note=依据用户实物照片纠正Gemini2支架装配朝向，纯仿真 | verification=-
+- 2026-09-24T20:52:42+08:00 | actor=codex-side | event=complete | note=按实物照片纠正支架前后与相机30度座面倾斜；安装模型截图核对完成 | verification=MuJoCo3; layering18; 754 passed/14 skipped; compileall/diff; simulation build
+- 2026-09-25T12:17:42+08:00 | actor=codex | event=start | note=按实物照片修正腕部相机和支架模型安装位置并验证 | verification=-
+- 2026-09-25T12:25:13+08:00 | actor=codex | event=checkpoint | note=完成腕部附件静态与离屏装配检查；安装界面被照片遮挡，等待侧后视图后修正；配置仍保持原值 | verification=现有模型临时启用后EGL渲染成功；未操作硬件
+- 2026-09-25T13:57:30+08:00 | actor=codex | event=start | note=仅在simulation默认模型启用用户确认的相机支架装配 | verification=-
+- 2026-09-25T13:59:03+08:00 | actor=codex | event=complete | note=相机支架仅接入simulation默认MJCF，已重建；真实模型和手眼参数不变 | verification=附件3 passed; layering18; 全量754 passed/14 skipped; build/compileall/MJCF check通过
+- 2026-09-25T14:31:18+08:00 | actor=codex | event=start | note=替换simulation Gemini2为用户确认旧版支架 | verification=-
+- 2026-09-25T14:36:10+08:00 | actor=codex | event=complete | note=旧版Gemini2短支架已替换至simulation默认模型并重建验证 | verification=附件3、分层18、全量754 passed/14 skipped；build/installed model/compileall/MJCF一致性通过
+- 2026-09-25T14:46:46+08:00 | actor=codex | event=start | note=修正旧版相机支架腕部安装缝隙 | verification=-
+- 2026-09-25T14:50:18+08:00 | actor=codex | event=complete | note=旧支架安装面偏移3.5mm已修正，simulation重建和回归通过 | verification=附件3、分层18、全量754 passed/14 skipped；build/compileall/MJCF/diff通过
+- 2026-09-25T14:54:28+08:00 | actor=codex | event=start | note=按侧面实物照片重新修正旧版相机支架装配 | verification=-
+- 2026-09-25T14:58:47+08:00 | actor=codex | event=complete | note=旧支架按卡槽内侧面和双孔轴重新配准，仿真重建验证完成 | verification=附件3、layering18、754 passed/14 skipped、build/compileall/MJCF/diff通过
+- 2026-09-25T15:03:06+08:00 | actor=codex | event=start | note=仿真支架改中灰，相机保留深灰 | verification=-
+- 2026-09-25T15:04:21+08:00 | actor=codex | event=complete | note=仿真支架中灰配色完成，相机保留深灰 | verification=build/渲染/MJCF/compileall通过；layering18；754 passed/14 skipped
+- 2026-09-25T17:36:31+08:00 | actor=codex | event=start | note=检查end_link与左右手指归属，导出旧版支架STEP供打印 | verification=-
+- 2026-09-25T17:37:39+08:00 | actor=codex | event=complete | note=完成end_link几何归属可视化和旧版支架STEP本地导出；相机沿用98g | verification=URDF/网格分色核对；导出STEP哈希一致；无生产代码修改
+- 2026-09-25T18:18:40+08:00 | actor=codex | event=start | note=将相机支架质量更新为用户实测22g | verification=-
+- 2026-09-25T18:20:26+08:00 | actor=codex | event=complete | note=实测支架22g已写入仿真并同步惯量缩放，已重建验证 | verification=installed mass22g; 附件3/layering18/754 passed14 skipped; build/compileall/MJCF/diff通过
+- 2026-09-25T18:23:51+08:00 | actor=codex | event=start | note=逐项核对D1真实控制接口，仅静态源码审计 | verification=-
+- 2026-09-25T18:24:56+08:00 | actor=codex | event=complete | note=D1源码核对完成：FollowJointTrajectory按positions/time更新目标，SDK发送目标位置和速度上限；无实机操作 | verification=ros_actions -> ArmEndPos._loop_cb -> RobotArm.pos_vel -> send_pos_vel静态追踪
+- 2026-09-25T18:28:03+08:00 | actor=codex | event=start | note=D2运动限制逐层只读审计 | verification=-
+- 2026-09-25T18:31:58+08:00 | actor=codex | event=complete | note=D2只读核对完成：规划与POS_VEL限速不同，URDF effort非实机限矩证明；底层action无独立速度加速度复核 | verification=配置、ROS轨迹校验、SDK mode_pos_vel及仿真限矩源码核对；无硬件或参数修改
+- 2026-09-26T10:35:19+08:00 | actor=codex | event=start | note=修正验证TOTG先于Ruckig后处理顺序 | verification=-
+- 2026-09-26T10:37:40+08:00 | actor=codex | event=complete | note=TOTG→Ruckig顺序修正，实际MoveIt只规划请求与回归验证通过 | verification=build; runtime SUCCESS实际调用顺序; layering18; 754 passed14 skipped; compileall/diff
+- 2026-09-26T10:40:15+08:00 | actor=codex | event=start | note=D3频率配置与采样语义只读核对 | verification=-
+- 2026-09-26T10:41:17+08:00 | actor=codex | event=complete | note=D3静态审计完成，频率可作为位置控制基线，实际时序仍待测量 | verification=控制循环/反馈事务/发布stamp/仿真步进源码检查；未改参数或启动硬件
+- 2026-09-26T11:03:35+08:00 | actor=codex | event=start | note=修正规格与仅仿真限矩，核对SDK及厂家D5资料 | verification=-
+- 2026-09-26T11:16:39+08:00 | actor=codex | event=complete | note=24V规格与仿真峰值限矩更新完成；SDK与厂家D5审计完成，POS_VEL未改 | verification=755 passed/15 skipped; MuJoCo5; layering18; build/installed limits/MJCF/compileall/diff通过
+- 2026-09-26T11:17:51+08:00 | actor=codex | event=start | note=恢复URDF27/7仿真限矩，移除新增覆盖逻辑，保留已核实规格 | verification=-
+- 2026-09-26T11:20:06+08:00 | actor=codex | event=complete | note=仿真限矩恢复27/7并移除覆盖逻辑，保留实证电机规格 | verification=build/installed limits/MJCF/compileall/diff通过；MuJoCo5; layering18;755 passed15 skipped
+- 2026-09-26T11:43:37+08:00 | actor=codex | event=start | note=更新用户维护TODO：活动手指总成及D4 D5 D6待补充项 | verification=-
+- 2026-09-26T11:44:54+08:00 | actor=codex | event=complete | note=按明确授权更新USER_MAINTAINED_TODO：活动手指总成及D4 D5 D6待补充项 | verification=文档逐项核对与git diff --check通过；无代码/参数修改
+- 2026-09-26T12:11:02+08:00 | actor=codex | event=start | note=仿真左右手指执行器限力改为每指1N | verification=-
+- 2026-09-26T12:13:01+08:00 | actor=codex | event=complete | note=MuJoCo左右手指执行器限力均改1N，安装模型三层限幅一致 | verification=build/installed ranges/compileall/MJCF/diff通过；layering18；755 passed15 skipped
+- 2026-09-26T12:17:07+08:00 | actor=codex | event=start | note=仿真手指执行器和关节限力统一1.5N | verification=-
+- 2026-09-26T12:19:27+08:00 | actor=codex | event=complete | note=仿真每指执行器与关节总执行器限力统一±1.5N，重建验证完成 | verification=installed三层限幅;MuJoCo6;layering18;755 passed16 skipped;build/compileall/MJCF/diff通过
+- 2026-09-26T12:52:03+08:00 | actor=codex | event=start | note=核对RGBD YOLO GraspNet CameraInfo实际一致性并对齐MuJoCo相机内参 | verification=-
+- 2026-09-26T13:04:42+08:00 | actor=codex | event=checkpoint | note=F1源码审计及MuJoCo参考K对齐和ROS发布验证完成；真实Gemini2未连接，实测K/D与一致性待设备连接 | verification=build;755 passed19 skipped;MuJoCo camera10;driver/message12;layering18;实际仿真ROS两路各5帧一致;compileall/diff
+- 2026-09-26T13:16:08+08:00 | actor=codex | event=start | note=MuJoCo腕部虚拟相机接入已有眼在手上标定 | verification=-
+- 2026-09-26T13:22:21+08:00 | actor=codex | event=complete | note=已有眼在手上标定接入MuJoCo腕部相机，渲染与ROS TF验证完成；近场遮挡保留记录 | verification=MuJoCo4;ROS image/info5pairs per stream+TF;755 passed20 skipped;layering18;build/compileall/MJCF/diff
+- 2026-09-26T13:32:53+08:00 | actor=codex | event=start | note=修正MuJoCo相机调试标记与相机外壳遮挡，说明RL视觉需求 | verification=-
+- 2026-09-26T13:38:31+08:00 | actor=codex | event=complete | note=相机调试标记和自身外壳传感器渲染修正，夹爪可见，物理与手眼不变 | verification=render ID/depth/model invariance;MuJoCo12;layering18;755 passed21 skipped;build/compileall/diff
+- 2026-09-26T13:41:25+08:00 | actor=codex | event=start | note=提交推送当前仿真与相机工作进度到origin/main | verification=-
+- 2026-09-26T13:43:39+08:00 | actor=codex | event=checkpoint | note=提交前验证通过，保存当前59文件工作进度并推送origin/main | verification=755 passed21 skipped;layering18;compileall/diff;未发现凭据模式
+- 2026-09-27T16:29:47+08:00 | actor=Codex | event=complete | note=完成只读RGB-D同步目标点云到MuJoCo代理场景一次性采集工具 | verification=synthetic ROS end-to-end 900 points; simulation build; layering 18; full 758 passed 21 skipped; MuJoCo 5 passed; compileall; diff check
+- 2026-09-27T16:44:22+08:00 | actor=Codex | event=start | note=按用户确认删除MuJoCo瓶子接触试验、多姿态搜索及RGB-D点云代理，保留示教预演 | verification=-
+- 2026-09-27T16:52:12+08:00 | actor=Codex | event=complete | note=删除MuJoCo三项实验原型并保留示教预演 | verification=4 packages rebuild; ROS entry/interface absence; layering 18; full 751 passed 19 skipped; MuJoCo 17 passed; compileall; diff check
+- 2026-09-27T17:04:36+08:00 | actor=codex | event=start | note=按用户要求移除仿真虚拟RGBD视觉链，保留相机支架实体负载与真实视觉 | verification=-
+- 2026-09-27T17:10:39+08:00 | actor=codex | event=complete | note=移除虚拟视觉链完成，实体相机支架负载保留，仿真运行与回归通过 | verification=build;ROS无camera/TF发布;744 passed14 skipped;MuJoCo9;layering18;compileall/MJCF/diff
+- 2026-09-27T17:12:54+08:00 | actor=codex | event=start | note=提交推送当前仿真清理进度到GitHub | verification=-
+- 2026-09-27T17:13:25+08:00 | actor=codex | event=checkpoint | note=当前清理进度已验证，准备提交推送origin/main | verification=744 passed14 skipped;layering18;MuJoCo9;build/runtime/compileall/MJCF/diff
+- 2026-09-27T17:29:05+08:00 | actor=codex | event=start | note=规划 MuJoCo 强化学习训练起步路线 | verification=-
+- 2026-09-27T17:42:51+08:00 | actor=codex | event=start | note=安装RL依赖、维护克隆配置文档、实现并验证MuJoCo Reach Gymnasium环境 | verification=-
+- 2026-09-27T17:49:16+08:00 | actor=codex | event=complete | note=RL依赖已安装，克隆配置文档和Reach环境完成；干净venv及短训练链路验证通过，无硬件操作 | verification=layering18; full744passed15skipped; Reach7passed; Gymnasium/SB3 check; clean venv pip check; simulation build; compileall; diff check
+- 2026-09-27T18:17:32+08:00 | actor=codex | event=start | note=将MuJoCo强化学习PyTorch从CPU版改为GPU版，并验证CUDA训练 | verification=-
+- 2026-09-27T18:29:21+08:00 | actor=codex | event=complete | note=CUDA 12.1 PyTorch GPU版、SB3/Gymnasium兼容版本及文档已更新；RTX 4060张量与PPO训练、隔离环境重装验证通过 | verification=CUDA tensor; GPU PPO 512 steps and eval; clean venv pip check and check_env; Reach7; layering18; full744passed15skipped; simulation build; compileall; diff check
+- 2026-09-28T15:43:13+08:00 | actor=codex | event=start | note=评估当前项目是否可接入 LeRobot 框架 | verification=-
+- 2026-09-28T15:48:16+08:00 | actor=codex | event=complete | note=完成 LeRobot 接入可行性审查：仿真训练层可适配，真实控制与数据集需新增外部 Robot/数据转换/安全桥接；未修改业务代码 | verification=只读审查完成；系统 Python 的 tests/test_gym_reach.py 因 gymnasium 未安装跳过；仓库现有 MuJoCo RL 文档记录隔离环境验证
+- 2026-09-28T15:54:26+08:00 | actor=codex | event=start | note=为当前项目制定清晰的强化学习推进路线，区分 MuJoCo/Gymnasium/LeRobot、任务定义与 sim-to-real 阶段 | verification=-
+- 2026-09-28T16:01:33+08:00 | actor=codex | event=start | note=推进第一个RL任务：六轴机械臂从home到附近目标末端位姿 | verification=-
+- 2026-09-28T16:04:38+08:00 | actor=codex | event=complete | note=完成首个末端目标位姿Reach任务：位置+姿态观测、奖励和成功门，GPU PPO链路验证通过，无真机 | verification=Reach7; Gymnasium/SB3 check; full744passed15skipped; GPU PPO512; simulation build; compileall; diff check
+- 2026-09-28T16:06:35+08:00 | actor=codex | event=start | note=查看 Agent 文件夹内容并说明用途 | verification=-
+- 2026-09-28T16:07:13+08:00 | actor=codex | event=complete | note=已查看 Agent 目录结构并完成用途概括 | verification=目录清单、核心状态文件和 evidence 统计已核对
+- 2026-09-28T16:12:04+08:00 | actor=codex | event=start | note=整理 Agent 状态文档：区分历史 P0-P6 与当前 MuJoCo RL/维护阶段 | verification=-
+- 2026-09-28T16:13:21+08:00 | actor=codex | event=checkpoint | note=完成 Agent 当前队列、当前阶段、TCP口径和历史证据说明整理 | verification=state queue regenerated after documentation update
+- 2026-09-28T16:14:12+08:00 | actor=codex | event=complete | note=Agent 状态文档整理完成，历史队列已封存，当前 Reach/RL 阶段已生效 | verification=state regenerated; git diff --check passed
+- 2026-09-28T16:33:18+08:00 | actor=codex | event=checkpoint | note=建立 Agent 当前状态单一入口和历史归档规则 | verification=update_state.py py_compile; current status schema regenerated
+- 2026-09-28T16:35:37+08:00 | actor=codex | event=complete | note=完成 Agent 目录长期维护结构设计与当前状态入口重构 | verification=CURRENT_STATUS 4/7; historical P0-P6 100%; update_state py_compile; git diff --check
+- 2026-09-28T16:46:10+08:00 | actor=codex | event=checkpoint | note=将 evidence 明确分类为当前有效基线与历史归档两类 | verification=分类索引、current/archive说明与接手入口已更新
+- 2026-09-28T16:46:24+08:00 | actor=codex | event=complete | note=完成 evidence 当前有效基线/历史归档分类说明 | verification=evidence indexes added; original evidence paths preserved; git diff --check passed
+- 2026-09-28T16:50:04+08:00 | actor=codex | event=complete | note=核对 P0 evidence 与 Gate B/C 删除边界 | verification=P0 11 records: 2 passed, 7 failed, 2 aborted; Gate B/C tool removal confirmed in docs and activity log
+- 2026-09-28T16:52:08+08:00 | actor=codex | event=complete | note=按用户要求清理 P0 Gate B/C 历史证据 | verification=11 JSON moved recoverably to desktop trash; safety code untouched; references synchronized; git diff --check
+- 2026-09-28T17:02:53+08:00 | actor=codex | event=complete | note=完成 docs 分类索引、维护原则和文档状态标注整理 | verification=docs index links checked; git diff --check passed; no hardware action
+- 2026-09-28T17:07:39+08:00 | actor=codex | event=complete | note=按用户要求删除已移除虚拟相机的三份维护证据 | verification=3 untracked JSON moved recoverably to trash; MotorBridge/TOTG evidence retained; classification updated; git diff --check
+- 2026-09-28T17:11:16+08:00 | actor=codex | event=start | note=删除 TOTG/Ruckig 运行日志并将验证报告中文化 | verification=-
+- 2026-09-28T17:11:57+08:00 | actor=codex | event=complete | note=删除 TOTG/Ruckig 原始运行日志并完成验证报告中文化 | verification=报告翻译完成；runtime log 已移入回收站；git diff --check
+- 2026-09-28T17:16:02+08:00 | actor=codex | event=start | note=正式迁移 docs 文档到 current/design/reference/archive | verification=-
+- 2026-09-28T17:21:32+08:00 | actor=codex | event=complete | note=完成 docs 文档实体迁移与全量引用更新 | verification=current/design/reference/archive 实体归类完成；Markdown 链接检查42份无断链；package layering 18 passed；受影响测试111 passed，1项因环境缺少 rebotarm_msgs 未通过；git diff --check
+- 2026-09-28T17:28:39+08:00 | actor=codex | event=start | note=将 Agent evidence maintenance 证据迁移到 current | verification=-
+- 2026-09-28T17:29:17+08:00 | actor=codex | event=complete | note=完成 evidence 维护证据实体迁移 | verification=两份维护证据已迁入 evidence/current；maintenance 目录已移除；无残留路径引用；git diff --check
+- 2026-09-28T17:41:31+08:00 | actor=codex | event=complete | note=按用户定义重组 docs/reference：迁移系统命令参考并恢复节点拓扑图 | verification=reference 命令/拓扑/数据流资料集中完成；Markdown 42份无断链；受影响测试38 passed；git diff --check
+- 2026-09-28T17:41:55+08:00 | actor=codex | event=start | note=将 USER_MAINTAINED_TODO 迁移到 docs/user | verification=-
+- 2026-09-28T17:42:25+08:00 | actor=codex | event=complete | note=完成用户维护待办文档迁移到 docs/user | verification=USER_MAINTAINED_TODO 已迁移；索引和维护规则已更新；Markdown 无断链；git diff --check
+- 2026-09-28T17:43:19+08:00 | actor=codex | event=complete | note=完成用户维护待办文档迁移到 docs/user | verification=USER_MAINTAINED_TODO 已迁移；索引和维护规则已更新；Markdown 无断链；git diff --check
+- 2026-09-28T17:56:12+08:00 | actor=codex | event=start | note=按最终文档边界重组 implemented/setup/design/reference/user/archive | verification=-
+- 2026-09-28T17:59:54+08:00 | actor=codex | event=complete | note=完成 docs 最终边界重组：implemented/setup/design/reference/user/archive | verification=已实现功能、环境配置、设计缺口、参考约束和用户待办实体归类；Markdown 41份无断链；受影响测试38 passed；git diff --check
+- 2026-09-28T18:05:56+08:00 | actor=codex | event=start | note=将网页手眼标定技术路线移入 design | verification=-
+- 2026-09-28T18:08:18+08:00 | actor=codex | event=complete | note=将网页手眼标定技术路线移入 design 并明确未完成真实设备边界 | verification=设计文档、索引和包README已更新；Markdown无断链；git diff --check
+- 2026-09-28T18:14:21+08:00 | actor=codex | event=start | note=整理文档命令单一来源：reference/commands 与 implemented 功能说明分离 | verification=-
+- 2026-09-28T18:16:46+08:00 | actor=codex | event=complete | note=完成命令单一来源整理：reference/commands 与 implemented 功能说明分离 | verification=命令集中、implemented 去重并建立链接；Markdown 44份无断链；受影响测试38 passed；git diff --check
+- 2026-09-28T18:33:06+08:00 | actor=codex | event=start | note=翻译 RGB-D 审计并重分类视觉抓取参数文档 | verification=-
+- 2026-09-28T18:35:44+08:00 | actor=codex | event=complete | note=完成 RGB-D 审计中文化、视觉七层参数设计归档和当前参数参考建立 | verification=审计已中文化；七层设计移入 design；current params 依据 launch/YAML 建立；Markdown 无断链；git diff --check
+- 2026-09-28T18:36:28+08:00 | actor=codex | event=complete | note=完成 RGB-D 审计中文化、视觉七层参数设计归档和当前参数参考建立 | verification=审计已中文化；七层设计移入 design；current params 依据 launch/YAML 建立；当前拓扑图已恢复；Markdown 无断链；git diff --check
+- 2026-09-28T18:45:20+08:00 | actor=codex | event=complete | note=核对用户删除后的 implemented/reference 链接并清理残留引用 | verification=已确认 implemented/reference 边界；删除文件残留引用已移除；Markdown 42份无断链；git diff --check
+- 2026-09-28T18:51:24+08:00 | actor=codex | event=start | note=移除 docs/archive 历史资料目录并改用 Git 历史追溯 | verification=-
+- 2026-09-28T18:53:14+08:00 | actor=codex | event=complete | note=按用户要求移除 docs/archive，历史文档统一从 Git history 追溯 | verification=docs/archive 已移入可恢复回收站；docs 维护规则和索引已更新；Markdown 41份无断链；git diff --check
+- 2026-09-28T19:37:51+08:00 | actor=codex | event=start | note=翻译 docs/implemented/architecture.md 为中文 | verification=-
+- 2026-09-28T19:40:08+08:00 | actor=codex | event=complete | note=完成 implemented architecture 中文化 | verification=架构文档普通说明已翻译；技术标识符保留；Markdown 链接和 git diff --check 通过
+- 2026-09-28T19:42:36+08:00 | actor=codex | event=start | note=盘点并更新 docs/implemented 与 docs/reference/commands 的功能覆盖 | verification=-
+- 2026-09-28T19:45:05+08:00 | actor=codex | event=complete | note=补齐 implemented 功能总览与系统命令覆盖 | verification=新增 system_capabilities.md 和 system_runtime.md；Markdown 链接0断链；分层测试18 passed；compileall与diff检查通过
+- 2026-09-28T19:48:31+08:00 | actor=codex | event=start | note=统一 docs 下 Markdown 文档格式 | verification=-
+- 2026-09-28T19:50:39+08:00 | actor=codex | event=complete | note=统一 docs Markdown 格式与状态元数据 | verification=统一状态/类型/适用范围元数据，补充 docs 维护模板；Markdown 28份0断链；分层18 passed；compileall和diff检查通过；全量pytest因未加载构建后的rebotarm_msgs在收集阶段2个ImportError
+- 2026-09-28T19:52:24+08:00 | actor=codex | event=start | note=按正文模板重排 implemented 与 reference 文档 | verification=-
+- 2026-09-28T19:56:12+08:00 | actor=codex | event=complete | note=按统一正文模板重排 implemented 与 reference 文档 | verification=implemented 功能文档统一为功能概述/当前实现/验证结果/边界/运行入口；reference 命令文档统一为适用范围/前置条件/操作步骤/检查结果/停止安全；Markdown 0断链，分层18 passed，compileall与diff检查通过
+- 2026-09-28T19:57:40+08:00 | actor=codex | event=start | note=统一 calibration_acceptance.md 功能文档结构 | verification=-
+- 2026-09-28T19:58:35+08:00 | actor=codex | event=complete | note=统一 calibration_acceptance 功能文档结构 | verification=改为功能概述/当前实现/验证结果/边界与未完成/运行入口与相关文档；Markdown 0断链；分层18 passed；diff检查通过
+- 2026-09-28T20:02:35+08:00 | actor=codex | event=start | note=审计并重新规划 docs/implemented 与 docs/reference 架构 | verification=-
+- 2026-09-28T20:05:05+08:00 | actor=codex | event=complete | note=完成 implemented/reference 目录级架构重构 | verification=implemented补齐硬件/MoveIt/操作/示教/视觉抓取专题；reference新增commands/topology/parameters索引与系统数据流；Markdown 39份0断链；分层18 passed；compileall与diff检查通过
+- 2026-09-28T20:08:09+08:00 | actor=codex | event=start | note=盘点 implemented 当前已实现功能并生成用户核对清单 | verification=-
+- 2026-09-28T20:08:40+08:00 | actor=codex | event=complete | note=完成 implemented 当前功能核对清单 | verification=依据 system_capabilities 与专题文档列出当前实现能力及未完成边界
+- 2026-09-28T20:15:16+08:00 | actor=codex | event=start | note=按用户确认的架构重构 implemented 与 reference 文档 | verification=-
+- 2026-09-28T20:19:23+08:00 | actor=codex | event=complete | note=完成 docs 文档易用性重构 | verification=implemented 功能说明简化；reference 命令按任务收口；详细审计和旧命令细节迁移至 Agent/evidence/current；Markdown 46份0断链；分层18 passed；compileall与diff检查通过
+- 2026-09-29T10:40:48+08:00 | actor=codex | event=start | note=补齐视觉抓取 plan_only 预览与真机执行命令 | verification=-
+- 2026-09-29T10:41:50+08:00 | actor=codex | event=complete | note=补齐视觉抓取 plan-only 预览与真机执行命令 | verification=plan-only 触发服务、真机 execution launch、enable/execute/stop/disable 命令已核对源码；Markdown 0断链；分层18 passed
+- 2026-09-29T10:43:33+08:00 | actor=codex | event=start | note=复核 implemented 与 reference command 的功能和入口覆盖 | verification=-
+- 2026-09-29T10:49:24+08:00 | actor=codex | event=verified | note=复核 implemented 与 reference/commands：补齐入口覆盖表、基础 bringup、teleop_system、MuJoCo 维护与 Viewer/ROS 后端、手眼残差和 TCP 独立命令；断链和分层测试通过，全量测试受未构建 rebotarm_msgs 阻塞 | verification=package_layering=18 passed; markdown_links=0; compileall=passed; full_pytest=blocked_missing_rebotarm_msgs
+- 2026-09-29T10:55:55+08:00 | actor=codex | event=start | note=检查仓库 log 与 Log 目录用途 | verification=-
+- 2026-09-29T10:56:35+08:00 | actor=codex | event=complete | note=完成 log 与 Log 目录用途说明 | verification=确认 Log 为 Orbbec SDK 日志，log 为 colcon 构建/测试日志，均已被 .gitignore 忽略；另区分 .git/logs reflog
+- 2026-09-29T11:01:40+08:00 | actor=codex | event=complete | note=设置 log 目录定期清理 | verification=已创建每日凌晨3点执行的自动任务，仅清理 /home/huangbin/robotarm_ros2/log/ 中超过两天的文件与空目录；不触碰 Log、.git/logs 或其他路径
+- 2026-09-29T11:03:59+08:00 | actor=codex | event=start | note=审查 visual_grasp_system.launch.py 参数冗余与节点解耦 | verification=-
+- 2026-09-29T11:05:40+08:00 | actor=codex | event=complete | note=完成 visual_grasp_system.launch.py 参数与解耦审查 | verification=确认134个LaunchArgument全部被读取；识别参数转发、节点生命周期、策略YAML、硬编码话题和未使用配置等耦合点；未修改源码
+- 2026-09-29T11:08:48+08:00 | actor=codex | event=start | note=检查当前变更并准备上传 GitHub | verification=-
+- 2026-09-29T11:10:48+08:00 | actor=codex | event=start | note=确认当前项目进度并上传 GitHub | verification=-
+- 2026-09-29T11:13:08+08:00 | actor=codex | event=start | note=将 visual_grasp_system.launch.py 解耦列入用户代办 | verification=-
+- 2026-09-29T11:13:38+08:00 | actor=codex | event=complete | note=已将 visual_grasp_system.launch.py 解耦列入用户代办 | verification=更新 docs/user/USER_MAINTAINED_TODO.md；未修改源码；git diff --check
+- 2026-09-29T11:15:01+08:00 | actor=codex | event=start | note=检查 rebotarm_bringup 是否缺少 README | verification=-
+- 2026-09-29T11:15:44+08:00 | actor=codex | event=complete | note=确认并补充 rebotarm_bringup 包 README | verification=新增 src/rebotarm_bringup/README.md；说明包边界、入口、安全约束与验证命令；git diff --check
+- 2026-09-29T11:28:19+08:00 | actor=codex | event=start | note=说明 rebotarm_moveit_config 功能包职责 | verification=-
+- 2026-09-29T11:28:39+08:00 | actor=codex | event=complete | note=完成 rebotarm_moveit_config 功能包职责说明 | verification=检查 README、README_zh、package.xml、demo.launch.py、URDF/SRDF及规划配置
+- 2026-09-29T11:33:54+08:00 | actor=codex | event=start | note=核查 MoveIt config launch 与 bringup 入口关系 | verification=-
+- 2026-09-29T11:35:43+08:00 | actor=codex | event=complete | note=完成 MoveIt config demo launch 与 bringup 关系核查 | verification=确认 interactive_system、moveit_hardware、visual_grasp_system 和 MuJoCo 入口均对 demo.launch.py 存在条件包含或直接复用
+- 2026-09-29T11:42:15+08:00 | actor=codex | event=start | note=审计 rebotarm_teach 包的解耦性与代码规范 | verification=-
+- 2026-09-29T11:44:21+08:00 | actor=codex | event=verified | note=完成 rebotarm_teach 解耦与规范审计：包边界总体符合，纯数据层/ROS适配/回放编排分层清晰；主要改进项为 teach_recording.py 1999 行、teach_replay_workflow.py 939 行、缺少统一 lint 配置和少量宽行/宽泛异常捕获 | verification=teach-focused tests=137 passed, 1 skipped; compileall=passed; no direct dashboard/controller/teleop imports
+- 2026-09-29T11:50:23+08:00 | actor=codex | event=start | note=将 teach 包解耦与规范问题写入用户维护清单 | verification=-
+- 2026-09-29T11:53:54+08:00 | actor=codex | event=verified | note=已将 teach 包审计出的解耦与代码规范问题加入用户维护清单第8项 | verification=git_diff_check=passed
+- 2026-09-29T11:59:47+08:00 | actor=codex | event=start | note=审计 rebotarm_vision 包的解耦性、代码规范和冗余 | verification=-
+- 2026-09-29T12:01:29+08:00 | actor=codex | event=verified | note=完成视觉包审计：策略层基本解耦，但发现节点间共享工具耦合、GraspNet复用legacy普通抓取helper、两个超大节点、manifest疑似冗余依赖及legacy/benchmark入口需分类 | verification=compileall=passed; vision tests=77 passed, 28 blocked by missing rebotarm_msgs, 1 skipped
+- 2026-09-29T12:03:25+08:00 | actor=codex | event=start | note=将 vision 包解耦、冗余和代码规范问题写入用户维护清单 | verification=-
+- 2026-09-29T12:03:50+08:00 | actor=codex | event=verified | note=已将 vision 包审计问题加入用户维护清单第9项 | verification=git_diff_check=passed
+- 2026-09-29T12:07:49+08:00 | actor=codex | event=start | note=说明目标位姿Reach任务的训练、评估和效果查看流程 | verification=-
+- 2026-09-29T12:08:27+08:00 | actor=codex | event=complete | note=已说明Reach位姿任务训练、数值评估与当前可视化边界；本轮未改代码、未启动真机 | verification=核对 docs/reference/commands/mujoco_rl.md 与 rl_reach.py 现行入口
+- 2026-09-29T12:21:56+08:00 | actor=codex | event=start | note=诊断pose Reach 100k PPO成功率为0的训练质量问题 | verification=-
+- 2026-09-29T12:23:20+08:00 | actor=codex | event=complete | note=完成pose Reach 100k模型效果诊断：PPO劣于zero-action基线，定位训练预算、观测/奖励/课程设计问题；未改代码未接真机 | verification=同种子20回合 zero-action vs PPO 对照；现有100回合评估结果；代码与SB3配置审查
+- 2026-09-29T12:39:05+08:00 | actor=codex | event=start | note=按Isaac Lab Reach思路改造MuJoCo Reach：固定目标课程、相对观测、keypoint风格奖励、动作平滑 | verification=-
+- 2026-09-29T12:45:51+08:00 | actor=codex | event=start | note=按用户同意的 Isaac Lab Reach 顺序改造 MuJoCo Reach：相对观测、fixed/local 课程、keypoint/progress/action-rate 奖励；确认标准 MuJoCo CPU 与 MJX GPU 边界 | verification=-
+- 2026-09-29T12:47:32+08:00 | actor=codex | event=verified | note=Reach改造验证完成：MuJoCo专项7通过，Gymnasium/SB3 checker通过，simulation colcon build成功；全量测试在正确ROS overlay下740 passed/15 skipped，但4个既有文档断言失败，与本次改动无关。标准MuJoCo物理仍CPU，MJX需单独迁移。 | verification=tests/test_gym_reach.py: 7 passed; rl_reach check: gymnasium_check=true,sb3_check=true; colcon rebotarm_simulation: finished; compileall: passed; full tests: 740 passed, 15 skipped, 4 pre-existing documentation assertion failures
+- 2026-09-29T13:15:58+08:00 | actor=codex | event=verified | note=fixed 500k最终模型100回合评估：success=0，位置0.95mm，姿态3.316度，姿态门槛3度未到；后续训练入口增加定期checkpoint和独立评估选best，现有运行不受影响。 | verification=fixed_seed7.zip eval 100 episodes success=0 collision=0 distance=0.000949829m orientation=3.31594deg; 20-episode trajectory audit max hold=0; Reach 7 passed, Gym/SB3 checker passed, layering 18 passed, simulation build passed
+- 2026-09-29T13:18:17+08:00 | actor=codex | event=start | note=按用户要求评估并实现 MuJoCo+MJX GPU Reach 训练路径，核对本机依赖和仿真控制器等价性，仅纯仿真 | verification=-
+- 2026-09-29T14:01:49+08:00 | actor=codex | event=checkpoint | note=MJX GPU批量Reach路径已实现并验证运行，但32环境PPO约293 steps/s，尚未实现训练加速；原场景碰撞不受MJX 3.3支持，使用实验性Reach专用碰撞profile。 | verification=JAX CUDA GPU detected; MJX test 1 passed; 32-env PPO 16384-step smoke saved; simulation build passed; full tests 740 passed/16 skipped/4 existing doc assertion failures
+- 2026-09-29T14:07:26+08:00 | actor=codex | event=verified | note=MJX批量Reach实现完成：CUDA GPU物理128并行，端到端短训练约1213 steps/s，原单环境PPO约415 steps/s；碰撞profile是Reach专用，模型需原MuJoCo复评。 | verification=JAX CudaDevice(0); MJX 128-env 65536-step PPO saved; CPU 8192-step PPO comparator; MJX parity test 1 passed; Reach tests 7 passed; layering 18 passed; simulation colcon build passed; full tests 740 passed/16 skipped/4 existing documentation assertions failed
+- 2026-09-29T14:15:15+08:00 | actor=codex | event=start | note=为六轴Reach建立无桌子瓶子的专用MuJoCo/MJX场景，验证128并行在RTX4060上的实际显存与训练吞吐 | verification=-
+- 2026-09-29T14:30:23+08:00 | actor=codex | event=verified | note=Reach 使用无桌子瓶子的专用场景；RTX 4060 Laptop 上 128 MJX 环境短训通过；碰撞关闭并更新文档 | verification=Reach 7 pass; MJX 1 pass; layering 18 pass; full 740 pass 16 skip 4 pre-existing doc failures; simulation build and compileall pass; 32768-step GPU smoke pass
+- 2026-09-29T14:32:54+08:00 | actor=codex | event=start | note=诊断 MJX Reach 同名模型路径被空检查点目录占用的问题 | verification=-
+- 2026-09-29T14:33:08+08:00 | actor=codex | event=verified | note=确认仅有空检查点目录占用 MJX 模型名，已安全移除，原训练命令可重试 | verification=同名 final/best/检查点目录均不存在；未发现实际训练进程
+- 2026-09-29T15:12:17+08:00 | actor=codex | event=start | note=评估用户完成的 MJX Reach fixed 训练 best 与 final 模型 | verification=-
+- 2026-09-29T15:13:25+08:00 | actor=codex | event=verified | note=用户 MJX fixed 训练 best/final 均100%固定目标成功；CPU物理复评与零动作对照完成 | verification=MJX100回合 best/final success=1；CPU单轨迹均20步成功；zero-action失败；评估JSON已保存
+- 2026-09-29T15:18:23+08:00 | actor=codex | event=start | note=为 Reach 训练策略添加 MuJoCo Viewer 回放及 episodes 说明 | verification=-
+- 2026-09-29T15:21:18+08:00 | actor=codex | event=complete | note=Reach 策略 MuJoCo Viewer 回放入口与 episodes 文档完成 | verification=本机原生Viewer一回合20步成功；simulation build pass; layering18 pass; compile/diff pass; full740 pass16 skip4 pre-existing doc failures
+- 2026-09-29T15:26:18+08:00 | actor=codex | event=start | note=开始第二阶段随机附近末端位姿 Reach：对齐 MJX 目标采样并训练评估 | verification=-
+- 2026-09-29T15:39:17+08:00 | actor=codex | event=verified | note=第二阶段local随机Reach采样对齐并完成首轮327680步训练及MJX/CPU独立评估，尚未收敛 | verification=Reach9 pass; layering18 pass; simulation build/compile/diff pass; full740 pass16 skip4 pre-existing doc failures; MJX local100 success2%; CPU local100 success0%
+- 2026-09-29T15:47:31+08:00 | actor=codex | event=start | note=建立 MJX/CPU 同目标 Reach 诊断并依据失败分布调整第二阶段训练 | verification=-
+- 2026-09-29T16:19:29+08:00 | actor=codex | event=verified | note=完成同目标诊断和奖励课程训练，完整范围复评28%，位置精度仍为瓶颈 | verification=CPU/MJX paired100 success28%; Reach11 layering18 build/compile/diff pass; full740 pass16 skip4 pre-existing failures
+- 2026-09-29T16:29:48+08:00 | actor=codex | event=start | note=分析pose_v3位置失败分桶、目标限幅、超时后进展和已知可达构型控制对照 | verification=-
+- 2026-09-29T16:33:00+08:00 | actor=codex | event=verified | note=完成第二阶段位置失败分桶、方向、限幅、延长回合与底层控制对照分析 | verification=同100目标CPU MuJoCo逐步报告；向上47目标0成功；延长至500步无新增成功；限幅仅3目标；无训练或硬件改动
+- 2026-09-29T16:35:48+08:00 | actor=codex | event=start | note=试验基于每回合初始目标距离的自适应位置奖励，并与pose_v3同目标对照 | verification=-
+- 2026-09-29T16:49:37+08:00 | actor=codex | event=verified | note=初始距离自适应位置奖励试验完成，同目标100回合成功率28%到54%，向上目标仍为主要缺口 | verification=CPU/MJX paired100 success54%; Reach12 pass; layering18 pass; simulation build/compile/diff pass; full740 pass16 skip4 pre-existing failures
+- 2026-09-29T16:51:12+08:00 | actor=codex | event=start | note=运行相同步数旧pose_v3奖励对照，与自适应初始距离奖励比较 | verification=-
+- 2026-09-29T17:01:36+08:00 | actor=codex | event=verified | note=同等步数旧奖励对照完成并更新MuJoCo RL文档：同100目标CPU final pose_v3 61/100，adaptive 54/100；仅纯仿真。 | verification=两组各327680训练步；目标数组完全相同；CPU/MJX独立复评；分层18通过；全量740 passed/16 skipped/4既有其他命令文档断言失败；compileall与git diff --check通过。
+- 2026-09-29T17:05:16+08:00 | actor=codex | event=start | note=按用户要求检查并上传当前代码进度到 GitHub | verification=-
+- 2026-09-30T14:07:41+08:00 | actor=codex | event=checkpoint | note=已拉取上游 main@19f2939；解决仿真核心接口与虚拟相机退役冲突，开始检查兼容性 | verification=-
+- 2026-09-30T14:14:04+08:00 | actor=codex | event=checkpoint | note=当前状态入口改为本地上游整合；保留本地历史记录，上游训练证据不计入本地验收 | verification=-
+- 2026-09-30T14:29:34+08:00 | actor=codex | event=verified | note=上游 main@19f2939 与本地扩展整合验证完成，原硬件/视觉抓取/恢复保护源码保留 | verification=1164 passed/15 skipped；分层18 passed；required compileall；11包build；EGL health；Pick 1x10安全；launch show-args；无实机操作
+- 2026-09-30T14:30:23+08:00 | actor=codex | event=complete | note=完成当前主目录的上游 main@19f2939 本地整合与软件验证，不推送远端、不启动实机 | verification=完整回归1164 passed/15 skipped；分层18 passed；11包构建、编译、EGL和启动参数检查通过

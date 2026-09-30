@@ -11,6 +11,7 @@ import mujoco
 import yaml
 
 from rebotarm_simulation.resource_paths import package_resource
+from .gemini2_payload import add_gemini2_payload
 
 
 PACKAGE_MESH_PREFIX = "package://rebotarm_moveit_config/meshes/"
@@ -96,6 +97,7 @@ def generate_mjcf_bytes(repo_root: Path | None) -> bytes:
         _add_joint_dynamics(root, _load_joint_dynamics(repo_root))
         _add_actuators(root, urdf_root, repo_root)
         _add_sensors(root)
+        add_gemini2_payload(root, repo_root)
     return _canonicalize(root)
 
 
@@ -362,6 +364,13 @@ def _add_actuators(
             if joint_name in {"left_finger_joint", "right_finger_joint"}
             else float(limit.attrib["effort"])
         )
+        if joint_name in {"left_finger_joint", "right_finger_joint"}:
+            # Keep both force-clamping layers on the same simulation-only setting.
+            joint = root.find(f'.//joint[@name="{joint_name}"]')
+            if joint is None:
+                raise ValueError(f"missing MuJoCo finger joint: {joint_name}")
+            joint.set("actuatorfrcrange", f"-{effort:g} {effort:g}")
+            joint.set("actuatorfrclimited", "true")
         ET.SubElement(
             actuator,
             "motor",

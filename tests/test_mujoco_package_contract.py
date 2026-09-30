@@ -54,6 +54,9 @@ def test_setup_installs_mujoco_resources_and_entrypoints() -> None:
     assert resource_patterns == {
         "models/**/*.xml",
         "models/**/*.[sS][tT][lL]",
+        "models/**/*.json",
+        "models/**/*.txt",
+        "models/**/*.step",
         "config/*.yaml",
         "launch/*.launch.py",
     }

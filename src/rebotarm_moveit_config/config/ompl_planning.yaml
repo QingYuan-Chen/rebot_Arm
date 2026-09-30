@@ -8,7 +8,7 @@
 # - planning_plugins：本条流水线真正加载的规划器插件（只保留 OMPL）；
 # - request_adapters：规划前对请求做规范化与校验的适配器，顺序即执行顺序（列表顺序有语义）；
 # - response_adapters：规划后对轨迹做时间参数化、平滑与校验的适配器，顺序同样有语义
-#   （Ruckig 平滑必须先于时间最优参数化，测试会断言这一先后关系）。
+#   （时间最优参数化必须先于 Ruckig 平滑，测试会断言这一先后关系）。
 planning_plugins:
   # OMPL 规划接口插件；删掉或改名会让 ompl 流水线找不到规划器，直接导致规划失败。
   - ompl_interface/OMPLPlanner
@@ -22,12 +22,10 @@ request_adapters:
   # 校验起点是否自碰撞/与环境碰撞：在规划前就拦住，避免"起点已经撞了"还去规划。
   - default_planning_request_adapters/CheckStartStateCollision
 response_adapters:
-  # Ruckig 平滑：按 joint_limits.yaml 的 max_velocity / max_acceleration / max_jerk 生成
-  # 连续可导（加加速度受限）的轨迹，是 jerk 限位真正生效的地方。必须排在最前。
-  - default_planning_response_adapters/AddRuckigTrajectorySmoothing
-  # 时间最优参数化：给轨迹点写入时间戳与速度/加速度，供控制器按时间执行。放在 Ruckig 之后，
-  # 才能保证它处理的是已经平滑过的路径。
+  # TOTG 先为几何路径生成时间戳、速度和加速度。
   - default_planning_response_adapters/AddTimeOptimalParameterization
+  # Ruckig 再按关节 jerk 限制平滑已参数化轨迹，避免后续 TOTG 重写平滑结果。
+  - default_planning_response_adapters/AddRuckigTrajectorySmoothing
   # 最终解校验：确认返回的轨迹满足关节限位与约束，不满足则丢弃。
   - default_planning_response_adapters/ValidateSolution
   # 把成功路径发布到 /display_planned_path，供 RViz 显示（只影响可视化，不影响执行）。

@@ -11,7 +11,7 @@ Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/detections -> local GraspNet
 Do not restore retired Windows, HTTP, MJPEG, remote-JSON, or standalone
 GraspNet-service vision paths. Dashboard HTTP is local UI/API only.
 
-Before changing code, read `docs/architecture.md`, `CONTEXT.md`,
+Before changing code, read `docs/implemented/architecture.md`, `CONTEXT.md`,
 `tests/test_package_layering.py`, `Agent/README.md`, `Agent/MEMORY.md`,
 `Agent/PROJECT_STATUS.md`, and `Agent/STATE.json`.
 

@@ -21,13 +21,21 @@ firmware_reference:
 
 # 电机型号规格，供按型号取额定/峰值力矩与减速比。键名即 arm.<关节>.motor_model 的取值。
 motor_specs:
-  # 大关节（joint1~joint3）所用型号：额定 9 N·m、峰值 27 N·m（关节侧），减速比 40。
+  # 大关节（joint1~joint3）所用型号：额定 12 N·m、峰值 40 N·m（关节侧），减速比 40。
   DM4340P:
-    rated_torque_nm: 9.0
-    peak_torque_nm: 27.0
+    hardware_revision: DM-J4340P-2EC V1.1
+    rated_voltage_v: 24
+    rated_speed_rpm: 36
+    no_load_speed_rpm: 56
+    rated_torque_nm: 12.0
+    peak_torque_nm: 40.0
     reduction_ratio: 40.0
   # 小关节（joint4~joint6）与夹爪所用型号：额定 3.5 N·m、峰值 12.5 N·m，减速比 10。
   DM4310_V1_2:
+    hardware_revision: DM-J4310-2EC V1.2
+    rated_voltage_v: 24
+    rated_speed_rpm: 120
+    no_load_speed_rpm: 200
     rated_torque_nm: 3.5
     peak_torque_nm: 12.5
     reduction_ratio: 10.0
@@ -79,8 +87,8 @@ gripper:
   # 电机侧力矩上限（N·m）：先于指尖力上限生效，是电机自身的安全边界。
   motor_torque_limit_nm: 1.5
   # 1.5 N·m × 55.56 rad/m × 0.8 只是电机侧折算出的理想上界，并非实测指尖力。
-  # 在真实夹爪能用秤/力传感器标定之前，MuJoCo 的滑移手指推力保持保守取值。
-  finger_force_limit_n: 20.0
+  # 用户指定每个滑动手指执行器及关节总执行器限力均为1.5 N；非实测夹持力。
+  finger_force_limit_n: 1.5
   # 仿真指尖力伺服：位置刚度（N/m），偏大则接触更硬、更容易数值振荡。
   sim_force_kp_n_per_m: 250.0
   # 仿真指尖力伺服：速度阻尼（N·s/m），用于抑制接触振荡。

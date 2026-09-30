@@ -1,85 +1,87 @@
-# reBotArm Agent 工作区
+# reBotArm Agent 工作区维护手册
 
-`Agent/` 是仓库内所有 coding agent / 编码代理共享的持久化工作区，用于保存当前执行状态，而不是保存大段聊天记录。
+`Agent/` 是编码代理共享的项目状态目录，不是 ROS 包、节点或后台服务。
+它的目标是让下一位代理或开发者能快速回答四个问题：
 
-## 文件职责
+1. 当前项目正在做什么？
+2. 哪些验收已经完成？
+3. 哪些事项被取消、失败或移出范围？
+4. 下一步能做什么，哪些硬件动作仍然需要授权？
 
-| 文件 | 职责 | 更新方式 |
-| --- | --- | --- |
-| `PROJECT_STATUS.md` | 主规划 P0-P6 的验收清单和完成依据 | Agent 在证据成立后更新 checkbox |
-| `EXECUTION_FLOW.md` | 每次任务的开始、执行、验证、交接流程 | 流程变化时人工更新 |
-| `MEMORY.md` | 当前事实、决策、阻塞和交接信息 | 每次状态变化立即更新 |
-| `ACTIVITY_LOG.md` | 按时间追加的工作事件 | 由 `update_state.py` 追加 |
-| `STATE.json` | 机器可读的实时快照和加权完成度 | 只由 `update_state.py` 生成 |
-| `update_state.py` | 重新计算完成度、Git 状态和最新事件 | 任务开始、检查点和结束时运行 |
+## 新接手者的阅读顺序
 
-过时的根目录工程记忆、状态快照、使用说明及两份旧规划已清理，历史内容保留在 Git 中。当前操作手册见 `docs/README_zh.md`，不再从旧文档推断实时状态。
+按以下顺序阅读，不要从历史日志开头一路读到底：
 
-`evidence/`、历史计划和两套仿真参考归档仅本机留存，不随当前源码发布。
-本目录旧记录中的相关路径是历史证据位置，不要求新克隆包含这些文件；
-已提交过的证据可从 Git 历史追溯。现行软件回归测试继续随源码维护。
+1. `CURRENT_STATUS.md`：当前唯一的人类可读状态入口。
+2. `EXECUTION_FLOW.md` 的“当前执行队列”：当前任务和边界。
+3. `STATE.json`：机器生成的摘要；不要手工修改。
+4. `PROJECT_STATUS.md`：P0-P6 历史验收基线，需要核对过去验收时再看。
+5. `MEMORY.md`：当前事实、决策和详细历史上下文。
+6. `ACTIVITY_LOG.md`、`evidence/`：审计和原始证据，需要追溯具体事件时再看。
 
-## 状态来源优先级
+## 文件职责和写入规则
 
-1. 当前代码、测试和硬件验收证据；
-2. `AGENTS.md` 与 `docs/architecture.md` 的安全和包边界；
-3. 用户最新明确的任务和范围决策；
-4. `Agent/PROJECT_STATUS.md` 的验收清单、`Agent/MEMORY.md` 和 `Agent/STATE.json` 的当前执行状态；
-5. 历史文档只用于追溯。
+| 文件/目录 | 用途 | 谁可以修改 | 规则 |
+| --- | --- | --- | --- |
+| `CURRENT_STATUS.md` | 当前阶段、当前验收、阻塞、下一步和安全边界 | Agent/开发者 | 只保留当前范围，状态变化时更新 |
+| `EXECUTION_FLOW.md` | 当前队列、执行流程和历史队列索引 | Agent/开发者 | 当前队列置顶，旧队列明确标为历史 |
+| `STATE.json` | 机器可读摘要 | 仅 `update_state.py` | 禁止手工编辑 |
+| `update_state.py` | 记录事件并重新生成 `STATE.json` | 维护脚本 | 任务开始、检查点、完成时运行 |
+| `PROJECT_STATUS.md` | P0-P6 历史验收和范围收口记录 | Agent/开发者 | 不把历史失败改写成通过 |
+| `MEMORY.md` | 详细事实、决策、阻塞和交接信息 | Agent/开发者 | 顶部维护当前摘要，后部保留历史 |
+| `ACTIVITY_LOG.md` | 按时间追加的事件流水 | `update_state.py` | 只追加，不回写历史 |
+| `evidence/` | 测试、运行和硬件证据；分为 `current/` 与 `archive/` | Agent/开发者 | 先读 `evidence/README.md`，缺失旧文件时从 Git 历史追溯 |
+| `__pycache__/` | Python 自动缓存 | Python | 非项目状态，可清理 |
 
-## “实时更新”的含义
+## 当前与历史的边界
 
-本仓库不运行后台常驻 Agent。实时更新指以下事件发生后，在同一个任务内立即同步：
+- `CURRENT_STATUS.md` 是当前范围的唯一入口。
+- P0-P6 已关闭，但其清单、失败记录和安全边界必须保留作历史基线。
+- “范围关闭”不等于“验收通过”；已取消的项目必须保留这个说明。
+- 历史证据路径如果在当前工作树不存在，应视为 Git 历史证据，不要当作当前文件。
+- 当前 `STATE.json` 中的 P0-P6 完成度是历史加权清单完成度，不代表 RL 收敛或实时硬件验收。
 
-- 开始一个新任务；
-- 当前阶段、执行队列或阻塞发生变化；
-- 完成一项可验证的验收条件；
-- 测试结果、硬件边界或关键事实发生变化；
-- 任务完成或需要交接。
+## 标准工作流
 
-## 快速使用
-
-读取当前状态：
-
-```bash
-python3 Agent/update_state.py
-cat Agent/STATE.json
-```
-
-记录任务开始：
+开始任务：
 
 ```bash
 python3 Agent/update_state.py \
   --event start \
   --actor Codex \
-  --note "开始处理 P0 连接与使能解耦"
+  --note "开始处理具体任务"
 ```
 
-记录验证检查点：
+完成可验证检查点：
 
 ```bash
 python3 Agent/update_state.py \
   --event verified \
   --actor Codex \
-  --note "完成 enable 失败回滚测试" \
-  --verification "python3 -m pytest tests/test_hardware_enable.py -q"
+  --note "完成软件验证" \
+  --verification "填写实际测试命令和结果"
 ```
 
-更新 checkbox 后重新计算完成度：
+结束任务并刷新状态：
 
 ```bash
 python3 Agent/update_state.py \
-  --event checkpoint \
+  --event complete \
   --actor Codex \
-  --note "P0 验收清单已更新"
+  --note "任务完成" \
+  --verification "填写实际验证结果"
 ```
 
-## 约束
+仅刷新生成状态、不追加事件：
 
-- 真机处于健康 enabled 状态时，视觉、规划、标定采集等可恢复的任务级失败不得直接 disable：必须 stop 后保持 enabled hold，或受控回到本轮已记录 baseline、确认到位后再 disable。受控回位失败但电机/控制器仍健康时继续保持并等待人工处置；只有 holding torque 已不可信的硬件/通信严重故障或明确急停请求才允许在非 baseline 姿态保护性失能；
-- 没有测试、运行记录或明确代码证据时，不得把 checkbox 改为 `[x]`；
-- 自动测试通过不等于真机验收通过；
-- 只完成部分工作时，在 `MEMORY.md` 写清剩余项，不把整项标成完成；
-- `STATE.json` 是生成物，不手工修改；
-- `ACTIVITY_LOG.md` 只追加，不回写历史；
-- 不在这些文件中保存密码、token、设备私密凭据或用户隐私数据。
+```bash
+python3 Agent/update_state.py
+```
+
+## 安全和证据规则
+
+- 真机健康 enabled 时，可恢复的任务失败不得直接把机械臂失能在未知姿态；必须保持 enabled hold，或受控回到已记录 baseline 后再 disable。
+- 真机默认 disabled；需要 fresh feedback、现场安全检查和用户明确的 `/rebotarm/enable` 授权。
+- 软件测试通过不等于真机验收通过。
+- 没有代码、测试、运行记录或用户明确来源确认时，不得把验收 checkbox 标为完成。
+- 不在 `Agent/` 中保存密码、token、设备私密凭据或用户隐私数据。

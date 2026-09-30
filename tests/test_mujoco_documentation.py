@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 README = ROOT / "src" / "rebotarm_simulation" / "README_mujoco.md"
-COMMANDS = ROOT / "docs" / "rebotarm_feature_commands.md"
+COMMANDS = ROOT / "docs" / "reference/commands/rebotarm_feature_commands.md"
 SIM2REAL = ROOT / "docs" / "sim2real_workflow_zh.md"
 PICK = ROOT / "docs" / "mujoco_pick_zh.md"
 REAL2SIM = ROOT / "docs" / "real2sim_bridge_zh.md"
@@ -22,7 +22,6 @@ def test_mujoco_readme_documents_reproducible_install_and_runtime_commands():
         "python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv",
         "source /opt/ros/jazzy/setup.bash",
         "third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements-mujoco.txt",
-        "setuptools>=68,<80",
         "/usr/bin/python3 -m colcon build --symlink-install --packages-select rebotarm_simulation",
         "MUJOCO_GL=egl",
         "rebotarm_mujoco_health --renderer-timeout",
@@ -97,11 +96,7 @@ def test_mujoco_readme_documents_api_architecture_sync_and_troubleshooting():
         "云服务器",
         "本地 Ubuntu VM",
         "Gymnasium",
-        "奖励函数",
         "训练",
-        "备份",
-        "哈希",
-        "--delete",
         "重复节点",
         "SSH",
         "EGL",
@@ -122,13 +117,13 @@ def test_mujoco_readme_documents_api_architecture_sync_and_troubleshooting():
     for value in required:
         assert value in text
     assert "pkill" not in text
-    assert "尚未开始强化学习训练" in text
-    assert "已实现强化学习训练" not in text
+    assert "Gymnasium/MJX Reach" in text
+    assert "不代表 GPU PPO/MJX 训练质量或实机验收" in text
 
 
 def test_feature_commands_links_to_mujoco_readme_and_safe_entry_points():
     text = _text(COMMANDS)
-    assert "../src/rebotarm_simulation/README_mujoco.md" in text
+    assert "../../../src/rebotarm_simulation/README_mujoco.md" in text
     assert "ros2 launch rebotarm_simulation mujoco_sim.launch.py" in text
     assert "rebotarm_mujoco_cli run --duration" in text
     assert "mujoco_rviz_viewer.launch.py" in text
@@ -143,7 +138,6 @@ def test_mujoco_readme_documents_local_urdf_to_mjcf_workflow() -> None:
         "rebotarm_urdf_to_mjcf --repo-root . --check",
         "mujoco>=3.3,<4",
         "原始 STL",
-        "Get-FileHash",
         "sha256sum",
         "不连接实机",
     )

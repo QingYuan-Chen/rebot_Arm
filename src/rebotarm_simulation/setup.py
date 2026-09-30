@@ -61,6 +61,9 @@ setup(
     ]
     + install_resources("models/**/*.xml")
     + install_resources("models/**/*.[sS][tT][lL]")
+    + install_resources("models/**/*.json")
+    + install_resources("models/**/*.txt")
+    + install_resources("models/**/*.step")
     + install_resources("config/*.yaml")
     + install_resources("launch/*.launch.py")
     + [(f"share/{package_name}/launch", sorted(launch_files))],
@@ -78,7 +81,6 @@ setup(
             "rebotarm_mujoco_batch = rebotarm_simulation.mujoco_batch:main",
             "rebotarm_mujoco_contact_check = rebotarm_simulation.mujoco_contact_check:main",
             "rebotarm_mujoco_ros_acceptance = rebotarm_simulation.mujoco_ros_acceptance:main",
-            "rebotarm_mujoco_moveit_acceptance = rebotarm_simulation.mujoco_moveit_acceptance:main",
             "rebotarm_mujoco_pick_batch = rebotarm_simulation.mujoco_pick_batch:main",
             "rebotarm_real2sim_acceptance = rebotarm_simulation.real2sim_acceptance:main",
             "rebotarm_real2sim_bridge = rebotarm_simulation.real2sim_ros_node:main",

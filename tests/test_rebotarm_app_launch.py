@@ -160,26 +160,27 @@ def test_dashboard_hides_and_blocks_hardware_only_commands_in_simulation() -> No
     assert "button.disabled = !useHardware ||" in html
 
 def test_common_commands_document_recommends_one_entrypoint() -> None:
-    doc = _read("docs/rebotarm_common_commands.md")
+    doc = _read("docs/reference/commands/rebotarm_common_commands.md")
 
     assert "rebotarm_app.launch.py" in doc
     assert "mode:=" not in doc
-    assert "channel:=auto" in doc
-    assert "reBotArm 遥操作使用文档" in doc
-    assert "网页遥操作" in doc
+    assert "channel:=/dev/ttyACM0" in doc
+    assert "网页、键盘与示教命令" in doc
+    assert "网页工作台" in doc
     assert "键盘遥操作" in doc
-    assert "重力补偿手拖示教录制" in doc
+    assert "示教录制" in doc
     assert "Ctrl+C" in doc
-    assert "safe_home" in doc
+    assert "Safe Home" in doc
 
 
 def test_feature_commands_document_web_teleop_next_to_rviz_drag() -> None:
-    doc = _read("docs/rebotarm_feature_commands.md")
+    doc = _read("docs/reference/commands/rebotarm_feature_commands.md")
 
-    assert "## RViz MoveIt 末端拖动" in doc
-    assert "## 网页遥操作" in doc
+    assert "## 仿真 RViz 拖动" in doc
+    assert "rebotarm_common_commands.md" in doc
     assert "ros2 launch rebotarm_bringup moveit_hardware.launch.py" in doc
     assert "rviz_ee_drag_real.launch.py" in doc
-    assert "ros2 launch rebotarm_bringup rebotarm_app.launch.py" in doc
-    assert "channel:=auto" in doc
-    assert "网页关节 Preview / Execute / Stop" in doc
+    assert "channel:=/dev/ttyACM0" in doc
+    operator_doc = _read("docs/reference/commands/rebotarm_common_commands.md")
+    assert "ros2 launch rebotarm_bringup rebotarm_app.launch.py" in operator_doc
+    assert "Preview、Execute、Stop" in operator_doc
