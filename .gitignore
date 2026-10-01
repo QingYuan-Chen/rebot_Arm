@@ -12,17 +12,13 @@ log_*/
 
 # Local model downloads and machine-specific inference artifacts.
 # Already tracked baseline assets remain tracked.
-/weights/
 *.pt
+!/scripts/yolo26s-seg.pt
 *.onnx
 *.engine
 *.whl
 /runs/
 /teleop_records/
-
-# Local experiment evidence is retained on disk, not added by routine staging.
-# Historical reports remain on disk and in Git history.
-/Agent/evidence/
 
 # Retired P1 comparison tools and their historical material stay local.
 /scripts/p1_upstream_mujoco/
@@ -57,6 +53,7 @@ venv/
 .vscode/
 .idea/
 third_party/rebotarm_mujoco_venv/
+third_party/rebotarm_rl_venv/
 third_party/reBotArm_control_py/
 third_party/reBotArm_develop_hjx/
 third_party/robotarm_ros2_upstream/

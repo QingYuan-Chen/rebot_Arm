@@ -15,10 +15,10 @@
 
 ## 项目介绍
 
-当前源码版本以 Git 提交为准。项目总览见 [README.md](README.md)，
-最新操作入口见 [功能命令参考](docs/reference/commands/rebotarm_feature_commands.md)。
+当前源码版本以 Git 提交为准。项目总览见 [README.md](../../README.md)，
+最新操作入口见 [功能命令参考](commands/rebotarm_feature_commands.md)。
 启动文件的分层、包含关系和功能边界见
-[启动结构与功能](src/rebotarm_bringup/launch/README.md)。
+[启动结构与功能](../../src/rebotarm_bringup/launch/README.md)。
 
 `rebotarm_ros2` 是 reBotArm B601 机械臂的 ROS2 SDK 工作空间。它将现有的
 `reBotArm_control_py` Python 控制库封装为 ROS2 topic、service 和 action，
@@ -89,7 +89,7 @@ sudo apt install ros-jazzy-moveit-simple-controller-manager
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-source tools/source_local_environment.bash
+source scripts/source_local_environment.bash
 ```
 
 ---
@@ -97,7 +97,7 @@ source tools/source_local_environment.bash
 ## 配置开发环境
 
 当前仓库的本机安装、硬件配置和视觉地址覆盖方式见
-[`docs/setup/ubuntu_ros2_jazzy.md`](docs/setup/ubuntu_ros2_jazzy.md)。
+[`docs/setup/ubuntu_ros2_jazzy.md`](../setup/ubuntu_ros2_jazzy.md)。
 
 ### Step 1. 安装 ROS2 依赖
 
@@ -109,22 +109,22 @@ MoveIt Execute 还需要 `ros-jazzy-moveit-simple-controller-manager`。
 先安装固定的 PyPI bootstrap 包：
 
 ```bash
-python3 -m pip install --user --break-system-packages -r requirements-runtime.txt
+python3 scripts/install_python_dependencies.py runtime --user --break-system-packages
 ```
 
-原始 `motorbridge==0.4.6` 不包含控制器所需的逐电机反馈 sequence，因此单独安装
+原始 `motorbridge==0.4.7` 不包含控制器所需的逐电机反馈 sequence，因此单独安装
 PyPI 包不够。必须从仓库根目录构建并显式安装已审查的
-`0.4.6+rebotarm.2` source patch，再通过启动前检查：
+`0.4.7+rebotarm.1` source patch，再通过启动前检查：
 
 ```bash
-python3 tools/setup_motorbridge_fresh_feedback.py --build-only
-python3 tools/setup_motorbridge_fresh_feedback.py --install-user
-python3 tools/setup_motorbridge_fresh_feedback.py --check-installed
+python3 scripts/setup_motorbridge_fresh_feedback.py --build-only
+python3 scripts/setup_motorbridge_fresh_feedback.py --install-user
+python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed
 ```
 
 `--build-only` 只在临时 venv 验证 wheel，不修改用户 Python；
 `--check-installed` 不联网、不构建且不访问硬件。详细构建、检查和回退说明见
-[`docs/setup/ubuntu_ros2_jazzy.md`](docs/setup/ubuntu_ros2_jazzy.md)。
+[`docs/setup/ubuntu_ros2_jazzy.md`](../setup/ubuntu_ros2_jazzy.md)。
 
 ### Step 3. 获取底层 SDK
 
@@ -132,7 +132,7 @@ python3 tools/setup_motorbridge_fresh_feedback.py --check-installed
 ```bash
 # 在当前仓库根目录执行
 mkdir -p third_party
-vcs import third_party < rebotarm_dependencies.repos
+vcs import third_party < third_party/rebotarm_dependencies.repos
 ```
 
 ### Step 4. 确认底层 SDK 可导入
@@ -158,7 +158,7 @@ source install/setup.bash
 
 构建不要求视觉模型或GPU，现有模型可选打包；启用检测时必须提供实际模型路径。
 视觉、GraspNet和MuJoCo使用各自的运行解释器，不通过切换构建解释器选择环境。
-系统依赖、安装顺序及运行参数以 [本机安装说明](docs/setup/ubuntu_ros2_jazzy.md) 为准。
+系统依赖、安装顺序及运行参数以 [本机安装说明](../setup/ubuntu_ros2_jazzy.md) 为准。
 
 验证包和入口：
 
@@ -183,15 +183,13 @@ rebotarmcontroller MoveToPose
 ```text
 rebot_Arm/
 ├── README.md
-├── README_zh.md
-├── Agent/                 # 实时状态与验收依据
 ├── docs/                  # 架构、环境与操作手册
-├── patches/               # MotorBridge 安全补丁
-├── requirements-*.txt     # 分环境依赖清单
-├── src/                   # 上表13个ROS包
+├── scripts/               # 环境、启动、检查与模型
+├── patches/               # MotorBridge 补丁
+├── src/                   # 11个活动ROS包
 ├── tests/
-├── tools/
-└── third_party/           # 本机参考快照与依赖，仅保留 COLCON_IGNORE
+├── third_party/           # 本机参考、运行依赖与固定SDK清单
+└── star_arm_102_rebot_b601_follow/  # 独立跟随工具
 ```
 
 ---
@@ -203,7 +201,7 @@ rebot_Arm/
 启动控制节点、`robot_state_publisher`，可选RViz；不包含网页或视觉。
 该入口会连接真机，使用前确认本轮授权和串口归属。
 完整网页遥操作入口为`rebotarm_app.launch.py`，见
-[功能命令参考](docs/reference/commands/rebotarm_feature_commands.md)。
+[功能命令参考](commands/rebotarm_feature_commands.md)。
 
 ```bash
 ros2 launch rebotarm_bringup bringup.launch.py

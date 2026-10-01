@@ -58,7 +58,7 @@ def _load_mujoco() -> tuple[Any, Any]:
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "MuJoCo health check requires the pinned MuJoCo environment; "
-            "install requirements-mujoco.txt first"
+            "install docs/setup/dependencies/mujoco.md first"
         ) from exc
     return mujoco, np
 

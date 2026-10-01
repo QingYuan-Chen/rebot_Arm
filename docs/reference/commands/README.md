@@ -57,4 +57,4 @@
 
 新增命令先判断是否属于已有主题；属于已有主题时修改对应权威文件，不新建重复说明。命令失效时从索引移除或改为明确的退役说明，不保留可复制的旧入口。
 
-每个命令文件只保留一个用户任务的完整流程。功能说明放在 `implemented/features/`，节点和参数说明放在 `reference/topology/`、`reference/parameters/`，测试原始记录放在 `Agent/evidence/`。
+每个命令文件只保留一个用户任务的完整流程。功能说明放在 `implemented/features/`，节点和参数说明放在 `reference/topology/`、`reference/parameters/`；关键验证结论维护在 [项目状态](../project_status.md)，新运行报告使用命令显式指定的 `log/` 路径，不加入文档目录。

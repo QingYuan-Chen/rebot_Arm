@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Local deployment environment only; never starts nodes or accesses hardware.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    printf 'Use: source tools/source_local_environment.bash\n' >&2
+    printf 'Use: source scripts/source_local_environment.bash\n' >&2
     exit 1
 fi
 

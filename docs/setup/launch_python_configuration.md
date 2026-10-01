@@ -32,7 +32,7 @@ export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 日常使用也可以直接执行：
 
 ```bash
-source tools/source_local_environment.bash
+source scripts/source_local_environment.bash
 ```
 
 该脚本还会默认设置本工作区的 `GRASPNET_MODEL_ROOT` 和
@@ -52,7 +52,7 @@ source /opt/ros/jazzy/setup.bash
 缺失则不打包；运行时启用检测仍必须提供可读且兼容的模型。
 独立视觉使用`yolo_model_path`，完整视觉使用`vision_yolo_model_path`覆盖路径。
 模型准备和PT启动示例见 [视觉环境说明](ubuntu_vision_setup_zh.md)。
-`tools/setup_ubuntu_vision.sh`只安装依赖；`tools/run_ubuntu_vision.sh`只为视觉
+`scripts/setup_ubuntu_vision.sh`只安装依赖；`scripts/run_ubuntu_vision.sh`只为视觉
 设置解释器环境变量，不再激活venv或注入全局PYTHONPATH。
 
 部署到其他机器时，改为那台机器实际安装的解释器路径即可。也可以在每次 launch

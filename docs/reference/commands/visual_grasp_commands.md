@@ -30,7 +30,7 @@ export GRASPNET_CHECKPOINT_PATH=/absolute/path/to/checkpoint-rs.tar
 ## 只读视觉
 
 ```bash
-./tools/run_ubuntu_vision.sh
+./scripts/run_ubuntu_vision.sh
 ```
 
 检查图像、检测和候选：

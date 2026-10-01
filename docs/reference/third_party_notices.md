@@ -12,14 +12,15 @@
 ### MotorBridge
 
 - Source: <https://github.com/motorbridge/motorbridge.git>
-- Pinned revision: `38b8a5681887514b301dbcab96e01a473cbd7173`
+- Pinned revision: `2b7b350914ace47ba06e85fcad333143de2b057b`
 - Local patch: `patches/motorbridge/0001-add-feedback-sequence-api.patch`.
-- Required runtime: `0.4.6+rebotarm.2` with `feedback_sequence=true`; unpatched
-  PyPI `0.4.6` is not a valid real-controller runtime.
+- Required runtime: `0.4.7+rebotarm.1` with `feedback_sequence=true`; unpatched
+  PyPI `0.4.7` is not a valid real-controller runtime. The pinned revision and
+  patch digest are checked by `scripts/setup_motorbridge_fresh_feedback.py`.
 
 ### Vision assets
 
-`tools/yolo26s-seg.pt` is tracked. Verify its upstream source and license before
+`scripts/yolo26s-seg.pt` is tracked. Verify its upstream source and license before
 redistribution. GraspNet code, checkpoints, PointNet2/KNN extensions and
 TensorRT engines are external runtime assets and are not supplied here.
 

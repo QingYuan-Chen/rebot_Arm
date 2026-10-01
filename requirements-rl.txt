@@ -1,8 +1,0 @@
-# Ubuntu 24.04 / Python 3.12 / NVIDIA driver 535+ / CUDA 12.x.
-# PyTorch 2.5.1 CUDA 12.1 wheel is published by PyTorch; +cu121 avoids CPU wheel selection.
---extra-index-url https://download.pytorch.org/whl/cu121
--r requirements-mujoco.txt
-gymnasium==1.2.3
-imageio==2.37.4
-stable-baselines3==2.8.0
-torch==2.5.1+cu121

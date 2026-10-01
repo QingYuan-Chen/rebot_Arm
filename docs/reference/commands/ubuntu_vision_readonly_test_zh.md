@@ -12,8 +12,8 @@ cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 
-./tools/setup_ubuntu_vision.sh
-./tools/setup_ubuntu_graspnet.sh
+./scripts/setup_ubuntu_vision.sh
+./scripts/setup_ubuntu_graspnet.sh
 ```
 
 安装脚本输出 `CUDA available: True`、显卡名称、`GraspNet environment imports: OK`
@@ -30,7 +30,7 @@ export GRASPNET_CHECKPOINT_PATH=/absolute/path/to/checkpoint-rs.tar
 模型路径和推理设备使用仓库默认值，不需要再输入参数：
 
 ```bash
-./tools/run_ubuntu_vision.sh
+./scripts/run_ubuntu_vision.sh
 ```
 
 默认值为：

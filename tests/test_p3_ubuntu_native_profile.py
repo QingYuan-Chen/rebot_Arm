@@ -39,7 +39,7 @@ def test_retired_http_vision_paths_are_not_shipped() -> None:
         "src/rebotarm_vision/rebotarm_vision/camera/network_mjpeg_driver.py",
         "src/rebotarm_vision/rebotarm_vision/network_graspnet_client.py",
         "src/rebotarm_vision/rebotarm_vision/local_graspnet_client.py",
-        "tools/ubuntu_graspnet_service.py",
+        "scripts/ubuntu_graspnet_service.py",
     ):
         assert not (ROOT / path).exists(), path
     for path in (

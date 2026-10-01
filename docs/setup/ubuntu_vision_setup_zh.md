@@ -23,7 +23,7 @@ Windows 服务及远端 HTTP 输入已删除。Ubuntu 原生链路使用 `camera
 再从仓库根目录安装视觉运行环境：
 
 ```bash
-./tools/setup_ubuntu_vision.sh
+./scripts/setup_ubuntu_vision.sh
 ```
 
 脚本创建 `.venv-vision`，固定安装 PyTorch `2.11.0+cu128`、torchvision
@@ -40,7 +40,7 @@ Windows 服务及远端 HTTP 输入已删除。Ubuntu 原生链路使用 `camera
 接入 Gemini2 后执行一次：
 
 ```bash
-./tools/install_orbbec_udev_rules.sh
+./scripts/install_orbbec_udev_rules.sh
 ```
 
 该步骤需要输入 sudo 密码。完成后拔插相机，并检查：
@@ -54,8 +54,8 @@ lsusb | grep -i -E "orbbec|2bc5"
 ### 新部署：直接使用已有PT模型
 
 ```bash
-./tools/run_ubuntu_vision.sh \
-  yolo_model_path:="$PWD/tools/yolo26s-seg.pt" yolo_device:=0
+./scripts/run_ubuntu_vision.sh \
+  yolo_model_path:="$PWD/scripts/yolo26s-seg.pt" yolo_device:=0
 ```
 
 无需TensorRT engine即可启动相机/YOLO；它不是已验证YOLO26m engine的等效性能或精度验收。
@@ -77,7 +77,7 @@ lsusb | grep -i -E "orbbec|2bc5"
 使用来源已确认、适配目标GPU及CUDA/TensorRT版本的engine，通过绝对路径指定：
 
 ```bash
-./tools/run_ubuntu_vision.sh \
+./scripts/run_ubuntu_vision.sh \
   yolo_model_path:=/absolute/path/to/reviewed-model.engine yolo_device:=0
 ```
 
@@ -129,7 +129,7 @@ ros2 topic echo /camera/depth/camera_info --once
 sudo apt install ros-jazzy-depth-image-proc
 ```
 
-保持 `./tools/run_ubuntu_vision.sh` 运行，在第二个终端启动转换节点：
+保持 `./scripts/run_ubuntu_vision.sh` 运行，在第二个终端启动转换节点：
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -155,8 +155,8 @@ PyTorch/CUDA 和 GraspNet 推理依赖。安装和健康检查均为本地操作
 打开串口、enable 电机或发送轨迹：
 
 ```bash
-./tools/setup_ubuntu_graspnet.sh
-PYTHONPATH= ./.venv-graspnet/bin/python tools/check_ubuntu_graspnet_env.py
+./scripts/setup_ubuntu_graspnet.sh
+PYTHONPATH= ./.venv-graspnet/bin/python scripts/check_ubuntu_graspnet_env.py
 PYTHONPATH= ./.venv-graspnet/bin/python -m pip check
 ```
 
@@ -202,7 +202,7 @@ export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
   vision_profile:=ubuntu_native use_hardware:=false execution_mode:=plan_only \
   start_visual_ready:=false start_visual_grasp_executor:=false \
-  vision_yolo_model_path:="$PWD/tools/yolo26s-seg.pt"
+  vision_yolo_model_path:="$PWD/scripts/yolo26s-seg.pt"
 ```
 
 这会使用真实相机和RViz-only运动学后端，不启动MuJoCo物理仿真或真机控制器；

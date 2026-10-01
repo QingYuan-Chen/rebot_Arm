@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "tools/setup_motorbridge_fresh_feedback.py"
+MODULE_PATH = ROOT / "scripts/setup_motorbridge_fresh_feedback.py"
 SPEC = importlib.util.spec_from_file_location(
     "setup_motorbridge_fresh_feedback",
     MODULE_PATH,

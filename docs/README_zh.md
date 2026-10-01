@@ -4,7 +4,7 @@
 
 本文档用于区分已实现功能、环境配置、设计方案、参考资料和历史记录。新接手者先看：
 
-1. [`../Agent/CURRENT_STATUS.md`](../Agent/CURRENT_STATUS.md)：当前项目状态、验收和安全边界；
+1. [`reference/project_status.md`](reference/project_status.md)：唯一项目状态文档、验证范围和安全边界；
 2. [`MAINTENANCE.md`](MAINTENANCE.md)：文档分类和长期维护规则；
 3. 本页对应类别和具体文档。
 
@@ -15,7 +15,7 @@
 了解功能 -> implemented/features/system_capabilities.md
 准备运行 -> reference/topology/system_dataflow.md
 复制命令 -> reference/commands/README.md
-查看详细证据 -> Agent/evidence/
+查看当前验证与限制 -> reference/project_status.md
 ```
 
 ## 文档分类
@@ -30,14 +30,19 @@
 
 ## 当前状态和规则
 
-- 当前主线是 MuJoCo/Gymnasium Reach；Reach 训练链路已通过基线验证，但策略尚未稳定收敛。
-- P0-P6 是已关闭的历史工程基线，不自动授权新的真实机械臂动作。
-- 当前真实视觉、硬件和 RL 的边界以代码、测试、用户最新决定和 `Agent/CURRENT_STATUS.md` 为准。
+- 当前保留 MuJoCo 仿真与 CPU Gymnasium Reach 基线；后续训练框架为 MJLab，尚未接入。
+- 历史阶段文档已清理；已有实测不自动授权新的真实机械臂动作。
+- 当前真实视觉、硬件和 RL 的边界以代码、测试、用户最新决定和 `reference/project_status.md` 为准。
 - 文档中的“计划”“有功能”“软件验证”不等于真实硬件验收或任务成功。
 
 ## 当前有效文档
 
 ### 架构、环境和启动
+
+- [`reference/context.md`](reference/context.md)：部署范围与工程术语。
+- [`reference/ros_sdk.md`](reference/ros_sdk.md)：ROS SDK 与控制器接口。
+- [`reference/third_party_notices.md`](reference/third_party_notices.md)：第三方来源与许可。
+- [`setup/dependencies/README.md`](setup/dependencies/README.md)：按环境分类的依赖版本与安装入口。
 
 - [`implemented/architecture.md`](implemented/architecture.md)：ROS 2 包职责、依赖方向、权限和工作流边界。
 - [`setup/ubuntu_ros2_jazzy.md`](setup/ubuntu_ros2_jazzy.md)：Ubuntu 24.04 / ROS 2 Jazzy 环境、构建和安全顺序。
@@ -78,7 +83,7 @@
 1. 当前代码和测试；
 2. `AGENTS.md`、`docs/implemented/architecture.md` 的安全和包边界；
 3. 用户最新明确决定；
-4. `Agent/CURRENT_STATUS.md`、`Agent/STATE.json`；
+4. `docs/reference/project_status.md`；
 5. 当前操作文档；
 6. 历史设计、迁移报告和旧实验记录。
 

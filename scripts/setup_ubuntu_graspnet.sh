@@ -14,7 +14,7 @@ env PYTHONPATH= "${python_bin}" -m pip install --upgrade "pip<27" "setuptools<80
 env PYTHONPATH= "${python_bin}" -m pip install \
   torch==2.11.0+cu128 torchvision==0.26.0+cu128 \
   --index-url https://download.pytorch.org/whl/cu128
-env PYTHONPATH= "${python_bin}" -m pip install -r "${repo_root}/requirements-graspnet.txt" \
+env PYTHONPATH= python3 "${repo_root}/scripts/install_python_dependencies.py" graspnet --python "${python_bin}" \
   --extra-index-url https://download.pytorch.org/whl/cu128
 
 env PYTHONPATH= "${python_bin}" - <<'PY'

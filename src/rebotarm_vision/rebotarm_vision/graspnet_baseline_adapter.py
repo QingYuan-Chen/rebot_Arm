@@ -480,7 +480,7 @@ def _load_inprocess_backend_module(module_name: str, *, module_path: str = ""):
 
     1. 显式配置的 module_path：直接按文件路径加载；
     2. 常规 import：模块已装进当前 Python 环境时最为直接；
-    3. 兜底在共享资源目录的 graspnet_backend/ 与源码树各级 tools/ 下按文件名查找，
+    3. 兜底在共享资源目录的 graspnet_backend/ 与源码树各级 scripts/ 下按文件名查找，
        以兼容未安装、直接从源码树运行的场景。
     只有确认是"该模块本身找不到"（ModuleNotFoundError.name 相同）才继续兜底；若只是该模块
     内部缺依赖，则原样抛出，避免把真实环境问题掩盖成路径问题。
@@ -508,7 +508,7 @@ def _load_inprocess_backend_module(module_name: str, *, module_path: str = ""):
             pass
         source = Path(__file__).resolve()
         for parent in source.parents:
-            candidates.append(parent / "tools" / f"{module_name}.py")
+            candidates.append(parent / "scripts" / f"{module_name}.py")
         for candidate in candidates:
             if candidate.is_file():
                 return _load_python_module_from_path(module_name, candidate)

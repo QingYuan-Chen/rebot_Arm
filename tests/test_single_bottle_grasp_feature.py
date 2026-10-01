@@ -62,24 +62,3 @@ def test_installed_feature_profile_keeps_real_accepted_parameters() -> None:
         "grasp_close_timeout_sec": 4.0,
         "controller_grasp_hold_timeout_sec": 30.0,
     }
-
-
-def test_legacy_p6_script_is_only_a_compatibility_wrapper() -> None:
-    wrapper = (ROOT / "tools/p6_single_bottle_grasp_runner.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert len(wrapper.splitlines()) < 40
-    assert "rebotarm_vision.single_bottle_grasp import main" in wrapper
-
-
-def test_p5_task_tool_reuses_the_production_trajectory_client() -> None:
-    tool = (ROOT / "tools/p5_paired_trajectory_runner.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert (
-        "from rebotarm_motion.guarded_trajectory_client import ("
-        in tool
-    )
-    assert "class PairedTrajectoryNode" not in tool

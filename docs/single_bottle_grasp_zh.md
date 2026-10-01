@@ -43,7 +43,7 @@ source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 export RMW_FASTRTPS_USE_SHM=0
 
-python3 tools/setup_motorbridge_fresh_feedback.py --check-installed || exit 1
+python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed || exit 1
 fuser -v /dev/ttyUSB0 /dev/ttyACM0
 
 ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
@@ -58,9 +58,6 @@ source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 
 ros2 run rebotarm_vision rebotarm_single_bottle_grasp \
-  --output "Agent/evidence/visual_grasp/single_bottle_$(date +%Y%m%d_%H%M%S).json" \
+  --output "log/visual_grasp/single_bottle_$(date +%Y%m%d_%H%M%S).json" \
   --confirm REAL_SINGLE_BOTTLE_GRASP
 ```
-
-`tools/p6_single_bottle_grasp_runner.py` 仅保留为旧命令兼容入口。新使用方式应调用
-安装后的 `rebotarm_single_bottle_grasp`，以免把产品功能继续绑定到验收阶段编号。

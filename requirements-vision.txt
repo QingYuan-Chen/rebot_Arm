@@ -1,8 +1,0 @@
-# Keep NumPy 1.x for ROS 2 Jazzy's apt-installed cv_bridge ABI.
-numpy==1.26.4
-scipy==1.11.4
-opencv-python==4.11.0.86
-ultralytics==8.4.66
-
-# 2.1.1 requires NumPy 2 on Python 3.12, which conflicts with cv_bridge.
-pyorbbecsdk2==2.0.18

@@ -9,12 +9,12 @@ from pathlib import Path
 from setuptools import find_packages, setup
 
 package_name = "rebotarm_vision"
-# 模型权重存放在仓库根的 tools/ 目录下（相对本 setup.py 是 ../../tools）。
+# 模型权重存放在仓库根的 scripts/ 目录下（相对本 setup.py 是 ../../scripts）。
 # yolo26s-seg.pt 是 PyTorch 权重（通用回退），
 # yolo26m-seg-fp16-b1-640-linux.engine 是 TensorRT 半精度引擎（批 1、640 输入，仅 Linux）。
 vision_model_sources = [
-    Path("../../tools/yolo26s-seg.pt"),
-    Path("../../tools/yolo26m-seg-fp16-b1-640-linux.engine"),
+    Path("../../scripts/yolo26s-seg.pt"),
+    Path("../../scripts/yolo26m-seg-fp16-b1-640-linux.engine"),
 ]
 
 # 运行期资产在构建期是可选的：权重可能尚未下载，此时不打包进 models/ 目录。
@@ -68,7 +68,7 @@ setup(
         # GraspNet 进程内推理后端脚本，由 graspnet_baseline_node 以 import 方式加载
         (
             f"share/{package_name}/graspnet_backend",
-            ["../../tools/graspnet_baseline_inference.py"],
+            ["../../scripts/graspnet_baseline_inference.py"],
         ),
     ],
     install_requires=["setuptools"],

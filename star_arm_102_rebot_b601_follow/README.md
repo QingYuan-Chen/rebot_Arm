@@ -14,7 +14,7 @@
 安装与离线测试：
 
 ```bash
-cd star_arm_102_rebot_b601_follow
+cd /home/a/project/rebot_Arm/star_arm_102_rebot_b601_follow
 python3 -m venv .venv
 .venv/bin/python -m pip install -r \
   Python_SDK/rebot_b601_mapping/requirements-dev.txt

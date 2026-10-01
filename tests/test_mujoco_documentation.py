@@ -21,7 +21,7 @@ def test_mujoco_readme_documents_reproducible_install_and_runtime_commands():
         "Python 3.12",
         "python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv",
         "source /opt/ros/jazzy/setup.bash",
-        "third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements-mujoco.txt",
+        "python3 scripts/install_python_dependencies.py mujoco --python third_party/rebotarm_mujoco_venv/bin/python",
         "/usr/bin/python3 -m colcon build --symlink-install --packages-select rebotarm_simulation",
         "MUJOCO_GL=egl",
         "rebotarm_mujoco_health --renderer-timeout",
@@ -117,8 +117,8 @@ def test_mujoco_readme_documents_api_architecture_sync_and_troubleshooting():
     for value in required:
         assert value in text
     assert "pkill" not in text
-    assert "Gymnasium/MJX Reach" in text
-    assert "不代表 GPU PPO/MJX 训练质量或实机验收" in text
+    assert "Gymnasium CPU Reach" in text
+    assert "不代表 GPU PPO 训练质量或实机验收" in text
 
 
 def test_feature_commands_links_to_mujoco_readme_and_safe_entry_points():

@@ -26,9 +26,9 @@ ros2 run rebotarm_vision rebotarm_visual_grasp_benchmark \
 
 ```bash
 cd /home/a/project/rebot_Arm
-source tools/source_local_environment.bash
-./tools/run_ubuntu_vision.sh \
-  yolo_model_path:="$PWD/tools/yolo26s-seg.pt" yolo_device:=0
+source scripts/source_local_environment.bash
+./scripts/run_ubuntu_vision.sh \
+  yolo_model_path:="$PWD/scripts/yolo26s-seg.pt" yolo_device:=0
 ```
 
 该命令只启动相机/YOLO，不启动机械臂控制器。GraspNet 使用独立的

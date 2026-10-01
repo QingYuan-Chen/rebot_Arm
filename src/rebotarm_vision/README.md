@@ -64,7 +64,7 @@ rebotarm_vision/
 ├── launch/vision.launch.py            # 通用视觉入口
 ├── launch/vision_ubuntu.launch.py     # Ubuntu 原生相机入口
 ├── setup.py / package.xml / resource/*
-└── ../../tools/graspnet_baseline_inference.py # 构建时安装到 share/.../graspnet_backend/
+└── ../../scripts/graspnet_baseline_inference.py # 构建时安装到 share/.../graspnet_backend/
 ```
 
 `candidate_*.py` 是一组独立策略模块，负责把候选逐层变成可执行计划；不要把这些门绕过后直接调用 controller。`visual_ready_node` 属于 `rebotarm_motion`，视觉包只保留其兼容/调用接口。

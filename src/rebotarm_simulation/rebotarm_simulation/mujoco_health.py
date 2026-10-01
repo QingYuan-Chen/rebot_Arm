@@ -30,7 +30,7 @@ def _version() -> str:
         import mujoco
     except (ImportError, ModuleNotFoundError) as exc:
         raise RuntimeError(
-            "MuJoCo is required; install requirements-mujoco.txt in the active environment"
+            "MuJoCo is required; install docs/setup/dependencies/mujoco.md in the active environment"
         ) from exc
     return str(mujoco.__version__)
 

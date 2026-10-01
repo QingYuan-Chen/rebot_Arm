@@ -11,9 +11,8 @@ Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/detections -> local GraspNet
 Do not restore retired Windows, HTTP, MJPEG, remote-JSON, or standalone
 GraspNet-service vision paths. Dashboard HTTP is local UI/API only.
 
-Before changing code, read `docs/implemented/architecture.md`, `CONTEXT.md`,
-`tests/test_package_layering.py`, `Agent/README.md`, `Agent/MEMORY.md`,
-`Agent/PROJECT_STATUS.md`, and `Agent/STATE.json`.
+Before changing code, read `docs/implemented/architecture.md`, `docs/reference/context.md`,
+`tests/test_package_layering.py`, and `docs/reference/project_status.md`.
 
 ## Hard Rules
 
@@ -31,17 +30,14 @@ Before changing code, read `docs/implemented/architecture.md`, `CONTEXT.md`,
 - Keep launch composition and backend selection in `rebotarm_bringup`.
 - Keep hand-eye, TCP, and TF validation in `rebotarm_calibration`.
 
-## Agent State
+## Project State
 
-`Agent/` is the live project-state source. At task start run:
-
-```bash
-python3 Agent/update_state.py --event start --actor <agent> --note "<task>"
-```
-
-Update `Agent/MEMORY.md` when facts or blockers change. Update `STATE.json` only
-through `Agent/update_state.py`; do not rewrite activity history or mark hardware
-acceptance from software tests alone.
+`docs/reference/project_status.md` is the only project-state document. Read it
+before changes and update it directly when important decisions, blockers, or
+verification results change. Keep feature details and commands in their existing
+docs pages and link to them instead of copying them into state notes. Do not
+recreate the retired state directory, generated JSON, activity logs, or phase
+documents. Do not mark hardware acceptance from software tests alone.
 
 ## Required Checks
 

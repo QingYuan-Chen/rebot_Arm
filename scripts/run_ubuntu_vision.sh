@@ -7,7 +7,7 @@ export REBOTARM_VISION_PYTHON="${REBOTARM_VISION_PYTHON:-${repo_root}/.venv-visi
 export PYTHONNOUSERSITE=1
 
 if ! command -v "${REBOTARM_VISION_PYTHON}" >/dev/null; then
-  echo "Vision environment not found. Run tools/setup_ubuntu_vision.sh first." >&2
+  echo "Vision environment not found. Run scripts/setup_ubuntu_vision.sh first." >&2
   exit 1
 fi
 if [[ ! -f "${repo_root}/install/setup.bash" ]]; then

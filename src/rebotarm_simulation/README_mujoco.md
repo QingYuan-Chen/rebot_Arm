@@ -52,7 +52,7 @@ MuJoCo虚拟环境只用于运行，不需要相机、视觉权重或历史上�
 cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
-third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements-mujoco.txt
+python3 scripts/install_python_dependencies.py mujoco --python third_party/rebotarm_mujoco_venv/bin/python
 /usr/bin/python3 -m colcon build --symlink-install --packages-select rebotarm_simulation
 source install/setup.bash
 export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
@@ -473,8 +473,8 @@ sha256sum src/rebotarm_simulation/models/rebotarm/robot.xml
 ## 本地合并兼容说明
 
 默认 `scene.xml` 保留 cube 接触/Pick 与 Viewer 拖拽目标；瓶体随机化使用
-`scene_bottle.xml`，上游 Gymnasium/MJX Reach 使用独立无碰撞 `reach_scene.xml`。
+`scene_bottle.xml`，上游 Gymnasium CPU Reach 使用独立无碰撞 `reach_scene.xml`。
 三类场景共享本轮更新的 `robot.xml` 和 Gemini 2 仿真负载。旧虚拟 RGB-D
 发布流程已退役。MoveIt 仿真验收统一由 `rebotarm_motion` 实现。
 
-本地软件回归不代表 GPU PPO/MJX 训练质量或实机验收。
+本地软件回归不代表 GPU PPO 训练质量或实机验收。

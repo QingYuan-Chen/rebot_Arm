@@ -1,4 +1,0 @@
-# Python dependencies that are not distributed as ROS packages.
-# Bootstrap package only. The controller additionally requires the reviewed
-# feedback-sequence patch installed by tools/setup_motorbridge_fresh_feedback.py.
-motorbridge==0.4.7

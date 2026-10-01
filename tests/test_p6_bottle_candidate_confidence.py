@@ -95,7 +95,7 @@ assert spec is not None and spec.loader is not None
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 sys.argv = [
-    'p6_single_bottle_grasp_runner.py',
+    'rebotarm_single_bottle_grasp',
     '--gripper-open-m', '0.08',
     '--output', '/tmp/p6-parser-test.json',
 ]

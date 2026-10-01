@@ -11,8 +11,8 @@ env PYTHONPATH= "${python_bin}" -m pip install --upgrade "pip<27" "setuptools<80
 env PYTHONPATH= "${python_bin}" -m pip install \
   torch==2.11.0+cu128 torchvision==0.26.0+cu128 \
   --index-url https://download.pytorch.org/whl/cu128
-env PYTHONPATH= "${python_bin}" -m pip install -r "${repo_root}/requirements-vision.txt"
-env PYTHONPATH= "${python_bin}" -m pip install --no-deps -r "${repo_root}/requirements-tensorrt.txt"
+env PYTHONPATH= python3 "${repo_root}/scripts/install_python_dependencies.py" vision --python "${python_bin}"
+env PYTHONPATH= python3 "${repo_root}/scripts/install_python_dependencies.py" tensorrt --python "${python_bin}" --no-deps
 
 set +u
 source /opt/ros/jazzy/setup.bash
@@ -42,6 +42,6 @@ echo "Environment ready."
 echo "Build the ROS workspace separately with system Python; see docs/setup/ubuntu_ros2_jazzy.md."
 echo "No models are downloaded or exported. Select a model using yolo_model_path."
 echo "Install the Orbbec udev rule once after connecting the camera:"
-echo "  ${repo_root}/tools/install_orbbec_udev_rules.sh"
+echo "  ${repo_root}/scripts/install_orbbec_udev_rules.sh"
 echo "Start Ubuntu-native vision with:"
-echo "  ${repo_root}/tools/run_ubuntu_vision.sh"
+echo "  ${repo_root}/scripts/run_ubuntu_vision.sh"
