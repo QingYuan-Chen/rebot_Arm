@@ -16,9 +16,6 @@
                                   用错解释器会以缺失依赖的形式在运行期才暴露。
     yolo_model_path:              检测权重完整路径，默认 share/rebotarm_vision/models/yolo26s-seg.pt。
     handeye_config:               手眼标定 YAML 路径，默认 share/rebotarm_vision/config/handeye.yaml。
-    start_ordinary_grasp:         是否启动传统"检测框 + 深度"抓取规划链路，默认 false（不启动）。
-    ordinary_grasp_root:          传统链路所需的模型/资源根目录，默认空串（未配置）。仅当上项为 true 时必填。
-    ordinary_depth_quality_enabled: 传统链路是否启用深度质量门控，默认 true。
 
 以上参数只是转交给 vision.launch.py，本文件不直接构造任何节点，也不决定真实/仿真后端。
 """
@@ -60,12 +57,6 @@ def generate_launch_description():
                 "handeye_config",
                 default_value=str(vision_share / "config" / "handeye.yaml"),
             ),
-            # 传统抓取链路默认关闭：Ubuntu 原生 profile 走 GraspNet 候选链路
-            DeclareLaunchArgument("start_ordinary_grasp", default_value="false"),
-            # 传统链路资源根目录，默认空串表示未配置（启用传统链路时必须显式提供）
-            DeclareLaunchArgument("ordinary_grasp_root", default_value=""),
-            # 传统链路深度质量门控开关
-            DeclareLaunchArgument("ordinary_depth_quality_enabled", default_value="true"),
             # 包含通用启动文件：相机配置固定为 Ubuntu 原生 profile，其余参数透传
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -79,11 +70,6 @@ def generate_launch_description():
                     "yolo_device": LaunchConfiguration("yolo_device"),
                     "vision_python_executable": LaunchConfiguration("vision_python_executable"),
                     "handeye_config": LaunchConfiguration("handeye_config"),
-                    "start_ordinary_grasp": LaunchConfiguration("start_ordinary_grasp"),
-                    "ordinary_grasp_root": LaunchConfiguration("ordinary_grasp_root"),
-                    "ordinary_depth_quality_enabled": LaunchConfiguration(
-                        "ordinary_depth_quality_enabled"
-                    ),
                 }.items(),
             )
         ]

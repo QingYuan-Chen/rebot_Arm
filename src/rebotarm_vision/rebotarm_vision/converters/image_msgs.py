@@ -12,8 +12,26 @@
 
 from __future__ import annotations
 
+from typing import Mapping
+
 import numpy as np
 from sensor_msgs.msg import CameraInfo, Image
+
+
+def _intrinsic_value(camera_info: Mapping[str, object], name: str, index: int) -> float:
+    """读取单个内参，按 ``name`` → ``k[index]`` → ``0.0`` 回退。
+
+    相机配置来自 YAML，``k`` 可能缺失或长度不足；把这项容错集中在纯函数中，
+    让消息组装逻辑只关注 ROS 字段映射，并避免四个内参重复实现同一回退规则。
+    """
+
+    if name in camera_info and camera_info[name] is not None:
+        return float(camera_info[name])
+    intrinsic_matrix = camera_info.get("k", ())
+    try:
+        return float(intrinsic_matrix[index])  # type: ignore[index]
+    except (IndexError, KeyError, TypeError, ValueError):
+        return 0.0
 
 
 def color_to_msg(image_bgr, stamp, frame_id: str) -> Image:
@@ -57,6 +75,24 @@ def depth_to_msg(depth_mm, stamp, frame_id: str) -> Image:
     return msg
 
 
+def depth_image_to_array(msg: Image) -> np.ndarray:
+    """将 ``mono16``/``16UC1`` 深度消息解码为毫米 ``uint16`` 数组。
+
+    数据长度必须与图像尺寸一致；无效编码或尺寸会抛出 ``ValueError``，
+    调用节点负责拒绝该帧。返回值与原消息共享只读数据缓冲区。
+    """
+
+    if msg.encoding not in ("mono16", "16UC1"):
+        raise ValueError(f"unsupported depth encoding: {msg.encoding}")
+    if msg.height <= 0 or msg.width <= 0:
+        raise ValueError(f"invalid depth dimensions: {msg.width}x{msg.height}")
+    depth = np.frombuffer(msg.data, dtype=np.uint16)
+    expected = msg.height * msg.width
+    if depth.size != expected:
+        raise ValueError(f"depth payload has {depth.size} pixels, expected {expected}")
+    return depth.reshape((msg.height, msg.width))
+
+
 def camera_info_to_msg(camera_info: dict, stamp, frame_id: str) -> CameraInfo:
     """由相机参数字典构造相机信息消息。
 
@@ -70,10 +106,10 @@ def camera_info_to_msg(camera_info: dict, stamp, frame_id: str) -> CameraInfo:
     畸变且无立体外参——这是单目 RGB-D 相机的常见约定。
     """
 
-    fx = float(camera_info.get("fx", camera_info.get("k", [0.0, 0.0, 0.0])[0]))
-    fy = float(camera_info.get("fy", camera_info.get("k", [0.0, 0.0, 0.0, 0.0, 0.0])[4]))
-    cx = float(camera_info.get("cx", camera_info.get("k", [0.0, 0.0, 0.0])[2]))
-    cy = float(camera_info.get("cy", camera_info.get("k", [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])[5]))
+    fx = _intrinsic_value(camera_info, "fx", 0)
+    fy = _intrinsic_value(camera_info, "fy", 4)
+    cx = _intrinsic_value(camera_info, "cx", 2)
+    cy = _intrinsic_value(camera_info, "cy", 5)
     msg = CameraInfo()
     msg.header.stamp = stamp
     msg.header.frame_id = frame_id

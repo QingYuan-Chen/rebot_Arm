@@ -29,8 +29,10 @@
 import os
 from pathlib import Path
 
+import yaml
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler
 from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -54,6 +56,19 @@ def _workspace_path(environment_name: str, relative_path: str) -> str:
     return ""
 
 
+def _read_policy(context, profile, node_name):
+    """Read one node's defaults; fail with the resource and node in the error."""
+    path = profile.perform(context)
+    try:
+        with open(path, encoding="utf-8") as stream:
+            values = yaml.safe_load(stream)[node_name]["ros__parameters"]
+        if not isinstance(values, dict):
+            raise TypeError("ros__parameters must be a mapping")
+        return values
+    except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
+        raise RuntimeError(f"Cannot load policy {path} for {node_name}: {exc}") from exc
+
+
 # 生成完整启动描述。两条顺序约束必须保持：
 #   1) 声明顺序即启动顺序，共享底层栈先起、就绪实例随后；
 #   2) 视觉链路节点全部挂在 post_visual_ready_actions 里，由就绪实例的退出事件触发。
@@ -62,16 +77,14 @@ def generate_launch_description():
     # 上层启动只决定把哪一份策略档传给哪个节点，策略本身不在本文件定义。
     bringup_share = FindPackageShare("rebotarm_bringup")
     vision_share = FindPackageShare("rebotarm_vision")
-    grasp_pose_policy_params = PathJoinSubstitution([vision_share, "config", "grasp_pose_policy.yaml"])  # 抓取姿态与候选过滤策略档（候选过滤节点用混合策略，执行器用 base_axis）
+    grasp_pose_policy_params = PathJoinSubstitution([vision_share, "config", "grasp_pose_policy.yaml"])  # 抓取姿态与候选过滤策略档（候选过滤节点保留候选姿态，执行器用 base_axis）
     gripper_policy_params = PathJoinSubstitution([vision_share, "config", "gripper_policy.yaml"])  # 夹爪开合宽度与夹持力策略档
     retry_policy_params = PathJoinSubstitution([vision_share, "config", "retry_policy.yaml"])  # 重试、抓取验证与放置策略档
     retreat_policy_params = PathJoinSubstitution([vision_share, "config", "retreat_policy.yaml"])  # 抓取后安全撤退策略档
     visual_servo_params = PathJoinSubstitution([vision_share, "config", "visual_servo.yaml"])  # 计划刷新与接近段视觉伺服档
     table_safety_params = PathJoinSubstitution([vision_share, "config", "table_safety.yaml"])  # 台面高度安全档（候选过滤与执行器共享同一批高度下限）
-    graspnet_policy_params = PathJoinSubstitution([vision_share, "config", "graspnet_policy.yaml"])  # 抓取网络参数档（通用档，含 model_root/checkpoint/device 等）
     graspnet_ubuntu_params = PathJoinSubstitution([vision_share, "config", "graspnet_ubuntu.yaml"])  # 抓取网络参数档（Ubuntu 原生档，模型路径由启动参数另行注入）
     visual_ready_params = PathJoinSubstitution([FindPackageShare("rebotarm_motion"), "config", "visual_ready.yaml"])  # 视觉就绪位姿档（启动实例与常驻实例共用同一份关节角）
-    flat_graspnet_params = PathJoinSubstitution([vision_share, "config", "flat_graspnet.yaml"])  # 通用（flat）候选档：原样保留网络位姿 + 工作空间盒闸门
 
     # ── 命名空间与后端选择 ──
     # 下面的 LaunchConfiguration 只是把启动参数读进来；每个参数的完整含义见文末声明处。
@@ -96,10 +109,6 @@ def generate_launch_description():
     vision_camera_config = LaunchConfiguration("vision_camera_config")
     vision_handeye_config = LaunchConfiguration("vision_handeye_config")
     vision_yolo_model_path = LaunchConfiguration("vision_yolo_model_path")
-    # ── 普通（几何）抓取备用链路，默认关闭 ──
-    start_ordinary_grasp = LaunchConfiguration("start_ordinary_grasp")
-    ordinary_grasp_root = LaunchConfiguration("ordinary_grasp_root")
-    ordinary_depth_quality_enabled = LaunchConfiguration("ordinary_depth_quality_enabled")
     # ── 抓取网络候选生成（主候选来源）──
     start_graspnet_baseline = LaunchConfiguration("start_graspnet_baseline")
     graspnet_candidates_topic = LaunchConfiguration("graspnet_candidates_topic")
@@ -322,6 +331,82 @@ def generate_launch_description():
             }
         ],
     )
+
+    def _launch_executor(context):
+        # Flatten named YAML entries before Node normalization so explicit overrides
+        # have predictable precedence, including values equal to former defaults.
+        policy_defaults = {}
+        for profile in (
+            grasp_pose_policy_params,
+            gripper_policy_params,
+            retry_policy_params,
+            retreat_policy_params,
+            visual_servo_params,
+            table_safety_params,
+        ):
+            policy_defaults.update(_read_policy(context, profile, "rebotarm_visual_grasp_executor"))
+        # Keep launch compatibility: only values different from YAML defaults
+        # are added as overrides. Equal defaults remain owned by the profile.
+        override_names = ('close_position_m', 'close_max_effort', 'open_before_approach', 'auto_gripper_width', 'auto_gripper_effort', 'open_clearance_m', 'close_margin_m', 'min_gripper_effort', 'max_gripper_effort', 'max_allowed_grasp_width_m', 'gripper_grasp_enabled', 'gripper_grasp_close_force', 'gripper_grasp_timeout_sec', 'gripper_grasp_min_close_time_sec', 'gripper_grasp_velocity_threshold', 'gripper_grasp_min_closure_distance_m',)
+        for name in override_names:
+            value = LaunchConfiguration(name).perform(context).strip().lower()
+            default = str(policy_defaults[name]).strip().lower()
+            if value != default:
+                policy_defaults[name] = LaunchConfiguration(name)
+        return [Node(
+    package="rebotarm_vision",
+    executable="rebotarm_visual_grasp_executor",
+    name="rebotarm_visual_grasp_executor",
+    output="screen",
+    condition=IfCondition(start_visual_grasp_executor),
+    parameters=[
+        {
+            **policy_defaults,
+            "arm_namespace": arm_namespace,
+            "input_topic": executor_input_topic,
+            "candidates_topic": filtered_candidates_topic,
+            "target_frame": "base_link",
+            "tcp_offset_xyz": tcp_offset_xyz,
+            "target_base_offset_xyz": target_base_offset_xyz,
+            "grasp_base_z_offset_m": grasp_base_z_offset_m,
+            "pose_policy": pose_policy,
+            "fixed_grasp_orientation_xyzw": fixed_grasp_orientation_xyzw,
+            "base_approach_axis_xyz": base_approach_axis_xyz,
+            "base_pregrasp_distance_m": base_pregrasp_distance_m,
+            "min_grasp_z_m": min_target_z_m,
+            "safe_retreat_enabled": safe_retreat_enabled,
+            "safe_retreat_distance_m": safe_retreat_distance_m,
+            "safe_home_after_grasp": safe_home_after_grasp,
+            "move_velocity_scaling": move_velocity_scaling,
+            "approach_velocity_scaling": approach_velocity_scaling,
+            "retreat_velocity_scaling": retreat_velocity_scaling,
+            "acceleration_scaling": acceleration_scaling,
+            "execute_gripper": execute_gripper,
+            "execution_mode": execution_mode,
+            "max_plan_age_sec": max_plan_age_sec,
+            "plan_only_stage_pause_sec": plan_only_stage_pause_sec,
+            "approach_visual_servo_enabled": approach_visual_servo_enabled,
+            "approach_visual_servo_max_iterations": approach_visual_servo_max_iterations,
+            "approach_visual_servo_max_step_m": approach_visual_servo_max_step_m,
+            "approach_visual_servo_position_tolerance_m": approach_visual_servo_position_tolerance_m,
+            "approach_visual_servo_require_fresh_plan": approach_visual_servo_require_fresh_plan,
+            "auto_retry_enabled": auto_retry_enabled,
+            "auto_retry_max_attempts": auto_retry_max_attempts,
+            "safe_retreat_before_retry": safe_retreat_before_retry,
+            "grasp_verification_enabled": grasp_verification_enabled,
+            "grasp_verification_min_closure_distance_m": grasp_verification_min_closure_distance_m,
+            "grasp_verification_require_contact": grasp_verification_require_contact,
+            "place_after_grasp_enabled": place_after_grasp_enabled,
+            "place_position_xyz": place_position_xyz,
+            "place_orientation_xyzw": place_orientation_xyzw,
+            "place_open_position_m": place_open_position_m,
+            "place_open_max_effort": place_open_max_effort,
+            "place_retreat_z_m": place_retreat_z_m,
+            "trajectory_precheck_enabled": trajectory_precheck_enabled,
+        }
+    ],
+)]
+
     # ── 就绪之后才启动的完整视觉抓取链路（按依赖顺序排列）──
     # 顺序：就绪常驻服务 → 相机与检测 → 抓取网络候选 → 逆解与碰撞过滤 →
     #       MoveIt 位姿执行 → 抓取执行器。无硬件状态后端已在本列表之前启动。
@@ -373,9 +458,6 @@ def generate_launch_description():
                 "yolo_model_path": vision_yolo_model_path,
                 "vision_python_executable": vision_python_executable,
                 "yolo_device": "0",
-                "start_ordinary_grasp": start_ordinary_grasp,
-                "ordinary_grasp_root": ordinary_grasp_root,
-                "ordinary_depth_quality_enabled": ordinary_depth_quality_enabled,
             }.items(),
         ),
         # 抓取预览发送器（默认关闭）：把过滤后的计划转成操作者可预览的目标位姿，
@@ -582,83 +664,7 @@ def generate_launch_description():
         # 接近 → 预抓取 → 抓取 → 闭合验证 →（可选 沿接近路径反向撤退/放置）的阶段序列，
         # 逐阶段调用运动层与夹爪服务，并施加台面高度、夹持力、验证与撤退等安全策略。
         # 默认 execution_mode=plan_only：只规划干跑，不向硬件下发动作。
-        Node(
-            package="rebotarm_vision",
-            executable="rebotarm_visual_grasp_executor",
-            name="rebotarm_visual_grasp_executor",
-            output="screen",
-            condition=IfCondition(start_visual_grasp_executor),
-            parameters=[
-                grasp_pose_policy_params,
-                gripper_policy_params,
-                retry_policy_params,
-                retreat_policy_params,
-                visual_servo_params,
-                table_safety_params,
-                {
-                    "arm_namespace": arm_namespace,
-                    "input_topic": executor_input_topic,
-                    "candidates_topic": filtered_candidates_topic,
-                    "target_frame": "base_link",
-                    "tcp_offset_xyz": tcp_offset_xyz,
-                    "target_base_offset_xyz": target_base_offset_xyz,
-                    "grasp_base_z_offset_m": grasp_base_z_offset_m,
-                    "pose_policy": pose_policy,
-                    "fixed_grasp_orientation_xyzw": fixed_grasp_orientation_xyzw,
-                    "base_approach_axis_xyz": base_approach_axis_xyz,
-                    "base_pregrasp_distance_m": base_pregrasp_distance_m,
-                    "min_grasp_z_m": min_target_z_m,
-                    "close_position_m": close_position_m,
-                    "close_max_effort": close_max_effort,
-                    "open_before_approach": open_before_approach,
-                    "auto_gripper_width": auto_gripper_width,
-                    "auto_gripper_effort": auto_gripper_effort,
-                    "open_clearance_m": open_clearance_m,
-                    "close_margin_m": close_margin_m,
-                    "min_gripper_effort": min_gripper_effort,
-                    "max_gripper_effort": max_gripper_effort,
-                    "max_allowed_grasp_width_m": max_allowed_grasp_width_m,
-                    "gripper_grasp_enabled": gripper_grasp_enabled,
-                    "gripper_grasp_close_force": gripper_grasp_close_force,
-                    "gripper_grasp_timeout_sec": gripper_grasp_timeout_sec,
-                    "gripper_grasp_min_close_time_sec": gripper_grasp_min_close_time_sec,
-                    "gripper_grasp_velocity_threshold": gripper_grasp_velocity_threshold,
-                    "gripper_grasp_min_closure_distance_m": gripper_grasp_min_closure_distance_m,
-                    "safe_retreat_enabled": safe_retreat_enabled,
-                    "safe_retreat_distance_m": safe_retreat_distance_m,
-                    "safe_home_after_grasp": safe_home_after_grasp,
-                    "move_velocity_scaling": move_velocity_scaling,
-                    "approach_velocity_scaling": approach_velocity_scaling,
-                    "retreat_velocity_scaling": retreat_velocity_scaling,
-                    "acceleration_scaling": acceleration_scaling,
-                    "execute_gripper": execute_gripper,
-                    "execution_mode": execution_mode,
-                    "max_plan_age_sec": max_plan_age_sec,
-                    "plan_only_stage_pause_sec": plan_only_stage_pause_sec,
-                    "refresh_plan_at_pregrasp_enabled": False,  # 默认不做接近点计划刷新（增强项，未验证前保持关闭）
-                    "refresh_plan_at_pregrasp_required": False,  # 刷新非强制：等不到新计划时沿用旧计划而不是直接判失败
-                    "refresh_plan_timeout_sec": 1.0,  # 等待新抓取计划的最长时间 1 s
-                    "approach_visual_servo_enabled": approach_visual_servo_enabled,
-                    "approach_visual_servo_max_iterations": approach_visual_servo_max_iterations,
-                    "approach_visual_servo_max_step_m": approach_visual_servo_max_step_m,
-                    "approach_visual_servo_position_tolerance_m": approach_visual_servo_position_tolerance_m,
-                    "approach_visual_servo_require_fresh_plan": approach_visual_servo_require_fresh_plan,
-                    "auto_retry_enabled": auto_retry_enabled,
-                    "auto_retry_max_attempts": auto_retry_max_attempts,
-                    "safe_retreat_before_retry": safe_retreat_before_retry,
-                    "grasp_verification_enabled": grasp_verification_enabled,
-                    "grasp_verification_min_closure_distance_m": grasp_verification_min_closure_distance_m,
-                    "grasp_verification_require_contact": grasp_verification_require_contact,
-                    "place_after_grasp_enabled": place_after_grasp_enabled,
-                    "place_position_xyz": place_position_xyz,
-                    "place_orientation_xyzw": place_orientation_xyzw,
-                    "place_open_position_m": place_open_position_m,
-                    "place_open_max_effort": place_open_max_effort,
-                    "place_retreat_z_m": place_retreat_z_m,
-                    "trajectory_precheck_enabled": trajectory_precheck_enabled,
-                }
-            ],
-        ),
+        OpaqueFunction(function=_launch_executor),
     ]
 
     # ── 启动参数声明与实体组装 ──
@@ -712,9 +718,6 @@ def generate_launch_description():
                     ]
                 ),
             ),
-            DeclareLaunchArgument("start_ordinary_grasp", default_value="false"),  # 是否启动普通（几何）抓取节点；该备用链路默认关闭，主链路使用抓取网络候选
-            DeclareLaunchArgument("ordinary_grasp_root", default_value=""),  # 普通抓取资源根目录；空串表示使用包内默认路径
-            DeclareLaunchArgument("ordinary_depth_quality_enabled", default_value="true"),  # 普通抓取是否启用深度质量检查（过滤无效深度像素）
             DeclareLaunchArgument("start_graspnet_baseline", default_value="true"),  # 是否启动抓取网络候选生成节点（主候选来源）
             DeclareLaunchArgument("graspnet_candidates_topic", default_value="/grasp/graspnet_candidates"),  # 候选数组输出话题；同时也是下游逆解过滤节点的输入话题
             DeclareLaunchArgument("graspnet_output_frame_id", default_value="camera_depth_frame"),  # 候选位姿输出坐标系，必须与深度图 frame_id 一致，否则 TF 换算失配
@@ -825,6 +828,7 @@ def generate_launch_description():
             DeclareLaunchArgument("candidate_max_joint6_delta_rad", default_value="1.5708"),  # joint6 单关节最大允许角差（rad，约 90 度）；超过直接否决该候选
             DeclareLaunchArgument("candidate_joint6_symmetry_enabled", default_value="true"),  # 是否启用夹爪 180 度对称性补偿（平行夹爪绕张合轴转 pi 后仍是同一次物理抓取）
             DeclareLaunchArgument("candidate_joint6_symmetry_angle_rad", default_value="3.141592653589793"),  # 对称角（rad，等于 pi）；只有 180 度对称才物理等价，不应随意改动
+            # 夹爪 launch 参数直接读取 YAML 默认值，显式传入的值仍覆盖配置。
             DeclareLaunchArgument("close_position_m", default_value="0.025"),  # 固定合爪目标位置（两指间距，m）；自适应模式开启且测得有效宽度时会被覆写
             DeclareLaunchArgument("close_max_effort", default_value="0.4"),  # 合爪阶段最大夹持力（归一化量纲，非牛顿；本站约定 0~0.6）；调大更紧但可能压坏目标
             DeclareLaunchArgument("open_before_approach", default_value="true"),  # 是否在接近目标前先张开夹爪；狭窄场景可置 false，改为到达接近点后再张开

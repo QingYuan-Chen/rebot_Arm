@@ -12,7 +12,7 @@ if str(VISION_SRC) not in sys.path:
 
 
 def test_base_axis_policy_uses_visual_position_but_fixed_reachable_orientation():
-    from rebotarm_vision.visual_grasp_pose_policy import BaseAxisGraspPolicyConfig, build_base_axis_grasp_targets
+    from rebotarm_vision.policies.visual_grasp_pose_policy import BaseAxisGraspPolicyConfig, build_base_axis_grasp_targets
 
     config = BaseAxisGraspPolicyConfig(
         fixed_orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
@@ -35,7 +35,7 @@ def test_base_axis_policy_uses_visual_position_but_fixed_reachable_orientation()
 
 
 def test_base_axis_policy_normalizes_approach_axis():
-    from rebotarm_vision.visual_grasp_pose_policy import BaseAxisGraspPolicyConfig, build_base_axis_grasp_targets
+    from rebotarm_vision.policies.visual_grasp_pose_policy import BaseAxisGraspPolicyConfig, build_base_axis_grasp_targets
 
     config = BaseAxisGraspPolicyConfig(
         fixed_orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
@@ -56,7 +56,7 @@ def test_base_axis_policy_normalizes_approach_axis():
 
 
 def test_base_axis_policy_rejects_zero_approach_axis():
-    from rebotarm_vision.visual_grasp_pose_policy import BaseAxisGraspPolicyConfig, build_base_axis_grasp_targets
+    from rebotarm_vision.policies.visual_grasp_pose_policy import BaseAxisGraspPolicyConfig, build_base_axis_grasp_targets
 
     config = BaseAxisGraspPolicyConfig(
         fixed_orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
@@ -69,7 +69,7 @@ def test_base_axis_policy_rejects_zero_approach_axis():
 
 
 def test_official_geometry_policy_uses_candidate_tcp_orientation_for_pregrasp_axis():
-    from rebotarm_vision.visual_grasp_pose_policy import (
+    from rebotarm_vision.policies.visual_grasp_pose_policy import (
         OfficialGeometryGraspPolicyConfig,
         build_official_geometry_grasp_targets,
     )
@@ -94,7 +94,7 @@ def test_official_geometry_policy_uses_candidate_tcp_orientation_for_pregrasp_ax
 
 
 def test_hybrid_geometry_policy_uses_base_axis_pregrasp_with_candidate_yaw():
-    from rebotarm_vision.visual_grasp_pose_policy import (
+    from rebotarm_vision.policies.visual_grasp_pose_policy import (
         BaseAxisGraspPolicyConfig,
         build_hybrid_geometry_grasp_targets,
     )
@@ -121,7 +121,7 @@ def test_hybrid_geometry_policy_uses_base_axis_pregrasp_with_candidate_yaw():
 
 
 def test_preserve_candidate_pose_keeps_graspnet_tcp_orientation_and_uses_end_link_center_when_tcp_offset_zero():
-    from rebotarm_vision.visual_grasp_pose_policy import (
+    from rebotarm_vision.policies.visual_grasp_pose_policy import (
         OfficialGeometryGraspPolicyConfig,
         build_preserve_candidate_grasp_targets,
     )
@@ -146,7 +146,7 @@ def test_preserve_candidate_pose_keeps_graspnet_tcp_orientation_and_uses_end_lin
 
 
 def test_parallel_jaw_symmetric_orientation_preserves_approach_axis_and_flips_open_axis():
-    from rebotarm_vision.visual_grasp_pose_policy import (
+    from rebotarm_vision.policies.visual_grasp_pose_policy import (
         build_parallel_jaw_symmetric_orientation,
         quaternion_to_rotation_matrix,
     )
@@ -163,7 +163,7 @@ def test_parallel_jaw_symmetric_orientation_preserves_approach_axis_and_flips_op
 
 
 def test_candidate_workspace_gate_accepts_only_base_link_workspace_box_and_object_distance():
-    from rebotarm_vision.candidate_workspace_gate import CandidateWorkspaceGateConfig, candidate_workspace_gate
+    from rebotarm_vision.policies.candidate_workspace_gate import CandidateWorkspaceGateConfig, candidate_workspace_gate
 
     config = CandidateWorkspaceGateConfig(
         enabled=True,

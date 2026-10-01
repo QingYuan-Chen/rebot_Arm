@@ -1,3 +1,4 @@
+from rebotarm_vision.visual_grasp_service_gateway import VisualGraspServiceGateway
 """Pure-planning preview: virtual start must never leak into real execution."""
 
 from types import SimpleNamespace
@@ -9,7 +10,7 @@ from rebotarm_msgs.srv import ExecutePose, PublishTrajectoryPreview
 
 from rebotarm_motion.moveit_planner import MoveItMotionPlanner
 from rebotarm_motion.pose_execution_node import PoseExecutionNode
-from rebotarm_vision.visual_grasp_executor_node import VisualGraspExecutorNode
+from rebotarm_vision.nodes.visual_grasp_executor_node import VisualGraspExecutorNode
 from rebotarm_vision.visual_grasp_sequence import PoseTarget, VisualGraspStage
 from rebotarm_msgs.msg import GraspPlan
 
@@ -164,14 +165,14 @@ def test_visual_stages_chain_last_trajectory_point_without_executing():
         name="move_to_pregrasp", kind="move",
         pose=PoseTarget(position=(0.4, 0.0, 0.2), orientation=(0.0, 0.0, 0.0, 1.0)),
     )
-    assert VisualGraspExecutorNode._send_execute_pose(node, stage, execute=False)[0]
-    assert VisualGraspExecutorNode._send_execute_pose(node, stage, execute=False)[0]
+    assert VisualGraspServiceGateway._send_execute_pose(node, stage, execute=False)[0]
+    assert VisualGraspServiceGateway._send_execute_pose(node, stage, execute=False)[0]
     assert not requests[0].execute and not requests[1].execute
     assert requests[0].suppress_preview and requests[1].suppress_preview
     assert requests[0].preview_start_joint_state.name == []
     assert list(requests[1].preview_start_joint_state.position) == [0.3] * 6
-    assert list(node._preview_start_joint_state.position) == [0.6] * 6
-    assert len(node._preview_trajectories) == 2
+    assert list(node._state.preview_start_joint_state.position) == [0.6] * 6
+    assert len(node._state.preview_trajectories) == 2
 
 
 def test_visual_preview_sequence_calls_motion_owned_batch_publisher_once():
@@ -194,7 +195,7 @@ def test_visual_preview_sequence_calls_motion_owned_batch_publisher_once():
         _wait_for_future=lambda *args: True,
     )
 
-    ok, message = VisualGraspExecutorNode._publish_preview_sequence(node)
+    ok, message = VisualGraspServiceGateway._publish_preview_sequence(node)
 
     assert ok and message == "published"
     assert len(requests) == 1

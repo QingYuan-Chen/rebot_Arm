@@ -13,7 +13,7 @@ if str(VISION_SRC) not in sys.path:
 
 
 def test_candidate_scoring_policy_preserves_graspnet_order_before_motion_penalty():
-    from rebotarm_vision.candidate_scoring_policy import CandidateScoringInput, score_candidate
+    from rebotarm_vision.policies.candidate_scoring_policy import CandidateScoringInput, score_candidate
 
     first = score_candidate(
         CandidateScoringInput(original_index=0, variant_label="preserve_candidate_pose", motion_penalty=0.2)
@@ -28,7 +28,7 @@ def test_candidate_scoring_policy_preserves_graspnet_order_before_motion_penalty
 
 
 def test_candidate_scoring_policy_prefers_less_motion_within_same_graspnet_rank():
-    from rebotarm_vision.candidate_scoring_policy import CandidateScoringInput, score_candidate
+    from rebotarm_vision.policies.candidate_scoring_policy import CandidateScoringInput, score_candidate
 
     small_motion = score_candidate(
         CandidateScoringInput(original_index=0, variant_label="preserve_candidate_pose", motion_penalty=0.1)
@@ -41,7 +41,7 @@ def test_candidate_scoring_policy_prefers_less_motion_within_same_graspnet_rank(
 
 
 def test_candidate_scoring_policy_keeps_small_z_variant_tie_breaker():
-    from rebotarm_vision.candidate_scoring_policy import CandidateScoringInput, score_candidate
+    from rebotarm_vision.policies.candidate_scoring_policy import CandidateScoringInput, score_candidate
 
     z0 = score_candidate(CandidateScoringInput(original_index=0, variant_label="base_axis_yaw0_z0"))
     z1 = score_candidate(CandidateScoringInput(original_index=0, variant_label="base_axis_yaw0_z1"))

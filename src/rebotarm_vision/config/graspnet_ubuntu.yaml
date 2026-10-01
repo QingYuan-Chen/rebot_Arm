@@ -1,8 +1,7 @@
 # GraspNet 抓取候选推理参数（Ubuntu 原生链路档）：由上层启动组合包与离线感知启动文件
 # 加载到 GraspNet 基线节点（rebotarm_graspnet_baseline_node）。
-# 与 graspnet_policy.yaml 的区别：本档不含 model_root / checkpoint_path / device /
-# backend_module / max_points，这些由启动文件按本机安装路径与后端模块注入；
-# 同时额外给出深度换算系数与夹爪开口上限。
+# 模型路径、设备、后端模块和采样点数由启动文件按本机安装路径注入；
+# 本档集中保留 Ubuntu RGB-D 输入、深度范围与候选输出默认值。
 # 注意：本文件中的话题名、坐标系名与参数键都是对外接口，禁止改动；只允许增加注释。
 rebotarm_graspnet_baseline_node:
   ros__parameters:

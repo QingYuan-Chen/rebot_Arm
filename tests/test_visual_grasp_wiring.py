@@ -10,6 +10,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _read(relative: str) -> str:
+    vision = "src/rebotarm_vision/rebotarm_vision/"
+    layers = {
+        vision + "nodes/visual_grasp_executor_node.py": (
+            "visual_grasp_workflow.py", "visual_grasp_runtime.py",
+            "visual_grasp_service_gateway.py", "utils/visual_grasp_messages.py",
+        ),
+        vision + "nodes/candidate_ik_filter_node.py": (
+            "policies/candidate_ik_policy.py", "candidate_ik_gateway.py", "candidate_ik_runtime.py",
+        ),
+    }
+    if relative in layers:
+        return "\n".join([_read_file(relative)] + [_read_file(vision + name) for name in layers[relative]])
     if relative == "src/rebotarm_dashboard/rebotarm_dashboard/teleop_status_panel_node.py":
         return "\n".join(
             [
@@ -78,7 +90,6 @@ def test_rebotarm_vision_exposes_grasp_console_entrypoints():
     scripts = _console_scripts("src/rebotarm_vision/setup.py")
 
     assert {
-        "rebotarm_ordinary_grasp_node",
         "rebotarm_graspnet_baseline_node",
         "rebotarm_send_grasp_preview",
         "rebotarm_visual_grasp_executor",
@@ -119,7 +130,7 @@ def test_visual_grasp_system_launch_defaults_to_safe_plan_only_mode():
 def test_visual_grasp_system_uses_provisional_upper_motion_scaling_defaults():
     launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
     executor_text = _read(
-        "src/rebotarm_vision/rebotarm_vision/visual_grasp_executor_node.py"
+        "src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_executor_node.py"
     )
 
     expected = {
@@ -148,7 +159,6 @@ def test_real_grasp_profiles_follow_operator_measured_tcp():
     expected = "[-0.04, 0.0, 0.0]"
     for relative in (
         "src/rebotarm_vision/config/camera_ubuntu.yaml",
-        "src/rebotarm_vision/config/flat_graspnet.yaml",
     ):
         assert f"tcp_offset_xyz: {expected}" in _read(relative)
 
@@ -165,8 +175,6 @@ def test_visual_grasp_strategy_defaults_are_split_into_yaml_profiles():
         "retreat_policy.yaml",
         "visual_servo.yaml",
         "table_safety.yaml",
-        "graspnet_policy.yaml",
-        "flat_graspnet.yaml",
     ]
 
     for filename in expected_profiles:
@@ -181,14 +189,45 @@ def test_visual_grasp_strategy_defaults_are_split_into_yaml_profiles():
     assert "retreat_policy_params" in launch_text
     assert "visual_servo_params" in launch_text
     assert "table_safety_params" in launch_text
-    assert "graspnet_policy_params" in launch_text
     assert "visual_ready_params" in launch_text
-    assert "flat_graspnet_params" in launch_text
     assert "parameters=[\n            visual_ready_params," in launch_text
     assert "graspnet_config,\n                {" in launch_text
-    assert "grasp_pose_policy_params,\n                gripper_policy_params," in launch_text
-    assert "retry_policy_params,\n                retreat_policy_params," in launch_text
-    assert "visual_servo_params,\n                table_safety_params," in launch_text
+    assert "policy_defaults.update(_read_policy" in launch_text
+    assert "gripper_policy_params" in launch_text
+    assert "retry_policy_params" in launch_text
+    assert "retreat_policy_params" in launch_text
+    assert "visual_servo_params" in launch_text
+    assert "table_safety_params" in launch_text
+
+
+def test_gripper_launch_compatibility_defaults_match_yaml_profile():
+    """Keep legacy launch overrides numerically aligned with the canonical YAML defaults."""
+    launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
+    profile = _read("src/rebotarm_vision/config/gripper_policy.yaml")
+    defaults = {
+        "close_position_m": "0.025",
+        "close_max_effort": "0.4",
+        "open_before_approach": "true",
+        "auto_gripper_width": "true",
+        "auto_gripper_effort": "true",
+        "open_clearance_m": "0.0",
+        "close_margin_m": "0.012",
+        "min_gripper_effort": "0.22",
+        "max_gripper_effort": "0.60",
+        "max_allowed_grasp_width_m": "0.085",
+        "gripper_grasp_enabled": "true",
+        "gripper_grasp_close_force": "0.4",
+        "gripper_grasp_timeout_sec": "8.0",
+        "gripper_grasp_min_close_time_sec": "0.08",
+        "gripper_grasp_velocity_threshold": "0.04",
+        "gripper_grasp_min_closure_distance_m": "0.006",
+    }
+    for name, value in defaults.items():
+        assert f"{name}: {value}" in profile
+        assert (
+            f'DeclareLaunchArgument("{name}", default_value="{value}")' in launch_text
+            or f'"{name}"' in launch_text
+        )
 
 
 def test_visual_grasp_system_uses_graspnet_candidates_directly_before_ik():
@@ -252,7 +291,7 @@ def test_visual_grasp_system_starts_vision_chain_after_visual_ready():
     post_ready_index = launch_text.index("post_visual_ready_actions = [")
     vision_index = launch_text.index('PathJoinSubstitution([vision_share, "launch", "vision.launch.py"])')
     ik_index = launch_text.index('executable="rebotarm_grasp_candidate_ik_filter"')
-    executor_index = launch_text.index('executable="rebotarm_visual_grasp_executor"')
+    executor_index = launch_text.index("OpaqueFunction(function=_launch_executor)")
     handler_index = launch_text.index("OnProcessExit(")
 
     assert ready_index < post_ready_index < vision_index < ik_index < executor_index
@@ -383,7 +422,7 @@ def test_visual_grasp_system_forwards_hardware_channel_and_uses_safe_shutdown_de
 
 def test_visual_grasp_markers_show_tcp_approach_and_open_axis():
     launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
-    marker_text = _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_marker_node.py")
+    marker_text = _read("src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_marker_node.py")
 
     assert 'DeclareLaunchArgument("gripper_open_axis_local_xyz", default_value="[0.0, 1.0, 0.0]")' in launch_text
     assert 'DeclareLaunchArgument("show_tcp_markers", default_value="true")' in launch_text
@@ -418,7 +457,9 @@ def test_visual_grasp_plan_age_default_is_mode_aware():
 
 
 def test_visual_grasp_benchmark_returns_ready_between_attempts():
-    benchmark_text = _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_benchmark.py")
+    benchmark_text = _read(
+        "src/rebotarm_vision/rebotarm_vision/benchmarks/visual_grasp_benchmark.py"
+    )
 
     assert "--attempts" in benchmark_text
     assert "--wait-enter" in benchmark_text
@@ -432,7 +473,9 @@ def test_visual_grasp_benchmark_returns_ready_between_attempts():
 
 def test_hybrid_grasp_sim_benchmark_waits_for_fresh_filtered_plan_before_execute():
     scripts = _console_scripts("src/rebotarm_vision/setup.py")
-    benchmark_text = _read("src/rebotarm_vision/rebotarm_vision/hybrid_grasp_sim_benchmark.py")
+    benchmark_text = _read(
+        "src/rebotarm_vision/rebotarm_vision/benchmarks/hybrid_grasp_sim_benchmark.py"
+    )
     doc_text = _read("docs/reference/commands/visual_grasp_commands.md")
 
     assert "rebotarm_hybrid_grasp_sim_benchmark" in scripts
@@ -472,7 +515,7 @@ def test_visual_grasp_commands_document_strict_stability_test():
 def test_graspnet_baseline_v13_is_wired_as_candidate_source_without_replacing_execution():
     setup_scripts = _console_scripts("src/rebotarm_vision/setup.py")
     launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
-    node_text = _read("src/rebotarm_vision/rebotarm_vision/graspnet_baseline_node.py")
+    node_text = _read("src/rebotarm_vision/rebotarm_vision/nodes/graspnet_baseline_node.py")
 
     assert "rebotarm_graspnet_baseline_node" in setup_scripts
     assert 'DeclareLaunchArgument("start_graspnet_baseline", default_value="true")' in launch_text
@@ -495,7 +538,12 @@ def test_graspnet_baseline_v13_is_wired_as_candidate_source_without_replacing_ex
 
 
 def test_visual_grasp_executor_keeps_stop_paths_wired():
-    executor_text = _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_executor_node.py")
+    executor_text = (
+        _read("src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_executor_node.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_workflow.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_runtime.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_service_gateway.py")
+    )
 
     assert 'f"/{self._arm_namespace}/visual_grasp/execute"' in executor_text
     assert 'f"/{self._arm_namespace}/visual_grasp/stop"' in executor_text
@@ -525,18 +573,36 @@ def test_rebotarm_msgs_exports_grasp_gripper_service():
     assert "float64 contact_position" in srv_text
 
 
-def test_ordinary_grasp_node_publishes_candidate_array_topic():
-    node_text = _read("src/rebotarm_vision/rebotarm_vision/ordinary_grasp_node.py")
-    launch_text = _read("src/rebotarm_vision/launch/vision.launch.py")
-    camera_config = _read("src/rebotarm_vision/config/camera_ubuntu.yaml")
+def test_retired_ordinary_grasp_is_absent_from_active_vision_path():
+    package = ROOT / "src/rebotarm_vision"
+    assert not (package / "rebotarm_vision/ordinary_grasp_node.py").exists()
+    assert not (package / "rebotarm_vision/converters/ordinary_grasp_adapter.py").exists()
+    assert "rebotarm_ordinary_grasp_node" not in _read("src/rebotarm_vision/setup.py")
+    assert "ordinary_grasp_node" not in _read(
+        "src/rebotarm_vision/rebotarm_vision/nodes/graspnet_baseline_node.py"
+    )
+    for relative in (
+        "src/rebotarm_vision/launch/vision.launch.py",
+        "src/rebotarm_vision/launch/vision_ubuntu.launch.py",
+        "src/rebotarm_bringup/launch/visual_grasp_system.launch.py",
+        "src/rebotarm_vision/config/camera_ubuntu.yaml",
+    ):
+        assert "ordinary_grasp" not in _read(relative)
 
-    assert "GraspCandidateArray" in node_text
-    assert 'ordinary_grasp.candidates_topic", "/grasp/candidates"' in node_text
-    assert "self.candidates_pub.publish(candidates)" in node_text
-    assert "plan_and_candidates_from_detections_and_depth" in node_text
-    assert '"ordinary_grasp.candidates_topic": "/grasp/candidates"' in launch_text
-    assert "depth_quality.max_depth_m: 1.2" in camera_config
-    assert "DepthQualityConfig" in node_text
+
+def test_vision_tf_consumers_do_not_import_preview_node_helpers():
+    for name in (
+        "grasp_candidate_marker_node.py",
+        "visual_grasp_marker_node.py",
+    ):
+        source = _read(f"src/rebotarm_vision/rebotarm_vision/nodes/{name}")
+        assert "from ..utils.tf_message_adapter import" in source
+        assert "_transform_from_msg" not in source
+        assert "from ..grasp_preview_sender_node import" not in source
+    source = _read("src/rebotarm_vision/rebotarm_vision/candidate_tf_adapter.py")
+    assert "from .utils.tf_message_adapter import" in source
+    assert "_transform_from_msg" not in source
+    assert "from .grasp_preview_sender_node import" not in source
 
 
 def test_rebotarm_vision_exposes_candidate_ik_filter_entrypoint():
@@ -581,7 +647,12 @@ def test_visual_grasp_system_disables_extra_fake_joint_state_sources():
 
 def test_visual_grasp_executor_consumes_grasp_plan_by_default():
     launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
-    executor_text = _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_executor_node.py")
+    executor_text = (
+        _read("src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_executor_node.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_workflow.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_runtime.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_service_gateway.py")
+    )
 
     assert 'DeclareLaunchArgument("executor_input_topic", default_value="/grasp/filtered_plan")' in launch_text
     assert 'executor_input_topic = LaunchConfiguration("executor_input_topic")' in launch_text
@@ -592,29 +663,42 @@ def test_visual_grasp_executor_consumes_grasp_plan_by_default():
 
 
 def test_visual_grasp_executor_refreshes_plan_after_pregrasp():
-    executor_text = _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_executor_node.py")
+    executor_text = (
+        _read("src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_executor_node.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_workflow.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_runtime.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_service_gateway.py")
+    )
     launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
 
     assert 'self.declare_parameter("input_topic", "/grasp/filtered_plan")' in executor_text
     assert 'self.declare_parameter("refresh_plan_at_pregrasp_enabled", True)' in executor_text
     assert 'self.declare_parameter("refresh_plan_at_pregrasp_required", True)' in executor_text
     assert 'self.declare_parameter("refresh_plan_timeout_sec", 1.0)' in executor_text
-    assert "self._plan_revision" in executor_text
+    assert "state.plan_revision" in executor_text
     assert "def _wait_for_refreshed_plan" in executor_text
     assert 'stage.name == "move_to_pregrasp"' in executor_text
     assert "fresh grasp plan unavailable after pregrasp" in executor_text
     assert "stages = self._replace_remaining_after_pregrasp" in executor_text
     assert 'DeclareLaunchArgument("refresh_plan_at_pregrasp_enabled"' not in launch_text
     assert 'DeclareLaunchArgument("refresh_plan_at_pregrasp_required"' not in launch_text
-    assert '"refresh_plan_at_pregrasp_enabled": False' in launch_text
-    assert '"refresh_plan_at_pregrasp_required": False' in launch_text
+    servo_profile = _read("src/rebotarm_vision/config/visual_servo.yaml")
+    assert "refresh_plan_at_pregrasp_enabled: false" in servo_profile
+    assert "refresh_plan_at_pregrasp_required: false" in servo_profile
+    assert '"refresh_plan_at_pregrasp_enabled": False' not in launch_text
+    assert '"refresh_plan_at_pregrasp_required": False' not in launch_text
 
 
 def test_visual_grasp_executor_has_bounded_approach_visual_servo():
-    executor_text = _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_executor_node.py")
+    executor_text = (
+        _read("src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_executor_node.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_workflow.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_runtime.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_service_gateway.py")
+    )
     launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
 
-    assert "from .visual_servo_policy import VisualServoApproachConfig, build_visual_servo_step" in executor_text
+    assert "from .policies.visual_servo_policy import VisualServoApproachConfig, build_visual_servo_step" in executor_text
     assert 'self.declare_parameter("approach_visual_servo_enabled", False)' in executor_text
     assert 'self.declare_parameter("approach_visual_servo_max_iterations", 5)' in executor_text
     assert 'self.declare_parameter("approach_visual_servo_max_step_m", 0.02)' in executor_text
@@ -631,22 +715,27 @@ def test_visual_grasp_executor_has_bounded_approach_visual_servo():
 
 
 def test_visual_grasp_executor_wires_retry_verification_place_and_recovery():
-    executor_text = _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_executor_node.py")
+    executor_text = (
+        _read("src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_executor_node.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_workflow.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_runtime.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_service_gateway.py")
+    )
     launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
-    recovery_text = _read("src/rebotarm_vision/rebotarm_vision/trajectory_recovery_policy.py")
+    recovery_text = _read("src/rebotarm_vision/rebotarm_vision/policies/trajectory_recovery_policy.py")
 
     assert "GraspCandidateArray, GraspPlan" in executor_text
-    assert "from .grasp_retry_policy import RetryPolicyConfig, ordered_candidate_indices" in executor_text
-    assert "from .grasp_verification_policy import" in executor_text
-    assert "from .place_task_policy import PlaceTaskConfig, build_place_stages" in executor_text
-    assert "from .trajectory_recovery_policy import RecoveryConfig, recovery_decision_for_stage" in executor_text
+    assert "from .policies.grasp_retry_policy import RetryPolicyConfig, ordered_candidate_indices" in executor_text
+    assert "from .policies.grasp_verification_policy import" in executor_text
+    assert "from .policies.place_task_policy import PlaceTaskConfig, build_place_stages" in executor_text
+    assert "from .policies.trajectory_recovery_policy import RecoveryConfig, recovery_decision_for_stage" in executor_text
     assert 'self.declare_parameter("candidates_topic", "/grasp/filtered_candidates")' in executor_text
     assert 'self.declare_parameter("auto_retry_enabled", False)' in executor_text
     assert 'self.declare_parameter("grasp_verification_enabled", True)' in executor_text
     assert 'self.declare_parameter("place_after_grasp_enabled", False)' in executor_text
     assert 'self.declare_parameter("trajectory_precheck_enabled", True)' in executor_text
     assert "def _candidate_plans_for_attempts" in executor_text
-    assert "attempts: list[tuple[int, GraspPlan]] = [(-1, deepcopy(self._latest_plan))]" in executor_text
+    assert "attempts: list[tuple[int, GraspPlan]] = [(-1, plan)]" in executor_text
     assert "if index == int(candidates.best_index):" in executor_text
     assert "continue" in executor_text
     assert "def _verify_after_close" in executor_text
@@ -654,7 +743,7 @@ def test_visual_grasp_executor_wires_retry_verification_place_and_recovery():
     assert "def _append_place_stages" in executor_text
     assert "def _precheck_execute_pose" in executor_text
     assert 'name="retry_safe_retreat"' in executor_text
-    assert "self._retry_retreat_stage = stage" in executor_text
+    assert "retry_retreat_stage = stage" in executor_text
     assert "self._run_stage(retreat)" in executor_text
     assert "recovery_decision_for_stage" in executor_text
     assert '"close_gripper"' not in recovery_text
@@ -670,15 +759,20 @@ def test_visual_grasp_executor_wires_retry_verification_place_and_recovery():
 
 
 def test_candidate_ik_filter_node_uses_moveit_ik_and_state_validity_without_execution():
-    node_text = _read("src/rebotarm_vision/rebotarm_vision/candidate_ik_filter_node.py")
+    node_text = _read("src/rebotarm_vision/rebotarm_vision/nodes/candidate_ik_filter_node.py")
+    runtime_text = _read("src/rebotarm_vision/rebotarm_vision/candidate_ik_runtime.py")
+    node_text += "\n" + runtime_text
+    node_text += "\n" + _read("src/rebotarm_vision/rebotarm_vision/policies/candidate_ik_policy.py")
+    node_text += "\n" + _read("src/rebotarm_vision/rebotarm_vision/policies/candidate_motion_policy.py")
+    node_text += "\n" + _read("src/rebotarm_vision/rebotarm_vision/candidate_ik_gateway.py")
     launch_text = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
-    motion_policy_text = _read("src/rebotarm_vision/rebotarm_vision/candidate_motion_policy.py")
-    pose_variant_text = _read("src/rebotarm_vision/rebotarm_vision/pose_variant_policy.py")
-    target_policy_text = _read("src/rebotarm_vision/rebotarm_vision/candidate_target_policy.py")
-    gate_policy_text = _read("src/rebotarm_vision/rebotarm_vision/candidate_gate_policy.py")
-    scoring_policy_text = _read("src/rebotarm_vision/rebotarm_vision/candidate_scoring_policy.py")
+    motion_policy_text = _read("src/rebotarm_vision/rebotarm_vision/policies/candidate_motion_policy.py")
+    pose_variant_text = _read("src/rebotarm_vision/rebotarm_vision/policies/pose_variant_policy.py")
+    target_policy_text = _read("src/rebotarm_vision/rebotarm_vision/policies/candidate_target_policy.py")
+    gate_policy_text = _read("src/rebotarm_vision/rebotarm_vision/policies/candidate_gate_policy.py")
+    scoring_policy_text = _read("src/rebotarm_vision/rebotarm_vision/policies/candidate_scoring_policy.py")
     tf_adapter_text = _read("src/rebotarm_vision/rebotarm_vision/candidate_tf_adapter.py")
-    feasibility_policy_text = _read("src/rebotarm_vision/rebotarm_vision/motion_feasibility_policy.py")
+    feasibility_policy_text = _read("src/rebotarm_vision/rebotarm_vision/policies/motion_feasibility_policy.py")
 
     assert "GetPositionIK" in node_text
     assert "GetStateValidity" in node_text
@@ -688,7 +782,7 @@ def test_candidate_ik_filter_node_uses_moveit_ik_and_state_validity_without_exec
     assert 'self.declare_parameter("collision_check_service", "/check_state_validity")' in node_text
     assert 'self.declare_parameter("collision_group_name", "arm_with_gripper")' in node_text
     assert 'self.declare_parameter("service_timeout_sec", 5.0)' in node_text
-    assert 'self.declare_parameter("pose_policy", "hybrid_geometry_with_base_axis_fallback")' in node_text
+    assert 'self.declare_parameter("pose_policy", "preserve_candidate_pose")' in node_text
     assert 'self.declare_parameter("orientation_yaw_offsets_rad",' in node_text
     assert 'self.declare_parameter("candidate_grasp_z_offsets_m",' in node_text
     assert 'self.declare_parameter("max_candidates_per_frame", 20)' in node_text
@@ -709,7 +803,7 @@ def test_candidate_ik_filter_node_uses_moveit_ik_and_state_validity_without_exec
     assert "build_candidate_target_variants(" in node_text
     assert "CandidateTargetPolicyConfig(" in node_text
     assert 'self.declare_parameter("candidate_pregrasp_min_z_m", 0.04)' in node_text
-    assert 'pregrasp_min_z_m=float(self.get_parameter("candidate_pregrasp_min_z_m").value)' in node_text
+    assert 'pregrasp_min_z_m=float(_parameter(self, "candidate_pregrasp_min_z_m").value)' in node_text
     assert "build_parallel_jaw_pose_variants(" in target_policy_text
     assert "pregrasp_min_z_m: float = 0.0" in target_policy_text
     assert "build_parallel_jaw_symmetric_orientation" in pose_variant_text
@@ -739,14 +833,14 @@ def test_candidate_ik_filter_node_uses_moveit_ik_and_state_validity_without_exec
     assert 'self.declare_parameter("candidate_workspace_min_xyz", [0.18, -0.35, 0.0])' in node_text
     assert 'self.declare_parameter("candidate_workspace_max_xyz", [0.64, 0.35, 0.45])' in node_text
     assert 'self.declare_parameter("candidate_max_grasp_to_object_center_m", 0.15)' in node_text
-    assert "variants = self._candidate_target_variants(msg, candidate.pose)" in node_text
+    assert "variants = self.policy._candidate_target_variants(msg, candidate.pose)" in node_text
     assert "for pregrasp, grasp, variant_label in variants:" in node_text
-    assert "request.ik_request.robot_state.joint_state = deepcopy(self._latest_joint_state)" in node_text
+    assert "request.ik_request.robot_state.joint_state = deepcopy(seed)" in node_text
     assert "request.ik_request.avoid_collisions = False" in node_text
     assert "candidate IK filter IK failed" in node_text
     assert "orientation=(" in node_text
     assert "def _target_debug_text" in node_text
-    assert "def _check_state_validity" in node_text
+    assert "def check_state_validity" in node_text
     assert "candidate IK filter state validity failed" in node_text
     assert "candidate_scoring_policy" in node_text
     assert "CandidateScoringInput(" in node_text
@@ -754,7 +848,7 @@ def test_candidate_ik_filter_node_uses_moveit_ik_and_state_validity_without_exec
     assert "def _preserve_input_score" not in node_text
     assert "candidate_tf_adapter" in node_text
     assert "transform_candidate_pose_to_target_frame(" in node_text
-    assert "from .grasp_preview_sender_node import _transform_from_msg, transform_pose_message" not in node_text
+    assert "from ..grasp_preview_sender_node import _transform_from_msg, transform_pose_message" not in node_text
     assert "transform_pose_message(" not in node_text
     assert "_transform_from_msg(" not in node_text
     assert "lookup_transform(" in tf_adapter_text
@@ -816,21 +910,6 @@ def test_candidate_ik_filter_node_uses_moveit_ik_and_state_validity_without_exec
     assert '"candidate_max_grasp_to_object_center_m": candidate_max_grasp_to_object_center_m' in launch_text
 
 
-def test_flat_graspnet_profile_preserves_pose_and_uses_end_link_center():
-    profile_text = _read("src/rebotarm_vision/config/flat_graspnet.yaml")
-
-    assert "candidate_pose_policy: preserve_candidate_pose" in profile_text
-    assert "tcp_offset_xyz: [-0.04, 0.0, 0.0]" in profile_text
-    assert "target_base_offset_xyz: [0.0, 0.0, 0.0]" in profile_text
-    assert "candidate_workspace_gate_enabled: true" in profile_text
-    assert "candidate_workspace_min_xyz: [0.18, -0.35, 0.0]" in profile_text
-    assert "candidate_workspace_max_xyz: [0.64, 0.35, 0.45]" in profile_text
-    assert "candidate_max_grasp_to_object_center_m: 0.15" in profile_text
-    assert "candidate_max_candidates_per_frame: 20" in profile_text
-    assert "candidate_pregrasp_min_z_m: 0.04" in profile_text
-    assert "candidate_max_variants_per_candidate" not in profile_text
-
-
 def test_gripper_visual_joint_state_node_rejects_empty_or_incomplete_arm_state():
     node_text = _read(
         "src/rebotarm_teleop/rebotarm_teleop/gripper_visual_joint_state_node.py"
@@ -855,7 +934,7 @@ def test_candidate_ik_filter_builds_filtered_plan_from_reachable_targets_without
         pytest.skip("moveit_msgs is not installed in this Python environment")
 
     from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
-    from rebotarm_vision.candidate_ik_filter_node import CandidateIkFilterNode
+    from rebotarm_vision.nodes.candidate_ik_filter_node import CandidateIkFilterNode
     from rebotarm_vision.visual_grasp_sequence import PoseTarget
 
     filtered = GraspCandidateArray()
@@ -897,14 +976,19 @@ def test_low_level_controller_exports_grasp_gripper_service():
 
 
 def test_visual_grasp_executor_uses_grasp_service_for_close_stage():
-    executor_text = _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_executor_node.py")
+    executor_text = (
+        _read("src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_executor_node.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_workflow.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_runtime.py")
+        + "\n" + _read("src/rebotarm_vision/rebotarm_vision/visual_grasp_service_gateway.py")
+    )
 
     assert "GraspGripper" in executor_text
     assert 'f"/{self._arm_namespace}/gripper/grasp"' in executor_text
     assert "gripper_grasp_enabled" in executor_text
     assert "def _call_grasp_gripper" in executor_text
     assert 'stage.name == "close_gripper"' in executor_text
-    assert 'request.close_force = max(float(self.get_parameter("gripper_grasp_close_force").value), 0.0)' in executor_text
+    assert 'request.close_force = max(float(_parameter(self, "gripper_grasp_close_force").value), 0.0)' in executor_text
     assert "request.hold_force = max(float(stage.gripper_max_effort), 0.0)" in executor_text
 
 

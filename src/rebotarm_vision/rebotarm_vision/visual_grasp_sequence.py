@@ -21,8 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .gripper_policy import GripperCommand
-from .retreat_policy import RetreatPolicyConfig, build_retreat_pose
+from .policies.gripper_policy import GripperCommand
+from .policies.retreat_policy import RetreatPolicyConfig, build_retreat_pose
 
 
 @dataclass(frozen=True)

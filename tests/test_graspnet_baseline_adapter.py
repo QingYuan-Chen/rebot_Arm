@@ -141,16 +141,6 @@ def test_network_graspnet_payload_converts_to_candidates():
     assert candidates.candidates[0].header.stamp.sec == 1_700_000_000
 
 
-def test_graspnet_unavailable_backend_is_explicitly_disabled():
-    from rebotarm_vision.graspnet_baseline_adapter import GraspNetBaselineBackend
-
-    backend = GraspNetBaselineBackend(model_root="")
-
-    assert backend.available is False
-    with pytest.raises(RuntimeError, match="GraspNet baseline backend is not configured"):
-        backend.infer(points=np.zeros((1, 3)), colors=np.zeros((1, 3)), max_grasps=5)
-
-
 def test_inprocess_graspnet_calls_full_rgbd_backend_without_http(tmp_path):
     from rebotarm_vision.graspnet_baseline_adapter import InProcessGraspNetBackend
 
@@ -221,6 +211,8 @@ def test_inprocess_graspnet_calls_full_rgbd_backend_without_http(tmp_path):
     assert np.array_equal(infer_call["color_bgr"], color)
     assert np.array_equal(infer_call["depth_mm"], depth_m)
     assert infer_call["camera_info"]["depth_scale_m"] == 1.0
+    assert infer_call["camera_info"]["workspace_min_depth_m"] == pytest.approx(0.05)
+    assert infer_call["camera_info"]["workspace_max_depth_m"] == pytest.approx(1.5)
     assert infer_call["detections"][0]["mask_polygon_xy"] == [0, 0, 4, 0, 4, 3, 0, 3]
     assert infer_call["max_grasps"] == 10
     assert infer_call["max_jaw_width_m"] == pytest.approx(0.085)
@@ -229,7 +221,9 @@ def test_inprocess_graspnet_calls_full_rgbd_backend_without_http(tmp_path):
 
 def test_candidate_filter_tf_failure_publishes_no_ranked_candidates():
     from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
-    from rebotarm_vision.candidate_ik_filter_node import CandidateIkFilterNode
+    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
+    from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
+    from types import SimpleNamespace
 
     msg = GraspCandidateArray()
     msg.header.frame_id = "camera_depth_frame"
@@ -239,7 +233,7 @@ def test_candidate_filter_tf_failure_publishes_no_ranked_candidates():
     msg.candidates.append(candidate)
     published = []
     warnings = []
-    node = object.__new__(CandidateIkFilterNode)
+    node = object.__new__(CandidateIkPolicy)
     parameters = {
         "max_candidates_per_frame": 10,
         "candidate_min_confidence": 0.4,
@@ -255,14 +249,21 @@ def test_candidate_filter_tf_failure_publishes_no_ranked_candidates():
     node._publish_ranked = lambda original, ranked: published.append((original, ranked))
     node.get_logger = lambda: type("Logger", (), {"warn": warnings.append})()
 
-    CandidateIkFilterNode._on_candidates_unlocked(node, msg)
+    CandidateIkRuntime(
+        policy=node, gateway=SimpleNamespace(
+            check_target=getattr(node, "_check_ik_and_collision", None),
+            publish_ranked=node._publish_ranked, publish_empty=lambda message: None,
+        ), max_candidates=10, logger=node.get_logger(),
+    ).filter_frame(msg)
 
     assert published == [(msg, [])]
     assert warnings == ["candidate IK filter rejected candidate: TF lookup unavailable"]
 
 
 def test_preserve_input_safety_gate_allows_low_grasp_when_width_is_valid():
-    from rebotarm_vision.candidate_ik_filter_node import CandidateIkFilterNode
+    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
+    from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
+    from types import SimpleNamespace
     from rebotarm_vision.visual_grasp_sequence import PoseTarget
 
     class NodeForGate:
@@ -283,5 +284,5 @@ def test_preserve_input_safety_gate_allows_low_grasp_when_width_is_valid():
     safe_grasp = PoseTarget(position=(0.38, 0.0, 0.18), orientation=(0.0, 0.0, 0.0, 1.0))
     node = NodeForGate()
 
-    assert CandidateIkFilterNode._candidate_safety_gate(node, candidate, grasp=low_grasp) is True
-    assert CandidateIkFilterNode._candidate_safety_gate(node, candidate, grasp=safe_grasp) is True
+    assert CandidateIkPolicy._candidate_gate_allows(node, candidate, grasp=low_grasp) is True
+    assert CandidateIkPolicy._candidate_gate_allows(node, candidate, grasp=safe_grasp) is True

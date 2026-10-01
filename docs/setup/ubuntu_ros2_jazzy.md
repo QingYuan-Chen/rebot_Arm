@@ -265,13 +265,7 @@ ros2 launch rebotarm_vision vision.launch.py \
   handeye_config:=/absolute/path/to/my_handeye.yaml
 ```
 
-旧的 `ordinary_grasp` 算法不是本仓库依赖，默认不启动。安装对应旧工程后显式启用：
-
-```bash
-ros2 launch rebotarm_vision vision.launch.py \
-  start_ordinary_grasp:=true \
-  ordinary_grasp_root:=/absolute/path/to/rebot_grasp
-```
+旧的 `ordinary_grasp` 节点及其 launch 参数已退役；当前候选由本地 GraspNet 链路生成。
 
 ## 5. 安全顺序
 

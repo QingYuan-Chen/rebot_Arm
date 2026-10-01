@@ -115,7 +115,6 @@ for package, names in files.items():
                         "rebotarm_mujoco_node": "mujoco",
                         "rebotarm_graspnet_baseline_node": "graspnet",
                         "rebotarm_vision_node": "vision",
-                        "rebotarm_ordinary_grasp_node": "vision",
                         "rebotarm_grasp_tcp_frame": "vision",
                         "rebotarm_offline_yolo_node": "vision",
                     }.get(executable)

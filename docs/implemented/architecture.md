@@ -134,7 +134,7 @@
 
 不得绕过运动校验或控制器安全机制。视觉抓取必须经过规划、碰撞检查和执行安全门。
 
-Ready-pose 运动（`visual_ready_node` 及其参数 profile）位于 `rebotarm_motion`。旧 vision Python/console 入口仍作为兼容别名保留；bringup 直接启动运动职责包的所有者。
+Ready-pose 运动（`visual_ready_node` 及其参数 profile）位于 `rebotarm_motion`。视觉包不再提供旧的顶层 Python 兼容模块；console script 名称保持不变，但统一指向 `nodes/`、`benchmarks/`、`diagnostics/` 等 canonical 子包。bringup 直接启动运动职责包的所有者。
 
 ### 仿真职责
 

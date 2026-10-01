@@ -14,7 +14,7 @@ if str(VISION_SRC) not in sys.path:
 
 
 def test_joint_motion_rejects_actual_joint6_delta_over_limit():
-    from rebotarm_vision.candidate_motion_policy import JointMotionPolicyConfig, evaluate_joint_motion
+    from rebotarm_vision.policies.candidate_motion_policy import JointMotionPolicyConfig, evaluate_joint_motion
 
     result = evaluate_joint_motion(
         current_positions={"joint1": 0.0, "joint6": 0.0},
@@ -28,7 +28,7 @@ def test_joint_motion_rejects_actual_joint6_delta_over_limit():
 
 
 def test_joint_motion_accepts_actual_joint6_delta_at_limit():
-    from rebotarm_vision.candidate_motion_policy import JointMotionPolicyConfig, evaluate_joint_motion
+    from rebotarm_vision.policies.candidate_motion_policy import JointMotionPolicyConfig, evaluate_joint_motion
 
     result = evaluate_joint_motion(
         current_positions={"joint1": 0.0, "joint6": 0.0},

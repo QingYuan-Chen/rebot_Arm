@@ -3,6 +3,7 @@
 # 解算逻辑见 gripper_policy.py：物体宽度超过上限即 fail-closed 拒绝该次抓取；
 # 夹持力恒取 close_max_effort 并截断到 [min_gripper_effort, max_gripper_effort]。
 # 注意：本文件中的参数键都是对外接口，禁止改动；只允许增加注释。
+# visual_grasp_system.launch.py 仍保留同名参数作为兼容覆盖入口；其默认值必须与本档一致。
 rebotarm_visual_grasp_executor:
   ros__parameters:
     # 固定合爪目标位置（两指间距，单位 m）。auto_gripper_width 为真且测得有效物体宽度时

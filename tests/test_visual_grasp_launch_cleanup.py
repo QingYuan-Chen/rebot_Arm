@@ -63,7 +63,7 @@ def test_vision_launch_has_no_machine_specific_home_paths():
     assert "/home/u24" not in text
     assert "camera_config" in text
     assert "handeye_config" in text
-    assert 'DeclareLaunchArgument("start_ordinary_grasp", default_value="false")' in text
+    assert "start_ordinary_grasp" not in text
 
 
 def test_interactive_launch_removes_legacy_start_interaction_nodes_flag():
@@ -77,7 +77,7 @@ def test_interactive_launch_removes_legacy_start_interaction_nodes_flag():
 def test_visual_grasp_launch_exposes_adaptive_gripper_and_retreat_params():
     text = (ROOT / "src" / "rebotarm_bringup" / "launch" / "visual_grasp_system.launch.py").read_text(encoding="utf-8")
 
-    for name in (
+    gripper_names = (
         "auto_gripper_effort",
         "min_gripper_effort",
         "max_gripper_effort",
@@ -88,6 +88,12 @@ def test_visual_grasp_launch_exposes_adaptive_gripper_and_retreat_params():
         "gripper_grasp_min_close_time_sec",
         "gripper_grasp_velocity_threshold",
         "gripper_grasp_min_closure_distance_m",
+    )
+    for name in gripper_names:
+        assert f'DeclareLaunchArgument("{name}"' in text
+    assert "**policy_defaults" in text
+
+    for name in (
         "safe_retreat_enabled",
         "safe_retreat_distance_m",
         "safe_home_after_grasp",

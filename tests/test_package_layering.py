@@ -23,6 +23,44 @@ def test_simulation_has_no_motion_implementation_or_manifest_dependency() -> Non
     assert not any(child.text == "rebotarm_motion" for child in manifest)
 
 
+def test_vision_manifest_does_not_own_calibration_or_motion_packages() -> None:
+    vision = ET.parse(ROOT / "src/rebotarm_vision/package.xml").getroot()
+    bringup = ET.parse(ROOT / "src/rebotarm_bringup/package.xml").getroot()
+    for package in ("rebotarm_calibration", "rebotarm_motion"):
+        assert not any(child.text == package for child in vision)
+        assert any(child.text == package for child in bringup)
+
+
+def test_vision_uses_canonical_subpackage_entrypoints_without_compatibility_shims() -> None:
+    package = ROOT / "src/rebotarm_vision"
+    module_root = package / "rebotarm_vision"
+    retired_shims = (
+        "vision_node.py",
+        "graspnet_baseline_node.py",
+        "candidate_ik_filter_node.py",
+        "visual_grasp_executor_node.py",
+        "visual_grasp_benchmark.py",
+        "hybrid_grasp_sim_benchmark.py",
+        "debug_camera_preview.py",
+        "grasp_depth_probe_node.py",
+        "graspnet_open3d_viewer.py",
+        "transform_points.py",
+        "tf_message_adapter.py",
+        "parameter_validation.py",
+        "message_freshness.py",
+        "latest_only_work_queue.py",
+        "visual_grasp_messages.py",
+        "candidate_workspace_gate.py",
+    )
+    for name in retired_shims:
+        assert not (module_root / name).exists(), name
+
+    setup_text = (package / "setup.py").read_text(encoding="utf-8")
+    assert "rebotarm_vision.nodes.vision_node:main" in setup_text
+    assert "rebotarm_vision.benchmarks.visual_grasp_benchmark:main" in setup_text
+    assert "rebotarm_vision.diagnostics.debug_camera_preview:main" in setup_text
+
+
 def test_retired_mujoco_ros_backends_are_absent_from_active_package() -> None:
     package = ROOT / "src/rebotarm_simulation/rebotarm_simulation"
     assert not (package / "mujoco_ros_adapter_node.py").exists()

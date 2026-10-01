@@ -13,7 +13,7 @@ if str(VISION_SRC) not in sys.path:
 
 
 def test_parallel_jaw_pose_variants_adds_180_degree_symmetric_orientation():
-    from rebotarm_vision.pose_variant_policy import (
+    from rebotarm_vision.policies.pose_variant_policy import (
         PoseVariantConfig,
         build_parallel_jaw_pose_variants,
         quaternion_to_rotation_matrix,
@@ -36,7 +36,7 @@ def test_parallel_jaw_pose_variants_adds_180_degree_symmetric_orientation():
 
 
 def test_parallel_jaw_pose_variants_can_disable_symmetric_orientation():
-    from rebotarm_vision.pose_variant_policy import PoseVariantConfig, build_parallel_jaw_pose_variants
+    from rebotarm_vision.policies.pose_variant_policy import PoseVariantConfig, build_parallel_jaw_pose_variants
 
     variants = build_parallel_jaw_pose_variants(
         base_label="preserve_candidate_pose",

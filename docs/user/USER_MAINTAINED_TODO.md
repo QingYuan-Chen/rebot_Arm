@@ -67,20 +67,6 @@
 - 当前说明：已完成静态审查，确认当前文件声明 134 个 launch 参数且存在参数转发、生命周期和硬编码话题等耦合问题；尚未修改源码，也不代表解耦已经完成。
 - 设计方案、实施记录、测试结果及最终结论：待补充。
 
-### 9. `rebotarm_vision` 解耦、冗余与代码规范
-
-- 状态：主链路结构基本合格，维护性审计和清理未完成。
-- 待办 1：将坐标变换公共函数从 `grasp_preview_sender_node.py` 提取到独立工具模块，禁止其他节点依赖节点文件中的私有函数 `_transform_from_msg`。
-- 待办 2：将 `depth_image_to_array()` 从 `ordinary_grasp_node.py` 提取到通用图像转换模块，解除当前 GraspNet 主链路对 legacy 普通抓取节点的依赖。
-- 待办 3：拆分过大的 `visual_grasp_executor_node.py`（当前约 1400 行）和 `candidate_ik_filter_node.py`（当前约 800 行），将 ROS 适配、阶段编排、MoveIt 服务交互、执行状态和策略逻辑分离。
-- 待办 4：明确 `ordinary_grasp` 为 legacy/可选备用路线；确认是否继续保留其外部 `ordinary_grasp_root` 适配、launch 参数、配置和测试，或从当前活动入口中移除并仅通过 Git 历史追溯。
-- 待办 5：明确 `GraspNetBaselineBackend` 与 `InProcessGraspNetBackend` 的正式性，确定唯一推荐的 Ubuntu 运行后端，兼容后端需标注维护边界。
-- 待办 6：把视觉入口分类为正式运行、只读诊断、开发调试、Benchmark 和 legacy 兼容，避免 `setup.py` 中大量入口被误认为同等正式功能。
-- 待办 7：审计 `camera/base.py`、`handeye_config.py`、`aruco_reference.py` 等可疑未使用模块，以及 `package.xml` 中未被源码直接使用的 `rebotarm_calibration`、`rebotarm_motion` 依赖；确认后再决定保留、迁移或删除。
-- 待办 8：增加统一 Ruff/Black/isort（必要时 mypy）配置，逐步清理过长代码行和无必要的 `except Exception`。
-- 当前说明：上述问题不阻塞当前 Ubuntu 视觉主链路；重构或清理前必须保持 Gemini 2 → YOLO → ROS → GraspNet → 候选过滤 → plan-only/受控执行的数据流、安全门和只读默认值不变。
-- 设计方案、入口分类表、依赖审计、拆分记录、静态检查结果、回归测试及最终结论：待补充。
-
 以上是待完善清单，不构成自动启动硬件、使能、运动或厂家参数辨识的授权；真实采集按项目安全流程另行安排。
 
 ## 维护记录

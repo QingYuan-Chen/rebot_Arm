@@ -4,6 +4,16 @@
 
 ## 当前焦点
 
+- 2026-09-30：只读复核发现上轮视觉 P1/P2 软件完成结论存在未覆盖行为缺口：执行服务超时后 runtime 提前返回且 stop 调用为 0、finally 过早回 IDLE；无效计划/空候选不撤销旧缓存；候选和非基座计划转换取最新 TF 而非采集时刻；撤退失败后仍可进入下一候选；GraspNet 深度范围与 camera.color_format 参数未透传。无硬件替身复现前两项及重试缺口。先前 773 passed 不构成这些路径的安全验收；本轮仅审查，尚未修复。
+
+- 2026-09-30：vision 包只读审查：当前源码全量软件回归 773 passed/18 skipped，分层 22 passed，必需 compileall 及 vision compileall 通过。无硬件测试替身复现 ExecutePose 客户端超时→mark_aborting→runtime 提前返回，停止调用为 0 次且 finally 回到 IDLE；无效计划/空候选不会清除旧执行缓存。源码另见候选与执行 TF 使用最新时刻而非采集 stamp、重试前撤退失败只告警仍可继续、GraspNet min_depth_m/max_depth_m 未传入正式 backend。以上为待修问题，本次未修改业务代码、未访问相机或真实机械臂；测试通过不覆盖这些完整失败链。
+
+- 2026-09-30：ArUco 辅助函数迁入 `rebotarm_calibration/aruco_reference.py`，视觉包旧模块删除，测试改由标定包负责；视觉包 manifest 不再声明 calibration/motion 直接依赖，组合依赖仍由 bringup 声明。标定与视觉包构建通过；全量软件回归 755 passed/18 skipped，新增边界聚焦测试 27 passed。未操作相机或真机。
+
+- 2026-09-30：视觉包解耦待办 1 已完成软件迁移：新增 `tf_message_adapter.py`，统一 TF 消息→`Transform3D`、Pose 变换与 TCP 偏移；候选 TF 适配、两种 marker 节点及视觉抓取执行节点不再从预览节点导入工具函数。`grasp_preview_sender_node.py` 保留旧 Python 导入别名，不改变 ROS 话题/服务/参数。聚焦测试 117、分层 21、全量 752 passed/18 skipped，vision build、compileall、diff check 通过；无真机操作。
+
+- 2026-09-30：用户决定退役视觉包的 `ordinary_grasp` 备用路线。已将深度消息解码提取到 `converters/image_msgs.py` 供正式 GraspNet 节点使用，并从源码、setup 入口、vision/bringup launch、相机 YAML 与专属测试移除普通抓取节点及外部适配器；本地安装空间的旧 console script 也已删除。保留 `GraspPlan`/`GraspCandidate` 消息与正式 GraspNet 话题。聚焦测试 96、分层 21、全量 749 passed/18 skipped；vision/bringup 重建及 launch `--show-args` 通过，未启动硬件。其他主机上的旧安装空间需重建并清理生成的旧脚本。
+
 - 2026-09-29：用户真机工作台日志显示 `TeachRecorderNode` 导入失败，源码第 380 行被误改为 `return5420、`，导致 SyntaxError；MoveIt/控制器已启动但录制节点死亡，日志中控制器状态为 `CONNECTED_DISABLED`，不构成示教功能通过。已恢复原有 `return`，teach 包重建、安装模块导入、compileall、分层 21 通过；全量 747 passed/18 skipped/4 项既有文档断言失败。未在真机重新启动工作台或执行 Enable；需用户重新启动后确认 recorder 节点存活及状态反馈，再继续录制测试。
 
 - 2026-09-29：审查本机可访问项目、备份及当前仓库脚本后，未发现旧 teach 预演入口的实际调用；旧 Python 转发模块、teach console entry 和 install 中对应旧脚本已移除。新入口仍为 `ros2 run rebotarm_simulation rebotarm_mujoco_teach_preview`。teach/simulation 重建通过；分层 21、MuJoCo 专项 6 通过；全量 747 passed、18 skipped、4 项既有文档断言失败，compileall/diff 通过。其他机器或未挂载环境的调用方不在本机可验证范围；未操作真机。
@@ -882,3 +892,37 @@ Dashboard 的 `TeachReplayWorkflow` 已定为唯一正式示教回放实现，�
 - 2026-09-29：用户提议按初始目标距离自适应位置奖励。新增MJX adaptive_position：d0每回合固定，s=clip(0.4*d0,.015,.04)，位置项=.5exp(-d/s)+.5exp(-d/.015)，姿态/进展/动作/成功项沿pose_v3，旧profile保留。从pose_v3 final续训local 128环境327680步seed17；同未参与选模100 goal_q，起始/best/final CPU与MJX均成功28/52/54%，最终位置21.4/13.1/12.3mm，姿态.92/.90/.88deg。向下53目标成功28→50，向上47目标0→4；≥7cm目标18个成功1→4。改动有助于当前同目标集，但一次续训不能隔离奖励与额外步数的因果影响，仍有向上/远目标缺口。模型runs/reach/mjx_reach_local_adaptive_seed17.zip，报告对应_paired_comparison.json。Reach专项12、分层18、simulation build/compile/diff通过；全量740 passed/16 skipped/4既有文档断言失败。无真机。
 
 - 2026-09-29：完成同等训练步数旧奖励对照，修正上一条“自适应奖励有助于同目标集”的因果解读。从相同pose_v3 final、local目标、128环境、seed17、eval频率与实际327680步出发，仅旧奖励pose_v3与adaptive_position不同；同seed20000起100个goal_q完全相同。CPU MuJoCo最终模型旧奖励/自适应成功61/54，MJX为60/54；CPU位置误差11.1/12.3mm、姿态0.82/0.88deg。旧奖励best/自适应best为56/52。CPU逐目标：自适应成功54个旧奖励全部成功，旧奖励另成功7个；向下53目标53/50、向上47目标8/4、初距≥7cm的18目标7/4。此前自适应相对初始的改善可以由继续训练解释，本次单seed对照没有显示其优于旧奖励；不推广到所有seed。模型runs/reach/mjx_reach_local_pose_v3_control_seed17.zip，报告对应_paired_comparison.json，日志对应.log；仅无接触仿真，无真机。
+
+2026-10-01：视觉 launch/config 整理第二阶段先完成 `visual_servo.yaml` 参数归属迁移。`visual_grasp_system.launch.py` 不再重复传入 `refresh_plan_at_pregrasp_enabled`、`refresh_plan_at_pregrasp_required`、`refresh_plan_timeout_sec`，三项默认值唯一来自 `visual_servo.yaml`；节点名、参数名和启动接口保持不变。聚焦测试100通过，完整测试777通过、18跳过，视觉与bringup重建成功。带公开 launch 覆盖参数的夹爪/候选策略尚未迁移，需后续用兼容覆盖机制处理。
+
+2026-10-01：第二阶段继续处理 `gripper_policy.yaml`。由于 `visual_grasp_system.launch.py` 的 16 个同名参数是现有公开覆盖接口，暂不直接删除；补充注释明确 YAML 是默认档、launch 参数是兼容覆盖，并新增测试逐项校验两处默认值一致，防止漂移。视觉/bringup 构建成功，完整测试 778 passed、18 skipped。
+
+2026-10-01：完成夹爪策略的显式覆盖迁移。`visual_grasp_system.launch.py` 通过 `OpaqueFunction` 在运行时比较 16 个夹爪 launch 参数与 `gripper_policy.yaml` 默认值；未修改时移除覆盖键，节点使用 YAML；用户传入非默认值时保留原参数覆盖行为。节点、launch 参数名和启动命令保持兼容。完整测试 778 passed、18 skipped，相关包构建和 compileall 通过。
+
+2026-10-01：继续整理 launch/config 时修正了上一版夹爪覆盖实现：Node 会在构造时复制参数字典，事后 pop 无效。当前执行器改为 `OpaqueFunction` 延迟读取并合并六个策略 YAML；只有 launch 值与 YAML 默认不同才作为兼容覆盖，默认值由 YAML 提供。启动工厂已用 LaunchContext 无硬件生成 Node 验证。候选过滤 YAML 与现有 launch 默认存在语义差异（pose_policy、workspace gate、pregrasp distance 等），暂不迁移，先对齐语义避免行为改变。全量测试 778 passed、18 skipped。
+
+2026-10-01：用户决定候选过滤只使用 `preserve_candidate_pose`。已将 `candidate_target_policy.build_candidate_target_variants()` 限制为该策略，传入 hybrid/official/base_axis/fallback 变体会明确 ValueError；候选过滤节点默认值与 grasp_pose_policy.yaml 已同步为 preserve_candidate_pose。执行器独立的 `pose_policy=base_axis` 保留，因为它是执行阶段策略。全量测试 778 passed、18 skipped，vision/bringup build、compileall、diff check 通过。
+
+2026-10-01：按用户要求为 `config/visual_servo.yaml` 补充明确注释：标记为实验性配置，当前正式视觉链路不启用，只有完成独立 plan-only 验证后才应显式开启；参数值和接口未改变。视觉包重建成功，相关测试 79 passed。
+
+2026-10-01：开始视觉包目录整理第1步：删除源码树中 Python 生成的所有 `__pycache__`；修正 `rebotarm_vision/README.md` 中不存在的 `retry_policy.py` 条目，保留实际的 `grasp_retry_policy.py`。未移动源码、未改变 ROS 接口；相关 launch/README 测试 82 passed。
+
+2026-10-01：视觉包目录整理第2步完成：确认并删除未被任何源码、launch、测试或入口引用且与 `candidate_scoring_policy.py` 重复的 `grasp_candidate_policy.py`，同步删除 README 条目。`camera/base.py`（接口预留）和 `depth_quality.py`（未接线但完整纯函数质量门）暂保留，待单独决定。vision 包重建成功，全量测试 778 passed、18 skipped，compileall/diff check 通过。
+
+2026-10-01：视觉包目录整理第3步完成：确认 `camera/base.py` 无包内调用方、无入口或测试引用，且 Gemini2 驱动不继承该协议；删除该未接入接口文件，并同步更新 Gemini2 模块文档和 README 目录。Gemini2 对外类与 ROS 接口未变。vision 包构建成功，全量测试 778 passed、18 skipped，compileall/diff check 通过。
+
+2026-10-01：视觉包目录整理第4步完成：审计确认 `depth_quality.py` 无源码/launch/config/入口/测试调用，是未接线的备用深度质量门；删除该文件并同步 README。当前 GraspNet 深度处理未改变。vision 包构建成功，全量测试 778 passed、18 skipped，compileall/diff check 通过。
+
+- 2026-10-01：视觉包目录整理第5步完成：新增 `rebotarm_vision/diagnostics/`，将相机调试预览、深度探针和 GraspNet Open3D 查看器移入；旧模块路径保留兼容导入壳，三个 console script 名称和 ROS 节点接口不变。视觉包构建成功，兼容导入检查通过，完整测试 `778 passed, 18 skipped`，compileall 与 `git diff --check` 通过；未启动相机、MoveIt 或硬件。
+
+- 2026-10-01：视觉包目录整理第6步完成：新增 `rebotarm_vision/benchmarks/`，将 `visual_grasp_benchmark.py` 与 `hybrid_grasp_sim_benchmark.py` 移入；旧模块路径和两个 console script 保持兼容。源码型 wiring 测试已改读 canonical 新路径。视觉包构建成功，正确 source ROS 与 workspace overlay 后 `778 passed, 18 skipped`，compileall 与 `git diff --check` 通过；未启动相机、MoveIt 或硬件。
+
+- 2026-10-01：视觉包目录整理第7步完成：新增 `rebotarm_vision/nodes/`，将 9 个正式 ROS 节点适配器移入（视觉主节点、GraspNet、候选 IK、执行器、标记、预览、TCP、离线 YOLO 等）；旧模块路径和 console script 保持兼容，节点内部相对导入调整为跨层导入。源码测试改读 canonical 节点与已提取 runtime/gateway/policy 模块。构建成功，聚焦测试 `114 passed`，全量 `778 passed, 18 skipped`，compileall 与 `git diff --check` 通过；未启动相机、MoveIt 或硬件。
+
+- 2026-10-01：视觉包目录整理第8步完成：新增 `rebotarm_vision/policies/`，将所有 `*_policy.py` 纯策略模块移入；旧模块路径保留兼容导入壳，节点与运行时改为显式引用 `policies`。`candidate_ik_config.py`、`visual_grasp_config.py` 等配置类暂留根目录，未混入策略包。README 与源码型测试改为 canonical 路径。构建成功，策略兼容导入通过，聚焦测试 `97 passed`，全量 `778 passed, 18 skipped`，compileall 与 `git diff --check` 通过；未启动相机、MoveIt 或硬件。
+
+- 2026-10-01：视觉包目录整理第9步完成：公共纯函数与基础设施分组完成。新增 `utils/` 并移入 `transform_points.py`、`tf_message_adapter.py`、`visual_grasp_messages.py`、`parameter_validation.py`、`message_freshness.py`、`latest_only_work_queue.py`；工作空间门 `candidate_workspace_gate.py` 归入 `policies/`。旧模块路径保留兼容导入壳，节点/运行时引用改为显式 `utils`/`policies`。构建成功，工具兼容导入通过，聚焦测试 `104 passed`，全量 `778 passed, 18 skipped`，compileall 与 `git diff --check` 通过；未启动相机、MoveIt 或硬件。
+
+- 2026-10-01：用户决定删除目录整理阶段的旧顶层兼容导入壳，统一使用 `nodes/`、`benchmarks/`、`diagnostics/`、`policies/`、`utils/` canonical 路径。审计确认仓库内部 import、测试和 setup.py 已全部迁移；保留 console script 名称作为 ROS 外部接口。新增分层测试确认旧顶层模块不存在、setup entrypoint 指向 canonical 子包。vision 构建成功，分层测试 `23 passed`，全量 `779 passed, 18 skipped`，compileall 与 `git diff --check` 通过；未启动相机、MoveIt 或硬件。
+
+- 2026-10-01：完成目录重组后的全项目只读审计。排除 build/install/log 后，仓库内旧 `rebotarm_vision.<顶层模块>` 引用为 0；AST 扫描 134 个视觉包 import、50 个唯一模块目标，缺失目标为 0；15 个 console script 均指向 canonical `nodes/`、`benchmarks/`、`diagnostics/` 子包。分层测试 `23 passed`，全量 `779 passed, 18 skipped`，dashboard/teleop/teach/motion 与 bringup compileall、git diff check 通过。未启动相机、MoveIt 或硬件。剩余风险仅是仓库外部脚本若仍导入旧顶层 Python 路径，需要按新路径迁移。

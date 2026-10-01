@@ -37,7 +37,7 @@ def test_ubuntu_camera_config_uses_verified_hw_alignment_profiles() -> None:
 
 
 def test_vision_node_publishes_camera_info_for_both_rgb_and_depth() -> None:
-    node = _read("src/rebotarm_vision/rebotarm_vision/vision_node.py")
+    node = _read("src/rebotarm_vision/rebotarm_vision/nodes/vision_node.py")
 
     assert '"/camera/color/camera_info"' in node
     assert '"/camera/depth/camera_info"' in node
