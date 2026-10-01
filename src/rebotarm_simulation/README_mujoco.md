@@ -22,11 +22,11 @@ Sim2Real/Real2Sim 的仿真侧随机化、JSONL 记录、确定性回放、轨�
 
 ## 安装与构建
 
-ROS launch 的解释器可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYTHON`
-环境变量指定；未设置时，MuJoCo launch 默认使用仓库中的
-`third_party/rebotarm_mujoco_venv/bin/python`，避免误用不含 `mujoco` 的系统
-`python3`。从其他工作目录启动时请传绝对路径或设置环境变量。
-混合视觉入口的配置见 [启动解释器说明](../../docs/setup/launch_python_configuration.md)。
+ROS launch 默认使用 PATH 中的 `python3`，本机部署使用系统 Python 3.12 和用户级
+MuJoCo 依赖，不需要 MuJoCo 专属虚拟环境、激活脚本或解释器环境变量。
+外部部署可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYTHON` 显式覆盖；
+启动目录不会影响解释器选择。混合视觉入口见
+[启动解释器说明](../../docs/setup/launch_python_configuration.md)。
 
 `mujoco_moveit_sim.launch.py` 默认同时打开原生 MuJoCo viewer，便于桌面联调
 观察物理模型；ROS 适配节点仍是独立的 headless 节点，负责 ROS action 和状态
@@ -45,31 +45,31 @@ ros2 launch rebotarm_simulation mujoco_headless.launch.py
 ```
 
 在当前工作区根目录、未激活venv的新终端执行。系统依赖按
-[安装说明](../../docs/setup/ubuntu_ros2_jazzy.md)准备；源码统一由系统Python构建，
-MuJoCo虚拟环境只用于运行，不需要相机、视觉权重或历史上游副本。
+[安装说明](../../docs/setup/ubuntu_ros2_jazzy.md)准备；源码和仿真统一使用系统 Python，
+不需要相机、视觉权重或历史上游副本。
 
 ```bash
 cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
-python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
-python3 scripts/install_python_dependencies.py mujoco --python third_party/rebotarm_mujoco_venv/bin/python
+python3 scripts/install_python_dependencies.py mujoco --user --break-system-packages
 /usr/bin/python3 -m colcon build --symlink-install --packages-select rebotarm_simulation
 source install/setup.bash
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
 ```
 
-每个新终端都先 `source /opt/ros/jazzy/setup.bash`，再
-`source install/setup.bash`，并显式设置 `REBOTARM_MUJOCO_PYTHON`。
+依赖只需部署一次。`--user` 安装到当前用户包目录，不使用 sudo 或覆盖系统包文件；
+用户级包优先于同名系统包，固定版本见[依赖清单](../../docs/setup/dependencies/mujoco.md)。
+每个新终端加载 ROS 和 `install/setup.bash` 即可；旧终端若曾设置专属解释器路径，
+迁移后先执行 `unset REBOTARM_MUJOCO_PYTHON`。
 
-从源码调试时应显式使用 `third_party/rebotarm_mujoco_venv/bin/python -m ...`；colcon 安装后
-的 `rebotarm_mujoco_*` console script 会在构建时写入解释器 shebang。因此若
-更换或重建 venv，必须重新 colcon build，不能假定旧脚本会自动改用当前 Python。
-以下是从工作区源码直接运行的完整等价命令，不依赖已安装的 console script：
+colcon 安装的 console script 使用构建时的解释器 shebang；本机统一由
+`/usr/bin/python3` 构建，因此 ROS launch 和 `ros2 run` 都能读取同一组用户级依赖。
+若选择其他解释器运行独立工具，使用 `ros2 run --prefix /绝对路径/python ...`。
+以下是从工作区源码直接运行的完整等价命令：
 
 ```bash
-MUJOCO_GL=egl PYTHONPATH=src/rebotarm_simulation third_party/rebotarm_mujoco_venv/bin/python -m rebotarm_simulation.mujoco_health --renderer-timeout 30
-PYTHONPATH=src/rebotarm_simulation third_party/rebotarm_mujoco_venv/bin/python -m rebotarm_simulation.mujoco_cli run --duration 5
-PYTHONPATH=src/rebotarm_simulation third_party/rebotarm_mujoco_venv/bin/python -m rebotarm_simulation.mujoco_viewer --duration 30
+MUJOCO_GL=egl PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_health --renderer-timeout 30
+PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_cli run --duration 5
+PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_viewer --duration 30
 ```
 
 ## 健康检查与无界面运行

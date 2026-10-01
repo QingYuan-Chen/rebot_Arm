@@ -22,7 +22,7 @@
 | `docs/setup/dependencies/runtime.md` | 控制器 MotorBridge 基础依赖，随后必须安装本地审查补丁 | 系统 Python；本节命令 |
 | `docs/setup/dependencies/vision.md` | 相机、YOLO、OpenCV，固定 NumPy 1.x 兼容 ROS cv_bridge | `.venv-vision`；`scripts/setup_ubuntu_vision.sh` |
 | `docs/setup/dependencies/graspnet.md` | GraspNet 抓取候选、点云及固定 PyTorch/CUDA 依赖 | `.venv-graspnet`；`scripts/setup_ubuntu_graspnet.sh` |
-| `docs/setup/dependencies/mujoco.md` | MuJoCo 仿真与模型工具 | `third_party/rebotarm_mujoco_venv`；见仿真包 README |
+| `docs/setup/dependencies/mujoco.md` | MuJoCo 仿真与模型工具 | 系统 Python 3.12，用户级安装；见仿真包 README |
 | `docs/setup/dependencies/rl.md` | MuJoCo + Gymnasium + GPU PPO（包含物理依赖） | 独立可选训练环境；见 `../reference/commands/mujoco_rl.md` |
 | `docs/setup/dependencies/tensorrt.md` | TensorRT 推理扩展，单独以 `--no-deps` 安装以避免拉取额外 CUDA 工具链 | 与 vision 共用环境；由视觉安装脚本调用 |
 
@@ -211,15 +211,15 @@ python3 -m pytest tests -q
 历史材料及其专属测试仅本机保留，已有开发目录若要只验证发布范围，可用
 `git ls-files -z tests | xargs -0 python3 -m pytest -q`。
 
-### 可选MuJoCo运行环境
+### 可选 MuJoCo 依赖
 
 ```bash
-python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
-python3 scripts/install_python_dependencies.py mujoco --python third_party/rebotarm_mujoco_venv/bin/python
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
+python3 scripts/install_python_dependencies.py mujoco --user --break-system-packages
 ```
 
-不需要激活该venv或重新构建ROS包。仿真入口和模型见
+依赖安装到系统 Python 的用户包目录；无需虚拟环境或解释器环境变量。
+`--user` 不覆盖系统文件，用户级包会优先于同名系统包；版本固定在依赖清单中。
+仿真入口和模型见
 `src/rebotarm_simulation/README_mujoco.md`。
 
 ## 3. 硬件配置

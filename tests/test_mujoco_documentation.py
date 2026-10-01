@@ -19,9 +19,8 @@ def test_mujoco_readme_documents_reproducible_install_and_runtime_commands():
         "Ubuntu 24.04",
         "ROS 2 Jazzy",
         "Python 3.12",
-        "python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv",
         "source /opt/ros/jazzy/setup.bash",
-        "python3 scripts/install_python_dependencies.py mujoco --python third_party/rebotarm_mujoco_venv/bin/python",
+        "python3 scripts/install_python_dependencies.py mujoco --user --break-system-packages",
         "/usr/bin/python3 -m colcon build --symlink-install --packages-select rebotarm_simulation",
         "MUJOCO_GL=egl",
         "rebotarm_mujoco_health --renderer-timeout",
@@ -35,13 +34,14 @@ def test_mujoco_readme_documents_reproducible_install_and_runtime_commands():
         "rebotarm_mujoco_viewer --duration",
         "joints 0.0 -0.8 -1.0 0.3 0.0 0.0",
         "--no-command-input",
-        "PYTHONPATH=src/rebotarm_simulation third_party/rebotarm_mujoco_venv/bin/python -m rebotarm_simulation.mujoco_health",
-        "PYTHONPATH=src/rebotarm_simulation third_party/rebotarm_mujoco_venv/bin/python -m rebotarm_simulation.mujoco_cli",
-        "PYTHONPATH=src/rebotarm_simulation third_party/rebotarm_mujoco_venv/bin/python -m rebotarm_simulation.mujoco_viewer",
+        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_health",
+        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_cli",
+        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_viewer",
     )
     for value in required:
         assert value in text
     assert ".venv-mujoco-ros" not in text
+    assert "third_party/rebotarm_mujoco_venv" not in text
 
 
 def test_mujoco_readme_documents_ros_interfaces_examples_and_moveit_safety():

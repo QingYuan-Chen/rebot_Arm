@@ -22,19 +22,18 @@
 在 Ubuntu VM 中执行：
 
 ```bash
-cd ~/robotarm_ros2_mujoco_acceptance
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
+cd /home/a/project/rebot_Arm
 export PYTHONPATH="$PWD/src/rebotarm_simulation:${PYTHONPATH:-}"
 mkdir -p logs/sim2real
 ```
 
 如果已经执行过 `colcon build` 并 source 了工作区，也可以直接使用
-`rebotarm_sim2real`；以下命令使用 `python -m`，不依赖是否重新安装入口。
+`rebotarm_sim2real`；以下命令使用 `python3 -m`，不依赖是否重新安装入口。
 
 ## 1. 随机化运行并记录
 
 ```bash
-python -m rebotarm_simulation.sim2real_cli rollout \
+python3 -m rebotarm_simulation.sim2real_cli rollout \
   --randomization-profile training_profile \
   --seed 7 \
   --steps 100 \
@@ -48,7 +47,7 @@ python -m rebotarm_simulation.sim2real_cli rollout \
 ## 2. 确定性回放
 
 ```bash
-python -m rebotarm_simulation.sim2real_cli replay \
+python3 -m rebotarm_simulation.sim2real_cli replay \
   logs/sim2real/seed-7-reference.jsonl \
   --randomization-profile training_profile \
   --seed 7 \
@@ -62,7 +61,7 @@ seed 和动作下，各误差应为 `0` 或在设置的阈值内。
 ## 3. 单独比较两条轨迹
 
 ```bash
-python -m rebotarm_simulation.sim2real_cli compare \
+python3 -m rebotarm_simulation.sim2real_cli compare \
   logs/sim2real/seed-7-reference.jsonl \
   logs/sim2real/seed-7-replay.jsonl \
   --joint-position-max 0.001 \
@@ -79,7 +78,7 @@ python -m rebotarm_simulation.sim2real_cli compare \
 ## 4. 批量安全与复现性验收
 
 ```bash
-python -m rebotarm_simulation.sim2real_cli batch-check \
+python3 -m rebotarm_simulation.sim2real_cli batch-check \
   --randomization-profile training_profile \
   --seed 7 \
   --episodes 20 \

@@ -124,6 +124,7 @@ def test_install_docs_use_pinned_sdk_and_explicit_runtime_interpreters():
     assert "~/seeed/rebotarm_ros2" not in readme
     assert 'ros2 run --prefix "$GRASPNET_PYTHON"' in vision
     assert "尚未完成 `vision_profile:=ubuntu_native` 集成" not in vision
-    assert "export REBOTARM_MUJOCO_PYTHON=" in simulation
+    assert "REBOTARM_MUJOCO_PYTHON" in simulation
+    assert 'export REBOTARM_MUJOCO_PYTHON=' not in _read("scripts/source_local_environment.bash")
     assert "/usr/bin/python3 -m colcon build" in simulation
     assert "/bin/activate" not in simulation

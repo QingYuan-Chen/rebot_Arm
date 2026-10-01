@@ -46,14 +46,7 @@ env_names = {"mujoco": "REBOTARM_MUJOCO_PYTHON", "vision": "REBOTARM_VISION_PYTH
 expected = {}
 for kind, name in env_names.items():
     os.environ.pop(name, None)
-    # MuJoCo is intentionally isolated in the workspace venv by default;
-    # vision and GraspNet fall back to the system interpreter unless their
-    # dedicated environment variables are supplied.
-    expected[kind] = (
-        str(root / "third_party" / "rebotarm_mujoco_venv" / "bin" / "python")
-        if kind == "mujoco"
-        else "python3"
-    )
+    expected[kind] = "python3"
     if mode != "default":
         os.environ[name] = f"/opt/custom-{kind}/bin/python"
         expected[kind] = os.environ[name]
@@ -64,6 +57,8 @@ for relative in (".venv-graspnet/bin/python", ".venv-vision/lib/python3.12/site-
     target = relocated / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.touch()
+os.chdir(relocated)
+os.environ["PWD"] = str(relocated)
 
 files = {
     "rebotarm_simulation": ["mujoco_sim.launch.py", "mujoco_moveit_sim.launch.py"],
@@ -130,5 +125,5 @@ for package, names in files.items():
                                 seen.add((name, kind))
 
 assert all(any(filename == name for filename, kind in seen) for names in files.values() for name in names), seen
-print("All 8 relocated launch files resolved; no processes started:", mode)
+print("Relocated launch files resolved; no processes started:", mode)
 '''

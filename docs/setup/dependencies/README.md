@@ -13,7 +13,7 @@
 | [runtime.md](runtime.md) | MotorBridge 控制器基础依赖 | 系统 Python，安装后仍需反馈序号补丁 |
 | [vision.md](vision.md) | Gemini 2、YOLO、OpenCV | `.venv-vision`；`scripts/setup_ubuntu_vision.sh` |
 | [graspnet.md](graspnet.md) | GraspNet、点云及 CUDA PyTorch | `.venv-graspnet`；`scripts/setup_ubuntu_graspnet.sh` |
-| [mujoco.md](mujoco.md) | MuJoCo 仿真与模型工具 | `third_party/rebotarm_mujoco_venv` |
+| [mujoco.md](mujoco.md) | MuJoCo 仿真与模型工具 | 系统 Python 3.12，用户级安装 |
 | [rl.md](rl.md) | CPU Reach 和可选 CUDA SB3/PPO | `third_party/rebotarm_rl_venv` |
 | [tensorrt.md](tensorrt.md) | TensorRT 推理运行库 | `.venv-vision`；单独使用 `--no-deps` |
 
@@ -28,7 +28,7 @@ python3 scripts/install_python_dependencies.py mujoco --show
 实际安装时显式指定目标环境，其他选项见 `--help`：
 
 ```bash
-python3 scripts/install_python_dependencies.py mujoco --python third_party/rebotarm_mujoco_venv/bin/python
+python3 scripts/install_python_dependencies.py mujoco --user --break-system-packages
 ```
 
 不要直接将带标题、说明和代码围栏的 Markdown 交给 `pip -r`。

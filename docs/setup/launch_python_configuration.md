@@ -2,8 +2,8 @@
 
 > 状态：SETUP；类型：启动解释器和环境配置契约；适用范围：MuJoCo、视觉和 GraspNet 进程。
 
-2026-09-06 起，MuJoCo、视觉、GraspNet 的 ROS launch 不再向上搜索工作区内的
-`.venv-*` 或 `third_party/rebotarm_mujoco_venv`，也不向整组节点注入视觉
+MuJoCo、视觉、GraspNet 的 ROS launch 不依赖工作区内的虚拟环境目录布局，
+也不向整组节点注入视觉
 `site-packages/PYTHONPATH`。每类 Python 节点使用自己的解释器 prefix。
 
 选择优先级：显式 launch 参数 > 对应环境变量 > `PATH` 中的 `python3`。
@@ -19,12 +19,12 @@
 环境变量设置在启动前完成，路径允许放在工作区外。未设置时，依赖需安装在当前
 `PATH` 所选 Python 中；不再自动切换到恰好在邻近目录找到的虚拟环境。
 
-本机现有环境可在终端中明确选择（仅配置环境，不启动节点）：
+本机 MuJoCo 已部署到系统 Python 的用户包目录，默认直接使用 `python3`，
+无需指定专属解释器。视觉和 GraspNet 仍可单独选择（仅配置环境，不启动节点）：
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
 export REBOTARM_VISION_PYTHON="$PWD/.venv-vision/bin/python"
 export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 ```
@@ -35,6 +35,8 @@ export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 source scripts/source_local_environment.bash
 ```
 
+该脚本不会设置或覆盖 `REBOTARM_MUJOCO_PYTHON`；已有显式覆盖会保留。
+旧终端若保留已删除环境的路径，迁移后执行 `unset REBOTARM_MUJOCO_PYTHON`。
 该脚本还会默认设置本工作区的 `GRASPNET_MODEL_ROOT` 和
 `GRASPNET_CHECKPOINT_PATH`；如果当前 shell 已经显式设置过这两个变量，则保留已有值。
 
@@ -71,7 +73,8 @@ MuJoCo 模型资源的选择方式保持原有契约；本次只解除解释器�
 接口不变。历史源码可从 Git 历史追溯，本机参考归档不再随源码发布。
 模型分析、指标和独立离线工具仍使用的公共模块继续保留。
 
-验证结果：全量测试 `761 passed, 8 skipped`，分层20通过；从当前活动源码导入
-正式 MuJoCo 后端执行轨迹/停止/取消等测试55通过。三个包独立构建成功，8个已安装
-launch均通过 `--show-args`；搬迁目录测试覆盖默认、环境变量和显式参数优先级。
-旧模块在新overlay中不可导入。以上均为软件验证，未启动硬件或发送运动命令。
+2026-10-01 验证：系统 Python 3.12 的用户级依赖部署完成，`pip check` 通过；
+完整回归 `1167 passed / 14 skipped`，分层 18 通过，11 包构建通过。
+搬迁目录测试覆盖默认、环境变量和显式参数优先级；从 `/tmp` 使用默认解释器
+通过模型/物理/EGL、原生 Viewer 和 MoveIt 实际仿真执行。旧 MuJoCo 环境已删除。
+以上均为软件验证，未启动硬件或发送实机运动命令。

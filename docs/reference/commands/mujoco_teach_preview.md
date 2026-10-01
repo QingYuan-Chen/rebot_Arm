@@ -9,7 +9,7 @@
 ## 前置条件
 
 - 已完成 ROS 2 Jazzy 环境加载；
-- 已创建 `third_party/rebotarm_mujoco_venv`；
+- 已按[仿真依赖说明](../../setup/dependencies/mujoco.md)为系统 Python 安装依赖；
 - 已准备可读的示教 JSONL 文件；
 - 有桌面时可使用 Viewer，无桌面时省略 `--viewer`。
 
@@ -19,7 +19,7 @@
 cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-third_party/rebotarm_mujoco_venv/bin/python -m rebotarm_teach.mujoco_preview \
+python3 -m rebotarm_teach.mujoco_preview \
   /你的/示教记录.jsonl --viewer
 ```
 

@@ -15,7 +15,6 @@
 # PyTorch 2.5.1 CUDA 12.1 wheel is published by PyTorch; +cu121 avoids CPU wheel selection.
 --extra-index-url https://download.pytorch.org/whl/cu121
 -r mujoco.md
-gymnasium==1.2.3
 imageio==2.37.4
 stable-baselines3==2.8.0
 torch==2.5.1+cu121

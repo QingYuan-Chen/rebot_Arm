@@ -13,7 +13,7 @@
 - Ubuntu 24.04 / ROS 2 Jazzy，11 个活动 ROS 包；职责和依赖边界见[架构说明](../implemented/architecture.md)。
 - 视觉只维护 Gemini 2 → 本地 YOLO → ROS RGB-D/CameraInfo/detections → 本机进程内 GraspNet。
 - 分环境依赖由[依赖索引](../setup/dependencies/README.md)统一维护，安装工具为 `scripts/install_python_dependencies.py`。
-- 视觉、GraspNet 与 MuJoCo 分别使用 `.venv-vision`、`.venv-graspnet`、`third_party/rebotarm_mujoco_venv`；解释器选择见[配置契约](../setup/launch_python_configuration.md)。
+- 视觉、GraspNet 分别使用 `.venv-vision`、`.venv-graspnet`；MuJoCo 默认使用系统 Python 3.12 的用户级依赖；解释器选择见[配置契约](../setup/launch_python_configuration.md)。
 - 主控制器要求配套的 MotorBridge 反馈序号补丁；启动前用 `scripts/setup_motorbridge_fresh_feedback.py --check-installed` 只读检查，版本以当前工具和依赖清单为准。
 
 ## 保留的关键决定
@@ -55,17 +55,21 @@
 - 新运行报告由命令显式指定输出，推荐 `log/visual_grasp/` 或 `log/calibration/`；运行数据不作为项目状态文档，也不加入例行提交。
 - `scripts/` 只保留环境安装/启动/检查脚本、GraspNet 推理后端及 YOLO/TensorRT 模型资产；旧 P5 阶段工具和 P6 兼容入口已删除。
 - 目录结构以用户手动整理后的布局为准；补充文档在 `docs/reference/`，SDK 清单在 `third_party/`，MotorBridge 补丁在根目录的 `patches/`。
+- 按用户授权删除 `third_party/robotarm_ros2_upstream`、`robotarm_ros2_mujoco_snapshot` 和 `reBotArm_develop_hjx` 三个旧参考目录，包含其中未接入主项目的历史实验。`third_party/` 当前保留厂商 SDK、固定版本清单和 `COLCON_IGNORE`；正式源码与第三方归属说明继续保留。
 - 独立跟随工具在根目录的 `star_arm_102_rebot_b601_follow/`；不再使用此前的 `相关资料/` 布局，不自动恢复或重新移动用户整理的文件。
 - 单瓶抓取使用正式 `rebotarm_single_bottle_grasp` 入口；标定使用所属功能包的网页与 ROS 工具，见[标定操作说明](commands/calibration_web.md)。
 - 当前源码的历史变更从 Git 历史追溯；已删除的本机未跟踪实验数据不保留。
 
 ## 最近软件验证
 
+- 2026-10-01 解除 MuJoCo 专属虚拟环境依赖：launch 默认使用 PATH 中的 `python3`，本机部署到系统 Python 3.12 的用户包目录；显式解释器覆盖仍可用，环境脚本不会自动设置或覆盖 MuJoCo 解释器。MuJoCo 3.3.0、Gymnasium 1.2.3 和原依赖版本保留，NumPy 仍为系统 1.26.4；`pip check` 通过，MotorBridge 未升级或覆盖。旧 MuJoCo 环境已在验证后删除。
+- 本轮完整回归 `1167 passed / 14 skipped`（两条既有 Gymnasium 观测范围提示），分层专项 `18 passed`，11 包构建及必需编译检查通过。从 `/tmp` 使用默认 Python 验证模型、有限物理步进、EGL 渲染、原生 Viewer 和 MoveIt 实际执行；规划 37 点，终点最大误差 `0.012408 rad`。Goal 前确认唯一 MuJoCo Action server 和关节反馈源；域 119/176 隔离，本轮未访问实机。54 份模型/配置文件摘要未变；不代表两项既有仿真控制问题已修复。证据保留在本机 `log/mujoco_python_cleanup_20261001/`。
+
 - 用户手动布局的引用同步完成：工具位于 `scripts/`，补丁位于 `patches/`，独立跟随工具位于根目录；仅同步引用与说明，未移动目录。
 - 2026-10-01 在 `develop@03a32a0` 完成主要功能仿真核验：基础物理与 ROS 接口、夹爪服务与接触、MoveIt 实际规划执行、合成示教预演、Real2Sim 镜像/物理跟随、Reach/Pick 环境和视觉多阶段 plan_only 规划均可运行；额外边界探针发现上述两项仿真控制问题，不能记为全部验收通过。
 - MoveIt 实际执行 37 个轨迹点，最终最大误差 `0.010004 rad`；4 s 示教预演最大误差 `0.000353 rad`。取消后最终 hold 稳定，但不代表瞬态切换已合格。
 - Pick 三个 seed 各 100 步安全违规为 0，随机动作抓取成功率为 0；本轮未验证训练策略成功抓取。视觉输入为经过 FK/碰撞校验的合成计划，未验证真实相机、YOLO/GraspNet 推理或单瓶实机执行。
-- 本轮完整回归 `1167 passed / 14 skipped`，两条既有 Gymnasium 观测范围提示；分层专项 `18 passed`，必需编译检查通过。此前目录整理的 11 包 `symlink-install` 构建通过；安装后的视觉模型与后端路径已同步至 `scripts/`。
+- 删除三个旧参考目录后重跑完整回归，仍为 `1167 passed / 14 skipped`，两条既有 Gymnasium 观测范围提示；分层专项 `18 passed`，必需编译检查及 MuJoCo 模型/物理步进/EGL 渲染检查通过，保留的 72 份依赖文件摘要未变。此前目录整理的 11 包 `symlink-install` 构建通过；安装后的视觉模型与后端路径已同步至 `scripts/`。
 - 51 份运行/模型配置摘要一致，本轮未修改标定或控制参数。空闲隔离域 119/176、`ROS_LOCALHOST_ONLY=1`；Goal 前验证唯一 MuJoCo Action 和反馈源；收尾测试进程及 DDS 端口无残留，既有 domain66 未动。
 - 视觉规划结束后的 MoveGroup 有一次超过默认 5 s 退出期限、由 launch 升级 SIGTERM 的观察记录；功能执行阶段正常，退出原因待另行核对。
 - 核验结果、问题原因和修复方向已写入[MuJoCo 使用说明](../../src/rebotarm_simulation/README_mujoco.md#当前仿真核验与已知问题)。原始证据保留在本机 `log/functional_sim_20261001/`，不随文档提交。软件验证未访问串口、启动实机、安装依赖或执行训练；两处问题尚未修复。

@@ -52,7 +52,6 @@ venv/
 .env
 .vscode/
 .idea/
-third_party/rebotarm_mujoco_venv/
 third_party/rebotarm_rl_venv/
 third_party/reBotArm_control_py/
 third_party/reBotArm_develop_hjx/

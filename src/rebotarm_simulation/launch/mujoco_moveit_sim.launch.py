@@ -24,9 +24,9 @@
     - ``use_rviz`` 默认 true，只影响可视化，不影响控制；
     - ``use_mujoco_viewer`` 默认 true，仅打开本地查看器；无显示环境应改用同包的无头
       启动文件；
-    - ``python_executable`` 默认取环境变量 ``REBOTARM_MUJOCO_PYTHON``，否则回退到当前
-      工作目录下的第三方虚拟环境解释器；该解释器必须装有物理引擎依赖，用它启动可
-      避免污染系统 ROS 环境。
+    - ``python_executable`` 默认取环境变量 ``REBOTARM_MUJOCO_PYTHON``，否则使用
+      PATH 中的 python3；该解释器必须装有物理引擎和 ROS 2 依赖，
+      不依赖工作目录或虚拟环境目录布局。
 
 安全说明
     启动本文件不会使能任何真实电机：真机使能始终需要显式指令与现场安全检查。
@@ -57,12 +57,6 @@ def generate_launch_description():
         [simulation_share, "models", "rebotarm", "scene.xml"]
     )
 
-    # 物理引擎解释器的兜底路径：不能默认用系统 python3，因为系统解释器通常没装
-    # MuJoCo。这里按"当前工作目录下的第三方虚拟环境"解析，可用环境变量覆盖。
-    default_mujoco_python = PathJoinSubstitution(
-        [EnvironmentVariable("PWD", default_value="."), "third_party", "rebotarm_mujoco_venv", "bin", "python"]
-    )
-
     return LaunchDescription(
         [
             # 命名空间：关节状态、动作与服务名都带该前缀，必须与规划侧一致。
@@ -79,16 +73,16 @@ def generate_launch_description():
             ),
             # 仿真节点发布关节状态与推进物理的节拍（Hz），过高只是空耗 CPU。
             DeclareLaunchArgument("publish_rate_hz", default_value="50.0"),
-            # 启动仿真节点所用的解释器，必须是装有物理引擎的那个（见上方兜底路径）。
+            # 默认使用已部署依赖的 python3，允许显式覆盖为其他解释器。
             DeclareLaunchArgument(
                 "python_executable",
                 default_value=EnvironmentVariable(
                     "REBOTARM_MUJOCO_PYTHON",
-                    default_value=default_mujoco_python,
+                    default_value="python3",
                 ),
                 description=(
-                    "Python interpreter containing MuJoCo; set an absolute path "
-                    "or REBOTARM_MUJOCO_PYTHON when launching from another directory"
+                    "Python interpreter containing MuJoCo and ROS 2 dependencies; "
+                    "defaults to python3 on PATH"
                 ),
             ),
             # 仿真执行后端节点：维护关节状态并提供轨迹执行动作。

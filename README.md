@@ -23,7 +23,7 @@
 - `scripts/`：环境安装、验证和离线工具。
 - `tests/`：软件回归与架构检查。
 - `patches/`：固定版本的 MotorBridge 反馈与校零安全补丁。
-- `third_party/`：固定 SDK 清单、本机参考快照、SDK 和虚拟环境；本机依赖与环境不纳入版本管理。
+- `third_party/`：固定 SDK 清单和厂商 SDK；本机依赖不纳入版本管理。
 - `star_arm_102_rebot_b601_follow/`：独立 Star Arm 跟随工具，不由主项目自动启动。
 
 标准本机构建目录为 `build/`、`install/`、`log/`，不提交到 Git。

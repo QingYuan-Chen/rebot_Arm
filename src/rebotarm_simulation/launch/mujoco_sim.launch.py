@@ -13,8 +13,8 @@
 - 参数先读安装目录下的 ``config/mujoco_sim.yaml``，再用本文件里的字典覆盖少数需要由命令行
   决定的项（命名空间、初始关节角）；YAML 里的节点默认值仍然生效；
 - 初始关节角是一个小幅预弯姿态而不是零位，避免上电瞬间处于奇异构型；
-- ``python_executable`` 默认指向工作目录下的 MuJoCo 虚拟环境，保证能 import 到 MuJoCo 与 ROS 2
-  绑定；可用环境变量 ``REBOTARM_MUJOCO_PYTHON`` 或启动参数覆盖。
+- ``python_executable`` 默认使用 PATH 中的 python3；部署时应安装 MuJoCo 与 ROS 2
+  依赖，可用环境变量 ``REBOTARM_MUJOCO_PYTHON`` 或启动参数覆盖。
 """
 
 from pathlib import Path
@@ -23,7 +23,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 
 
 def generate_launch_description():
@@ -34,19 +34,15 @@ def generate_launch_description():
     mujoco_arm_namespace = LaunchConfiguration("mujoco_arm_namespace")
     initial_joint_positions = LaunchConfiguration("initial_joint_positions")
     mujoco_gl = LaunchConfiguration("mujoco_gl")
-    # 兜底的解释器路径：工作目录下的 MuJoCo 虚拟环境；相对于 PWD 解析，找不到会由进程启动阶段报错。
-    default_mujoco_python = PathJoinSubstitution(
-        [EnvironmentVariable("PWD", default_value="."), "third_party", "rebotarm_mujoco_venv", "bin", "python"]
-    )
     return LaunchDescription(
         [
             # 运行本节点的 Python 解释器：必须同时具备 MuJoCo 与 ROS 2 依赖。
-            # 优先级为 启动参数 > 环境变量 REBOTARM_MUJOCO_PYTHON > 工作目录下的虚拟环境。
+            # 优先级为启动参数 > REBOTARM_MUJOCO_PYTHON > PATH 中的 python3。
             DeclareLaunchArgument(
                 "python_executable",
                 default_value=EnvironmentVariable(
                     "REBOTARM_MUJOCO_PYTHON",
-                    default_value=default_mujoco_python,
+                    default_value="python3",
                 ),
                 description="Python interpreter containing MuJoCo and ROS 2 dependencies",
             ),

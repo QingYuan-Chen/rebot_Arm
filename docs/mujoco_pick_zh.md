@@ -86,13 +86,12 @@ print(info["stage"], info["failure_reason"], info["lift_height_m"])
 Ubuntu VM 中执行：
 
 ```bash
-cd ~/robotarm_ros2_mujoco_acceptance
+cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
-source ~/robotarm_ros2/install/setup.bash
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
+source install/setup.bash
 export PYTHONPATH="$PWD/src/rebotarm_simulation:$PYTHONPATH"
 
-python -m rebotarm_simulation.mujoco_pick_batch \
+python3 -m rebotarm_simulation.mujoco_pick_batch \
   --episodes 20 \
   --steps 400 \
   --seed 7 \
@@ -115,7 +114,7 @@ python -m rebotarm_simulation.mujoco_pick_batch \
 基础 MuJoCo 总验收现在也包含 Pick 环境 smoke test：
 
 ```bash
-python -m rebotarm_simulation.mujoco_acceptance --skip-renderer
+python3 -m rebotarm_simulation.mujoco_acceptance --skip-renderer
 ```
 
 ## 当前限制与下一步
