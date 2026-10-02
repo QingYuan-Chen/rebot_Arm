@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-02T19:01:48+08:00",
+  "generated_at": "2026-10-02T19:14:27+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "6383228",
+    "head": "16043da",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-02T19:01:48+08:00 | actor=codex | event=start | note=先提交并推送当前进度，再拆分 visual_grasp_system.launch.py | verification=-"
+  "last_event": "- 2026-10-02T19:14:27+08:00 | actor=codex | event=checkpoint | note=已推送 mjlab 检查点 16043da；新增 visual_readonly、visual_plan_only、visual_execute、visual_ready 四个生命周期入口，保留 visual_grasp_system 兼容入口；完成 launch 语法、分层和 --show-args 验证 | verification=-"
 }

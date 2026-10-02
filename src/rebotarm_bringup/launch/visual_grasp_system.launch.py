@@ -1,4 +1,12 @@
-# 视觉抓取系统（visual grasp）主启动文件
+# 视觉抓取系统（visual grasp）兼容总启动文件
+#
+# 新部署请优先使用同目录按生命周期拆分的入口：
+#   visual_readonly.launch.py   只读感知与候选
+#   visual_plan_only.launch.py  IK/碰撞检查与规划预览
+#   visual_execute.launch.py    显式授权后的执行组合
+#   visual_ready.launch.py      独立视觉就绪服务
+# 本文件保留旧的 134 参数接口，供现有脚本平滑迁移；新的参数和节点归属不再继续向
+# 这里增加。这样既不破坏已验证的旧命令，也避免新功能继续扩大单文件耦合面。
 #
 # 用途：统一提供无硬件感知预览、plan-only 和受控执行。完整组合为
 # 就绪摆位 → 相机与检测 → 抓取网络候选 → MoveIt 逆解与碰撞过滤 →

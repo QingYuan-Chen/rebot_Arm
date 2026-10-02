@@ -5,9 +5,18 @@
 """
 
 from glob import glob
+from pathlib import Path
 from setuptools import setup
 
 package_name = "rebotarm_bringup"
+
+
+# Keep modular launch fragments under ``launch/includes`` installable while preserving
+# the flat ``ros2 launch rebotarm_bringup <name>`` entry points.
+launch_files = glob("launch/*.launch.py") + glob("launch/*.md")
+for path in Path("launch").rglob("*.launch.py"):
+    if str(path) not in launch_files:
+        launch_files.append(str(path))
 
 setup(
     name=package_name,
@@ -22,7 +31,7 @@ setup(
         # 启动文件及同目录结构说明。
         (
             f"share/{package_name}/launch",
-            glob("launch/*.launch.py") + glob("launch/*.md"),
+            launch_files,
         ),
         # 参数文件：所有 *.yaml（机械臂/夹爪/遥操作等）
         (f"share/{package_name}/config", glob("config/*.yaml")),

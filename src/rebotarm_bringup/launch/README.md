@@ -28,7 +28,11 @@ src/rebotarm_bringup/launch/
 ├── teleop_keyboard.launch.py
 ├── teleop_system.launch.py
 ├── rviz_ee_drag_sim.launch.py
-└── visual_grasp_system.launch.py
+├── visual_grasp_system.launch.py       # 兼容总入口（完整组合）
+├── visual_readonly.launch.py           # 只读感知与候选
+├── visual_plan_only.launch.py          # 规划预览
+├── visual_execute.launch.py            # 显式授权后的执行组合
+└── visual_ready.launch.py              # 独立就绪位姿服务
 ```
 
 ## 分层和包含关系
@@ -62,7 +66,11 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 | `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认不接真机。无硬件模式使用轻量仿真轨迹控制器，按键可以改变 RViz 姿态，但不代表物理仿真 |
 | `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；不启动 MoveIt，默认不接真机。无硬件模式可驱动 RViz 仿真姿态，真机点动仍由控制器执行 |
 | `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 使用仿真轨迹控制器提供 Plan/Execute，不打开真机 |
-| `visual_grasp_system.launch.py` | 唯一视觉入口 | MoveIt/后端、相机、YOLO、GraspNet、Open3D、原始候选标记、候选过滤、plan-only 与受控执行；默认 `use_hardware=false`、`execution_mode=plan_only`，不打开真机。纯感知诊断可关闭视觉就绪、运动执行与抓取执行器；无桌面环境用 `start_open3d_viewer:=false` |
+| `visual_grasp_system.launch.py` | 兼容总入口 | 保留旧参数接口，组合所有阶段；默认 `use_hardware=false`、`execution_mode=plan_only`，不打开真机 |
+| `visual_readonly.launch.py` | 只读感知入口 | 相机/YOLO/TCP TF、GraspNet 候选与可视化；不启动 MoveIt、IK、轨迹或夹爪 |
+| `visual_plan_only.launch.py` | 规划入口 | 感知、候选、IK/碰撞过滤和 MoveIt 规划预览；固定 `plan_only`，不执行夹爪 |
+| `visual_execute.launch.py` | 执行入口 | 在显式 `use_hardware:=true` 和控制器 Enable 门控后使用；默认仍为无硬件 |
+| `visual_ready.launch.py` | 就绪位姿入口 | 只提供视觉观察位姿服务/一次性摆位，不启动视觉链或执行器 |
 
 ## 两组容易混淆的入口
 
@@ -77,7 +85,23 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 `teleop_keyboard.launch.py` 是可独立使用的基础组合；各自的上层入口只叠加自己的功能。
 `rebotarm_app.launch.py` 与 `teleop_system.launch.py` 不应在同一命名空间同时启动。
 
-视觉入口也只保留一份。纯感知诊断使用安全默认的无硬件后端，并关闭运动编排节点：
+视觉阶段现在按边界提供独立入口。只读感知诊断使用：
+
+```bash
+ros2 launch rebotarm_bringup visual_readonly.launch.py \
+  start_open3d_viewer:=true
+```
+
+规划预览使用：
+
+```bash
+ros2 launch rebotarm_bringup visual_plan_only.launch.py \
+  use_hardware:=false
+```
+
+受控执行使用 `visual_execute.launch.py`，只有在完成现场安全检查、获取新鲜反馈并由
+操作员显式 Enable 后才允许传入 `use_hardware:=true`。兼容总入口仍保留，便于旧脚本
+迁移期间逐步切换：
 
 ```bash
 ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
