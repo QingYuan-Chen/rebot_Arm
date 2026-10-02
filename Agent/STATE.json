@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-02T19:14:27+08:00",
+  "generated_at": "2026-10-02T19:15:55+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "16043da",
+    "head": "1a1334c",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-02T19:14:27+08:00 | actor=codex | event=checkpoint | note=已推送 mjlab 检查点 16043da；新增 visual_readonly、visual_plan_only、visual_execute、visual_ready 四个生命周期入口，保留 visual_grasp_system 兼容入口；完成 launch 语法、分层和 --show-args 验证 | verification=-"
+  "last_event": "- 2026-10-02T19:15:55+08:00 | actor=codex | event=verified | note=visual grasp launch lifecycle entry split pushed as 1a1334c | verification=visual launch compileall; colcon build --packages-select rebotarm_bringup --symlink-install; pytest test_package_layering 23 passed; visual launch subset 104 passed; full suite blocked by missing rebotarm_msgs/ament generated environment"
 }
