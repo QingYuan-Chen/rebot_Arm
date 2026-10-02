@@ -1,3 +1,4 @@
+from rebotarm_bringup.visual_profiles import merged_parameters
 """内部阶段 grasp_candidate：参数由总入口声明，不单独启动。"""
 
 import os
@@ -12,7 +13,7 @@ from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJ
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
-def generate_launch_description():
+def _build(context):
     start_graspnet_baseline = LaunchConfiguration("start_graspnet_baseline")
     graspnet_candidates_topic = LaunchConfiguration("graspnet_candidates_topic")
     graspnet_output_frame_id = LaunchConfiguration("graspnet_output_frame_id")
@@ -29,7 +30,7 @@ def generate_launch_description():
     start_raw_candidate_markers = LaunchConfiguration("start_raw_candidate_markers")
     start_open3d_viewer = LaunchConfiguration("start_open3d_viewer")
     candidate_max_jaw_width_m = LaunchConfiguration("candidate_max_jaw_width_m")
-    return LaunchDescription([
+    return [
         Node(
             package="rebotarm_vision",
             executable="rebotarm_graspnet_baseline_node",
@@ -37,22 +38,7 @@ def generate_launch_description():
             output="screen",
             prefix=graspnet_python_executable,
             condition=IfCondition(start_graspnet_baseline),
-            parameters=[
-                graspnet_config,
-                visual_interfaces_config,
-                {
-                    "output_candidates_topic": graspnet_candidates_topic,
-                    "output_frame_id": graspnet_output_frame_id,
-                    "max_input_skew_ms": graspnet_max_input_skew_ms,
-                    "model_root": graspnet_model_root,
-                    "checkpoint_path": graspnet_checkpoint_path,
-                    "device": graspnet_device,
-                    "backend_module": graspnet_backend_module,
-                    "max_grasps": graspnet_max_grasps,
-                    "max_jaw_width_m": candidate_max_jaw_width_m,
-                    "max_points": graspnet_max_points,
-                }
-            ],
+            parameters=[merged_parameters(context, 'rebotarm_graspnet_baseline_node', [graspnet_config, visual_interfaces_config], {**{'output_candidates_topic': graspnet_candidates_topic, 'output_frame_id': graspnet_output_frame_id, 'max_input_skew_ms': graspnet_max_input_skew_ms, 'model_root': graspnet_model_root, 'checkpoint_path': graspnet_checkpoint_path, 'device': graspnet_device, 'backend_module': graspnet_backend_module, 'max_grasps': graspnet_max_grasps, 'max_jaw_width_m': candidate_max_jaw_width_m, 'max_points': graspnet_max_points}})],
         ),
         Node(
             package="rebotarm_vision",
@@ -60,13 +46,7 @@ def generate_launch_description():
             name="rebotarm_grasp_candidate_markers",
             output="screen",
             condition=IfCondition(start_raw_candidate_markers),
-            parameters=[
-                {
-                    "input_topic": graspnet_candidates_topic,
-                    "max_candidates": 5,
-                },
-                visual_interfaces_config,
-            ],
+            parameters=[merged_parameters(context, 'rebotarm_grasp_candidate_markers', [visual_interfaces_config], {**{'input_topic': graspnet_candidates_topic, 'max_candidates': 5}})],
         ),
         Node(
             package="rebotarm_vision",
@@ -75,11 +55,10 @@ def generate_launch_description():
             output="screen",
             prefix=graspnet_python_executable,
             condition=IfCondition(start_open3d_viewer),
-            parameters=[
-                {
-                    "input_candidates_topic": graspnet_candidates_topic,
-                },
-                visual_interfaces_config,
-            ],
+            parameters=[merged_parameters(context, 'rebotarm_graspnet_open3d_viewer', [visual_interfaces_config], {**{'input_candidates_topic': graspnet_candidates_topic}})],
         ),
-    ])
+    ]
+
+
+def generate_launch_description():
+    return LaunchDescription([OpaqueFunction(function=_build)])

@@ -49,3 +49,15 @@ motion_execution:
   ros__parameters:
     frame_id: base_link
     ee_frame_id: end_link
+
+# 启动连线（下游统一使用这些值；namespace 模板由总入口展开）。
+launch:
+  graspnet_candidates_topic: /grasp/graspnet_candidates
+  graspnet_output_frame_id: camera_depth_frame
+  candidate_ik_input_topic: /grasp/graspnet_candidates
+  filtered_candidates_topic: /grasp/filtered_candidates
+  filtered_plan_topic: /grasp/filtered_plan
+  executor_input_topic: /grasp/filtered_plan
+  candidate_joint_state_topic: '/{arm_namespace}/visual_joint_states'
+  candidate_collision_check_service: /check_state_validity
+  candidate_collision_group_name: arm_with_gripper

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-02T23:51:17+08:00",
+  "generated_at": "2026-10-02T23:59:11+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "4196108",
+    "head": "7ce7fec",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-02T23:51:17+08:00 | actor=codex | event=checkpoint | note=修复 compact 入口递归展开：使用 OpaqueFunction 准备兼容默认值，真实 --show-args 从 149 降至 22；新增运行时参数契约测试；未上传 GitHub | verification=compact contract focused tests passed; rebotarm_bringup build passed; compact --show-args exposes 22 args; full suite 781 passed/16 skipped with 11 stale source-assertion failures"
+  "last_event": "- 2026-10-02T23:59:11+08:00 | actor=codex | event=start | note=继续完成视觉抓取 launch 拆分：验证正式入口、profiles、includes 和回归测试 | verification=-"
 }

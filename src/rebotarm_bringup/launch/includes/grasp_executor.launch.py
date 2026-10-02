@@ -1,3 +1,4 @@
+from rebotarm_bringup.visual_profiles import merged_parameters
 """内部阶段 grasp_executor：参数由总入口声明，不单独启动。"""
 
 import os
@@ -24,7 +25,7 @@ def _read_policy(context, profile, node_name):
     except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
         raise RuntimeError(f"Cannot load policy {path} for {node_name}: {exc}") from exc
 
-def generate_launch_description():
+def _build(context):
     vision_share = FindPackageShare("rebotarm_vision")
     grasp_pose_policy_params = PathJoinSubstitution([vision_share, "config", "grasp_pose_policy.yaml"])
     gripper_policy_params = PathJoinSubstitution([vision_share, "config", "gripper_policy.yaml"])
@@ -101,56 +102,10 @@ def generate_launch_description():
     name="rebotarm_visual_grasp_executor",
     output="screen",
     condition=IfCondition(start_visual_grasp_executor),
-    parameters=[
-        visual_interfaces_config,
-        {
-                **policy_defaults,
-                # Interface names are owned by bringup; strategy values above remain
-                # owned by the vision policy profiles.
-                **{},
-            "arm_namespace": arm_namespace,
-            "input_topic": executor_input_topic,
-            "candidates_topic": filtered_candidates_topic,
-            "tcp_offset_xyz": tcp_offset_xyz,
-            "target_base_offset_xyz": target_base_offset_xyz,
-            "grasp_base_z_offset_m": grasp_base_z_offset_m,
-            "pose_policy": pose_policy,
-            "fixed_grasp_orientation_xyzw": fixed_grasp_orientation_xyzw,
-            "base_approach_axis_xyz": base_approach_axis_xyz,
-            "base_pregrasp_distance_m": base_pregrasp_distance_m,
-            "min_grasp_z_m": min_target_z_m,
-            "safe_retreat_enabled": safe_retreat_enabled,
-            "safe_retreat_distance_m": safe_retreat_distance_m,
-            "safe_home_after_grasp": safe_home_after_grasp,
-            "move_velocity_scaling": move_velocity_scaling,
-            "approach_velocity_scaling": approach_velocity_scaling,
-            "retreat_velocity_scaling": retreat_velocity_scaling,
-            "acceleration_scaling": acceleration_scaling,
-            "execute_gripper": execute_gripper,
-            "execution_mode": execution_mode,
-            "max_plan_age_sec": max_plan_age_sec,
-            "plan_only_stage_pause_sec": plan_only_stage_pause_sec,
-            "approach_visual_servo_enabled": approach_visual_servo_enabled,
-            "approach_visual_servo_max_iterations": approach_visual_servo_max_iterations,
-            "approach_visual_servo_max_step_m": approach_visual_servo_max_step_m,
-            "approach_visual_servo_position_tolerance_m": approach_visual_servo_position_tolerance_m,
-            "approach_visual_servo_require_fresh_plan": approach_visual_servo_require_fresh_plan,
-            "auto_retry_enabled": auto_retry_enabled,
-            "auto_retry_max_attempts": auto_retry_max_attempts,
-            "safe_retreat_before_retry": safe_retreat_before_retry,
-            "grasp_verification_enabled": grasp_verification_enabled,
-            "grasp_verification_min_closure_distance_m": grasp_verification_min_closure_distance_m,
-            "grasp_verification_require_contact": grasp_verification_require_contact,
-            "place_after_grasp_enabled": place_after_grasp_enabled,
-            "place_position_xyz": place_position_xyz,
-            "place_orientation_xyzw": place_orientation_xyzw,
-            "place_open_position_m": place_open_position_m,
-            "place_open_max_effort": place_open_max_effort,
-            "place_retreat_z_m": place_retreat_z_m,
-            "trajectory_precheck_enabled": trajectory_precheck_enabled,
-        }
-    ],
+    parameters=[merged_parameters(context, 'rebotarm_visual_grasp_executor', [visual_interfaces_config], {**{**policy_defaults, **{}, 'arm_namespace': arm_namespace, 'input_topic': executor_input_topic, 'candidates_topic': filtered_candidates_topic, 'tcp_offset_xyz': tcp_offset_xyz, 'target_base_offset_xyz': target_base_offset_xyz, 'grasp_base_z_offset_m': grasp_base_z_offset_m, 'pose_policy': pose_policy, 'fixed_grasp_orientation_xyzw': fixed_grasp_orientation_xyzw, 'base_approach_axis_xyz': base_approach_axis_xyz, 'base_pregrasp_distance_m': base_pregrasp_distance_m, 'min_grasp_z_m': min_target_z_m, 'safe_retreat_enabled': safe_retreat_enabled, 'safe_retreat_distance_m': safe_retreat_distance_m, 'safe_home_after_grasp': safe_home_after_grasp, 'move_velocity_scaling': move_velocity_scaling, 'approach_velocity_scaling': approach_velocity_scaling, 'retreat_velocity_scaling': retreat_velocity_scaling, 'acceleration_scaling': acceleration_scaling, 'execute_gripper': execute_gripper, 'execution_mode': execution_mode, 'max_plan_age_sec': max_plan_age_sec, 'plan_only_stage_pause_sec': plan_only_stage_pause_sec, 'approach_visual_servo_enabled': approach_visual_servo_enabled, 'approach_visual_servo_max_iterations': approach_visual_servo_max_iterations, 'approach_visual_servo_max_step_m': approach_visual_servo_max_step_m, 'approach_visual_servo_position_tolerance_m': approach_visual_servo_position_tolerance_m, 'approach_visual_servo_require_fresh_plan': approach_visual_servo_require_fresh_plan, 'auto_retry_enabled': auto_retry_enabled, 'auto_retry_max_attempts': auto_retry_max_attempts, 'safe_retreat_before_retry': safe_retreat_before_retry, 'grasp_verification_enabled': grasp_verification_enabled, 'grasp_verification_min_closure_distance_m': grasp_verification_min_closure_distance_m, 'grasp_verification_require_contact': grasp_verification_require_contact, 'place_after_grasp_enabled': place_after_grasp_enabled, 'place_position_xyz': place_position_xyz, 'place_orientation_xyzw': place_orientation_xyzw, 'place_open_position_m': place_open_position_m, 'place_open_max_effort': place_open_max_effort, 'place_retreat_z_m': place_retreat_z_m, 'trajectory_precheck_enabled': trajectory_precheck_enabled}})],
     )]
-    return LaunchDescription([
-    OpaqueFunction(function=_launch_executor),
-    ])
+    return [OpaqueFunction(function=_launch_executor)]
+
+
+def generate_launch_description():
+    return LaunchDescription([OpaqueFunction(function=_build)])

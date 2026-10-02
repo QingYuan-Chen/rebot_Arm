@@ -6,7 +6,7 @@
 
 from glob import glob
 from pathlib import Path
-from setuptools import setup
+from setuptools import find_packages, setup
 
 package_name = "rebotarm_bringup"
 
@@ -20,7 +20,7 @@ setup(
     name=package_name,
     version="0.1.0",
     # 无 Python 包（本包不含可导入的模块），资源通过下面的 data_files 安装
-    packages=[],
+    packages=find_packages(),
     data_files=[
         # ament 资源索引标记：让 ROS 2 能在环境中发现本包
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),

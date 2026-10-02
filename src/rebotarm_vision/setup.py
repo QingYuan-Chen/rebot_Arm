@@ -55,6 +55,7 @@ setup(
                 "config/retreat_policy.yaml",
                 "config/table_safety.yaml",
                 "config/visual_servo.yaml",
+                "config/visual_strategy_profile.yaml",
             ],
         ),
         # YOLO 权重（构建期缺失时为空列表）

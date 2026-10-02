@@ -1,0 +1,112 @@
+# 正式视觉启动 profile（非 ROS 参数文件）：候选/抓取编排策略。
+# 原视觉总入口的有效值迁入这里；节点 reusable policy YAML 仅作为底层兜底。
+launch:
+  vision_profile: ubuntu_native
+  graspnet_max_input_skew_ms: 100
+  graspnet_device: cuda:0
+  graspnet_backend_module: graspnet_baseline_inference
+  graspnet_max_grasps: 10
+  graspnet_max_points: 20000
+  start_grasp_preview: false
+  gripper_open_axis_local_xyz:
+  - 0.0
+  - 1.0
+  - 0.0
+  show_tcp_markers: true
+  show_approach_arrow: true
+  show_gripper_open_axis: true
+  candidate_filter_service_timeout_sec: 5.0
+  candidate_collision_check_enabled: true
+  pose_mode: pregrasp
+  tcp_offset_xyz:
+  - -0.04
+  - 0.0
+  - 0.0
+  target_base_offset_xyz:
+  - 0.0
+  - 0.0
+  - 0.0
+  min_target_z_m: 0.0
+  grasp_base_z_offset_m: 0.0
+  pose_policy: base_axis
+  fixed_grasp_orientation_xyzw:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  base_approach_axis_xyz:
+  - 1.0
+  - 0.0
+  - 0.0
+  base_pregrasp_distance_m: 0.06
+  candidate_pose_policy: preserve_candidate_pose
+  candidate_orientation_yaw_offsets_rad:
+  - 0.0
+  candidate_grasp_z_offsets_m:
+  - 0.0
+  candidate_max_candidates_per_frame: 20
+  candidate_min_confidence: 0.4
+  candidate_min_jaw_width_m: 0.006
+  candidate_max_jaw_width_m: 0.085
+  candidate_min_grasp_z_m: 0.0
+  candidate_pregrasp_min_z_m: 0.04
+  candidate_workspace_gate_enabled: true
+  candidate_workspace_min_xyz:
+  - 0.18
+  - -0.35
+  - 0.0
+  candidate_workspace_max_xyz:
+  - 0.64
+  - 0.35
+  - 0.45
+  candidate_max_grasp_to_object_center_m: 0.15
+  candidate_score_joint_distance_weight: 0.15
+  candidate_score_joint6_weight: 0.35
+  candidate_max_joint6_delta_rad: 1.5708
+  candidate_joint6_symmetry_enabled: true
+  candidate_joint6_symmetry_angle_rad: 3.141592653589793
+  close_position_m: 0.025
+  close_max_effort: 0.4
+  open_before_approach: true
+  auto_gripper_width: true
+  auto_gripper_effort: true
+  open_clearance_m: 0.0
+  close_margin_m: 0.012
+  min_gripper_effort: 0.22
+  max_gripper_effort: 0.6
+  max_allowed_grasp_width_m: 0.085
+  gripper_grasp_enabled: true
+  gripper_grasp_close_force: 0.4
+  gripper_grasp_timeout_sec: 8.0
+  gripper_grasp_min_close_time_sec: 0.08
+  gripper_grasp_velocity_threshold: 0.04
+  gripper_grasp_min_closure_distance_m: 0.006
+  safe_retreat_enabled: true
+  safe_retreat_distance_m: 0.06
+  safe_home_after_grasp: false
+  plan_only_stage_pause_sec: 0.0
+  approach_visual_servo_enabled: false
+  approach_visual_servo_max_iterations: 5
+  approach_visual_servo_max_step_m: 0.02
+  approach_visual_servo_position_tolerance_m: 0.008
+  approach_visual_servo_require_fresh_plan: true
+  auto_retry_enabled: false
+  auto_retry_max_attempts: 3
+  safe_retreat_before_retry: true
+  grasp_verification_enabled: true
+  grasp_verification_min_closure_distance_m: 0.006
+  grasp_verification_require_contact: true
+  place_after_grasp_enabled: false
+  place_position_xyz:
+  - -0.2
+  - -0.2
+  - 0.25
+  place_orientation_xyzw:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  place_open_position_m: 0.08
+  place_open_max_effort: 0.25
+  place_retreat_z_m: 0.06
+  trajectory_precheck_enabled: true

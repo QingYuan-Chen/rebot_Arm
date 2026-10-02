@@ -1,0 +1,19 @@
+# 正式运动启动 profile（非 ROS 参数文件）：就绪位、MoveIt 和分阶段速度。
+launch:
+  visual_ready_joint_positions:
+  - 0.0
+  - -0.1
+  - -0.2
+  - 0.2
+  - 0.0
+  - 0.0
+  visual_ready_duration_sec: 4.0
+  visual_ready_wait_timeout_sec: 12.0
+  visual_ready_max_start_delta_rad: 2.5
+  visual_ready_startup_delay_sec: 0.0
+  moveit_planning_time: 8.0
+  moveit_num_planning_attempts: 5
+  move_velocity_scaling: 0.25
+  approach_velocity_scaling: 0.08
+  retreat_velocity_scaling: 0.15
+  acceleration_scaling: 0.12
