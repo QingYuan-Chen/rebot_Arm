@@ -41,19 +41,18 @@ class HandeyeConfig:
     rotation_w: float
 
     def as_static_transform_arguments(self) -> list[str]:
-        # 产出 static_transform_publisher 的位置参数顺序：
-        # x y z qx qy qz qw parent_frame child_frame。
-        # 顺序由外部命令行接口决定，改动会直接导致坐标系挂错。
+        # 使用 ROS 2 tf2_ros 当前推荐的显式参数名，避免旧版位置参数弃用警告。
+        # 显式 frame-id/child-frame-id 也降低了平移与四元数顺序误配的风险。
         return [
-            str(self.translation_x),
-            str(self.translation_y),
-            str(self.translation_z),
-            str(self.rotation_x),
-            str(self.rotation_y),
-            str(self.rotation_z),
-            str(self.rotation_w),
-            self.parent_frame,
-            self.child_frame,
+            "--x", str(self.translation_x),
+            "--y", str(self.translation_y),
+            "--z", str(self.translation_z),
+            "--qx", str(self.rotation_x),
+            "--qy", str(self.rotation_y),
+            "--qz", str(self.rotation_z),
+            "--qw", str(self.rotation_w),
+            "--frame-id", self.parent_frame,
+            "--child-frame-id", self.child_frame,
         ]
 
 

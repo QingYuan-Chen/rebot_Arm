@@ -28,13 +28,13 @@ handeye:
     assert config.parent_frame == "end_link"
     assert config.child_frame == "camera_depth_frame"
     assert config.as_static_transform_arguments() == [
-        "0.03",
-        "-0.01",
-        "0.08",
-        "0.0",
-        "0.0",
-        "0.7071068",
-        "0.7071068",
-        "end_link",
-        "camera_depth_frame",
+        "--x", "0.03",
+        "--y", "-0.01",
+        "--z", "0.08",
+        "--qx", "0.0",
+        "--qy", "0.0",
+        "--qz", "0.7071068",
+        "--qw", "0.7071068",
+        "--frame-id", "end_link",
+        "--child-frame-id", "camera_depth_frame",
     ]

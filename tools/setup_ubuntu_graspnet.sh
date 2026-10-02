@@ -32,6 +32,9 @@ print("GraspNet environment imports: OK")
 PY
 env PYTHONPATH= "${python_bin}" -m pip check
 
+python3 "${repo_root}/tools/patch_graspnet_deprecations.py" \
+  --root "${repo_root}/third_party/graspnet-baseline"
+
 echo
 echo "GraspNet environment ready: ${venv_dir}"
 echo "Model root/checkpoint are intentionally not downloaded by this script."
