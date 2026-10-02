@@ -7,7 +7,7 @@ import pytest
 
 def test_mujoco_multiaxis_handeye_recovery():
     root=Path(__file__).resolve().parents[1]
-    python=Path(os.environ.get('REBOTARM_MUJOCO_PYTHON',str(root/'third_party/rebotarm_mujoco_venv/bin/python')))
+    python=Path(os.environ.get('REBOTARM_MUJOCO_PYTHON',str(root/'third_party/rebotarm_mjlab_venv/bin/python')))
     if not python.exists(): pytest.skip('configured MuJoCo interpreter unavailable')
     script=r'''
 import numpy as np
@@ -48,7 +48,7 @@ finally:sim.close()
 
 def test_mujoco_projected_marker_detection_and_handeye(tmp_path):
     root=Path(__file__).resolve().parents[1]
-    python=Path(os.environ.get('REBOTARM_MUJOCO_PYTHON',str(root/'third_party/rebotarm_mujoco_venv/bin/python')))
+    python=Path(os.environ.get('REBOTARM_MUJOCO_PYTHON',str(root/'third_party/rebotarm_mjlab_venv/bin/python')))
     if not python.exists(): pytest.skip('configured MuJoCo interpreter unavailable')
     script=r'''
 import numpy as np,cv2,mujoco,json,sys

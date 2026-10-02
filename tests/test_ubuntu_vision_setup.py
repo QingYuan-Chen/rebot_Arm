@@ -71,9 +71,9 @@ def test_vision_dependencies_preserve_ros_numpy_abi() -> None:
     assert "numpy==1.26.4" in requirements
     assert "pyorbbecsdk2==2.0.18" in requirements
     assert "pyorbbecsdk2==2.1.1" not in requirements
-    assert "tensorrt-cu12==10.13.3.9.post1" in tensorrt_requirements
-    assert "tensorrt-cu12-bindings==10.13.3.9.post1" in tensorrt_requirements
-    assert "tensorrt-cu12-libs==10.13.3.9.post1" in tensorrt_requirements
+    assert "tensorrt-cu13==10.13.3.9.post1" in tensorrt_requirements
+    assert "tensorrt-cu13-bindings==10.13.3.9.post1" in tensorrt_requirements
+    assert "tensorrt-cu13-libs==10.13.3.9.post1" in tensorrt_requirements
 
 
 def test_ubuntu_vision_launcher_selects_only_the_vision_interpreter() -> None:
@@ -90,7 +90,7 @@ def test_ubuntu_vision_setup_does_not_rebuild_workspace_with_venv() -> None:
 
     assert '/bin/activate' not in setup
     assert '"${python_bin}" -m colcon' not in setup
-    assert 'torch==2.11.0+cu128 torchvision==0.26.0+cu128' in setup
+    assert 'torch==2.14.1+cu130 torchvision==0.29.1+cu130' in setup
     assert 'pip install --no-deps -r "${repo_root}/requirements-tensorrt.txt"' in setup
     assert "import tensorrt" in setup
 

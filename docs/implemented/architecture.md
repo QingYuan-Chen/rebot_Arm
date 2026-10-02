@@ -146,7 +146,7 @@ Ready-pose 运动（`visual_ready_node` 及其参数 profile）位于 `rebotarm_
 - 仿真 `FollowJointTrajectory` 执行
 - 仿真关节和夹爪状态
 - headless 物理检查和可选 Viewer 集成
-- 离线 Gymnasium 任务、仿真奖励以及可选的 RL 训练/评估
+- 离线 mjlab manager-based RL 任务、仿真奖励以及可选的 RL 训练/评估
 - 轨迹指标、阶跃响应 benchmark 和仿真接触反馈
 - 示教轨迹的 MuJoCo 预演执行与 Viewer 生命周期管理
 

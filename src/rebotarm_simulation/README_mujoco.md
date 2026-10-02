@@ -2,14 +2,14 @@
 
 本目录提供可独立使用的 MuJoCo 物理仿真核心、桌面 Viewer 和 ROS 2
 适配层。已验证的目标环境是 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。
-已提供基于现有物理核心的 Gymnasium 末端位姿 Reach 环境与 GPU PPO 训练入口。
-克隆后配置、环境契约和验证步骤见 [强化学习命令参考](../../docs/reference/commands/mujoco_rl.md)。
+已提供复用现有 MJCF 的 mjlab / MuJoCo Warp / RSL-RL 末端位姿 Reach 训练入口。
+克隆后配置、环境契约和验证步骤见 [强化学习命令参考](../../docs/reference/commands/mjlab_rl.md)。
 
 ## 安装与构建
 
 ROS launch 的解释器可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYTHON`
 环境变量指定；未设置时，MuJoCo launch 默认使用仓库中的
-`third_party/rebotarm_mujoco_venv/bin/python`，避免误用不含 `mujoco` 的系统
+`third_party/rebotarm_mjlab_venv/bin/python`，避免误用不含 `mujoco` 的系统
 `python3`。从其他工作目录启动时请传绝对路径或设置环境变量。
 混合视觉入口的配置见 [启动解释器说明](../../docs/setup/launch_python_configuration.md)。
 
@@ -36,10 +36,10 @@ MuJoCo虚拟环境只用于运行，不需要相机、视觉权重或历史上�
 ```bash
 source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 -m colcon build --base-paths src --executor sequential --symlink-install
-python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
-third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements-mujoco.txt
+python3 -m venv --system-site-packages third_party/rebotarm_mjlab_venv
+third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements-mjlab.txt
 source install/setup.bash
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
+export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mjlab_venv/bin/python"
 ```
 
 新终端source ROS和本工作区，再设置上述环境变量，不需要激活venv。
@@ -218,7 +218,7 @@ CAN 设备或串口已被占用时，停止联调并确认环境；MuJoCo 测试
 机器人结构的唯一权威来源是
 `src/rebotarm_moveit_config/config/rebotarm.urdf`，MuJoCo 日常运行读取本地文件
 `src/rebotarm_simulation/models/rebotarm/robot.xml`。后者是自动生成并随仓库提交的
-MJCF，不需要联网加载。当前支持范围固定为 `mujoco>=3.3,<4`。
+MJCF，不需要联网加载。当前支持范围固定为 `mujoco>=3.11,<4`。
 
 URDF 或其引用的原始 STL 更新后，在仓库根目录重新生成：
 

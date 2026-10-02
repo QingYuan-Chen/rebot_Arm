@@ -17,7 +17,7 @@
     启动文件与测试都直接引用），不可随意改名。
 
 依赖约束
-    物理引擎锁定在 3.x（``mujoco>=3.3,<4``）：模型语义与接触行为跨大版本不保证兼容，
+    物理引擎锁定在 3.x（``mujoco>=3.11,<4``）：模型语义与接触行为跨大版本不保证兼容，
     升级需要重新做模型校验。
 """
 
@@ -66,13 +66,18 @@ setup(
     + install_resources("models/**/*.step")
     + install_resources("config/*.yaml")
     + [(f"share/{package_name}/launch", sorted(launch_files))],
-    install_requires=["setuptools", "mujoco>=3.3,<4", "numpy>=1.26", "PyYAML>=6"],
+    install_requires=["setuptools", "mujoco>=3.11,<4", "numpy>=1.26", "PyYAML>=6"],
     zip_safe=True,
     maintainer="reBotArm Maintainers",
     maintainer_email="support@example.com",
     description="RViz/offline simulation utilities for reBotArm bringup tests.",
     license="Apache-2.0",
     entry_points={
+        # Optional mjlab plugin.  It is discovered only by a separate mjlab
+        # environment; the ROS/MuJoCo CPU runtime never imports this module.
+        "mjlab.tasks": [
+            "rebotarm_reach = rebotarm_simulation.mjlab_reach",
+        ],
         "console_scripts": [
             "rebotarm_sim_trajectory_controller = rebotarm_simulation.sim_trajectory_controller_node:main",
             "rebotarm_mujoco_health = rebotarm_simulation.mujoco_health:main",

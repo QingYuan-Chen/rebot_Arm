@@ -1,11 +1,5 @@
-# 仿真包的可选第三方依赖清单（不属于 ROS 2 依赖声明）。
-# 仅在需要跑离线物理仿真时安装，例如：pip install -r requirements-mujoco.txt；
-# 只使用真实硬件通道的部署无需安装这些包。
-
-# MuJoCo 物理引擎：用于生成/校验仿真模型、无头物理检查与可选查看器。
-# 下界 3.3 是本包所用 API 的最低要求；上界 <4 用于排除存在破坏性变更的大版本，
-# 避免自动升级后仿真行为或接口无声失效。
-mujoco>=3.3,<4
-# 数值计算库：仿真中的数组运算与位姿/旋转相关数学依赖它；
-# 1.26 为本项目验证过的最低版本，低于该版本可能缺少所需的数值接口。
-numpy>=1.26
+# CPU MuJoCo component of the unified mjlab environment.
+# The repository setup installs requirements-mjlab.txt, which also provides
+# MuJoCo Warp, RSL-RL and PyTorch for the GPU training path.
+mujoco==3.11.0
+numpy==2.5.3

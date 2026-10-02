@@ -15,7 +15,7 @@
 | 视觉候选、plan-only 和视觉执行边界 | [visual_grasp_commands.md](visual_grasp_commands.md) | 视觉抓取工作流 |
 | 网页手眼/TCP 标定 | [calibration_web.md](calibration_web.md) | 标定软件操作 |
 | MuJoCo 示教预演 | [mujoco_teach_preview.md](mujoco_teach_preview.md) | 六轴轨迹预演 |
-| Gymnasium Reach/RL | [mujoco_rl.md](mujoco_rl.md) | 环境、训练和评估 |
+| mjlab GPU Reach/RL（实验性） | [mjlab_rl.md](mjlab_rl.md) | 独立 mjlab/Warp/PyTorch 训练环境 |
 
 ## 源码入口覆盖
 

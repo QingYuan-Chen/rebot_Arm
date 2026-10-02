@@ -60,7 +60,7 @@ def generate_launch_description():
     # 物理引擎解释器的兜底路径：不能默认用系统 python3，因为系统解释器通常没装
     # MuJoCo。这里按"当前工作目录下的第三方虚拟环境"解析，可用环境变量覆盖。
     default_mujoco_python = PathJoinSubstitution(
-        [EnvironmentVariable("PWD", default_value="."), "third_party", "rebotarm_mujoco_venv", "bin", "python"]
+        [EnvironmentVariable("PWD", default_value="."), "third_party", "rebotarm_mjlab_venv", "bin", "python"]
     )
 
     return LaunchDescription(

@@ -30,7 +30,7 @@
 
 ## 当前状态和规则
 
-- 当前主线是 MuJoCo/Gymnasium Reach；Reach 训练链路已通过基线验证，但策略尚未稳定收敛。
+- 当前主线是 mjlab/Warp Reach；Reach 训练链路已通过基线验证，但策略尚未稳定收敛。
 - P0-P6 是已关闭的历史工程基线，不自动授权新的真实机械臂动作。
 - 当前真实视觉、硬件和 RL 的边界以代码、测试、用户最新决定和 `Agent/CURRENT_STATUS.md` 为准。
 - 文档中的“计划”“有功能”“软件验证”不等于真实硬件验收或任务成功。
@@ -52,7 +52,7 @@
 - [`implemented/features/visual_grasp.md`](implemented/features/visual_grasp.md)：视觉候选、规划和阶段编排。
 - [`setup/ubuntu_vision_setup_zh.md`](setup/ubuntu_vision_setup_zh.md)：Gemini 2、YOLO、GraspNet 环境和启动。
 - [`implemented/features/vision_readonly.md`](implemented/features/vision_readonly.md)：Ubuntu 原生视觉只读链路的功能和边界。
-- [`implemented/features/mujoco_rl.md`](implemented/features/mujoco_rl.md)：MuJoCo/Gymnasium Reach 已实现能力和训练边界。
+- [`reference/commands/mjlab_rl.md`](reference/commands/mjlab_rl.md)：mjlab/Warp Reach 安装、训练、回放和验证边界。
 - [`implemented/features/mujoco_teach_preview.md`](implemented/features/mujoco_teach_preview.md)：MuJoCo 示教预演已实现能力和边界。
 
 ### 当前软件验收和参数参考

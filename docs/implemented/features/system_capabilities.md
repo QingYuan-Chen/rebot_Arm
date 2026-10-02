@@ -23,7 +23,7 @@
 | 视觉抓取规划 | 候选过滤、IK、工作空间/姿态/夹爪约束、MoveIt 碰撞门、预抓取/抓取/撤退阶段编排 | `rebotarm_vision` + `rebotarm_motion` | 候选和规划通过不等于抓取成功；真机执行需分级授权 | [视觉抓取命令](../../reference/commands/visual_grasp_commands.md) |
 | MuJoCo 仿真 | URDF→MJCF、headless/viewer、仿真关节状态、仿真轨迹控制器、MoveIt Plan/Execute 仿真后端、物理指标 | `rebotarm_simulation` | 不访问真实电机；仿真接触不替代现场碰撞/抓取验收 | [仿真命令](../../reference/commands/system_runtime.md) |
 | MuJoCo 示教预演 | 读取示教 JSONL，复用准备/重定时，在独立仿真中报告跟踪、接触和位移 | `rebotarm_teach` + `rebotarm_simulation` | 只覆盖仿真预演，不授权真机回放 | [示教预演命令](../../reference/commands/mujoco_teach_preview.md) |
-| Gymnasium Reach/RL | 末端位姿 Reach 环境、观测/奖励/成功门、Gymnasium/SB3、GPU PPO 训练评估 | `rebotarm_simulation` | 当前策略尚未达到稳定成功率；无相机、夹爪或 ROS 真机链 | [RL 命令](../../reference/commands/mujoco_rl.md) |
+| mjlab Reach/RL | mjlab manager-based Reach 环境、Warp GPU 物理、RSL-RL 训练 | `rebotarm_simulation` | 当前策略尚未达到稳定成功率；无相机、夹爪或 ROS 真机链 | [RL 命令](../../reference/commands/mjlab_rl.md) |
 
 ## 尚未列为已实现功能的内容
 

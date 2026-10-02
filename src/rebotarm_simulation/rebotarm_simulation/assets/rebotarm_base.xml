@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  本文件由本仓库 Apache-2.0 的 rebotarm.urdf 经 MuJoCo 3.3.0 转换而来，随后裁剪为
+  本文件由本仓库 Apache-2.0 的 rebotarm.urdf 经 MuJoCo 转换而来，随后裁剪为
   可移植的"视觉 + 运动学"基线模型：只保留网格几何与关节链，力/接触/限位等物理参数
   由仿真包的模型档位构建流程在加载时注入（见同包 mujoco_model_profile）。
   未使用任何外部（HJX）来源资产。

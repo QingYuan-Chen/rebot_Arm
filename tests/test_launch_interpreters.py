@@ -46,11 +46,11 @@ env_names = {"mujoco": "REBOTARM_MUJOCO_PYTHON", "vision": "REBOTARM_VISION_PYTH
 expected = {}
 for kind, name in env_names.items():
     os.environ.pop(name, None)
-    # MuJoCo is intentionally isolated in the workspace venv by default;
+    # MuJoCo uses the unified mjlab workspace venv by default;
     # vision and GraspNet fall back to the system interpreter unless their
     # dedicated environment variables are supplied.
     expected[kind] = (
-        str(root / "third_party" / "rebotarm_mujoco_venv" / "bin" / "python")
+        str(root / "third_party" / "rebotarm_mjlab_venv" / "bin" / "python")
         if kind == "mujoco"
         else "python3"
     )
@@ -60,7 +60,7 @@ for kind, name in env_names.items():
     if mode == "argument":
         expected[kind] = f"/opt/override-{kind}/bin/python"
 # The obsolete layouts deliberately exist: they must never override configuration.
-for relative in (".venv-graspnet/bin/python", ".venv-vision/lib/python3.12/site-packages/marker", "third_party/rebotarm_mujoco_venv/bin/python"):
+for relative in (".venv-graspnet/bin/python", ".venv-vision/lib/python3.12/site-packages/marker", "third_party/rebotarm_mjlab_venv/bin/python"):
     target = relocated / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.touch()

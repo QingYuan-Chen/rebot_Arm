@@ -11,7 +11,7 @@
 | 网页遥操作、RViz 与实机操作 | [功能命令参考](docs/reference/commands/rebotarm_feature_commands.md) |
 | 控制器接口 | [ROS SDK 说明](README_zh.md) |
 | 仿真 | [MuJoCo 使用说明](src/rebotarm_simulation/README_mujoco.md) |
-| Gymnasium / PPO 强化学习 | [训练与评估命令](docs/reference/commands/mujoco_rl.md) |
+| mjlab / Warp / RSL-RL 强化学习 | [训练与评估命令](docs/reference/commands/mjlab_rl.md) |
 | 包职责与依赖边界 | [架构说明](docs/implemented/architecture.md) |
 | 当前阶段及验收依据 | [Agent 状态](Agent/README.md) |
 | 其他文档 | [文档索引](docs/README_zh.md) |
@@ -36,7 +36,7 @@
 基线为 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。先按
 [安装说明](docs/setup/ubuntu_ros2_jazzy.md) 准备系统依赖和所需运行组件；
 `requirements-*.txt` 按控制器、视觉、GraspNet、MuJoCo、TensorRT 拆分；
-`requirements-rl.txt` 在 MuJoCo 环境中追加 GPU 强化学习依赖。其它用途的依赖
+`requirements-mjlab.txt` 在独立 mjlab 环境中安装 GPU 强化学习依赖。其它用途的依赖
 不要合并安装到同一个环境。
 
 ```bash

@@ -131,5 +131,5 @@ python3 -m compileall src/rebotarm_bringup/launch -q
 | 视觉候选、plan-only、仿真检查和真机边界 | [visual_grasp_commands.md](visual_grasp_commands.md) |
 | 网页手眼/TCP 标定 | [calibration_web.md](calibration_web.md) |
 | MuJoCo 示教轨迹预演 | [mujoco_teach_preview.md](mujoco_teach_preview.md) |
-| Gymnasium Reach/RL | [mujoco_rl.md](mujoco_rl.md) |
+| mjlab Reach/RL | [mjlab_rl.md](mjlab_rl.md) |
 | 控制器、仿真、构建和通用状态检查 | 本文 |

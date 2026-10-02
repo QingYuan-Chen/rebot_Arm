@@ -1,6 +1,6 @@
 # TensorRT inference runtime only. tools/setup_ubuntu_vision.sh installs these
 # with --no-deps so NVIDIA's multi-GB CUDA builder/toolkit meta-package is not
-# duplicated; this project uses the already installed CUDA 12.8 driver/runtime.
-tensorrt-cu12==10.13.3.9.post1
-tensorrt-cu12-bindings==10.13.3.9.post1
-tensorrt-cu12-libs==10.13.3.9.post1
+# duplicated; this project uses the PyTorch CUDA 13.0 runtime and the compatible NVIDIA driver.
+tensorrt-cu13==10.13.3.9.post1
+tensorrt-cu13-bindings==10.13.3.9.post1
+tensorrt-cu13-libs==10.13.3.9.post1

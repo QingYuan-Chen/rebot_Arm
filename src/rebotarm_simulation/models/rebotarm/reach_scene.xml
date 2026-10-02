@@ -8,7 +8,4 @@
     <headlight ambient="0.25 0.25 0.25" diffuse="0.65 0.65 0.65" specular="0.15 0.15 0.15"/>
     <global azimuth="135" elevation="-22"/>
   </visual>
-  <keyframe>
-    <key name="home" qpos="0 -0.8 -1.0 0.3 0 0 0.03 -0.03"/>
-  </keyframe>
 </mujoco>

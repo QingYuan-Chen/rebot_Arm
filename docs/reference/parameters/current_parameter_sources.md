@@ -20,7 +20,7 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 | 真机反馈、夹爪和控制器 | `hardware_controller.launch.py`、`rebotarmcontroller` 参数 | `rebotarmcontroller` |
 | 轨迹安全、视觉准备位和执行 | `src/rebotarm_motion/config/`、`visual_grasp_system.launch.py` | `rebotarm_motion` |
 | Gemini 2、YOLO、GraspNet | `src/rebotarm_vision/config/` | `rebotarm_vision` |
-| MuJoCo 模型、动力学和 RL | `src/rebotarm_simulation/config/`、`requirements-rl.txt` | `rebotarm_simulation` |
+| MuJoCo 模型、动力学和 RL | `src/rebotarm_simulation/config/`、`requirements-mjlab.txt` | `rebotarm_simulation` |
 | 标定会话和手眼输入 | `src/rebotarm_vision/config/handeye.yaml`、标定 launch 参数 | `rebotarm_calibration` |
 
 视觉抓取参数数量较多，具体默认值以 `visual_grasp_system.launch.py` 和对应 config 为准；本页不复制整张参数表。

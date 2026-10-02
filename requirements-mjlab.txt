@@ -1,0 +1,7 @@
+# GPU RL only: Ubuntu 24.04 / Python 3.12 / NVIDIA driver >= 580.
+# This unified environment provides both CPU MuJoCo 3.11 and GPU Warp/RSL-RL.
+# Keep it separate from ROS/vision/GraspNet environments.
+--extra-index-url https://download.pytorch.org/whl/cu130
+mjlab[cu130]==1.6.0
+torch==2.14.1+cu130
+opencv-python-headless==4.11.0.86

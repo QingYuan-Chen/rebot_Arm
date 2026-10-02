@@ -4,9 +4,10 @@
 
 > 状态更新时间：2026-09-28。P0-P6 及瓶子分级实机流程均为已关闭或历史记录；本队列只描述当前仿真/RL 工作，不授权任何真机动作。
 
-1. [已完成] MuJoCo/Gymnasium `RebotArmReachEnv` 首个末端位姿 Reach 任务：位置+姿态观测、奖励、成功门、碰撞/超时处理、Gymnasium/SB3 检查和 GPU PPO 链路已验证。
-2. [进行中] 继续优化 Reach 训练质量：固定训练/评估口径，记录多种随机种子和成功率；当前策略尚未学会稳定到达目标。
-3. [待规划] 在仿真侧先定义 action/observation、控制周期、关节顺序、限位和安全约束，再评估后续 sim-to-real 或 LeRobot 数据接口。
+1. [已完成] CPU MuJoCo 3.11.0 正确性基准：现有 MJCF、headless 仿真、轨迹和健康检查已在统一 mjlab 环境验证。
+2. [已完成] mjlab + MuJoCo Warp + RSL-RL GPU Reach 链路：manager-based 环境、任务注册、1 iteration smoke、CUDA 和集成测试已通过。
+3. [进行中] 固定 CPU/GPU paired evaluation 口径并评估训练质量；当前 smoke 结果不代表策略收敛或 sim-to-real 完成。
+4. [待规划] 在仿真侧继续完善 action/observation、控制周期、关节顺序、限位和安全约束，再评估后续 sim-to-real 或 LeRobot 数据接口。
 4. [待设备] 真实 Gemini 2 的当前 K/D、畸变和 RGB-D 一致性复核仅在设备连接后进行；不得用 MuJoCo 参考内参代替实机证据。
 5. [安全边界] 当前无新的真机 enable、trajectory、gripper、approach、lift、retreat 或接触授权；Reach/RL 保持纯仿真。
 

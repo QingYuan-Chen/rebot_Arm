@@ -9,8 +9,8 @@ export PYTHONNOUSERSITE=1
 python3 -m venv --system-site-packages "${venv_dir}"
 env PYTHONPATH= "${python_bin}" -m pip install --upgrade "pip<27" "setuptools<80" wheel
 env PYTHONPATH= "${python_bin}" -m pip install \
-  torch==2.11.0+cu128 torchvision==0.26.0+cu128 \
-  --index-url https://download.pytorch.org/whl/cu128
+  torch==2.14.1+cu130 torchvision==0.29.1+cu130 \
+  --index-url https://download.pytorch.org/whl/cu130
 env PYTHONPATH= "${python_bin}" -m pip install -r "${repo_root}/requirements-vision.txt"
 env PYTHONPATH= "${python_bin}" -m pip install --no-deps -r "${repo_root}/requirements-tensorrt.txt"
 
