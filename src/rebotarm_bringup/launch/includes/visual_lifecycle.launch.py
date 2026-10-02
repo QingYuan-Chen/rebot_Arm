@@ -15,6 +15,7 @@ from launch_ros.substitutions import FindPackageShare
 from launch.actions import LogInfo
 
 def _after_ready(event, context, actions):
+    # Legacy contract: on_exit=post_visual_ready_actions is now guarded by returncode.
     if event.returncode == 0:
         return actions
     return [LogInfo(msg="visual_ready failed; visual pipeline remains closed. Backend stays alive; no automatic disable.")]

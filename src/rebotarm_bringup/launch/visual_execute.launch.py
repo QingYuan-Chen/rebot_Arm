@@ -54,7 +54,7 @@ def generate_launch_description():
     args.append(
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                PathJoinSubstitution([bringup_share, "launch", "visual_grasp_system.launch.py"])
+                PathJoinSubstitution([bringup_share, "launch", "visual_grasp_compact.launch.py"])
             ),
             launch_arguments=(
                 {name: LaunchConfiguration(name) for name in names}

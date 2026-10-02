@@ -10,6 +10,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _read(relative: str) -> str:
+    if relative == "src/rebotarm_bringup/launch/visual_grasp_system.launch.py":
+        launch_dir = ROOT / "src/rebotarm_bringup" / "launch"
+        ordered = [
+            "visual_grasp_system.launch.py",
+            "includes/visual_backend.launch.py",
+            "includes/visual_lifecycle.launch.py",
+            "includes/visual_input.launch.py",
+            "includes/grasp_candidate.launch.py",
+            "includes/candidate_filter.launch.py",
+            "includes/motion_execution.launch.py",
+            "includes/grasp_executor.launch.py",
+            "includes/grasp_preview.launch.py",
+        ]
+        return "\n".join((launch_dir / path).read_text(encoding="utf-8") for path in ordered)
     vision = "src/rebotarm_vision/rebotarm_vision/"
     layers = {
         vision + "nodes/visual_grasp_executor_node.py": (
