@@ -39,6 +39,7 @@
 from __future__ import annotations
 
 import math
+import sys
 import time
 
 from builtin_interfaces.msg import Duration
@@ -290,9 +291,14 @@ def main(args: list[str] | None = None) -> None:
     try:
         if bool(node.get_parameter("auto_move_on_start").value):
             node.wait_before_startup_move()
-            if node.move_to_visual_ready():
+            startup_success = node.move_to_visual_ready()
+            if startup_success:
                 node.get_logger().info("visual_ready startup move complete")
             if bool(node.get_parameter("exit_after_startup_move").value):
+                # The launch layer uses the process exit code as the lifecycle gate.
+                # A failed guarded move must not look like a successful startup.
+                if not startup_success:
+                    sys.exit(1)
                 return
         rclpy.spin(node)
     except KeyboardInterrupt:

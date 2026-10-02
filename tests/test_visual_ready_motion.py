@@ -24,7 +24,7 @@ def test_ready_motion_preserves_endpoints_duration_and_smoothstep():
 
 def test_visual_ready_launches_use_motion_package():
     root = Path(__file__).resolve().parents[1]
-    source = (root / "src/rebotarm_bringup/launch" / "visual_grasp_system.launch.py").read_text()
+    source = (root / "src/rebotarm_bringup/launch" / "includes" / "visual_lifecycle.launch.py").read_text()
     for prefix in source.split('executable="rebotarm_visual_ready"')[:-1]:
         assert 'package="rebotarm_motion"' in prefix[-90:]
     assert '[FindPackageShare("rebotarm_motion"), "config", "visual_ready.yaml"]' in source

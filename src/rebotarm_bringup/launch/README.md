@@ -33,6 +33,23 @@ src/rebotarm_bringup/launch/
 ├── visual_plan_only.launch.py          # 规划预览
 ├── visual_execute.launch.py            # 显式授权后的执行组合
 └── visual_ready.launch.py              # 独立就绪位姿服务
+
+内部组合片段位于 `launch/includes/`，由兼容总入口加载，不作为用户入口单独启动：
+
+```text
+includes/
+├── visual_backend.launch.py
+├── visual_lifecycle.launch.py
+├── visual_input.launch.py
+├── grasp_candidate.launch.py
+├── candidate_filter.launch.py
+├── motion_execution.launch.py
+├── grasp_executor.launch.py
+└── grasp_preview.launch.py
+```
+
+`visual_ready` 自动摆位时，只有进程以返回码 0 退出才会打开后续视觉链；失败会保持
+底层状态但关闭视觉链，不自动 disable 真机。
 ```
 
 ## 分层和包含关系

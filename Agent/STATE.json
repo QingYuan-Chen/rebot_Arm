@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-02T19:15:55+08:00",
+  "generated_at": "2026-10-02T22:37:41+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "1a1334c",
+    "head": "adb02da",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-02T19:15:55+08:00 | actor=codex | event=verified | note=visual grasp launch lifecycle entry split pushed as 1a1334c | verification=visual launch compileall; colcon build --packages-select rebotarm_bringup --symlink-install; pytest test_package_layering 23 passed; visual launch subset 104 passed; full suite blocked by missing rebotarm_msgs/ament generated environment"
+  "last_event": "- 2026-10-02T22:37:41+08:00 | actor=codex | event=verified | note=完成视觉抓取总入口内部拆分：总入口保留兼容参数并仅组合 backend/lifecycle，阶段片段迁移至 launch/includes；visual-ready 失败返回非零码，失败时关闭后续视觉链但不自动失能 | verification=colcon build --packages-select rebotarm_bringup rebotarm_motion --symlink-install；5 个视觉 launch --show-args 通过；35 个分层/视觉聚焦测试通过；compileall 和 git diff --check 通过；全量测试仍被 pytest 源码路径遮蔽导致的 rebotarm_msgs 缺失阻断"
 }

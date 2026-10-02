@@ -32,12 +32,44 @@ def test_rebotarm_msgs_registered_interfaces_exist():
 
 def test_visual_grasp_launch_uses_existing_motion_execution_package():
     launch_text = (
-        ROOT / "src" / "rebotarm_bringup" / "launch" / "visual_grasp_system.launch.py"
+        ROOT / "src" / "rebotarm_bringup" / "launch" / "includes" / "motion_execution.launch.py"
     ).read_text(encoding="utf-8")
 
     assert 'package="rebotarm_motion_execution"' not in launch_text
     assert 'package="rebotarm_motion"' in launch_text
     assert 'executable="PoseExecutionNode"' in launch_text
+
+
+def test_visual_grasp_system_is_a_composition_entry_with_stage_includes():
+    launch_dir = ROOT / "src" / "rebotarm_bringup" / "launch"
+    main = (launch_dir / "visual_grasp_system.launch.py").read_text(encoding="utf-8")
+    assert len(main.splitlines()) < 300
+    for stage in (
+        "visual_backend",
+        "visual_lifecycle",
+    ):
+        assert f'"{stage}.launch.py"' in main
+    for stage in (
+        "visual_input",
+        "grasp_candidate",
+        "candidate_filter",
+        "motion_execution",
+        "grasp_executor",
+    ):
+        assert (launch_dir / "includes" / f"{stage}.launch.py").exists()
+
+
+def test_visual_ready_failure_closes_pipeline_without_disabling_hardware():
+    node = (ROOT / "src" / "rebotarm_motion" / "rebotarm_motion" / "visual_ready_node.py").read_text(
+        encoding="utf-8"
+    )
+    lifecycle = (ROOT / "src" / "rebotarm_bringup" / "launch" / "includes" / "visual_lifecycle.launch.py").read_text(
+        encoding="utf-8"
+    )
+    assert "sys.exit(1)" in node
+    assert "event.returncode == 0" in lifecycle
+    assert "pipeline remains closed" in lifecycle
+    assert "/rebotarm/disable" not in lifecycle
 
 
 def test_vision_launch_does_not_wrap_static_tf_in_ros2_run():
@@ -75,7 +107,7 @@ def test_interactive_launch_removes_legacy_start_interaction_nodes_flag():
 
 
 def test_visual_grasp_launch_exposes_adaptive_gripper_and_retreat_params():
-    text = (ROOT / "src" / "rebotarm_bringup" / "launch" / "visual_grasp_system.launch.py").read_text(encoding="utf-8")
+    text = (ROOT / "src" / "rebotarm_bringup" / "launch" / "includes" / "grasp_executor.launch.py").read_text(encoding="utf-8")
 
     gripper_names = (
         "auto_gripper_effort",
@@ -90,7 +122,7 @@ def test_visual_grasp_launch_exposes_adaptive_gripper_and_retreat_params():
         "gripper_grasp_min_closure_distance_m",
     )
     for name in gripper_names:
-        assert f'DeclareLaunchArgument("{name}"' in text
+        assert name in text
     assert "**policy_defaults" in text
 
     for name in (
@@ -98,7 +130,7 @@ def test_visual_grasp_launch_exposes_adaptive_gripper_and_retreat_params():
         "safe_retreat_distance_m",
         "safe_home_after_grasp",
     ):
-        assert f'DeclareLaunchArgument("{name}"' in text
+        assert f'LaunchConfiguration("{name}")' in text
         assert f'"{name}": {name}' in text
 
     for retired_name in (
