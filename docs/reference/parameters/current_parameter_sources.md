@@ -18,9 +18,22 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 |---|---|---|
 | URDF/SRDF、关节限位、规划器 | `src/rebotarm_moveit_config/config/` | `rebotarm_moveit_config` |
 | 真机反馈、夹爪和控制器 | `hardware_controller.launch.py`、`rebotarmcontroller` 参数 | `rebotarmcontroller` |
-| 轨迹安全、视觉准备位和执行 | `src/rebotarm_motion/config/`、`visual_grasp_system.launch.py` | `rebotarm_motion` |
+| 轨迹安全、视觉准备位和执行 | `src/rebotarm_motion/config/`、`launch/includes/motion_execution.launch.py`、`grasp_executor.launch.py` | `rebotarm_motion` |
 | Gemini 2、YOLO、GraspNet | `src/rebotarm_vision/config/` | `rebotarm_vision` |
+| 视觉抓取跨节点接口 | `src/rebotarm_bringup/config/visual_grasp_interfaces.yaml` | `rebotarm_bringup` |
 | MuJoCo 模型、动力学和 RL | `src/rebotarm_simulation/config/`、`requirements-mjlab.txt` | `rebotarm_simulation` |
 | 标定会话和手眼输入 | `src/rebotarm_vision/config/handeye.yaml`、标定 launch 参数 | `rebotarm_calibration` |
 
-视觉抓取参数数量较多，具体默认值以 `visual_grasp_system.launch.py` 和对应 config 为准；本页不复制整张参数表。
+## 视觉抓取入口层级
+
+| 入口 | 用途 | 参数范围 |
+|---|---|---|
+| `visual_grasp_compact.launch.py` | 日常使用 | 只暴露后端、模式和阶段开关 |
+| `visual_readonly.launch.py` | 只读感知 | 相机、解释器和候选输出接口 |
+| `visual_plan_only.launch.py` | 规划预览 | 规划阶段开关，固定 `plan_only` |
+| `visual_execute.launch.py` | 受控执行 | 执行阶段开关，默认仍无硬件 |
+| `visual_grasp_system.launch.py` | 兼容入口 | 保留旧参数，不作为新参数添加位置 |
+
+维护规则：新 topic/frame/service/action 只能先加入
+`visual_grasp_interfaces.yaml`；新视觉策略加入 `rebotarm_vision/config/`；新运动/执行策略
+加入 `rebotarm_motion/config/`。兼容入口只允许转发，不复制新的算法默认值。

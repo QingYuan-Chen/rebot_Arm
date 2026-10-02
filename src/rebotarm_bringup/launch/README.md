@@ -115,7 +115,15 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 `teleop_keyboard.launch.py` 是可独立使用的基础组合；各自的上层入口只叠加自己的功能。
 `rebotarm_app.launch.py` 与 `teleop_system.launch.py` 不应在同一命名空间同时启动。
 
-视觉阶段现在按边界提供独立入口。只读感知诊断使用：
+视觉阶段现在按边界提供独立入口。日常组合优先使用精简入口：
+
+```bash
+ros2 launch rebotarm_bringup visual_grasp_compact.launch.py \
+  use_hardware:=false execution_mode:=plan_only \
+  start_visual_grasp_executor:=false
+```
+
+只读感知诊断使用：
 
 ```bash
 ros2 launch rebotarm_bringup visual_readonly.launch.py \

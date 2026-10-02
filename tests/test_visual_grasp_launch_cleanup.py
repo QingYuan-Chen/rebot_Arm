@@ -72,6 +72,14 @@ def test_compact_visual_entry_exposes_only_composition_parameters():
     assert "gripper_grasp_close_force" not in text
 
 
+def test_interface_profile_is_documented_as_the_authoritative_connection_contract():
+    docs = (ROOT / "docs" / "reference" / "parameters" / "current_parameter_sources.md").read_text(
+        encoding="utf-8"
+    )
+    assert "visual_grasp_interfaces.yaml" in docs
+    assert "兼容入口只允许转发" in docs
+
+
 def test_visual_ready_failure_closes_pipeline_without_disabling_hardware():
     node = (ROOT / "src" / "rebotarm_motion" / "rebotarm_motion" / "visual_ready_node.py").read_text(
         encoding="utf-8"

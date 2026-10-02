@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-02T23:40:45+08:00",
+  "generated_at": "2026-10-02T23:43:50+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "b680971",
+    "head": "6f97238",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-02T23:40:45+08:00 | actor=codex | event=checkpoint | note=新增 visual_grasp_compact.launch.py：仅暴露后端、执行模式和阶段开关等公共参数；旧 visual_grasp_system 保留完整参数兼容层；未上传 GitHub | verification=36 focused tests passed; bringup compileall passed; colcon build rebotarm_bringup passed; compact launch --show-args returned 0"
+  "last_event": "- 2026-10-02T23:43:50+08:00 | actor=codex | event=checkpoint | note=补齐 compact 入口、接口 profile 参数来源文档与维护规则；只保留本地提交，不上传 GitHub | verification=37 focused tests passed; launch compileall and diff check passed"
 }
