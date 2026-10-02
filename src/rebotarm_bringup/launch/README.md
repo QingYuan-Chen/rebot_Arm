@@ -29,6 +29,7 @@ src/rebotarm_bringup/launch/
 ├── teleop_system.launch.py
 ├── rviz_ee_drag_sim.launch.py
 ├── visual_grasp_system.launch.py       # 兼容总入口（完整组合）
+├── visual_grasp_compact.launch.py      # 日常使用的精简公共入口
 ├── visual_readonly.launch.py           # 只读感知与候选
 ├── visual_plan_only.launch.py          # 规划预览
 ├── visual_execute.launch.py            # 显式授权后的执行组合
@@ -95,6 +96,7 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 | `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；不启动 MoveIt，默认不接真机。无硬件模式可驱动 RViz 仿真姿态，真机点动仍由控制器执行 |
 | `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 使用仿真轨迹控制器提供 Plan/Execute，不打开真机 |
 | `visual_grasp_system.launch.py` | 兼容总入口 | 保留旧参数接口，组合所有阶段；默认 `use_hardware=false`、`execution_mode=plan_only`，不打开真机 |
+| `visual_grasp_compact.launch.py` | 精简公共入口 | 只暴露后端、模式、阶段开关等公共参数；策略从 profile 加载 |
 | `visual_readonly.launch.py` | 只读感知入口 | 相机/YOLO/TCP TF、GraspNet 候选与可视化；不启动 MoveIt、IK、轨迹或夹爪 |
 | `visual_plan_only.launch.py` | 规划入口 | 感知、候选、IK/碰撞过滤和 MoveIt 规划预览；固定 `plan_only`，不执行夹爪 |
 | `visual_execute.launch.py` | 执行入口 | 在显式 `use_hardware:=true` 和控制器 Enable 门控后使用；默认仍为无硬件 |

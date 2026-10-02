@@ -61,6 +61,17 @@ def test_visual_grasp_system_is_a_composition_entry_with_stage_includes():
     assert '"visual_interfaces_config"' in main
 
 
+def test_compact_visual_entry_exposes_only_composition_parameters():
+    text = (ROOT / "src" / "rebotarm_bringup" / "launch" / "visual_grasp_compact.launch.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"execution_mode"' in text
+    assert '"use_hardware"' in text
+    assert '"start_visual_grasp_executor"' in text
+    assert "candidate_min_confidence" not in text
+    assert "gripper_grasp_close_force" not in text
+
+
 def test_visual_ready_failure_closes_pipeline_without_disabling_hardware():
     node = (ROOT / "src" / "rebotarm_motion" / "rebotarm_motion" / "visual_ready_node.py").read_text(
         encoding="utf-8"
