@@ -1164,3 +1164,4 @@
 - 2026-10-02T23:51:17+08:00 | actor=codex | event=checkpoint | note=修复 compact 入口递归展开：使用 OpaqueFunction 准备兼容默认值，真实 --show-args 从 149 降至 22；新增运行时参数契约测试；未上传 GitHub | verification=compact contract focused tests passed; rebotarm_bringup build passed; compact --show-args exposes 22 args; full suite 781 passed/16 skipped with 11 stale source-assertion failures
 - 2026-10-02T23:52:50+08:00 | actor=codex | event=start | note=完成视觉 launch 分层、配置实际覆盖及回归收尾；只在本地维护，不上传 GitHub | verification=-
 - 2026-10-02T23:59:11+08:00 | actor=codex | event=start | note=继续完成视觉抓取 launch 拆分：验证正式入口、profiles、includes 和回归测试 | verification=-
+- 2026-10-03T00:09:12+08:00 | actor=codex | event=complete | note=完成视觉抓取 launch 组合拆分、profiles 接口合并、formal/compact/legacy 入口验证；本地提交 3596ff6，未上传 GitHub | verification=-

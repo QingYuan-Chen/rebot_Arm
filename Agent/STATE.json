@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-02T23:59:11+08:00",
+  "generated_at": "2026-10-03T00:09:12+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "7ce7fec",
+    "head": "3596ff6",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-02T23:59:11+08:00 | actor=codex | event=start | note=继续完成视觉抓取 launch 拆分：验证正式入口、profiles、includes 和回归测试 | verification=-"
+  "last_event": "- 2026-10-03T00:09:12+08:00 | actor=codex | event=complete | note=完成视觉抓取 launch 组合拆分、profiles 接口合并、formal/compact/legacy 入口验证；本地提交 3596ff6，未上传 GitHub | verification=-"
 }
