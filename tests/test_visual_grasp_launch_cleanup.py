@@ -57,6 +57,8 @@ def test_visual_grasp_system_is_a_composition_entry_with_stage_includes():
         "grasp_executor",
     ):
         assert (launch_dir / "includes" / f"{stage}.launch.py").exists()
+    assert (ROOT / "src" / "rebotarm_bringup" / "config" / "visual_grasp_interfaces.yaml").exists()
+    assert '"visual_interfaces_config"' in main
 
 
 def test_visual_ready_failure_closes_pipeline_without_disabling_hardware():

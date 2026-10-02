@@ -17,6 +17,7 @@ def generate_launch_description():
     graspnet_candidates_topic = LaunchConfiguration("graspnet_candidates_topic")
     graspnet_output_frame_id = LaunchConfiguration("graspnet_output_frame_id")
     graspnet_config = LaunchConfiguration("graspnet_config")
+    visual_interfaces_config = LaunchConfiguration("visual_interfaces_config")
     graspnet_max_input_skew_ms = LaunchConfiguration("graspnet_max_input_skew_ms")
     graspnet_python_executable = LaunchConfiguration("graspnet_python_executable")
     graspnet_model_root = LaunchConfiguration("graspnet_model_root")
@@ -38,10 +39,8 @@ def generate_launch_description():
             condition=IfCondition(start_graspnet_baseline),
             parameters=[
                 graspnet_config,
+                visual_interfaces_config,
                 {
-                    "input_color_topic": "/camera/color/image_raw",  # 彩色图输入话题
-                    "input_depth_topic": "/camera/depth/image_raw",  # 深度图输入话题（16UC1，原始单位换算见参数档）
-                    "input_detections_topic": "/grasp/detections",  # 检测结果输入话题（用于把点云裁剪到目标区域）
                     "output_candidates_topic": graspnet_candidates_topic,
                     "output_frame_id": graspnet_output_frame_id,
                     "max_input_skew_ms": graspnet_max_input_skew_ms,
@@ -64,10 +63,9 @@ def generate_launch_description():
             parameters=[
                 {
                     "input_topic": graspnet_candidates_topic,
-                    "output_topic": "/grasp/raw_candidate_markers",
-                    "target_frame": "base_link",
                     "max_candidates": 5,
-                }
+                },
+                visual_interfaces_config,
             ],
         ),
         Node(
@@ -79,11 +77,9 @@ def generate_launch_description():
             condition=IfCondition(start_open3d_viewer),
             parameters=[
                 {
-                    "input_color_topic": "/camera/color/image_raw",
-                    "input_depth_topic": "/camera/depth/image_raw",
-                    "input_camera_info_topic": "/camera/depth/camera_info",
                     "input_candidates_topic": graspnet_candidates_topic,
-                }
+                },
+                visual_interfaces_config,
             ],
         ),
     ])

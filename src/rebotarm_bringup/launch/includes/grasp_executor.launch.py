@@ -73,6 +73,7 @@ def generate_launch_description():
     place_retreat_z_m = LaunchConfiguration("place_retreat_z_m")
     trajectory_precheck_enabled = LaunchConfiguration("trajectory_precheck_enabled")
     max_plan_age_sec = LaunchConfiguration("max_plan_age_sec")
+    visual_interfaces_config = LaunchConfiguration("visual_interfaces_config")
     def _launch_executor(context):
         # Flatten named YAML entries before Node normalization so explicit overrides
         # have predictable precedence, including values equal to former defaults.
@@ -101,12 +102,15 @@ def generate_launch_description():
     output="screen",
     condition=IfCondition(start_visual_grasp_executor),
     parameters=[
+        visual_interfaces_config,
         {
-            **policy_defaults,
+                **policy_defaults,
+                # Interface names are owned by bringup; strategy values above remain
+                # owned by the vision policy profiles.
+                **{},
             "arm_namespace": arm_namespace,
             "input_topic": executor_input_topic,
             "candidates_topic": filtered_candidates_topic,
-            "target_frame": "base_link",
             "tcp_offset_xyz": tcp_offset_xyz,
             "target_base_offset_xyz": target_base_offset_xyz,
             "grasp_base_z_offset_m": grasp_base_z_offset_m,

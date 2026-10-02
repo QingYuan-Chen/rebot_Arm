@@ -18,6 +18,7 @@ def generate_launch_description():
     filtered_candidates_topic = LaunchConfiguration("filtered_candidates_topic")
     filtered_plan_topic = LaunchConfiguration("filtered_plan_topic")
     candidate_joint_state_topic = LaunchConfiguration("candidate_joint_state_topic")
+    visual_interfaces_config = LaunchConfiguration("visual_interfaces_config")
     candidate_filter_service_timeout_sec = LaunchConfiguration("candidate_filter_service_timeout_sec")
     candidate_collision_check_enabled = LaunchConfiguration("candidate_collision_check_enabled")
     candidate_collision_check_service = LaunchConfiguration("candidate_collision_check_service")
@@ -54,6 +55,7 @@ def generate_launch_description():
             output="screen",
             condition=IfCondition(start_candidate_ik_filter),
             parameters=[
+                visual_interfaces_config,
                 # 该节点的完整候选过滤参数必须集中在同一个 launch 字典里。
                 # 在 ROS 2 Jazzy 上，按节点名分组的 YAML 条目会覆盖 launch_ros 生成的
                 # 通配字典（即使本字典写在后面），把参数拆到 YAML 里会让这些启动参数失效。
@@ -64,13 +66,9 @@ def generate_launch_description():
                     "output_plan_topic": filtered_plan_topic,
                     "joint_state_topic": candidate_joint_state_topic,
                     "service_timeout_sec": candidate_filter_service_timeout_sec,
-                    "target_frame": "base_link",
-                    "moveit_ik_service": "/compute_ik",  # MoveIt 逆解服务名
                     "collision_check_enabled": candidate_collision_check_enabled,
                     "collision_check_service": candidate_collision_check_service,
                     "collision_group_name": candidate_collision_group_name,
-                    "moveit_group_name": "arm",  # 逆解用规划组（仅手臂；夹爪碰撞由碰撞检查组覆盖）
-                    "ee_frame_id": "end_link",
                     "pose_policy": candidate_pose_policy,
                     "fixed_grasp_orientation_xyzw": fixed_grasp_orientation_xyzw,
                     "base_approach_axis_xyz": base_approach_axis_xyz,

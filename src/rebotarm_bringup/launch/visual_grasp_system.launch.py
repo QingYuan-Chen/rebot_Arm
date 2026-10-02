@@ -75,6 +75,12 @@ def generate_launch_description():
         DeclareLaunchArgument("graspnet_candidates_topic", default_value="/grasp/graspnet_candidates"),
         DeclareLaunchArgument("graspnet_output_frame_id", default_value="camera_depth_frame"),
         DeclareLaunchArgument("graspnet_config", default_value=graspnet_ubuntu_params),
+        DeclareLaunchArgument(
+            "visual_interfaces_config",
+            default_value=PathJoinSubstitution(
+                [bringup_share, "config", "visual_grasp_interfaces.yaml"]
+            ),
+        ),
         DeclareLaunchArgument("graspnet_max_input_skew_ms", default_value="100"),
         DeclareLaunchArgument(
             "graspnet_python_executable",

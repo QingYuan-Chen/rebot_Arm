@@ -1,0 +1,51 @@
+# 视觉抓取跨节点接口契约。
+# 这里仅存放连线、坐标系和服务/action 名；视觉算法策略仍归 rebotarm_vision，
+# 运动策略仍归 rebotarm_motion。修改接口时必须同步上下游节点和对应测试。
+
+rebotarm_graspnet_baseline_node:
+  ros__parameters:
+    input_color_topic: /camera/color/image_raw
+    input_depth_topic: /camera/depth/image_raw
+    input_detections_topic: /grasp/detections
+    output_candidates_topic: /grasp/graspnet_candidates
+    output_frame_id: camera_depth_frame
+
+rebotarm_grasp_candidate_markers:
+  ros__parameters:
+    input_topic: /grasp/graspnet_candidates
+    output_topic: /grasp/raw_candidate_markers
+    target_frame: base_link
+
+rebotarm_graspnet_open3d_viewer:
+  ros__parameters:
+    input_color_topic: /camera/color/image_raw
+    input_depth_topic: /camera/depth/image_raw
+    input_camera_info_topic: /camera/depth/camera_info
+    input_candidates_topic: /grasp/graspnet_candidates
+
+rebotarm_grasp_candidate_ik_filter:
+  ros__parameters:
+    target_frame: base_link
+    moveit_ik_service: /compute_ik
+    collision_check_service: /check_state_validity
+    collision_group_name: arm_with_gripper
+    moveit_group_name: arm
+    ee_frame_id: end_link
+
+rebotarm_visual_grasp_markers:
+  ros__parameters:
+    target_frame: base_link
+    output_topic: /grasp/visual_markers
+
+rebotarm_grasp_preview_sender:
+  ros__parameters:
+    target_frame: base_link
+
+rebotarm_visual_grasp_executor:
+  ros__parameters:
+    target_frame: base_link
+
+motion_execution:
+  ros__parameters:
+    frame_id: base_link
+    ee_frame_id: end_link

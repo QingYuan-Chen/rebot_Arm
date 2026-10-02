@@ -50,6 +50,17 @@ includes/
 
 `visual_ready` 自动摆位时，只有进程以返回码 0 退出才会打开后续视觉链；失败会保持
 底层状态但关闭视觉链，不自动 disable 真机。
+
+## 参数归属
+
+- `visual_grasp_interfaces.yaml`：跨节点 topic、frame、MoveIt service 和规划组名称；由
+  bringup 维护，避免在多个节点启动字典中重复硬编码。
+- `rebotarm_vision/config/`：相机、YOLO、GraspNet、候选评分与视觉策略；由视觉包维护。
+- `rebotarm_motion/config/`：视觉就绪、运动规划和执行相关策略；由运动包维护。
+- launch 文件：只负责后端选择、生命周期开关和兼容性覆盖；不新增算法默认值。
+
+旧总入口仍保留旧参数作为迁移兼容层。新调用应优先使用四个阶段入口；新接口参数先加到
+`visual_grasp_interfaces.yaml`，不要同时复制到多个 include 文件。
 ```
 
 ## 分层和包含关系

@@ -15,6 +15,7 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     vision_share = FindPackageShare("rebotarm_vision")
     grasp_pose_policy_params = PathJoinSubstitution([vision_share, "config", "grasp_pose_policy.yaml"])
+    visual_interfaces_config = LaunchConfiguration("visual_interfaces_config")
     arm_namespace = LaunchConfiguration("arm_namespace")
     start_grasp_preview = LaunchConfiguration("start_grasp_preview")
     start_visual_grasp_markers = LaunchConfiguration("start_visual_grasp_markers")
@@ -36,11 +37,11 @@ def generate_launch_description():
             condition=IfCondition(start_grasp_preview),
             parameters=[
                 grasp_pose_policy_params,
+                visual_interfaces_config,
                 {
                     "input_topic": executor_input_topic,
                     "output_topic": ["/", arm_namespace, "/interactive_control/pose_target"],
                     "pose_mode": pose_mode,
-                    "target_frame": "base_link",
                     "tcp_offset_xyz": tcp_offset_xyz,
                     "target_base_offset_xyz": target_base_offset_xyz,
                     "min_target_z_m": min_target_z_m,
@@ -57,10 +58,9 @@ def generate_launch_description():
             condition=IfCondition(start_visual_grasp_markers),
             parameters=[
                 grasp_pose_policy_params,
+                visual_interfaces_config,
                 {
                     "input_topic": executor_input_topic,
-                    "output_topic": "/grasp/visual_markers",  # RViz 标记输出话题
-                    "target_frame": "base_link",
                     "object_min_diameter_m": 0.06,  # 物体标记最小直径 6 cm，仅影响 RViz 可见性
                     "object_min_height_m": 0.12,  # 物体标记最小高度 12 cm，仅影响 RViz 可见性
                     "upright_object_marker": True,  # 物体框画成竖直方向，便于观察物体位置

@@ -14,9 +14,7 @@ package_name = "rebotarm_bringup"
 # Keep modular launch fragments under ``launch/includes`` installable while preserving
 # the flat ``ros2 launch rebotarm_bringup <name>`` entry points.
 launch_files = glob("launch/*.launch.py") + glob("launch/*.md")
-for path in Path("launch").rglob("*.launch.py"):
-    if str(path) not in launch_files:
-        launch_files.append(str(path))
+launch_include_files = glob("launch/includes/*.launch.py")
 
 setup(
     name=package_name,
@@ -32,6 +30,10 @@ setup(
         (
             f"share/{package_name}/launch",
             launch_files,
+        ),
+        (
+            f"share/{package_name}/launch/includes",
+            launch_include_files,
         ),
         # 参数文件：所有 *.yaml（机械臂/夹爪/遥操作等）
         (f"share/{package_name}/config", glob("config/*.yaml")),
