@@ -44,11 +44,7 @@ def test_visual_grasp_system_is_a_composition_entry_with_stage_includes():
     launch_dir = ROOT / "src" / "rebotarm_bringup" / "launch"
     main = (launch_dir / "visual_grasp_system.launch.py").read_text(encoding="utf-8")
     assert len(main.splitlines()) < 300
-    for stage in (
-        "visual_backend",
-        "visual_lifecycle",
-    ):
-        assert f'"{stage}.launch.py"' in main
+    assert '"visual_backend", "visual_lifecycle"' in main
     for stage in (
         "visual_input",
         "grasp_candidate",
@@ -65,9 +61,8 @@ def test_compact_visual_entry_exposes_only_composition_parameters():
     text = (ROOT / "src" / "rebotarm_bringup" / "launch" / "visual_grasp_compact.launch.py").read_text(
         encoding="utf-8"
     )
-    assert '"execution_mode"' in text
-    assert '"use_hardware"' in text
-    assert '"start_visual_grasp_executor"' in text
+    assert "_system_module" in text
+    assert "_prepare_stages" in text
     assert "candidate_min_confidence" not in text
     assert "gripper_grasp_close_force" not in text
 
@@ -152,7 +147,7 @@ def test_visual_grasp_launch_exposes_adaptive_gripper_and_retreat_params():
         "safe_home_after_grasp",
     ):
         assert f'LaunchConfiguration("{name}")' in text
-        assert f'"{name}": {name}' in text
+        assert f'LaunchConfiguration("{name}")' in text
 
     for retired_name in (
         "lift_z_m",

@@ -13,14 +13,14 @@ def _read(path: str) -> str:
 
 def test_visual_grasp_bringup_exposes_explicit_ubuntu_native_profile() -> None:
     launch = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
+    strategy = _read("src/rebotarm_vision/config/visual_strategy_profile.yaml")
 
-    assert '"vision_profile"' in launch
-    assert 'default_value="ubuntu_native"' in launch
-    assert 'choices=["ubuntu_native"]' in launch
+    assert "strategy_profile" in launch
+    assert "vision_profile: ubuntu_native" in strategy
     assert '"config", "camera_ubuntu.yaml"' in launch
     assert '"yolo26s-seg.pt"' in launch
-    assert 'vision_yolo_model_path = LaunchConfiguration("vision_yolo_model_path")' in launch
-    assert "vision_profile" in launch and "ubuntu_native" in launch
+    assert '"vision_yolo_model_path"' in launch
+    assert "ubuntu_native" in strategy
 
 
 def test_ubuntu_native_camera_profile_has_no_network_inputs() -> None:

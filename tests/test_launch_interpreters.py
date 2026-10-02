@@ -128,6 +128,11 @@ for package, names in files.items():
                                 assert resolve(value, context) == expected[kind], (name, key)
                                 seen.add((name, kind))
 
-assert all(any(filename == name for filename, kind in seen) for names in files.values() for name in names), seen
+expected_files = {
+    (name, kind)
+    for kind, names in (("mujoco", files["rebotarm_simulation"]), ("vision", files["rebotarm_vision"]))
+    for name in names
+}
+assert expected_files.issubset(seen), (expected_files, seen)
 print("All 8 relocated launch files resolved; no processes started:", mode)
 '''

@@ -1,8 +1,8 @@
 """视觉规划入口：感知 → GraspNet → IK/碰撞过滤 → MoveIt 规划预览。
 
 该入口固定 ``execution_mode=plan_only``、``execute_gripper=false``，并默认不连接真机。
-它保留兼容入口中的参数档和节点实现，但把规划阶段的生命周期从只读感知和执行阶段中
-分离出来，便于单独验证。
+它使用统一 25 参数公共接口；规划阶段的生命周期从只读感知和执行阶段中分离出来，
+便于脚本复用和单独验证。
 """
 
 from launch import LaunchDescription
