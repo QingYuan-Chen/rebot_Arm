@@ -1,20 +1,18 @@
 # 视觉包的 ament_python 安装脚本。
-# 职责：把视觉包本身、launch 文件、参数配置、YOLO 模型权重与 GraspNet 推理后端脚本
-# 安装到 share/rebotarm_vision 下，并注册全部可视化/抓取相关的控制台入口点。
-# 说明：本文件在构建期与测试期都会被直接执行（runpy），因此只允许增加注释，
-# 不得改动变量赋值、列表顺序或 setup(...) 的实参结构。
+# 职责：安装 Python 包（含推理后端），将 launch、配置和模型安装到 share，
+# 并注册可视化与抓取相关的控制台入口点。
 
 from pathlib import Path
 
 from setuptools import find_packages, setup
 
 package_name = "rebotarm_vision"
-# 模型权重存放在仓库根的 tools/ 目录下（相对本 setup.py 是 ../../tools）。
+# 模型权重存放在视觉包的 models/ 目录下。
 # yolo26s-seg.pt 是 PyTorch 权重（通用回退），
 # yolo26m-seg-fp16-b1-640-linux.engine 是 TensorRT 半精度引擎（批 1、640 输入，仅 Linux）。
 vision_model_sources = [
-    Path("../../tools/yolo26s-seg.pt"),
-    Path("../../tools/yolo26m-seg-fp16-b1-640-linux.engine"),
+    Path("models/yolo26s-seg.pt"),
+    Path("models/yolo26m-seg-fp16-b1-640-linux.engine"),
 ]
 
 # 运行期资产在构建期是可选的：权重可能尚未下载，此时不打包进 models/ 目录。
@@ -62,11 +60,6 @@ setup(
         (
             f"share/{package_name}/models",
             [str(path) for path in vision_model_sources],
-        ),
-        # GraspNet 进程内推理后端脚本，由 graspnet_baseline_node 以 import 方式加载
-        (
-            f"share/{package_name}/graspnet_backend",
-            ["../../tools/graspnet_baseline_inference.py"],
         ),
     ],
     install_requires=["setuptools"],

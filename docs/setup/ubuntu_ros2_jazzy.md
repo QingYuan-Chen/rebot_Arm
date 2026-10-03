@@ -14,17 +14,17 @@
 
 ## 1. 系统依赖
 
-根目录五份 `requirements-*.txt` 按运行环境和安装方式拆分，不应全部安装到
+`requirements/` 中的六份 TXT 清单按运行环境和安装方式拆分，不应全部安装到
 同一个 Python 环境，也不是五份重复清单：
 
 | 清单 | 用途 | 环境 / 安装入口 |
 | --- | --- | --- |
-| `requirements-runtime.txt` | 控制器 MotorBridge 基础依赖，随后必须安装本地审查补丁 | 系统 Python；本节命令 |
-| `requirements-vision.txt` | 相机、YOLO、OpenCV，固定 NumPy 1.x 兼容 ROS cv_bridge | `.venv-vision`；`tools/setup_ubuntu_vision.sh` |
-| `requirements-graspnet.txt`（PyTorch cu130） | GraspNet 抓取候选、点云及固定 PyTorch/CUDA 依赖 | `.venv-graspnet`；`tools/setup_ubuntu_graspnet.sh` |
-| `requirements-mujoco.txt` | 统一环境中的 CPU MuJoCo 组件说明 | 随 `requirements-mjlab.txt` 安装 |
-| `requirements-mjlab.txt` | CPU MuJoCo 3.11 + mjlab + MuJoCo Warp + RSL-RL + PyTorch CUDA 13.0 | 唯一仿真/RL venv；见 `../reference/commands/mjlab_rl.md` |
-| `requirements-tensorrt.txt`（TensorRT cu13） | TensorRT 推理扩展，单独以 `--no-deps` 安装以避免拉取额外 CUDA 工具链 | 与 vision 共用环境；由视觉安装脚本调用 |
+| `requirements/requirements-runtime.txt` | 控制器 MotorBridge 基础依赖，随后必须安装本地审查补丁 | 系统 Python；本节命令 |
+| `requirements/requirements-vision.txt` | 相机、YOLO、OpenCV，固定 NumPy 1.x 兼容 ROS cv_bridge | `.venv-vision`；`tools/setup_ubuntu_vision.sh` |
+| `requirements/requirements-graspnet.txt`（PyTorch cu130） | GraspNet 抓取候选、点云及固定 PyTorch/CUDA 依赖 | `.venv-graspnet`；`tools/setup_ubuntu_graspnet.sh` |
+| `requirements/requirements-mujoco.txt` | 统一环境中的 CPU MuJoCo 组件说明 | 随 `requirements/requirements-mjlab.txt` 安装 |
+| `requirements/requirements-mjlab.txt` | CPU MuJoCo 3.11 + mjlab + MuJoCo Warp + RSL-RL + PyTorch CUDA 13.0 | 唯一仿真/RL venv；见 `../reference/commands/mjlab_rl.md` |
+| `requirements/requirements-tensorrt.txt`（TensorRT cu13） | TensorRT 推理扩展，单独以 `--no-deps` 安装以避免拉取额外 CUDA 工具链 | 与 vision 共用环境；由视觉安装脚本调用 |
 
 GraspNet 与 MuJoCo 的 PyYAML 固定版本分别为6.0.1和6.0.3；直接合并会产生
 版本冲突。TensorRT 是视觉环境的独立安装步骤，不是第五个虚拟环境。
@@ -128,7 +128,7 @@ source install/setup.bash
 python3 tools/setup_motorbridge_fresh_feedback.py --check-installed
 ```
 
-`requirements-runtime.txt` 中的普通 `motorbridge==0.4.7` 只用于 bootstrap，原始
+`requirements/requirements-runtime.txt` 中的普通 `motorbridge==0.4.7` 只用于 bootstrap，原始
 PyPI 包没有本控制器所需的逐电机反馈 sequence，不能作为真机运行版本。不要在
 patched 版本已经安装后再次执行该 requirements 文件，否则可能覆盖已审查版本。
 
@@ -166,11 +166,11 @@ python3 tools/setup_motorbridge_fresh_feedback.py --check-installed
 保护失能策略不变。构建保留旧版本 wheel 以便回退。
 重复安装 bootstrap 清单后也必须重新安装审查补丁并检查；不要把原始 0.4.7 用作真机运行版本。
 
-厂商 SDK 使用仓库根目录的 `rebotarm_dependencies.repos` 固定版本：
+厂商 SDK 使用 `third_party/rebotarm_dependencies.repos` 固定版本：
 
 ```bash
 mkdir -p third_party
-vcs import third_party < rebotarm_dependencies.repos
+vcs import third_party < third_party/rebotarm_dependencies.repos
 ```
 
 也可以直接克隆：
@@ -198,7 +198,8 @@ source install/setup.bash
 ```
 
 不需要连接设备，也不需要先提供YOLO/GraspNet权重。构建时存在的
-`tools/yolo26s-seg.pt` 和旧默认engine会按原路径打包；不存在时不阻塞构建。
+`src/rebotarm_vision/models/` 中的默认 YOLO 权重和可选 TensorRT 引擎安装到
+`share/rebotarm_vision/models/`；不存在时不阻塞构建。
 运行时显式传入外部模型路径无需重建。不要把“构建通过”等同于“推理资产已准备”。
 
 安装控制器依赖并构建后可运行软件回归（不会授权真机动作）：
@@ -215,7 +216,7 @@ python3 -m pytest tests -q
 
 ```bash
 python3 -m venv --system-site-packages third_party/rebotarm_mjlab_venv
-third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements-mjlab.txt
+third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements/requirements-mjlab.txt
 export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mjlab_venv/bin/python"
 ```
 
@@ -247,7 +248,7 @@ Ubuntu 物理机直连 Gemini2 并在本机运行 CUDA YOLO 时，使用：
 ```bash
 ./tools/setup_ubuntu_vision.sh
 ./tools/install_orbbec_udev_rules.sh
-./tools/run_ubuntu_vision.sh yolo_model_path:="$PWD/tools/yolo26s-seg.pt" yolo_device:=0
+./tools/run_ubuntu_vision.sh yolo_model_path:="$PWD/src/rebotarm_vision/models/yolo26s-seg.pt" yolo_device:=0
 ```
 
 上述命令只启动相机和YOLO，不启动机械臂。CPU可改为`yolo_device:=cpu`。
@@ -296,4 +297,4 @@ P0 Gate B/C 自动使能、保持与失能验收工具已于 2026-09-19 移除�
 
 ## 可选：MuJoCo 强化学习
 
-按 [强化学习命令参考](../reference/commands/mjlab_rl.md) 安装根目录 `requirements-mjlab.txt`，并检查 Reach 环境。纯离线训练无需启动 ROS 或连接真机。
+按 [强化学习命令参考](../reference/commands/mjlab_rl.md) 安装 `requirements/requirements-mjlab.txt`，并检查 Reach 环境。纯离线训练无需启动 ROS 或连接真机。

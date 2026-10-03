@@ -9,7 +9,7 @@
 | --- | --- |
 | 环境、依赖与 MotorBridge 安装 | [本机环境说明](docs/setup/ubuntu_ros2_jazzy.md) |
 | 网页遥操作、RViz 与实机操作 | [功能命令参考](docs/reference/commands/rebotarm_feature_commands.md) |
-| 控制器接口 | [ROS SDK 说明](README_zh.md) |
+| 控制器接口 | [ROS SDK 说明](docs/reference/ros_sdk.md) |
 | 仿真 | [MuJoCo 使用说明](src/rebotarm_simulation/README_mujoco.md) |
 | mjlab / Warp / RSL-RL 强化学习 | [训练与评估命令](docs/reference/commands/mjlab_rl.md) |
 | 包职责与依赖边界 | [架构说明](docs/implemented/architecture.md) |
@@ -20,23 +20,24 @@
 
 - `src/`：13 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属。
 - `tools/`：环境安装、验证和离线工具。
+- `requirements/`：分环境依赖清单，使用标准 pip requirements 格式。
 - `tests/`：软件回归与架构检查。
 - `patches/`：固定版本的 MotorBridge 反馈与校零安全补丁。
 - `Agent/`：实施状态、决策和验收记录；历史完成度不等于新的真机动作授权。
-- `third_party/`：仅本机参考快照、SDK 和虚拟环境；不纳入版本管理。
+- `third_party/`：版本管理中保留 SDK 来源清单和 COLCON_IGNORE；本机参考快照、SDK 和虚拟环境不纳入版本管理。
 - `star_arm_102_rebot_b601_follow/`：独立 Star Arm 跟随工具，按其自身说明使用。
 
 标准本机构建目录为 `build/`、`install/`、`log/`，不提交到 Git。
 模型下载、TensorRT engine、本地运行数据及额外实验原始证据也不自动纳入提交。
-当前仍随仓库提供 `tools/yolo26s-seg.pt`；历史比较副本仅本机留存。
+当前仍随仓库提供 `src/rebotarm_vision/models/yolo26s-seg.pt`；历史比较副本仅本机留存。
 正式仿真资源及其来源见 [第三方说明](THIRD_PARTY_NOTICES.md)。
 
 ## 环境与构建
 
 基线为 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。先按
 [安装说明](docs/setup/ubuntu_ros2_jazzy.md) 准备系统依赖和所需运行组件；
-`requirements-*.txt` 按控制器、视觉、GraspNet、MuJoCo、TensorRT 拆分；
-`requirements-mjlab.txt` 在独立 mjlab 环境中安装 GPU 强化学习依赖。其它用途的依赖
+`requirements/requirements-*.txt` 按控制器、视觉、GraspNet、MuJoCo、TensorRT 拆分；
+`requirements/requirements-mjlab.txt` 在独立 mjlab 环境中安装 GPU 强化学习依赖。其它用途的依赖
 不要合并安装到同一个环境。
 
 ```bash

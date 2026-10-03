@@ -11,8 +11,8 @@ env PYTHONPATH= "${python_bin}" -m pip install --upgrade "pip<27" "setuptools<80
 env PYTHONPATH= "${python_bin}" -m pip install \
   torch==2.14.1+cu130 torchvision==0.29.1+cu130 \
   --index-url https://download.pytorch.org/whl/cu130
-env PYTHONPATH= "${python_bin}" -m pip install -r "${repo_root}/requirements-vision.txt"
-env PYTHONPATH= "${python_bin}" -m pip install --no-deps -r "${repo_root}/requirements-tensorrt.txt"
+env PYTHONPATH= "${python_bin}" -m pip install -r "${repo_root}/requirements/requirements-vision.txt"
+env PYTHONPATH= "${python_bin}" -m pip install --no-deps -r "${repo_root}/requirements/requirements-tensorrt.txt"
 
 set +u
 source /opt/ros/jazzy/setup.bash

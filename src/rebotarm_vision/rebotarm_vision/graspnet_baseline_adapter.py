@@ -299,7 +299,7 @@ class InProcessGraspNetBackend:
         model_root: str,
         checkpoint_path: str,
         device: str = "cuda:0",
-        module_name: str = "graspnet_baseline_inference",
+        module_name: str = "rebotarm_vision.backends.graspnet_baseline_inference",
         module_path: str = "",
         num_point: int = 20_000,
     ) -> None:
@@ -424,43 +424,10 @@ class InProcessGraspNetBackend:
 
 
 def _load_inprocess_backend_module(module_name: str, *, module_path: str = ""):
-    """定位并加载进程内推理引擎模块，按三条优先级依次尝试。
-
-    1. 显式配置的 module_path：直接按文件路径加载；
-    2. 常规 import：模块已装进当前 Python 环境时最为直接；
-    3. 兜底在共享资源目录的 graspnet_backend/ 与源码树各级 tools/ 下按文件名查找，
-       以兼容未安装、直接从源码树运行的场景。
-    只有确认是"该模块本身找不到"（ModuleNotFoundError.name 相同）才继续兜底；若只是该模块
-    内部缺依赖，则原样抛出，避免把真实环境问题掩盖成路径问题。
-    """
-    configured_path = Path(module_path).expanduser() if module_path else None
-    if configured_path is not None:
-        return _load_python_module_from_path(module_name, configured_path)
-    try:
-        return importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:
-        # exc.name 与请求的模块名不同 => 缺的是引擎内部依赖，交由调用方报错。
-        if exc.name != module_name:
-            raise
-        candidates: list[Path] = []
-        try:
-            from ament_index_python.packages import get_package_share_directory
-
-            candidates.append(
-                Path(get_package_share_directory("rebotarm_vision"))
-                / "graspnet_backend"
-                / f"{module_name}.py"
-            )
-        except Exception:
-            # 资源索引不可用（例如未 source 环境）时跳过该候选，继续走源码树兜底。
-            pass
-        source = Path(__file__).resolve()
-        for parent in source.parents:
-            candidates.append(parent / "tools" / f"{module_name}.py")
-        for candidate in candidates:
-            if candidate.is_file():
-                return _load_python_module_from_path(module_name, candidate)
-        raise
+    """加载显式文件路径或可导入的后端模块，不再搜索 tools 或 share 下的源码。"""
+    if module_path:
+        return _load_python_module_from_path(module_name, Path(module_path).expanduser())
+    return importlib.import_module(module_name)
 
 
 def _load_python_module_from_path(module_name: str, path: Path):

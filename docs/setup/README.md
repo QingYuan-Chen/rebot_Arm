@@ -9,7 +9,7 @@
 - `ubuntu_ros2_jazzy.md`：Ubuntu 24.04、ROS 2 Jazzy、系统依赖、构建和基础安全顺序；
 - `launch_python_configuration.md`：ROS launch 中 MuJoCo、视觉和 GraspNet 的逐进程 Python 配置；
 - `ubuntu_vision_setup_zh.md`：Gemini 2、YOLO、GraspNet 和视觉运行环境；
-- 根目录 `requirements-*.txt`：按功能拆分的第三方依赖清单，不要混装成一个环境。
+- `requirements/requirements-*.txt`：按功能拆分的第三方依赖清单，不要混装成一个环境。
 
 ## 复现原则
 

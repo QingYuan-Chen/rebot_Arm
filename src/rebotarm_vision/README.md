@@ -1,6 +1,6 @@
 # rebotarm_vision
 
-Ubuntu 原生视觉与抓取候选包。维护链路为 Gemini 2/RGB-D/CameraInfo → YOLO 检测 → 本机 GraspNet → 候选筛选/IK/工作空间/碰撞门 → MoveIt 规划接口。旧 Windows、HTTP、MJPEG、远程 JSON 和独立 GraspNet 服务路线不属于当前包。已有运行说明见 [`README_zh.md`](README_zh.md)。
+Ubuntu 原生视觉与抓取候选包。维护链路为 Gemini 2/RGB-D/CameraInfo → YOLO 检测 → 本机 GraspNet → 候选筛选/IK/工作空间/碰撞门 → MoveIt 规划接口。旧 Windows、HTTP、MJPEG、远程 JSON 和独立 GraspNet 服务路线不属于当前包。运行说明见 [视觉抓取命令](../../docs/reference/commands/visual_grasp_commands.md)。
 
 ## 目录结构
 
@@ -11,6 +11,8 @@ rebotarm_vision/
 │   │   └── gemini2_driver.py        # Gemini 2 图像/深度/CameraInfo 发布
 │   ├── detector/
 │   │   └── yolo_detector.py         # YOLO 推理和检测结果
+│   ├── backends/
+│   │   └── graspnet_baseline_inference.py # GraspNet 进程内推理实现
 │   ├── converters/
 │   │   ├── detection_msgs.py        # 检测消息转换
 │   │   ├── image_msgs.py            # 图像消息转换
@@ -41,13 +43,12 @@ rebotarm_vision/
 │   ├── gripper_quality.py             # 夹爪质量判定（策略在 policies/）
 │   ├── handeye_config.py           # 手眼配置读取（ArUco 算法归标定包）
 │   ├── utils/visualization.py         # 可视化辅助
-│   ├── models/README.md               # 模型文件放置说明
 │   └── __init__.py
 ├── config/                            # 相机、YOLO/GraspNet、hand-eye、候选/夹爪/安全参数
+├── models/                            # YOLO 权重，安装到 share/rebotarm_vision/models/
 ├── launch/vision.launch.py            # 通用视觉入口
 ├── launch/vision_ubuntu.launch.py     # Ubuntu 原生相机入口
-├── setup.py / package.xml / resource/*
-└── ../../tools/graspnet_baseline_inference.py # 构建时安装到 share/.../graspnet_backend/
+└── setup.py / package.xml / resource/*
 ```
 
 `candidate_*.py` 是一组独立策略模块，负责把候选逐层变成可执行计划；不要把这些门绕过后直接调用 controller。抓取从当前姿态规划，无固定观察位调用接口。

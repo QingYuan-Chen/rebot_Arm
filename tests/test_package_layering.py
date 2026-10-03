@@ -264,7 +264,7 @@ def test_retired_interactive_control_config_is_not_loaded() -> None:
 
 def test_architecture_document_defines_package_responsibilities_and_rules() -> None:
     architecture = (ROOT / "docs/implemented/architecture.md").read_text(encoding="utf-8")
-    context = (ROOT / "CONTEXT.md").read_text(encoding="utf-8")
+    context = (ROOT / "docs/reference/context.md").read_text(encoding="utf-8")
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
     required_terms = [

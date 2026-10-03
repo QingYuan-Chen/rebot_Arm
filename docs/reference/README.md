@@ -6,6 +6,9 @@
 
 当前内容包括：
 
+- [`context.md`](context.md)：部署范围、术语与运行契约；
+- [`ros_sdk.md`](ros_sdk.md)：ROS SDK 和控制器接口手册；
+
 - `commands/`：唯一的可复制功能命令来源，见 [`commands/README.md`](commands/README.md)；
 - `topology/`：节点所有权、launch 组合和数据流；
 - `parameters/`：参数文件、launch 参数、Topic/Service/Action 的来源索引；

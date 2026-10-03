@@ -4,6 +4,10 @@
 
 ## 当前焦点
 
+- 2026-10-03：按用户确认完成根目录整理第一步：六份 requirements-*.txt 原样移入 requirements/；根 README_zh.md 移为 docs/reference/ros_sdk.md，CONTEXT.md 移为 docs/reference/context.md；SDK repos 清单移入 third_party/。同步安装脚本、文档链接、AGENTS/执行流程和测试读取路径，新增 tools/README.md 与 requirements/README.md。依赖版本、上下文契约及 SDK 清单内容校验不变；分层23 passed，全量744 passed/16 skipped，Shell语法、文档链接、compileall/diff通过。本轮仅路径、文档及对应测试变更，不改ROS包结构、环境或Agent状态机制，未启动硬件，尚未提交推送。
+
+- 2026-10-03：GraspNet 推理实现从 tools 移入 `rebotarm_vision.backends.graspnet_baseline_inference`，默认配置和节点改用完整模块名；取消 tools/share 源码搜索与后端 data_files 安装。YOLO 权重移入 `src/rebotarm_vision/models/`，仍安装到 share/rebotarm_vision/models；同步模型说明、文档和测试。推理文件与模型 SHA-256 迁移前后一致。清理安装目录旧模型失效软链接后 vision 重建成功；包外 /tmp 验证后端导入和已安装权重校验通过，专项54 passed/1 skipped（含分层），全量744 passed/16 skipped，compileall/diff通过。未启动推理、相机或硬件，未提交推送。
+
 - 2026-10-03：审计 tools 后删除已关闭历史验收阶段的 `p5_*` 九个脚本、`p6_single_bottle_grasp_runner.py` 及其专属测试。视觉/GraspNet/相机/udev/MotorBridge 环境与运行工具均仍被构建、文档或测试使用，保留。现行代码、文档和测试无 P5/P6 runner 引用；分层 23 passed，全量 744 passed/16 skipped。未启动相机或真机。
 
 - 2026-10-03：按用户要求删除视觉包 benchmarks 目录、两个 benchmark console script、相关文档和测试引用。日常视觉启动与 execute 链路不受影响；分层 23 passed，全量 747 passed/16 skipped，vision 重建、compileall 与 diff 检查通过，未启动相机或真机。待将当前工作区整体提交并推送 GitHub。

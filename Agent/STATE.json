@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-03T17:50:50+08:00",
+  "generated_at": "2026-10-03T18:09:15+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "3bbdfcc",
+    "head": "7d68c9c",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-03T17:50:50+08:00 | actor=codex | event=complete | note=Removed confirmed-unused historical P5/P6 tools; retained active environment and runtime tools | verification=23 layering passed; 744 passed,16 skipped; no current references; no camera or hardware run"
+  "last_event": "- 2026-10-03T18:09:15+08:00 | actor=codex | event=start | note=Publish reviewed repository layout and vision resource ownership changes to GitHub | verification=-"
 }

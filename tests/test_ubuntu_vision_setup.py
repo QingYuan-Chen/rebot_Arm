@@ -60,13 +60,13 @@ def test_ubuntu_launch_uses_installed_config_and_model() -> None:
     assert '"yolo_model_path"' in launch
     assert '"launch/vision_ubuntu.launch.py"' in setup
     assert '"config/camera_ubuntu.yaml"' in setup
-    assert 'Path("../../tools/yolo26m-seg-fp16-b1-640-linux.engine")' in setup
-    assert 'Path("../../tools/yolo26s-seg.pt")' in setup
+    assert 'Path("models/yolo26m-seg-fp16-b1-640-linux.engine")' in setup
+    assert 'Path("models/yolo26s-seg.pt")' in setup
 
 
 def test_vision_dependencies_preserve_ros_numpy_abi() -> None:
-    requirements = _read("requirements-vision.txt")
-    tensorrt_requirements = _read("requirements-tensorrt.txt")
+    requirements = _read("requirements/requirements-vision.txt")
+    tensorrt_requirements = _read("requirements/requirements-tensorrt.txt")
 
     assert "numpy==1.26.4" in requirements
     assert "pyorbbecsdk2==2.0.18" in requirements
@@ -91,7 +91,7 @@ def test_ubuntu_vision_setup_does_not_rebuild_workspace_with_venv() -> None:
     assert '/bin/activate' not in setup
     assert '"${python_bin}" -m colcon' not in setup
     assert 'torch==2.14.1+cu130 torchvision==0.29.1+cu130' in setup
-    assert 'pip install --no-deps -r "${repo_root}/requirements-tensorrt.txt"' in setup
+    assert 'pip install --no-deps -r "${repo_root}/requirements/requirements-tensorrt.txt"' in setup
     assert "import tensorrt" in setup
 
 
@@ -103,10 +103,10 @@ def test_vision_packaging_allows_missing_runtime_models(tmp_path, monkeypatch, m
     package = tmp_path / "src/rebotarm_vision"
     package.mkdir(parents=True)
     shutil.copyfile(ROOT / "src/rebotarm_vision/setup.py", package / "setup.py")
-    tools = tmp_path / "tools"
-    tools.mkdir()
+    model_dir = package / "models"
+    model_dir.mkdir()
     for name in models:
-        (tools / name).write_bytes(b"test model")
+        (model_dir / name).write_bytes(b"test model")
     captured = {}
     monkeypatch.setattr("setuptools.setup", lambda **kwargs: captured.update(kwargs))
     monkeypatch.chdir(package)
@@ -117,10 +117,10 @@ def test_vision_packaging_allows_missing_runtime_models(tmp_path, monkeypatch, m
 
 
 def test_install_docs_use_pinned_sdk_and_explicit_runtime_interpreters():
-    readme = _read("README_zh.md")
+    readme = _read("docs/reference/ros_sdk.md")
     vision = _read("docs/setup/ubuntu_vision_setup_zh.md")
     simulation = _read("src/rebotarm_simulation/README_mujoco.md")
-    assert "vcs import third_party < rebotarm_dependencies.repos" in readme
+    assert "vcs import third_party < third_party/rebotarm_dependencies.repos" in readme
     assert "~/seeed/rebotarm_ros2" not in readme
     assert 'ros2 run --prefix "$GRASPNET_PYTHON"' in vision
     assert "尚未完成 `vision_profile:=ubuntu_native` 集成" not in vision

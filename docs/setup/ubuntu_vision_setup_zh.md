@@ -55,7 +55,7 @@ lsusb | grep -i -E "orbbec|2bc5"
 
 ```bash
 ./tools/run_ubuntu_vision.sh \
-  yolo_model_path:="$PWD/tools/yolo26s-seg.pt" yolo_device:=0
+  yolo_model_path:="$PWD/src/rebotarm_vision/models/yolo26s-seg.pt" yolo_device:=0
 ```
 
 无需TensorRT engine即可启动相机/YOLO；它不是已验证YOLO26m engine的等效性能或精度验收。
@@ -201,7 +201,7 @@ export REBOTARM_VISION_PYTHON="$PWD/.venv-vision/bin/python"
 export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
   vision_profile:=ubuntu_native use_hardware:=false \
-  vision_yolo_model_path:="$PWD/tools/yolo26s-seg.pt"
+  vision_yolo_model_path:="$PWD/src/rebotarm_vision/models/yolo26s-seg.pt"
 ```
 
 这会使用真实相机和RViz-only运动学后端，不启动MuJoCo物理仿真或真机控制器；

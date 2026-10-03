@@ -115,7 +115,7 @@ class GraspNetBaselineNode(Node):
         # 推理设备，形如 "cuda:0" / "cpu"；本节点只做透传，由后端解释。
         self.declare_parameter("device", "cuda:0")
         # 后端包装模块名与可选的模块文件路径；模块内需提供 GraspNetBaselineInference 类。
-        self.declare_parameter("backend_module", "graspnet_baseline_inference")
+        self.declare_parameter("backend_module", "rebotarm_vision.backends.graspnet_baseline_inference")
         self.declare_parameter(
             "backend_module_path", os.environ.get("GRASPNET_BACKEND_MODULE_PATH", "")
         )

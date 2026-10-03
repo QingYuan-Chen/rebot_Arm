@@ -4,7 +4,7 @@ launch:
   vision_profile: ubuntu_native
   graspnet_max_input_skew_ms: 100
   graspnet_device: cuda:0
-  graspnet_backend_module: graspnet_baseline_inference
+  graspnet_backend_module: rebotarm_vision.backends.graspnet_baseline_inference
   graspnet_max_grasps: 10
   graspnet_max_points: 20000
   start_grasp_preview: false

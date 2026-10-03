@@ -115,7 +115,7 @@
 
 ## 每次任务开始
 
-1. 阅读 `AGENTS.md`、`docs/implemented/architecture.md` 和 `CONTEXT.md`；
+1. 阅读 `AGENTS.md`、`docs/implemented/architecture.md` 和 `docs/reference/context.md`；
 2. 阅读 `Agent/MEMORY.md`、`Agent/PROJECT_STATUS.md` 和 `Agent/STATE.json`；
 3. 检查 Git 分支、工作区已有修改和当前阻塞；
 4. 确认任务属于哪个 P 阶段和 package owner；
