@@ -18,9 +18,6 @@ rebotarm_vision/
 │   │   ├── debug_camera_preview.py  # 相机调试预览
 │   │   ├── grasp_depth_probe_node.py # 深度采样诊断
 │   │   └── graspnet_open3d_viewer.py # GraspNet 候选可视化
-│   ├── benchmarks/                   # 软件与仿真评测入口
-│   │   ├── visual_grasp_benchmark.py     # 视觉抓取软件 benchmark
-│   │   └── hybrid_grasp_sim_benchmark.py # 视觉 + 仿真 benchmark
 │   ├── nodes/                        # 正式 ROS 适配节点
 │   │   ├── vision_node.py            # Gemini 2/YOLO 主节点
 │   │   ├── graspnet_baseline_node.py # RGB-D/检测 -> GraspCandidate
@@ -53,7 +50,7 @@ rebotarm_vision/
 └── ../../tools/graspnet_baseline_inference.py # 构建时安装到 share/.../graspnet_backend/
 ```
 
-`candidate_*.py` 是一组独立策略模块，负责把候选逐层变成可执行计划；不要把这些门绕过后直接调用 controller。`visual_ready_node` 属于 `rebotarm_motion`，视觉包只保留其兼容/调用接口。
+`candidate_*.py` 是一组独立策略模块，负责把候选逐层变成可执行计划；不要把这些门绕过后直接调用 controller。抓取从当前姿态规划，无固定观察位调用接口。
 
 ## 对外入口分类
 
@@ -61,10 +58,9 @@ rebotarm_vision/
 
 | 类别 | 入口 | 说明 |
 | --- | --- | --- |
-| 正式运行 | `rebotarm_vision_node`, `rebotarm_graspnet_baseline_node`, `rebotarm_grasp_candidate_ik_filter`, `rebotarm_visual_grasp_executor`, `rebotarm_grasp_tcp_frame` | Ubuntu 主链路；默认执行器仍由 `execution_mode=plan_only` 保护 |
+| 正式运行 | `rebotarm_vision_node`, `rebotarm_graspnet_baseline_node`, `rebotarm_grasp_candidate_ik_filter`, `rebotarm_visual_grasp_executor`, `rebotarm_grasp_tcp_frame` | Ubuntu 主链路；节点裸启动默认 plan_only，正式视觉 launch 固定 execute，启动后仍等待服务触发且不自动使能 |
 | 只读诊断 | `rebotarm_debug_camera_preview`, `rebotarm_grasp_depth_probe`, `rebotarm_grasp_candidate_markers`, `rebotarm_visual_grasp_markers` | 观察图像、深度或候选，不应下发运动 |
 | 开发调试 | `rebotarm_send_grasp_preview`, `rebotarm_graspnet_open3d_viewer`, `rebotarm_offline_yolo_node` | 离线或可视化工具，需单独准备输入 |
-| Benchmark | `rebotarm_visual_grasp_benchmark`, `rebotarm_hybrid_grasp_sim_benchmark` | 软件/仿真评测，不作为真机启动入口 |
 | legacy 兼容 | （已退役）ordinary grasp 入口 | 历史路线已从安装包和 launch 移除 |
 
 正式 Ubuntu GraspNet 节点使用 `InProcessGraspNetBackend`。外部研究代码只作为该后端加载的
@@ -80,8 +76,6 @@ rebotarm_visual_grasp_markers          # RViz 抓取标记
 rebotarm_visual_grasp_executor         # 视觉抓取执行编排
 rebotarm_grasp_candidate_ik_filter     # 候选 IK/碰撞过滤
 rebotarm_grasp_tcp_frame               # TCP 坐标系
-rebotarm_visual_grasp_benchmark        # 软件 benchmark
-rebotarm_hybrid_grasp_sim_benchmark    # 混合仿真 benchmark
 rebotarm_debug_camera_preview           # 相机调试
 rebotarm_grasp_depth_probe              # 深度探针
 rebotarm_graspnet_open3d_viewer         # Open3D 候选查看器

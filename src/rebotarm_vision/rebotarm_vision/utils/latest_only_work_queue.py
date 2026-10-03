@@ -60,7 +60,7 @@ class LatestOnlyWorkQueueStats:
 
 
 class LatestOnlyWorkQueue(Generic[T]):
-    """Serialize expensive work while retaining only the newest pending item."""
+    """串行执行耗时任务，等待队列中只保留最新任务。"""
 
     def __init__(self) -> None:
         self._lock = Lock()

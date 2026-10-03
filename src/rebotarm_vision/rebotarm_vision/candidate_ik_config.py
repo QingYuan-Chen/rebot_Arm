@@ -1,8 +1,7 @@
-"""Candidate IK filter configuration snapshot.
+"""候选逆运动学过滤器的配置快照。
 
-The ROS node remains the owner of parameter declaration.  This module only
-copies values once so frame processing can be tested without a parameter
-server or a live ROS node.
+ROS 节点负责声明参数；本模块仅复制一次参数值，
+使单帧处理逻辑可在没有参数服务器或运行中的 ROS 节点时接受测试。
 """
 
 from __future__ import annotations

@@ -37,7 +37,6 @@ setup(
         "console_scripts": [
             # 可执行名 = 模块:函数；左侧名字被上层启动文件以 executable=... 引用。
             "PoseExecutionNode = rebotarm_motion.pose_execution_node:main",
-            "rebotarm_visual_ready = rebotarm_motion.visual_ready_node:main",
             "rebotarm_mujoco_moveit_acceptance = rebotarm_motion.mujoco_moveit_acceptance:main",
         ],
     },

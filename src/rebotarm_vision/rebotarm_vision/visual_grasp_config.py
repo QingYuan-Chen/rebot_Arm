@@ -1,4 +1,4 @@
-"""Immutable snapshot of executor parameters used by orchestration."""
+"""供流程编排使用的执行器参数不可变快照。"""
 
 from __future__ import annotations
 

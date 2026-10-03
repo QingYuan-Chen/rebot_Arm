@@ -57,14 +57,9 @@ def test_visual_grasp_system_is_a_composition_entry_with_stage_includes():
     assert '"visual_interfaces_config"' in main
 
 
-def test_compact_visual_entry_exposes_only_composition_parameters():
-    text = (ROOT / "src" / "rebotarm_bringup" / "launch" / "visual_grasp_compact.launch.py").read_text(
-        encoding="utf-8"
-    )
-    assert "_system_module" in text
-    assert "_prepare_stages" in text
-    assert "candidate_min_confidence" not in text
-    assert "gripper_grasp_close_force" not in text
+def test_retired_visual_wrappers_are_removed():
+    for name in ('visual_grasp_compact', 'visual_readonly', 'visual_plan_only', 'visual_execute'):
+        assert not (ROOT / 'src/rebotarm_bringup/launch' / (name + '.launch.py')).exists()
 
 
 def test_interface_profile_is_documented_as_the_authoritative_connection_contract():
@@ -72,20 +67,15 @@ def test_interface_profile_is_documented_as_the_authoritative_connection_contrac
         encoding="utf-8"
     )
     assert "visual_grasp_interfaces.yaml" in docs
-    assert "兼容入口只允许转发" in docs
+    assert "visual_grasp_system.launch.py" in docs
 
 
-def test_visual_ready_failure_closes_pipeline_without_disabling_hardware():
-    node = (ROOT / "src" / "rebotarm_motion" / "rebotarm_motion" / "visual_ready_node.py").read_text(
-        encoding="utf-8"
-    )
-    lifecycle = (ROOT / "src" / "rebotarm_bringup" / "launch" / "includes" / "visual_lifecycle.launch.py").read_text(
-        encoding="utf-8"
-    )
-    assert "sys.exit(1)" in node
-    assert "event.returncode == 0" in lifecycle
-    assert "pipeline remains closed" in lifecycle
-    assert "/rebotarm/disable" not in lifecycle
+def test_visual_ready_tool_is_retired():
+    for relative in ('src/rebotarm_bringup/launch/visual_ready.launch.py',
+                     'src/rebotarm_motion/rebotarm_motion/visual_ready_node.py',
+                     'src/rebotarm_motion/config/visual_ready.yaml'):
+        assert not (ROOT / relative).exists()
+    assert 'rebotarm_visual_ready =' not in (ROOT / 'src/rebotarm_motion/setup.py').read_text()
 
 
 def test_vision_launch_does_not_wrap_static_tf_in_ros2_run():

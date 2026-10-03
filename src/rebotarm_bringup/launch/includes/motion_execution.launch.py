@@ -29,7 +29,7 @@ def _build(context):
             name="motion_execution",
             output="screen",
             condition=IfCondition(start_motion_execution),
-            parameters=[merged_parameters(context, 'motion_execution', [visual_interfaces_config], {**{'arm_namespace': arm_namespace, 'moveit_planning_time': moveit_planning_time, 'moveit_num_planning_attempts': moveit_num_planning_attempts, 'publish_plan_only_preview': PythonExpression(["'", execution_mode, "'.lower() == 'plan_only'"]), 'default_velocity_scaling': move_velocity_scaling, 'default_acceleration_scaling': acceleration_scaling}})],
+            parameters=[merged_parameters(context, 'motion_execution', [visual_interfaces_config], {**{'arm_namespace': arm_namespace, 'use_hardware': LaunchConfiguration('use_hardware'), 'moveit_planning_time': moveit_planning_time, 'moveit_num_planning_attempts': moveit_num_planning_attempts, 'publish_plan_only_preview': PythonExpression(["'", execution_mode, "'.lower() == 'plan_only'"]), 'default_velocity_scaling': move_velocity_scaling, 'default_acceleration_scaling': acceleration_scaling}})],
         ),
     ]
 

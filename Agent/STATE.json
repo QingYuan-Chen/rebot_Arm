@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-03T00:41:20+08:00",
+  "generated_at": "2026-10-03T17:39:27+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "b067478",
+    "head": "b90aa39",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-03T00:41:20+08:00 | actor=codex | event=complete | note=修复静态 TF 新参数格式和 GraspNet torch.cross 兼容补丁；正确视觉/GraspNet 环境只读入口验证通过，全量测试 722 passed, 16 skipped | verification=-"
+  "last_event": "- 2026-10-03T17:39:27+08:00 | actor=codex | event=checkpoint | note=Benchmarks removed and validated; preparing full current-worktree commit and GitHub push | verification=Layering 23 passed; full suite 747 passed,16 skipped; vision build and compileall passed; no hardware run"
 }

@@ -9,7 +9,7 @@ rebotarm_vision_node:
   ros__parameters:
     # 相机型号选择器：目前仅支持 gemini2（其它取值会让节点在启动时抛 unsupported camera.type）。
     camera.type: gemini2
-    # Verified Gemini 2 HW D2C pair on this Ubuntu host.
+    # 已在本 Ubuntu 主机验证的 Gemini 2 硬件深度到彩色对齐流组合。
     # 以下 color_*/depth_* 五元组是本机实测可用的 Gemini 2 硬件 D2C（深度-彩色对齐）配对组合，
     # 改动任一项都可能破坏对齐，导致深度图与彩色图不再逐像素对应；非必要不要调整。
     # 彩色流宽/高（像素）：640x480 是检测与内参默认值所对应的分辨率，换分辨率需同步更新内参。
@@ -40,8 +40,8 @@ rebotarm_vision_node:
     # 同时改为持续发布空检测结果（不再假装有数据），避免下游用陈旧检测继续规划。
     # 调小会更快触发故障锁存，调大则容错更久但故障发现更慢。
     camera.max_empty_frames: 30
-    # The Ubuntu launch file overrides this by the installed model path; leaving this empty here
-    # makes a bare `ros2 run` fail fast instead of loading an unintended model.
+    # Ubuntu 启动文件会用已安装模型的路径覆盖此值；这里留空，
+    # 使直接 ros2 run 且未配置模型时立即报错，避免加载非预期模型。
     # 留空表示"必须由启动文件注入"。启动文件会用 share 目录下安装好的模型路径覆盖该值；
     # 若直接 ros2 run 而未注入，节点检测到空路径会立即报错（yolo.model_path must not be empty），
     # 这样能快速失败，避免误加载到非预期模型。
@@ -73,8 +73,8 @@ rebotarm_vision_node:
     # 主循环频率（Hz）：取流 + 推理 + 发布的整体节奏上限。
     # 调高会更实时但更耗 CPU/GPU；调低会减轻负载，但检测结果更新变慢。
     ros.loop_rate_hz: 15.0
-    # Large 640x480 bgr8 samples are fragmented and lost with Fast DDS
-    # BEST_EFFORT on this host; RELIABLE passed the C++ payload control.
+    # 本机 Fast DDS 使用 BEST_EFFORT 时，640x480 bgr8 大图像样本会分片丢失；
+    # RELIABLE 已通过 C++ 数据载荷对照测试。
     # 本机 Fast DDS 在 BEST_EFFORT 下会分片丢失 640x480 bgr8 大样本；
     # 改用 RELIABLE 后通过了 C++ 侧载荷校验，因此这里必须是 reliable。
     # 合法取值仅 best_effort / reliable，其它取值节点会直接报错。
@@ -87,10 +87,7 @@ rebotarm_grasp_tcp_frame:
     # 父坐标系：机械臂末端连杆；子坐标系：抓取 TCP。两者构成发布到 TF 树的静态变换。
     parent_frame: end_link
     child_frame: grasp_tcp
-    # Operator-measured end_link -> grasp_tcp translation.  Do not substitute
-    # the MuJoCo ee_site value here.
-    # Operator-measured end_link -> grasp_tcp translation.  Do not substitute
-    # the MuJoCo ee_site value here.
+    # 操作员实测的 end_link -> grasp_tcp 平移，不能用 MuJoCo 的 ee_site 值替代。
     # 操作员实测的 end_link -> grasp_tcp 平移，单位米（沿末端 X 轴 -4 cm）。
     # 不要用仿真模型（MuJoCo）里的 ee_site 取值替代：仿真等效点与真机实测点并不一致，
     # 混用会让真机所有抓取位姿整体偏移，可能直接压到桌面或物体。

@@ -13,6 +13,7 @@
     发布 ``/<ns>/joint_states``：8 个关节（6 个臂关节 + 2 个手指关节）的位置/速度，effort 恒为 0；
     发布 ``/<ns>/gripper/state``：夹爪开口宽度（米），用关节状态消息承载；
     服务 ``/<ns>/trajectory_stop``：请求停止当前轨迹（等价于取消）；
+    服务 ``/<ns>/safe_home``：从任意停止姿态平滑回到统一 safe_home；
     服务 ``/<ns>/gripper/set``：直接设置夹爪开口宽度并立即刷新状态。
 
 关键流程与状态：
@@ -35,6 +36,7 @@ import rclpy
 from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
@@ -45,6 +47,9 @@ from rebotarm_msgs.srv import SetGripper
 from trajectory_msgs.msg import JointTrajectory
 
 from .sim_gripper import gripper_joint_positions_for_width
+
+
+SAFE_HOME_JOINT_POSITIONS = (0.0, 0.0, -0.017453292519943295, 0.0, 0.0, 0.0)
 
 
 def _duration_to_sec(duration: Duration) -> float:
@@ -90,7 +95,7 @@ class SimTrajectoryControllerNode(Node):
         self.declare_parameter("gripper_min_width_m", 0.0)
         # initial_joint_positions：启动时的臂关节初始位置（弧度），按 joint1..joint6 顺序，
         # 只覆盖前 6 个；手指关节位置默认保持 0（即完全闭合）。
-        self.declare_parameter("initial_joint_positions", [0.0, -0.1, -0.2, 0.2, 0.0, 0.0])
+        self.declare_parameter("initial_joint_positions", list(SAFE_HOME_JOINT_POSITIONS))
 
         self._arm_namespace = str(self.get_parameter("arm_namespace").value).strip("/")
         self._joint_names = [str(v) for v in list(self.get_parameter("joint_names").value)]
@@ -109,6 +114,9 @@ class SimTrajectoryControllerNode(Node):
         self._lock = threading.Lock()
         # 置位表示“请求停止当前轨迹”：取消回调与停止服务都会置位，执行回调每周期检查并清除
         self._stop_requested = threading.Event()
+        self._recovery_lock = threading.Lock()
+        self._motion_lock = threading.Lock()
+        self._callback_group = ReentrantCallbackGroup()
 
         self._joint_state_pub = self.create_publisher(JointState, f"/{self._arm_namespace}/joint_states", 10)
         self._gripper_state_pub = self.create_publisher(
@@ -123,9 +131,11 @@ class SimTrajectoryControllerNode(Node):
             execute_callback=self._execute_goal,
             goal_callback=self._goal_callback,
             cancel_callback=self._cancel_callback,
+            callback_group=self._callback_group,
         )
-        self.create_service(Trigger, f"/{self._arm_namespace}/trajectory_stop", self._stop_service)
-        self.create_service(SetGripper, f"/{self._arm_namespace}/gripper/set", self._set_gripper_service)
+        self.create_service(Trigger, f"/{self._arm_namespace}/trajectory_stop", self._stop_service, callback_group=self._callback_group)
+        self.create_service(Trigger, f"/{self._arm_namespace}/safe_home", self._safe_home_service, callback_group=self._callback_group)
+        self.create_service(SetGripper, f"/{self._arm_namespace}/gripper/set", self._set_gripper_service, callback_group=self._callback_group)
         self.create_timer(1.0 / self._publish_rate_hz, self._publish_joint_state)
         self.get_logger().info(
             f"RViz sim trajectory controller ready: /{self._arm_namespace}/follow_joint_trajectory, "
@@ -137,8 +147,8 @@ class SimTrajectoryControllerNode(Node):
 
         保守起见这里不做范围校验——本节点只做可视化，位置越界由上层规划与安全监控负责。
         """
-        if not goal_request.trajectory.joint_names:
-            self.get_logger().warn("rejecting empty trajectory goal")
+        if self._recovery_lock.locked() or self._motion_lock.locked() or not goal_request.trajectory.joint_names:
+            self.get_logger().warn("rejecting empty trajectory or busy simulation controller")
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
@@ -153,6 +163,48 @@ class SimTrajectoryControllerNode(Node):
         response.success = True
         response.message = "sim trajectory stop requested"
         return response
+
+    def _safe_home_service(self, _request, response):
+        """仿真等价的安全回位：从任意停止姿态平滑回到统一 safe_home。"""
+        if not self._recovery_lock.acquire(blocking=False):
+            response.success = False
+            response.message = "sim safe_home already running"
+            return response
+        motion_owned = False
+        try:
+            # 先让当前 FollowJointTrajectory 走取消分支，再独占更新关节状态。
+            self._stop_requested.set()
+            if not self._motion_lock.acquire(timeout=3.0):
+                response.success = False
+                response.message = "sim safe_home refused: active trajectory did not stop"
+                return response
+            motion_owned = True
+            with self._lock:
+                start = [self._positions_by_name.get(name, 0.0) for name in self._joint_names[:6]]
+            duration = 2.0
+            steps = max(1, int(duration * self._publish_rate_hz))
+            self._stop_requested.clear()
+            for index in range(1, steps + 1):
+                if not rclpy.ok() or self._stop_requested.is_set():
+                    response.success = False
+                    response.message = "sim safe_home stopped"
+                    return response
+                ratio = index / steps
+                smooth = 10.0 * ratio**3 - 15.0 * ratio**4 + 6.0 * ratio**5
+                with self._lock:
+                    for name, initial, target in zip(
+                        self._joint_names[:6], start, SAFE_HOME_JOINT_POSITIONS
+                    ):
+                        self._positions_by_name[name] = initial + (target - initial) * smooth
+                        self._velocities_by_name[name] = 0.0
+                time.sleep(1.0 / self._publish_rate_hz)
+            response.success = True
+            response.message = "sim safe_home reached"
+            return response
+        finally:
+            if motion_owned:
+                self._motion_lock.release()
+            self._recovery_lock.release()
 
     def _set_gripper_service(self, request, response):
         """``/<ns>/gripper/set`` 服务：把请求的开口宽度换算成两个手指关节位置并立即发布状态。
@@ -198,6 +250,18 @@ class SimTrajectoryControllerNode(Node):
         self._gripper_state_pub.publish(msg)
 
     def _execute_goal(self, goal_handle):
+        if self._recovery_lock.locked() or not self._motion_lock.acquire(blocking=False):
+            result = FollowJointTrajectory.Result()
+            result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
+            result.error_string = "another motion owns the simulation controller"
+            goal_handle.abort()
+            return result
+        try:
+            return self._execute_owned_goal(goal_handle)
+        finally:
+            self._motion_lock.release()
+
+    def _execute_owned_goal(self, goal_handle):
         """执行一条关节轨迹目标：按单调时钟线性插值，周期发布反馈。
 
         时间基准用 ``time.monotonic()``（不受系统时间调整影响），相对轨迹起点计 elapsed；
@@ -222,7 +286,10 @@ class SimTrajectoryControllerNode(Node):
 
         while rclpy.ok():
             if goal_handle.is_cancel_requested or self._stop_requested.is_set():
-                goal_handle.canceled()
+                if goal_handle.is_cancel_requested:
+                    goal_handle.canceled()
+                else:
+                    goal_handle.abort()
                 result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
                 result.error_string = "sim trajectory canceled"
                 return result

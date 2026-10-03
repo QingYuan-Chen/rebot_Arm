@@ -1,4 +1,4 @@
-"""ROS and MoveIt boundary used by :mod:`candidate_ik_runtime`."""
+""":mod:`candidate_ik_runtime` 使用的 ROS 与 MoveIt 接口边界。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _pose_from_target(target):
 
 
 class CandidateIkGateway:
-    """TF and MoveIt clients injected without a dependency on a ROS node."""
+    """通过注入使用 TF 和 MoveIt 客户端，无需依赖 ROS 节点对象。"""
 
     def __init__(self, *, config, ik_client, validity_client, tf_buffer,
                  joint_state, logger, publish_ranked, publish_empty,
@@ -41,7 +41,7 @@ class CandidateIkGateway:
         self._transform_cache = {}
 
     def begin_frame(self) -> None:
-        """Clear transforms cached for the previous candidate frame."""
+        """清除上一帧候选对应的坐标变换缓存。"""
         self._transform_cache.clear()
 
     def publish_ranked(self, message, ranked) -> None:

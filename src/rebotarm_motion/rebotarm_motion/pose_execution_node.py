@@ -28,14 +28,15 @@
   状态并由上层（视觉抓取执行器等）决定何时下发；
 - 速度/加速度缩放参数默认很小（0.10 / 0.08），请求中给 0.0 时回落到这些默认
   值，避免上位随手传 0 导致按满速执行；
-- `stop` 只是"请求停止"：无论底层停止调用是否报错，响应都返回成功，真实是否
-  停下来必须由上层用状态回读确认。
+- `stop` 成功要求旧请求退出、动作终态、控制器停止成功及新鲜关节反馈持续静止；
+  真机还要求新鲜且无故障的 IDLE 状态。确认失败时阻止后续执行，可再次 stop 重新检查。
 """
 
 from __future__ import annotations
 
 import time
 import math
+import threading
 
 import rclpy
 from control_msgs.action import FollowJointTrajectory
@@ -45,6 +46,10 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_srvs.srv import Trigger
+from sensor_msgs.msg import JointState
+from rclpy.qos import qos_profile_sensor_data
+from rebotarm_msgs.msg import ArmStatus
+from .stop_feedback import StopFeedback
 
 from rebotarm_msgs.srv import ExecutePose, PublishTrajectoryPreview
 
@@ -55,9 +60,8 @@ class PoseExecutionNode(Node):
     """位姿执行节点：规划 + 下发轨迹 + 提供停止入口。
 
     生命周期：由 `main()` 创建后交给 4 线程的多线程执行器自旋，直到进程收到
-    中断。运行期间只有一个实例状态量 `_active_goal_handle`，用于让 `stop`
-    服务能取消"正在执行的那一条"轨迹；`execute_pose` 回调会阻塞等待执行结果，
-    因此并发调用时后到的请求可能看到前一条的句柄（见 `_execute_pose` 中的说明）。
+    中断。执行请求独占运动入口；stop 增加代次、阻止旧规划下发，并跟踪延迟的
+    动作接受与终态。停止尚未确认时拒绝新执行。
 
     线程模型：所有服务、动作客户端与规划器共用同一个可重入回调组，允许执行中
     的 `execute_pose` 与 `stop` 并行进入。
@@ -97,10 +101,26 @@ class PoseExecutionNode(Node):
         self.declare_parameter("default_acceleration_scaling", 0.08)
         # 仅视觉纯规划入口启用；其他 ExecutePose 调用不会产生预览副作用。
         self.declare_parameter("publish_plan_only_preview", False)
+        self.declare_parameter("use_hardware", False)
+        self.declare_parameter("stop_confirmation_timeout_sec", 8.0)
 
         self._arm_namespace = str(self.get_parameter("arm_namespace").value).strip("/")
         # 正在执行的动作目标句柄，仅用于 stop 时发起取消；执行结束后置回 None。
         self._active_goal_handle = None
+        self._motion_lock = threading.RLock()
+        self._stop_lock = threading.Lock()
+        self._request_active = False
+        self._stopping = False
+        self._generation = 0
+        self._send_future = None
+        self._result_future = None
+        self._stop_feedback = StopFeedback()
+        self._arm_status = None
+        self.create_subscription(JointState, f"/{self._arm_namespace}/joint_states",
+                                 self._on_stop_feedback, qos_profile_sensor_data,
+                                 callback_group=self._callback_group)
+        self.create_subscription(ArmStatus, f"/{self._arm_namespace}/arm_status",
+                                 self._on_arm_status, 10, callback_group=self._callback_group)
         self._preview_publisher = (
             self.create_publisher(DisplayTrajectory, "/display_planned_path", 10)
             if bool(self.get_parameter("publish_plan_only_preview").value)
@@ -145,7 +165,7 @@ class PoseExecutionNode(Node):
             self._publish_trajectory_preview,
             callback_group=self._callback_group,
         )
-        # 停止服务：只负责"请求"停止，不保证轨迹已停稳。
+        # 停止服务：有界等待动作终态和新鲜静止反馈，失败时保持执行门控。
         self.create_service(
             Trigger,
             f"/{self._arm_namespace}/motion_execution/stop",
@@ -156,7 +176,38 @@ class PoseExecutionNode(Node):
             f"pose motion execution ready: /{self._arm_namespace}/motion_execution/execute_pose"
         )
 
-    def _execute_pose(self, request: ExecutePose.Request, response: ExecutePose.Response):
+    def _on_stop_feedback(self, msg):
+        self._stop_feedback.update(msg, time.monotonic(), self.get_clock().now().nanoseconds)
+
+    def _on_arm_status(self, msg):
+        with self._motion_lock:
+            self._arm_status = (time.monotonic(), msg)
+
+    def _execute_pose(self, request, response):
+        with self._motion_lock:
+            if self._request_active or self._stopping:
+                response.success = False
+                response.message = "motion busy or stop not confirmed"
+                return response
+            self._request_active = True
+            self._run_generation = self._generation
+            self._send_future = self._result_future = self._active_goal_handle = None
+        try:
+            return self._execute_pose_impl(request, response)
+        except Exception as exc:
+            with self._motion_lock:
+                self._stopping = True
+            response.success = False
+            response.message = f"motion failed; stop confirmation required: {exc}"
+            return response
+        finally:
+            with self._motion_lock:
+                self._request_active = False
+
+    def _interrupted(self):
+        return self._stopping or self._run_generation != self._generation
+
+    def _execute_pose_impl(self, request: ExecutePose.Request, response: ExecutePose.Response):
         """规划并可选执行一个末端位姿目标。
 
         请求字段：`target_pose`（位姿目标）、`velocity_scaling`/`acceleration_scaling`
@@ -220,6 +271,11 @@ class PoseExecutionNode(Node):
             return response
 
         response.stage = "execution"
+        with self._motion_lock:
+            if self._interrupted():
+                response.success = False
+                response.message = "stopped during planning"
+                return response
         # 请求超时至少按 1 s 处理：动作服务器发现/连接握手需要时间，给 0 会立刻误判不可用。
         if not self._trajectory_client.wait_for_server(timeout_sec=max(float(request.timeout_sec), 1.0)):
             response.success = False
@@ -228,22 +284,40 @@ class PoseExecutionNode(Node):
 
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = plan.trajectory
-        send_future = self._trajectory_client.send_goal_async(goal)
+        with self._motion_lock:
+            if self._interrupted():
+                response.success = False
+                response.message = "stopped before trajectory dispatch"
+                return response
+            send_future = self._trajectory_client.send_goal_async(goal)
+            self._send_future = send_future
         self._wait_future(send_future, max(float(request.timeout_sec), 1.0))
-        goal_handle = send_future.result() if send_future.done() else None
+        if not send_future.done():
+            with self._motion_lock:
+                self._stopping = True
+            send_future.add_done_callback(self._cancel_late_goal)
+            response.success = False
+            response.message = "trajectory acceptance timeout; stop confirmation required"
+            return response
+        goal_handle = send_future.result()
         if goal_handle is None or not goal_handle.accepted:
             response.success = False
             response.message = "trajectory goal rejected"
             return response
 
-        # 保存句柄，使并发到达的 stop 服务能取消这条轨迹。注意：赋值与清除之间
-        # 存在窗口，若 stop 在赋值前到达则只能依赖控制器侧的 trajectory_stop。
-        self._active_goal_handle = goal_handle
-        result_future = goal_handle.get_result_async()
+        # stop 也跟踪 send_future，接受响应晚到时仍会取消并等待终态。
+        with self._motion_lock:
+            self._active_goal_handle = goal_handle
+            result_future = goal_handle.get_result_async()
+            self._result_future = result_future
+            if self._interrupted():
+                goal_handle.cancel_goal_async()
         # 结果等待窗口至少 30 s：轨迹本身可能远长于规划超时，必须给它跑完的机会。
         self._wait_future(result_future, max(float(request.timeout_sec), 30.0))
-        self._active_goal_handle = None
         if not result_future.done():
+            with self._motion_lock:
+                self._stopping = True
+            goal_handle.cancel_goal_async()
             response.success = False
             response.message = "trajectory result timeout"
             return response
@@ -325,6 +399,22 @@ class PoseExecutionNode(Node):
             display.trajectory.append(robot_trajectory)
             previous_end = list(points[-1].positions)
 
+        from .gripper_preview import with_gripper_preview
+        try:
+            trajectories = with_gripper_preview(
+                trajectories, request.gripper_before_trajectory, request.gripper_openings_m
+            )
+        except ValueError as exc:
+            response.success = False
+            response.message = str(exc)
+            return response
+        # 重新构造显示序列，包含开合动画和保持开口的机械臂段。
+        display.trajectory = []
+        for trajectory in trajectories:
+            robot_trajectory = RobotTrajectory()
+            robot_trajectory.joint_trajectory = trajectory
+            display.trajectory.append(robot_trajectory)
+        expected_names = list(trajectories[0].joint_names)
         first_point = trajectories[0].points[0]
         display.trajectory_start.joint_state.name = expected_names
         display.trajectory_start.joint_state.position = list(first_point.positions)
@@ -333,28 +423,94 @@ class PoseExecutionNode(Node):
         response.message = f"published {len(trajectories)} preview trajectories"
         return response
 
-    def _stop(self, _request: Trigger.Request, response: Trigger.Response):
-        """停止入口：先取消动作目标，再请求控制器侧的 trajectory_stop。
+    def _cancel_late_goal(self, future):
+        try:
+            handle = future.result()
+            if handle is not None and handle.accepted:
+                with self._motion_lock:
+                    self._active_goal_handle = handle
+                    self._result_future = handle.get_result_async()
+                handle.cancel_goal_async()
+        except Exception as exc:
+            self.get_logger().error(f"late goal cancellation failed: {exc}")
 
-        两路都做了异常兜底并只记警告：停止流程本身不应因为底层不可用而抛异常
-        （否则服务端会返回失败并掩盖"已经尝试停止"这一事实）。响应恒为成功，
-        调用方必须通过状态回读确认是否真正停稳。
-        """
-        goal_handle = self._active_goal_handle
-        if goal_handle is not None:
-            try:
-                goal_handle.cancel_goal_async()
-            except Exception as exc:  # pragma: no cover
-                self.get_logger().warn(f"failed to cancel active trajectory: {exc}")
-        # 只等 0.2 s：stop 服务可能被急停路径调用，不能长时间阻塞在发现服务上。
-        if self._trajectory_stop_client.wait_for_service(timeout_sec=0.2):
-            try:
-                self._trajectory_stop_client.call_async(Trigger.Request())
-            except Exception as exc:  # pragma: no cover
-                self.get_logger().warn(f"failed to request trajectory_stop: {exc}")
-        response.success = True
-        response.message = "motion execution stop requested"
-        return response
+    def _action_terminal(self):
+        """Caller holds motion lock. Unknown/late acceptance is never idle."""
+        if self._send_future is None:
+            return True
+        if not self._send_future.done() or self._send_future.cancelled():
+            return False
+        handle = self._send_future.result()
+        if handle is None:
+            return False
+        if not handle.accepted:
+            return True
+        if self._result_future is None:
+            self._active_goal_handle = handle
+            self._result_future = handle.get_result_async()
+            handle.cancel_goal_async()
+        future = self._result_future
+        return (future.done() and not future.cancelled()
+                and int(future.result().status) in (4, 5, 6))
+
+    def _hardware_idle(self, now):
+        if not bool(self.get_parameter("use_hardware").value):
+            return True
+        if self._arm_status is None:
+            return False
+        received, status = self._arm_status
+        stamp = status.header.stamp.sec * 1_000_000_000 + status.header.stamp.nanosec
+        age = (self.get_clock().now().nanoseconds-stamp)/1e9
+        return (now-received <= 2.0 and stamp > 0 and -.25 <= age <= 2.0
+                and not status.error_codes and status.state_machine == "IDLE"
+                and len(status.per_joint_status_code) >= 6
+                and all(code in (0, 1) for code in status.per_joint_status_code))
+
+    def _stop(self, _request, response):
+        """Acknowledge only after cancellation, terminal action and fresh quiet feedback."""
+        if not self._stop_lock.acquire(blocking=False):
+            response.success = False
+            response.message = "stop confirmation already in progress"
+            return response
+        try:
+            with self._motion_lock:
+                self._stopping = True
+                self._generation += 1
+                handle = self._active_goal_handle
+            if handle is not None:
+                handle.cancel_goal_async()
+            timeout = max(float(self.get_parameter("stop_confirmation_timeout_sec").value), .1)
+            deadline = time.monotonic() + timeout
+            if not self._trajectory_stop_client.wait_for_service(timeout_sec=min(timeout, .5)):
+                raise RuntimeError("trajectory_stop unavailable")
+            stop_future = self._trajectory_stop_client.call_async(Trigger.Request())
+            quiet_since = None
+            while rclpy.ok() and time.monotonic() < deadline:
+                now = time.monotonic()
+                with self._motion_lock:
+                    terminal = self._action_terminal()
+                    stopped = (stop_future.done() and not stop_future.cancelled()
+                               and stop_future.result() is not None and stop_future.result().success)
+                    idle = stopped and terminal and not self._request_active and self._hardware_idle(now)
+                    if not idle:
+                        quiet_since = None
+                    elif quiet_since is None:
+                        quiet_since = now
+                    elif self._stop_feedback.stationary(quiet_since, now, self.get_clock().now().nanoseconds):
+                        self._stopping = False
+                        response.success = True
+                        response.message = "motion stop confirmed; holding current position"
+                        return response
+                time.sleep(.02)
+            raise RuntimeError("stop confirmation timed out: pending request/action, stale or moving feedback, or controller fault")
+        except Exception as exc:
+            response.success = False
+            response.message = str(exc)
+            return response
+        finally:
+            # Failure intentionally keeps _stopping set; another stop can
+            # recheck evidence after the underlying problem is resolved.
+            self._stop_lock.release()
 
     def _wait_future(self, future, timeout_sec: float) -> None:
         """在 4 线程执行器中同步等待一个 future 完成。

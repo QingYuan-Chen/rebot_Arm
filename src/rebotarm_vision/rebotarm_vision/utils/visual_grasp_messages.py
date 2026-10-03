@@ -1,4 +1,4 @@
-"""ROS pose conversion for visual grasp adapters."""
+"""视觉抓取适配器使用的 ROS 位姿转换。"""
 from __future__ import annotations
 import rclpy
 from geometry_msgs.msg import Pose, PoseStamped

@@ -1,4 +1,4 @@
-"""Read-only diagnostics and development visualisation tools.
+"""只读诊断与开发可视化工具。
 
-These modules do not belong to the production perception or execution path.
+这些模块不属于正式感知或执行链路。
 """

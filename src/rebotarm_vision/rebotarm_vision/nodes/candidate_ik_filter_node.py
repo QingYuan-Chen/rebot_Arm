@@ -283,7 +283,7 @@ class CandidateIkFilterNode(Node):
             )
 
     def _joint_state_snapshot(self) -> JointState | None:
-        """Return an isolated joint-state snapshot for one frame."""
+        """返回供单帧处理使用的独立关节状态快照。"""
         with self._joint_state_lock:
             return deepcopy(self._latest_joint_state)
 
@@ -359,7 +359,7 @@ class CandidateIkFilterNode(Node):
             f"ranked={counts.get('ranked', 0)}"
         )
 
-    # The runtime owns the loop; node methods remain the injected policy and gateway adapters.
+    # 运行时负责处理循环；节点方法作为策略与网关适配器注入。
     def _on_candidates_unlocked(self, msg: GraspCandidateArray) -> dict[str, int]:
         """把一帧候选交给运行时编排器处理。"""
         self._refresh_config()

@@ -1,1 +1,1 @@
-"""Pure policy and validation functions used by vision ROS adapters."""
+"""视觉 ROS 适配器使用的纯策略与校验函数。"""

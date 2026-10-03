@@ -25,7 +25,7 @@ def generate_launch_description():
     grasp_hold_timeout_sec = LaunchConfiguration("grasp_hold_timeout_sec")
     shutdown_safe_home = LaunchConfiguration("shutdown_safe_home")
     use_local_rviz = LaunchConfiguration("use_local_rviz")
-    visual_ready_joint_positions = LaunchConfiguration("visual_ready_joint_positions")
+    sim_initial_joint_positions = LaunchConfiguration("sim_initial_joint_positions")
     start_sim_trajectory_controller = LaunchConfiguration("start_sim_trajectory_controller")
     return LaunchDescription([
                                     Node(
@@ -47,7 +47,7 @@ def generate_launch_description():
             parameters=[
                 {
                     "arm_namespace": arm_namespace,
-                    "initial_joint_positions": visual_ready_joint_positions,
+                    "initial_joint_positions": sim_initial_joint_positions,
                 }
             ],
         ),

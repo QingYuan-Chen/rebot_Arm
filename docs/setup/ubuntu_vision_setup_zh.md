@@ -189,7 +189,7 @@ timestamp和`camera_depth_frame`交给同进程GraspNet runner，再把结果发
 并验证当前输入下的候选输出。模型代码、pointnet2扩展、graspnetAPI和checkpoint需
 与所选GraspNet版本匹配，环境安装脚本不负责提供这些第三方资产。
 
-## 7. 完整视觉链路（无真机、仅规划）
+## 7. 完整视觉链路（无真机、仿真执行）
 
 先设置上节的GraspNet模型根目录和checkpoint。
 在没有其他相机/仿真节点运行时执行；不要与第3节的相机入口重复启动：
@@ -200,13 +200,12 @@ source install/setup.bash
 export REBOTARM_VISION_PYTHON="$PWD/.venv-vision/bin/python"
 export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
-  vision_profile:=ubuntu_native use_hardware:=false execution_mode:=plan_only \
-  start_visual_ready:=false start_visual_grasp_executor:=false \
+  vision_profile:=ubuntu_native use_hardware:=false \
   vision_yolo_model_path:="$PWD/tools/yolo26s-seg.pt"
 ```
 
 这会使用真实相机和RViz-only运动学后端，不启动MuJoCo物理仿真或真机控制器；
 真实相机相对模拟机器人TF是否有物理意义需自行核验，候选规划不代表实机可执行。
 独立的“真实感知 + MuJoCo 执行”组合入口已删除；当前只保留本节的
-真实感知 plan-only 验证以及独立的 MuJoCo 离线仿真入口。
+真实感知与仿真轨迹执行验证以及独立的 MuJoCo 离线仿真入口。
 真实执行另见功能手册和现场授权边界。

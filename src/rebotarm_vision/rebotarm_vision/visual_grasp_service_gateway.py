@@ -1,4 +1,4 @@
-"""Request construction and response adaptation for visual grasp ROS services."""
+"""视觉抓取 ROS 服务的请求构造与响应适配。"""
 from __future__ import annotations
 
 import math
@@ -91,10 +91,13 @@ class VisualGraspServiceGateway:
         state = _state_for(self)
         with state.lock:
             trajectories = deepcopy(state.preview_trajectories)
+            events = list(state.preview_gripper_events)
         if not trajectories:
             return False, "no planned trajectories collected"
         request = PublishTrajectoryPreview.Request()
         request.trajectories = trajectories
+        request.gripper_before_trajectory = [index for index, _ in events]
+        request.gripper_openings_m = [width for _, width in events]
         result, error = _io_gateway_for(self).call("publish_preview", request, self._service_timeout_sec)
         if result is None:
             return False, error

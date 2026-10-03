@@ -1,4 +1,4 @@
-"""Candidate policy adapter with explicit configuration and joint-state inputs."""
+"""显式接收配置与关节状态输入的候选策略适配器。"""
 from __future__ import annotations
 
 from types import SimpleNamespace

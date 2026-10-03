@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import math
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -51,10 +52,10 @@ def _parameter(context, name: str):
 
 
 class VisualGraspWorkflow:
-    """Stage coordination with explicit resources and a fixed task configuration.
+    """使用显式资源和固定任务配置协调各执行阶段。
 
-    This object never holds a ROS Node. Node callbacks replace the shared state;
-    all service dispatch goes through the injected I/O gateway.
+    本对象不持有 ROS 节点；节点回调负责替换共享状态，
+    所有服务请求均通过注入的 I/O 网关分发。
     """
 
     def __init__(self, *, state, config, io_gateway, tf_buffer, clock, logger, monotonic=time.monotonic, sleep=time.sleep, context_ok=rclpy.ok):
@@ -639,7 +640,7 @@ class VisualGraspWorkflow:
         return pose_to_target(converted)
 
     def _lookup_plan_transform(self, plan: GraspPlan):
-        """Look up and reuse TF at the plan's acquisition timestamp."""
+        """查询并复用计划采集时间戳对应的 TF。"""
         stamp = plan.header.stamp
         stamp_ns = int(getattr(stamp, "sec", 0)) * 1_000_000_000 + int(
             getattr(stamp, "nanosec", 0)
@@ -678,7 +679,13 @@ class VisualGraspWorkflow:
             ok, message = self._call_execute_pose(stage)
         elif stage.kind == "gripper":
             if not self._execution_enabled():
-                ok, message = True, "plan_only: gripper command skipped"
+                width = stage.gripper_position_m
+                if width is None or not math.isfinite(float(width)) or not 0.0 <= float(width) <= 0.09:
+                    return False, "invalid gripper preview opening"
+                state = _state_for(self)
+                with state.lock:
+                    state.preview_gripper_events.append((len(state.preview_trajectories), float(width)))
+                ok, message = True, "plan_only: gripper animation recorded; control command skipped"
             elif self._gripper_execution_enabled():
                 if stage.name == "close_gripper" and bool(_parameter(self, "gripper_grasp_enabled").value):
                     ok, message = self._call_grasp_gripper(stage)

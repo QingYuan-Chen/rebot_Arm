@@ -53,10 +53,16 @@ class VisualGraspState:
     current_attempt_plan: Any = None
     preview_start_joint_state: Any = None
     preview_trajectories: list[Any] | None = None
+    preview_gripper_events: list[tuple[int, float]] = field(default_factory=list)
     running: bool = False
+    # stop 将 running 置为假后，execute 服务回调仍可能处于收尾阶段。
+    # 恢复执行前必须等待该回调释放下游动作和服务调用，
+    # 然后才能启动下一条轨迹。
+    run_callback_active: bool = False
     phase: str = "IDLE"
     active_request_id: int = 0
     stop_requested: bool = False
+    plans_blocked: bool = False
     abort_reason: str = ""
     lock: RLock = field(default_factory=RLock, repr=False, compare=False)
 
@@ -66,12 +72,13 @@ class VisualGraspState:
 
     def begin_run(self) -> bool:
         with self.lock:
-            if self.running or self.phase in ("RUNNING", "STOP_REQUESTED", "ABORTING"):
+            if self.running or self.phase in ("RUNNING", "STOP_REQUESTED", "ABORTING") or self.plans_blocked:
                 return False
             self.run_counter += 1
             self.current_run_id = self.run_counter
             self.active_request_id = self.run_counter
             self.running = True
+            self.run_callback_active = True
             self.phase = "RUNNING"
             self.stop_requested = False
             self.abort_reason = ""
@@ -80,9 +87,9 @@ class VisualGraspState:
     def request_stop(self, reason: str = "stop requested") -> None:
         with self.lock:
             self.stop_requested = True
+            self.plans_blocked = True
             self.abort_reason = reason
-            if self.running:
-                self.phase = "STOP_REQUESTED"
+            self.phase = "STOP_REQUESTED"
             self.running = False
 
     def mark_aborting(self, reason: str) -> None:
@@ -90,15 +97,32 @@ class VisualGraspState:
             self.abort_reason = reason
             self.phase = "ABORTING"
             self.stop_requested = True
+            self.plans_blocked = True
             self.running = False
 
     def finish_run(self, *, preserve_abort: bool = False) -> None:
         with self.lock:
             self.running = False
-            if preserve_abort and self.phase in ("STOP_REQUESTED", "ABORTING"):
+            self.run_callback_active = False
+            if self.plans_blocked or (preserve_abort and self.phase in ("STOP_REQUESTED", "ABORTING")):
                 return
             self.phase = "IDLE"
             self.active_request_id = 0
+
+    def confirm_stop(self) -> bool:
+        """内部接口约束：调用方必须已取得下游停止完成的证据。"""
+        with self.lock:
+            if self.run_callback_active or self.running or not self.plans_blocked:
+                return False
+            self.latest_plan = None
+            self.latest_candidates = None
+            self.last_plan_rejection = "waiting for a new plan after confirmed stop"
+            self.plans_blocked = False
+            self.stop_requested = False
+            self.phase = "IDLE"
+            self.abort_reason = ""
+            self.active_request_id = 0
+            return True
 
     def is_running(self) -> bool:
         with self.lock:
@@ -155,7 +179,8 @@ def _state_for(node) -> VisualGraspState:
         "last_grasp_closure_distance_m", "retry_retreat_stage", "run_counter",
         "current_run_id", "current_attempt_index", "current_candidate_index",
         "current_attempt_plan", "preview_start_joint_state", "preview_trajectories", "running",
-        "phase", "active_request_id", "stop_requested", "abort_reason",
+        "run_callback_active", "phase", "active_request_id", "stop_requested", "abort_reason",
+        "plans_blocked",
     ):
         legacy_name = "_" + state_field
         if hasattr(node, legacy_name):

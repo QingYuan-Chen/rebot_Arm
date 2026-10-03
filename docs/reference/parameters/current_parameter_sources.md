@@ -28,12 +28,9 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 
 | 入口 | 用途 | 参数范围 |
 |---|---|---|
-| `visual_grasp_compact.launch.py` | 日常使用 | 只暴露后端、模式和阶段开关 |
-| `visual_readonly.launch.py` | 只读感知 | 相机、解释器和候选输出接口 |
-| `visual_plan_only.launch.py` | 规划预览 | 规划阶段开关，固定 `plan_only` |
-| `visual_execute.launch.py` | 受控执行 | 执行阶段开关，默认仍无硬件 |
-| `visual_grasp_system.launch.py` | 兼容入口 | 保留旧参数，不作为新参数添加位置 |
+| `visual_grasp_system.launch.py` | 唯一视觉入口 | 仿真／真机后端、显示开关与配置文件；固定执行流程 |
 
-维护规则：新 topic/frame/service/action 只能先加入
-`visual_grasp_interfaces.yaml`；新视觉策略加入 `rebotarm_vision/config/`；新运动/执行策略
-加入 `rebotarm_motion/config/`。兼容入口只允许转发，不复制新的算法默认值。
+维护规则：新 topic/frame/service/action 先加入 `visual_grasp_interfaces.yaml`；
+视觉策略归 rebotarm_vision/config，运动策略归 rebotarm_motion/config。
+必需执行节点由主入口统一启动，不再由模式包装文件复制默认值。
+策略 profile 与 reusable policy YAML 的既有覆盖关系仍保留，本轮未改变抓取调参。

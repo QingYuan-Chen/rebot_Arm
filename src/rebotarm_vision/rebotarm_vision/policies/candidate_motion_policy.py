@@ -19,7 +19,7 @@ from collections.abc import Sequence
 
 
 def joint_positions_by_name(names: Sequence[str], positions: Sequence[float]) -> dict[str, float]:
-    """Normalize a joint sample without depending on sensor_msgs or a ROS node."""
+    """规范化关节采样数据，不依赖 sensor_msgs 或 ROS 节点。"""
 
     result: dict[str, float] = {}
     for name, position in zip(names, positions):

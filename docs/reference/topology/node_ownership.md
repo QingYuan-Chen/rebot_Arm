@@ -6,7 +6,6 @@
 |---|---|---|---|
 | `reBotArmController` | `rebotarmcontroller` | 真机通信、反馈和执行安全 | MotorBridge/串口 |
 | `PoseExecutionNode` | `rebotarm_motion` | 位姿规划/执行协调 | MoveIt、控制器 Action |
-| `rebotarm_visual_ready` | `rebotarm_motion` | 视觉准备位运动 | MoveIt、控制器 Action |
 | `TeachRecorderNode` | `rebotarm_teach` | 示教录制 | 控制器反馈 |
 | `TeleopKeyboardNode` | `rebotarm_teleop` | 键盘命令适配 | ROS services/actions |
 | `TeleopStatusPanelNode` | `rebotarm_dashboard` | Web 页面、HTTP/SSE 和状态聚合 | teleop/teach/calibration clients |

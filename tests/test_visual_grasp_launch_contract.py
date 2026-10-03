@@ -1,7 +1,7 @@
 """当前视觉抓取 launch 组合契约。
 
-这些测试只验证稳定边界：入口负责组合，阶段负责节点，profile 负责默认值，
-legacy 入口负责旧参数兼容。不要再对已拆除的单体源码布局做字符串断言。
+这些测试只验证稳定边界：入口负责组合，阶段负责节点，profile 负责默认值。
+不要再对已拆除的单体源码布局做字符串断言。
 """
 
 from pathlib import Path
@@ -44,20 +44,14 @@ def test_stage_ownership_and_profiles_are_present():
         assert path.exists(), path
 
 
-def test_legacy_entry_is_the_only_large_compatibility_surface():
+def test_formal_entry_keeps_the_public_parameter_surface_small():
     formal = (LAUNCH / "visual_grasp_system.launch.py").read_text(encoding="utf-8")
-    legacy = (LAUNCH / "visual_grasp_legacy.launch.py").read_text(encoding="utf-8")
     assert len(re.findall(r"DeclareLaunchArgument", formal)) <= 30
-    assert len(re.findall(r"DeclareLaunchArgument", legacy)) >= 100
 
 
 def test_all_public_entries_expand_without_starting_processes():
     entries = (
         "visual_grasp_system.launch.py",
-        "visual_grasp_compact.launch.py",
-        "visual_readonly.launch.py",
-        "visual_plan_only.launch.py",
-        "visual_execute.launch.py",
     )
     for entry in entries:
         result = subprocess.run(
@@ -68,12 +62,19 @@ def test_all_public_entries_expand_without_starting_processes():
             timeout=30,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert len(set(re.findall(r"^    '([^']+)':", result.stdout, re.M))) == 25
+        assert len(set(re.findall(r"^    '([^']+)':", result.stdout, re.M))) == 18
 
 
 def test_retired_vision_paths_are_not_reintroduced():
-    for path in (LAUNCH / "visual_grasp_system.launch.py", LAUNCH / "visual_grasp_legacy.launch.py"):
+    for path in (LAUNCH / "visual_grasp_system.launch.py",):
         text = path.read_text(encoding="utf-8")
         assert "network_mjpeg" not in text
         assert "network_candidates_url" not in text
         assert "remote_json" not in text
+
+
+def test_repeated_grasp_does_not_require_ready_pose():
+    text = (LAUNCH / 'includes/visual_lifecycle.launch.py').read_text()
+    assert 'rebotarm_visual_ready' not in text
+    node = (ROOT / 'src/rebotarm_vision/rebotarm_vision/nodes/visual_grasp_executor_node.py').read_text()
+    assert '_visual_ready_client' not in node

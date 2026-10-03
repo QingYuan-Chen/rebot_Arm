@@ -4,6 +4,34 @@
 
 ## 当前焦点
 
+- 2026-10-03：按用户要求删除视觉包 benchmarks 目录、两个 benchmark console script、相关文档和测试引用。日常视觉启动与 execute 链路不受影响；分层 23 passed，全量 747 passed/16 skipped，vision 重建、compileall 与 diff 检查通过，未启动相机或真机。待将当前工作区整体提交并推送 GitHub。
+
+- 2026-10-03：视觉包残留英文说明注释与文档字符串已翻译为中文，保留接口、参数、日志和代码指令。对修改前后 84 个 Python/YAML 文件比较非文档 AST 与配置值，结果一致。纠正 benchmarks 过时注释及命令文档“只读”表述；两工具会调用 execute，统计服务成功率，不验证物体夹起，hybrid 名称不保证仿真且默认命名空间仍为历史 rebotarm_sim。日常视觉链路不依赖 benchmarks，建议无批量评测需求时删除，本轮仅分析未删除。分层 23 passed，全量 749 passed/16 skipped，规定 compileall、vision 构建与 diff 检查通过；未启动相机或真机。
+
+- 2026-10-03：按用户要求把视觉仿真初始姿态从退役ready姿态改为safe_home：[0,0,-0.017453292519943295,0,0,0]rad（joint3=-1°）。motion profile与仿真控制器裸启动默认同步；仅初始化仿真状态，不触发真机回位。隔离ROS domain213节点初始化与安装profile检查一致；分层23，全量749 passed/16 skipped，motion/simulation/bringup重建、规定compileall/diff通过，未操作真机。
+
+- 2026-10-03：用户批准视觉主入口固定execute，公共execution_mode删除（现18参数）；use_hardware选择仿真/真机，启动不自动使能或抓取，execute服务触发完整流程。旧execution_mode=readonly/plan_only在加载后端前明确拒绝，防止静默把预览变成执行；内部节点纯规划与轨迹预检保留，max_plan_age仍4秒。相机只读诊断使用tools/run_ubuntu_vision.sh。同步README、命令与配置说明。分层23，全量749 passed/16 skipped；bringup/vision构建、installed show-args、规定compileall/diff通过。未操作真机。
+
+- 2026-10-03：用户授权删除ready工具，已移除visual_ready.launch.py、motion节点、专用YAML及console script，清理两个benchmark的ready客户端/前后自动回位/CLI开关及文档引用。仿真初始姿态改名sim_initial_joint_positions，数值仍[0,-0.1,-0.2,0.2,0,0]；safe_home/正常抓取/停止确认未改。删除旧ready专项测试，新增benchmark仅调用抓取、仿真初始姿态保持测试。全量749 passed/16 skipped，后补专项14 passed（含新增3项）；分层23，规定compileall、diff、主入口show-args通过；motion/vision/bringup重建成功，清理生成残留后验证安装模块/launch/console script均不存在。未操作真机。
+
+- 2026-10-03：按用户要求更新launch/README，清理仍残留的四阶段入口推荐与Markdown围栏错误；明确共享底层复用图方向、唯一视觉主入口、ready独立服务及直接关节插值不经过MoveIt碰撞规划的边界，逐项解释8个includes片段及readonly/plan_only/execute包含树。仅文档更新，无运行逻辑改动；分层23 passed，全量755 passed/16 skipped，bringup重建、compileall、diff和文档围栏/路径核对通过，未操作真机。
+
+- 2026-10-03：用户批准视觉公共入口收敛，删除compact/readonly/plan_only/execute四个包装文件并清理build/install残留软链接。system保留19个公共参数；readonly只感知，plan_only/execute自动启动IK/运动服务/抓取编排，非硬件后端自动启动仿真控制器；plan_only强制关闭夹爪执行，真机仍须显式enable。ready从视觉生命周期移除，旧start_visual_ready=true会提示使用独立入口；独立ready从motion YAML读取姿态/时长/起点阈值，现1rad。同步README、参数索引、操作命令和模式测试。分层/入口专项54 passed，全量755 passed/16 skipped；bringup build、两入口show-args、规定compileall、diff通过。未启动真机。策略profile与reusable policy YAML既有重复默认值尚未在本轮改动，避免夹带抓取调参。
+
+- 2026-10-03：视觉入口只读审查：当前system是正式组合入口，compact是动态导入system的兼容别名，launch/README和参数索引仍把角色写反。readonly/plan_only/execute是模式包装，plan_only与execute重复声明公共默认值；plan_only固定start_visual_grasp_executor=false，不能直接提供visual_grasp/execute整序列预览。独立visual_ready.launch仍以2.5rad覆盖YAML/profile的1rad，存在入口间安全阈值漂移；此前1rad结论只适用于system内可选ready路径。策略profile与节点policy YAML重复存值，夹爪仍有比较默认值决定覆盖的兼容逻辑。建议先修文档/行为契约和阈值一致性，再收敛公共入口与参数来源；未修改启动代码或运行硬件。
+
+- 2026-10-03：只读比较当前真机 execute 命令与1069aa2：展开launch/YAML并核对节点默认值后，候选IK过滤有效参数、执行速度/接近距离/夹爪策略/4秒新鲜度及底层controller/MoveIt配置一致。新增有效参数为camera.enable_frame_sync=true、vision/motion use_hardware=true、motion stop_confirmation_timeout_sec=8；全局use_sim_time=false与旧默认等效。启动默认visual_ready/Open3D由true改false；独立ready起点偏差2.5→1rad（当前关闭）。参数值相同不等于行为相同：GraspNet深度 .15–1.2m现正确透传（旧生产后端回落 .05–1.5m），新鲜计划有界等待与停止确认属于实现变化。检查时当前ROS环境无可见节点，结论为源码合并配置，不是运行中参数dump。未修改运行代码或启动真机。
+
+- 2026-10-03：按用户确认简化视觉外部流程，本条替代下方早期 stop/reset 恢复约定：删除 visual_grasp/reset 服务与自动回位；正常完成后直接再次 execute，safe_home/visual_ready 为独立操作员命令。运动层新增独占请求/代次门控，停止须确认旧请求退出、Action 终态、controller stop 成功及连续新鲜六轴静止反馈；真机额外检查新鲜无故障 IDLE。视觉层保留远端未完服务 Future，旧请求排空后再获取一次运动停止确认，成功才清旧缓存并等新计划；失败保持阻断，排障后重试 stop，不自动失能/回位。新鲜度与原规划碰撞检查保留。全量752 passed/16 skipped；分层及停止专项58 passed，隔离 ROS 仿真覆盖两轮中途停止保持、规划中停止无迟到轨迹、反馈中断拒绝 execute、反馈恢复后 stop 重试及再次执行。motion/vision/bringup 重建、安装模块/硬件模式透传、compileall、diff check 通过。未启动相机或真机，静止阈值未做真机验收；运行中的 launch 需受控退出后重启加载。
+
+- 2026-10-03：用户反馈真机成功后 safe_home 再次 execute 报旧缓存过期且不希望强制 visual_ready。确认过期到达消息原先仅记拒收原因却保留旧缓存；现新无效/过期输入原子撤销旧计划与候选，execute 在缺失/过期时按 service_timeout_sec 有界等待新有效计划，保留采集时间有效期与具体年龄/无效原因，可 stop 中断。主入口及 execute/plan_only 包装默认 start_visual_ready=false，删除执行器 visual_ready client 和仿真 reset 强制 ready 步骤；仿真 reset 仅平滑 safe_home，真机 reset 仍只解除锁存，独立 ready 工具可选保留。全量740 passed/16 skipped、后补重复执行场景聚焦38 passed、分层23；无 ready 节点的隔离 ROS stop/reset 测试通过；vision/bringup build、installed show-args、compileall/diff通过。现场无运行中的视觉节点，无法确认实际感知/过滤延迟，未放宽4秒新鲜度门槛、未发送真机命令；不能宣称真机重测已通过。
+
+- 2026-10-03：修复仿真 stop/reset 卡住与 safe_home 显示瞬跳。visual_ready 改为后台多线程 executor、独立 action/feedback 回调组、有界等待与超时取消，每次移动要求新反馈；仿真 safe_home 与发布定时器分离回调组，运动互斥并支持恢复中 stop；视觉状态新增执行回调收尾与 RECOVERING 门控，拒绝重复 reset，恢复后清旧计划。隔离 ROS domain 211 两轮 stop→reset：各约 3.15s（测试 ready=1s），95 帧/轮，最大间隔 36.7ms、步进 0.01272rad；恢复中 stop、重复 reset、重试通过。全量 734 passed/16 skipped，分层23，后补超时取消测试后聚焦25 passed，三包重建与规定compileall/diff通过。正常默认恢复约6s；运行中的旧launch须重启。仅RViz仿真协议验证，未启动相机/真实控制器，不增加硬件验收。
+
+- 2026-10-03：完成视觉 launch 兼容层审计并删除无引用的 `visual_grasp_legacy.launch.py`；当前源码、测试、文档和安装空间均不再引用或安装该入口。同步将 `visual_ready_max_start_delta_rad` profile 与节点 `max_start_delta_rad` 默认统一为 `1.0 rad`，保留停止后先恢复 safe_home/visual_ready 的安全边界。bringup/motion 构建成功，生命周期/launch 聚焦 9 passed，分层 23 passed，全量 731 passed/16 skipped，compileall 与 diff check 通过；未启动真机。
+
+- 2026-10-03：修复视觉抓取停止后的恢复门控。`/rebotarm/visual_grasp/stop` 仍保持 `STOP_REQUESTED/ABORTING` 锁存；新增 `/rebotarm/visual_grasp/reset`，只有旧流程已退出且操作者确认下游动作停稳后才清回 `IDLE`，避免停止请求尚未完成时并发执行。仿真轨迹控制器只提供 `trajectory_stop`，不提供 `/rebotarm/safe_home`；真实 `safe_home` 仍由 `rebotarmcontroller` 提供。聚焦生命周期 17 passed、分层 23 passed、全量 730 passed/16 skipped、vision build、compileall、diff check 通过；未启动或使能真机。
+
 - 2026-09-30：只读复核发现上轮视觉 P1/P2 软件完成结论存在未覆盖行为缺口：执行服务超时后 runtime 提前返回且 stop 调用为 0、finally 过早回 IDLE；无效计划/空候选不撤销旧缓存；候选和非基座计划转换取最新 TF 而非采集时刻；撤退失败后仍可进入下一候选；GraspNet 深度范围与 camera.color_format 参数未透传。无硬件替身复现前两项及重试缺口。先前 773 passed 不构成这些路径的安全验收；本轮仅审查，尚未修复。
 
 - 2026-09-30：vision 包只读审查：当前源码全量软件回归 773 passed/18 skipped，分层 22 passed，必需 compileall 及 vision compileall 通过。无硬件测试替身复现 ExecutePose 客户端超时→mark_aborting→runtime 提前返回，停止调用为 0 次且 finally 回到 IDLE；无效计划/空候选不会清除旧执行缓存。源码另见候选与执行 TF 使用最新时刻而非采集 stamp、重试前撤退失败只告警仍可继续、GraspNet min_depth_m/max_depth_m 未传入正式 backend。以上为待修问题，本次未修改业务代码、未访问相机或真实机械臂；测试通过不覆盖这些完整失败链。

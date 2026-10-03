@@ -1,5 +1,5 @@
-"""Formal ROS node adapters for the vision package.
+"""视觉包的正式 ROS 节点适配器。
 
-Core policies and runtimes remain in sibling modules so these adapters own ROS
-parameters, subscriptions, publications, and service/action integration.
+核心策略与运行时保留在同级模块中；这些适配器负责 ROS 参数、
+话题订阅与发布，以及服务和动作接口的集成。
 """

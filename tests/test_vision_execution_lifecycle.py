@@ -41,15 +41,38 @@ def test_only_one_execution_can_own_state_until_cleanup():
     assert state.phase == 'STOP_REQUESTED'
     assert not state.is_running()
     assert not state.begin_run()
-    state.finish_run()
-    assert state.phase == 'IDLE'
+    state.finish_run(preserve_abort=True)
+    assert state.phase == 'STOP_REQUESTED'
+    # A stop keeps the plan gate closed even after the worker callback exits;
+    # confirmed downstream stop is the only boundary that permits a fresh execution.
+    assert not state.begin_run()
+    assert state.confirm_stop()
     assert state.begin_run()
     state.mark_aborting('execute_pose timed out')
     assert state.phase == 'ABORTING'
     assert not state.begin_run()
     state.finish_run()
-    assert state.phase == 'IDLE'
+    assert state.phase == 'ABORTING'
     assert state.abort_reason == 'execute_pose timed out'
+
+
+def test_stop_latch_requires_confirmation_after_run_has_finished():
+    state = VisualGraspState()
+    assert state.begin_run()
+    state.request_stop("operator stop")
+    state.finish_run(preserve_abort=True)
+    assert state.phase == "STOP_REQUESTED"
+    assert not state.begin_run()
+    assert state.confirm_stop()
+    assert state.phase == "IDLE"
+    assert state.begin_run()
+
+
+def test_confirmation_cannot_clear_a_running_or_idle_state():
+    state = VisualGraspState()
+    assert not state.confirm_stop()
+    assert state.begin_run()
+    assert not state.confirm_stop()
 
 
 class Future:
@@ -82,7 +105,7 @@ def gateway(state, clock, future, sleep):
     )
 
 
-def test_timeout_cancels_local_future_and_ignores_late_result():
+def test_timeout_retains_remote_future_for_stop_confirmation():
     state = VisualGraspState()
     state.begin_run()
     clock = [0.0]
@@ -91,7 +114,7 @@ def test_timeout_cancels_local_future_and_ignores_late_result():
     result, error = io.call('execute_pose', object(), .1)
     assert result is None and 'timed out' in error
     assert state.phase == 'ABORTING'
-    assert future.cancelled
+    assert not future.cancelled
     clock[0] = 3.0
     assert future.result_reads == 0
 
@@ -267,3 +290,166 @@ def test_gateway_with_real_ros_client_and_fake_service():
         thread.join(timeout=2.0)
         node.destroy_node()
         context.shutdown()
+
+
+def test_confirm_stop_requires_worker_exit_and_discards_old_plans():
+    state = VisualGraspState(latest_plan=object(), latest_candidates=object())
+    state.begin_run()
+    state.request_stop()
+    assert not state.confirm_stop()
+    state.finish_run(preserve_abort=True)
+    assert state.confirm_stop()
+    assert state.phase == 'IDLE'
+    assert state.latest_plan is None and state.latest_candidates is None
+    assert not state.confirm_stop()
+
+
+def test_live_expired_plan_revokes_old_cache_and_wait_accepts_new_input(monkeypatch):
+    from rebotarm_msgs.msg import GraspPlan
+    from rebotarm_vision.nodes import visual_grasp_executor_node as module
+    state = VisualGraspState()
+    state.begin_run()
+    now = 100_000_000_000
+    old = GraspPlan()
+    old.valid = True
+    old.header.stamp.sec = 90
+    state.latest_plan = old
+    state.latest_candidates = object()
+    node = SimpleNamespace(
+        _state=state, _service_timeout_sec=.2, _max_plan_age_sec=4.,
+        get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=now)),
+    )
+    node._plan_is_fresh = lambda p: VisualGraspExecutorNode._plan_is_fresh(node, p)
+    VisualGraspExecutorNode._on_plan(node, old)
+    assert state.latest_plan is None and state.latest_candidates is None
+    assert 'age_sec=10.0' in state.last_plan_rejection
+    assert 'max_plan_age_sec=4.0' in state.last_plan_rejection
+    fresh = GraspPlan()
+    fresh.valid = True
+    fresh.header.stamp.sec = 100
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
+    monkeypatch.setattr(module.time, 'sleep', lambda _: VisualGraspExecutorNode._on_plan(node, fresh))
+    assert VisualGraspExecutorNode._wait_for_fresh_plan(node)[0]
+    assert state.latest_plan.header.stamp.sec == 100
+
+
+def test_fresh_plan_wait_is_stoppable_and_preserves_stop_latch(monkeypatch):
+    from rebotarm_vision.nodes import visual_grasp_executor_node as module
+    state = VisualGraspState()
+    state.begin_run()
+    node = SimpleNamespace(_state=state, _service_timeout_sec=.2)
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
+    monkeypatch.setattr(module.time, 'sleep', lambda _: state.request_stop('operator stop'))
+    ok, reason = VisualGraspExecutorNode._wait_for_fresh_plan(node)
+    assert not ok and reason == 'operator stop'
+    assert not state.begin_run()
+    assert not state.confirm_stop()
+    state.finish_run(preserve_abort=True)
+    assert state.confirm_stop()
+
+
+def test_plan_rejection_during_wait_is_reported_at_timeout(monkeypatch):
+    from rebotarm_vision.nodes import visual_grasp_executor_node as module
+    state = VisualGraspState(last_plan_rejection='invalid grasp plan: target out of workspace')
+    state.begin_run()
+    node = SimpleNamespace(_state=state, _service_timeout_sec=0.)
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
+    ok, reason = VisualGraspExecutorNode._wait_for_fresh_plan(node)
+    assert not ok and 'target out of workspace' in reason
+    assert 'timed out' in reason
+
+
+def test_repeated_execute_waits_for_new_plan_without_ready_motion(monkeypatch):
+    from rebotarm_msgs.msg import GraspPlan
+    from rebotarm_vision.nodes import visual_grasp_executor_node as module
+    from rebotarm_vision.visual_grasp_runtime import VisualGraspRuntime
+    state = VisualGraspState()
+    now = [100_000_000_000]
+    calls = []
+    fresh = GraspPlan()
+    fresh.valid = True
+    fresh.header.stamp.sec = 100
+    node = SimpleNamespace(
+        _state=state, _service_timeout_sec=.2, _max_plan_age_sec=4.,
+        _refresh_config=lambda: None, _config=None, _io_gateway=SimpleNamespace(stop_pending=False), _tf_buffer=None,
+        get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=now[0])),
+        get_logger=lambda: None,
+    )
+    node._plan_is_fresh = lambda p: VisualGraspExecutorNode._plan_is_fresh(node, p)
+    node._wait_for_fresh_plan = lambda: VisualGraspExecutorNode._wait_for_fresh_plan(node)
+    monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
+    monkeypatch.setattr(module, 'VisualGraspWorkflow', lambda **kwargs: kwargs)
+    def execute(runtime, request, response, **kwargs):
+        calls.append(state.latest_plan.header.stamp.sec)
+        response.success = True
+        return response
+    monkeypatch.setattr(VisualGraspRuntime, 'execute', execute)
+    VisualGraspExecutorNode._on_plan(node, fresh)
+    assert VisualGraspExecutorNode._execute_visual_grasp(node, None, SimpleNamespace()).success
+    assert state.phase == 'IDLE'
+    # Simulate time spent returning home. The previous plan is now expired,
+    # but a newly captured plan arrives while the second execute waits.
+    now[0] = 120_000_000_000
+    fresh.header.stamp.sec = 120
+    monkeypatch.setattr(module.time, 'sleep', lambda _: VisualGraspExecutorNode._on_plan(node, fresh))
+    assert VisualGraspExecutorNode._execute_visual_grasp(node, None, SimpleNamespace()).success
+    assert calls == [100, 120]
+    assert state.phase == 'IDLE'
+
+
+def test_stop_confirmation_waits_for_remote_call_then_new_motion_ack():
+    from concurrent.futures import Future as RealFuture
+    clock = [0.]
+    pending, early_stop, confirmed_stop = RealFuture(), RealFuture(), RealFuture()
+    requests = []
+    io = VisualGraspIoGateway(logger=None, clients={'motion_stop': SimpleNamespace(
+        wait_for_service=lambda **_: True,
+        call_async=lambda _: requests.append('stop') or (early_stop if len(requests)==1 else confirmed_stop),
+    )}, cancelled=lambda: False, monotonic=lambda: clock[0])
+    io._pending_calls.append(pending)
+    io.stop('motion_stop')
+    early_stop.set_result(SimpleNamespace(success=True, message='early'))
+    assert io.poll_stop_confirmation()[0] is None
+    assert requests == ['stop']
+    pending.set_result(SimpleNamespace(success=False))
+    assert io.poll_stop_confirmation()[0] is None
+    assert requests == ['stop', 'stop']
+    confirmed_stop.set_result(SimpleNamespace(success=True, message='confirmed'))
+    assert io.poll_stop_confirmation() == (True, 'confirmed')
+    assert not io.stop_pending
+
+
+def test_stop_failure_does_not_automatically_reopen_execution():
+    from concurrent.futures import Future as RealFuture
+    future = RealFuture()
+    future.set_result(SimpleNamespace(success=False, message='feedback stale'))
+    io = VisualGraspIoGateway(logger=None, clients={'motion_stop': SimpleNamespace(
+        wait_for_service=lambda **_: True, call_async=lambda _: future,
+    )}, cancelled=lambda: False)
+    io.stop('motion_stop')
+    assert io.poll_stop_confirmation() == (False, 'feedback stale')
+    assert io.stop_pending
+    assert io.poll_stop_confirmation() == (False, 'feedback stale')
+
+
+@pytest.mark.parametrize('unknown', ['cancelled', 'exception', 'empty'])
+def test_service_pruning_retains_unknown_remote_outcome(unknown):
+    from concurrent.futures import Future as RealFuture
+    old, current = RealFuture(), RealFuture()
+    if unknown == 'cancelled':
+        old.cancel()
+    elif unknown == 'exception':
+        old.set_exception(RuntimeError('transport failure'))
+    else:
+        old.set_result(None)
+    current.set_result(SimpleNamespace(success=True))
+    io = VisualGraspIoGateway(logger=None, clients={'execute_pose': SimpleNamespace(
+        wait_for_service=lambda **_: True, call_async=lambda _: current,
+    )}, cancelled=lambda: False, legacy_wait=lambda *_: True)
+    io._pending_calls.append(old)
+    assert io.call('execute_pose', None, 1.)[0].success
+    assert old in io._pending_calls
+    io._stop_pending = True
+    io._stop_started = io.monotonic()
+    assert io.poll_stop_confirmation()[0] is False
+    assert io.stop_pending

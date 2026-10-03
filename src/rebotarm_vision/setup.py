@@ -79,7 +79,7 @@ setup(
     # 采集/检测：视觉主节点、GraspNet 候选节点、离线 YOLO 节点
     # 预览/可视化：抓取预览发送器、RViz 标记发布器
     # 执行/筛选：视觉抓取执行器、抓取候选 IK 过滤器
-    # 工具/标定：抓取 TCP 坐标系广播、基准测试、混合抓取仿真基准、相机调试预览、深度探针、Open3D 查看器
+    # 工具/标定：抓取 TCP 坐标系广播、相机调试预览、深度探针、Open3D 查看器
     entry_points={
         "console_scripts": [
             "rebotarm_vision_node = rebotarm_vision.nodes.vision_node:main",
@@ -90,8 +90,6 @@ setup(
             "rebotarm_visual_grasp_executor = rebotarm_vision.nodes.visual_grasp_executor_node:main",
             "rebotarm_grasp_candidate_ik_filter = rebotarm_vision.nodes.candidate_ik_filter_node:main",
             "rebotarm_grasp_tcp_frame = rebotarm_vision.nodes.grasp_tcp_frame_node:main",
-            "rebotarm_visual_grasp_benchmark = rebotarm_vision.benchmarks.visual_grasp_benchmark:main",
-            "rebotarm_hybrid_grasp_sim_benchmark = rebotarm_vision.benchmarks.hybrid_grasp_sim_benchmark:main",
             "rebotarm_debug_camera_preview = rebotarm_vision.diagnostics.debug_camera_preview:main",
             "rebotarm_grasp_depth_probe = rebotarm_vision.diagnostics.grasp_depth_probe_node:main",
             "rebotarm_graspnet_open3d_viewer = rebotarm_vision.diagnostics.graspnet_open3d_viewer:main",

@@ -24,10 +24,10 @@ class VisualGraspRuntime:
 
         进入前有两道门：已有任务在跑（`_running`）直接拒绝，避免两个抓取序列并发；
         没有新鲜有效的计划也拒绝，避免用过期的检测结果驱动机械臂。进入后按候选顺序
-        逐个尝试，每次尝试都会重建完整阶段序列（含可选的放置阶段）。失败时调用恢复
-        策略决定是"停止 + 安全撤退 + 换候选继续"还是"停止 + 直接失败返回"。
+        逐个尝试，每次尝试都会重建完整阶段序列（含可选的放置阶段）。停止请求一旦
+        发出，I/O 门控阻止继续运动；停止确认由外层节点在旧回调退出后完成。
         无论成功、失败还是抛异常，`finally` 都会清空本轮计划快照并复位运行标志；
-        异常路径额外请求一次运动停止，保证不会把机械臂留在运动状态。
+        异常路径额外请求运动停止；只有后续确认成功才允许新任务。
         """
 
         state = _state_for(workflow)
@@ -63,6 +63,7 @@ class VisualGraspRuntime:
                 with state.lock:
                     _state_for(workflow).preview_start_joint_state = None
                     _state_for(workflow).preview_trajectories = []
+                    _state_for(workflow).preview_gripper_events = []
                     _state_for(workflow).current_attempt_index = attempt_index + 1
                     _state_for(workflow).current_candidate_index = int(candidate_index)
                     _state_for(workflow).current_attempt_plan = deepcopy(plan)
@@ -91,9 +92,8 @@ class VisualGraspRuntime:
                     return response
                 # 走到这里说明某个阶段失败：先按恢复策略收拾现场，再决定是否换候选
                 if not state.is_running():
-                    # A timeout/cancellation only cancels the client future; the
-                    # motion server may still be executing. Always send the
-                    # independent stop channels before returning.
+                    # 本地超时或停止不会终止远端服务，运动服务端可能仍在执行。
+                    # 返回前必须通过独立的停止通道发送停止请求。
                     workflow._request_stop()
                     response.success = False
                     response.message = state.abort_reason or "stopped"
@@ -150,6 +150,5 @@ class VisualGraspRuntime:
                 _state_for(workflow).current_attempt_plan = None
                 _state_for(workflow).preview_start_joint_state = None
                 _state_for(workflow).preview_trajectories = []
-                _state_for(workflow).finish_run(
-                    preserve_abort=_state_for(workflow).phase in ("STOP_REQUESTED", "ABORTING")
-                )
+                if not admitted:
+                    state.finish_run(preserve_abort=state.phase in ("STOP_REQUESTED", "ABORTING"))

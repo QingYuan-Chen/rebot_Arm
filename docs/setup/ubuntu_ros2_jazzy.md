@@ -280,8 +280,6 @@ ros2 launch rebotarm_vision vision.launch.py \
 
 ```text
 use_hardware:=false
-execution_mode:=plan_only
-move_to_visual_ready_on_start:=false
 shutdown_safe_home:=false
 auto_enable:=false
 ```

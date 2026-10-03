@@ -39,8 +39,6 @@ def test_vision_uses_canonical_subpackage_entrypoints_without_compatibility_shim
         "graspnet_baseline_node.py",
         "candidate_ik_filter_node.py",
         "visual_grasp_executor_node.py",
-        "visual_grasp_benchmark.py",
-        "hybrid_grasp_sim_benchmark.py",
         "debug_camera_preview.py",
         "grasp_depth_probe_node.py",
         "graspnet_open3d_viewer.py",
@@ -57,7 +55,6 @@ def test_vision_uses_canonical_subpackage_entrypoints_without_compatibility_shim
 
     setup_text = (package / "setup.py").read_text(encoding="utf-8")
     assert "rebotarm_vision.nodes.vision_node:main" in setup_text
-    assert "rebotarm_vision.benchmarks.visual_grasp_benchmark:main" in setup_text
     assert "rebotarm_vision.diagnostics.debug_camera_preview:main" in setup_text
 
 

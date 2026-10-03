@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import time
 
 import rclpy
 from geometry_msgs.msg import Pose, PoseStamped
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from std_srvs.srv import Trigger
@@ -43,6 +44,7 @@ def _parameter(node, name: str):
 # 输出（全部为服务调用，服务名前缀 `/{arm_namespace}`，默认命名空间 `rebotarm`）
 #   - `/visual_grasp/execute`（Trigger）：收到请求后同步跑完整条抓取序列，返回值即最终结论。
 #   - `/visual_grasp/stop`（Trigger）：请求中止，置运行标志为假并调用运动停止。
+#   - stop 成功须确认旧请求结束、Action 终态和新鲜静止反馈；不自动回位。
 #   - 向下游调用 `/motion_execution/execute_pose`（末端位姿规划/执行）、
 #     `/motion_execution/stop` 与 `/trajectory_stop`（急停）、`/safe_home`（回安全位）、
 #     `/gripper/set`（夹爪位置控制）与 `/gripper/grasp`（力闭合抓取）。
@@ -123,6 +125,7 @@ class VisualGraspExecutorNode(Node):
     def __init__(self) -> None:
         super().__init__("rebotarm_visual_grasp_executor")
         self._callback_group = ReentrantCallbackGroup()
+        self._stop_callback_group = MutuallyExclusiveCallbackGroup()
 
         # ── 输入话题与坐标系 ────────────────────────────────────────────────
         # 机械臂命名空间，用于拼接所有下游服务名；前导斜杠会被 strip 掉
@@ -242,6 +245,8 @@ class VisualGraspExecutorNode(Node):
         # ── 执行模式与速度缩放 ─────────────────────────────────────────────
         # plan_only = 只规划干跑（默认）；execute/real = 真正下发轨迹与夹爪命令
         self.declare_parameter("execution_mode", "plan_only")
+        # 仿真停止后的复位由本节点编排；真实硬件仍由操作者确认后单独恢复。
+        self.declare_parameter("use_hardware", False)
         # 常规移动的速度缩放，无量纲 (0, 1]；越小越慢越安全
         self.declare_parameter("move_velocity_scaling", 0.25)
         # 接近段速度缩放；比常规更慢，因为此时离目标与台面最近
@@ -310,6 +315,10 @@ class VisualGraspExecutorNode(Node):
         # 抓取计划的最大允许时延（s），超时视为过期并拒收
         self.declare_parameter("max_plan_age_sec", 1.0)
 
+        # 读取派生元组前，先构造经过校验的参数快照。
+        # _tuple3 统一从该快照读取，使启动配置和显式覆盖值
+        # 使用相同的转换流程。
+        self._config = VisualGraspConfig.from_node(self)
         self._arm_namespace = str(self.get_parameter("arm_namespace").value).strip("/")
         self._input_topic = str(self.get_parameter("input_topic").value)
         self._candidates_topic = str(self.get_parameter("candidates_topic").value)
@@ -333,7 +342,6 @@ class VisualGraspExecutorNode(Node):
 
         # ── 运行状态 ───────────────────────────────────────────────────────
         self._state = VisualGraspState()
-        self._config = VisualGraspConfig.from_node(self)
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
@@ -397,7 +405,8 @@ class VisualGraspExecutorNode(Node):
             callback_group=self._callback_group,
         )
         self.create_service(Trigger, f"/{self._arm_namespace}/visual_grasp/execute", self._execute_visual_grasp, callback_group=self._callback_group)
-        self.create_service(Trigger, f"/{self._arm_namespace}/visual_grasp/stop", self._stop_visual_grasp, callback_group=self._callback_group)
+        self.create_service(Trigger, f"/{self._arm_namespace}/visual_grasp/stop", self._stop_visual_grasp, callback_group=self._stop_callback_group)
+        self.create_timer(0.05, self._poll_stop_confirmation, callback_group=self._callback_group)
         self.get_logger().info(
             "visual grasp executor ready: "
             f"input={self._input_topic}, namespace=/{self._arm_namespace}, target_frame={self._target_frame}, "
@@ -414,7 +423,7 @@ class VisualGraspExecutorNode(Node):
                     "publish_preview": self._publish_preview_client,
                     "motion_stop": self._motion_stop_client,
                     "trajectory_stop": self._trajectory_stop_client,
-                    "safe_home": self._safe_home_client,
+                "safe_home": self._safe_home_client,
                     "gripper": self._gripper_client,
                     "gripper_grasp": self._gripper_grasp_client,
                 },
@@ -425,7 +434,7 @@ class VisualGraspExecutorNode(Node):
         return gateway
 
     def _handle_io_timeout(self, name: str) -> None:
-        """A timeout leaves the downstream motion state uncertain; request stop before return."""
+        """超时后下游运动状态不确定，返回前必须请求停止。"""
         state = _state_for(self)
         state.mark_aborting(f"{name} timed out")
         self._request_stop()
@@ -464,30 +473,24 @@ class VisualGraspExecutorNode(Node):
         return tuple(float(value) for value in self._config.get(name))
 
     def _on_plan(self, plan: GraspPlan) -> None:
-        """抓取计划订阅回调：只缓存"有效且未过期"的计划。
-
-        无效计划（`valid` 为假）直接丢弃，不覆盖已有缓存；通过校验的计划做深拷贝保存，
-        因为消息对象在回调返回后可能被中间件复用。每接受一次就自增 `_plan_revision`，
-        该版本号是判断"是否收到更新计划"的唯一依据（接近点刷新与视觉伺服都依赖它）。
-        """
-
+        """原子替换缓存；拒绝新输入时，同时撤销旧缓存的执行资格。"""
         state = _state_for(self)
-        if not plan.valid:
-            with state.lock:
+        with state.lock:
+            if state.plans_blocked:
+                return
+            reason = ""
+            if not plan.valid:
+                reason = f"invalid grasp plan: {plan.reason or 'upstream reported invalid'}"
+            elif not self._plan_is_fresh(plan):
+                age = message_age_sec(plan.header.stamp, now_ns=int(self.get_clock().now().nanoseconds))
+                reason = f"grasp plan expired on arrival: age_sec={age}, max_plan_age_sec={self._max_plan_age_sec}"
+            state.plan_revision += 1
+            state.last_plan_rejection = reason
+            if reason:
                 state.latest_plan = None
                 state.latest_candidates = None
-                state.plan_revision += 1
-                state.last_plan_rejection = f"invalid grasp plan: {plan.reason or 'upstream reported invalid'}"
-            return
-        if not self._plan_is_fresh(plan):
-            age = message_age_sec(plan.header.stamp, now_ns=int(self.get_clock().now().nanoseconds))
-            with state.lock:
-                state.last_plan_rejection = f"grasp plan expired on arrival: age_sec={age}, max_plan_age_sec={self._max_plan_age_sec}"
-            return
-        with state.lock:
-            state.latest_plan = deepcopy(plan)
-            state.last_plan_rejection = ""
-            state.plan_revision += 1
+            else:
+                state.latest_plan = deepcopy(plan)
 
     def _plan_is_fresh(self, plan: GraspPlan) -> bool:
         return is_message_fresh(
@@ -500,6 +503,8 @@ class VisualGraspExecutorNode(Node):
 
         state = _state_for(self)
         with state.lock:
+            if state.plans_blocked:
+                return
             if not candidates.candidates:
                 state.latest_candidates = None
                 state.latest_plan = None
@@ -512,23 +517,24 @@ class VisualGraspExecutorNode(Node):
         """ROS Trigger 适配：执行流程由 VisualGraspRuntime 编排。"""
         state = _state_for(self)
         with state.lock:
-            if state.running or state.phase != "IDLE":
+            if state.running or state.phase != "IDLE" or self._io_gateway.stop_pending:
                 response.success = False
-                response.message = "visual grasp already running"
+                response.message = state.abort_reason or "visual grasp running or stop not confirmed"
                 return response
-            if state.latest_plan is None:
+            if not state.begin_run():
                 response.success = False
-                response.message = state.last_plan_rejection or "no grasp plan received yet"
+                response.message = "visual grasp stop not confirmed"
                 return response
-            if not self._plan_is_fresh(state.latest_plan):
-                response.success = False
-                response.message = "cached grasp plan expired"
-                return response
-            state.begin_run()
             request_id = state.active_request_id
         try:
             self._refresh_config()
-            from .visual_grasp_runtime import VisualGraspRuntime
+            ok, reason = self._wait_for_fresh_plan()
+            if not ok:
+                response.success = False
+                response.message = reason
+                return response
+            # 运行时编排器位于包根目录，即 nodes 子包的上一层。
+            from ..visual_grasp_runtime import VisualGraspRuntime
             workflow = VisualGraspWorkflow(
                 state=state, config=self._config, io_gateway=self._io_gateway,
                 tf_buffer=self._tf_buffer, clock=self.get_clock(), logger=self.get_logger(),
@@ -546,56 +552,73 @@ class VisualGraspExecutorNode(Node):
                         preserve_abort=state.phase in ("STOP_REQUESTED", "ABORTING")
                     )
 
-    def _stop_visual_grasp(self, _request, response):
-        """`/visual_grasp/stop` 服务回调：请求中止当前序列。
+    def _wait_for_fresh_plan(self) -> tuple[bool, str]:
+        """允许实时感知链路补充缺失输入或替换过期输入。
 
-        只置运行标志为假并请求运动停止，不做等待：真正的序列退出发生在执行回调的
-        下一个检查点（阶段后的等待或服务结果等待循环）。即使当前没有任务在跑，
-        也照常返回成功并发出停止请求，属于幂等的"保险动作"。
+        等待受 service_timeout_sec 限制，并可由停止请求中断。
+        新鲜度始终按采集时间判断，不以消息到达时间替代。
         """
+        state = _state_for(self)
+        timeout = max(float(self._service_timeout_sec), 0.0)
+        deadline = time.monotonic() + timeout
+        while rclpy.ok():
+            with state.lock:
+                if not state.running or state.plans_blocked:
+                    return False, state.abort_reason or "stopped while waiting for a fresh plan"
+                plan = state.latest_plan
+                if plan is not None and self._plan_is_fresh(plan):
+                    return True, "fresh plan available"
+                if plan is not None:
+                    age = message_age_sec(plan.header.stamp, now_ns=int(self.get_clock().now().nanoseconds))
+                    state.latest_plan = None
+                    state.latest_candidates = None
+                    state.last_plan_rejection = (
+                        f"cached grasp plan expired: age_sec={age}, "
+                        f"max_plan_age_sec={self._max_plan_age_sec}"
+                    )
+                reason = state.last_plan_rejection or "no grasp plan received yet"
+            if time.monotonic() >= deadline:
+                return False, f"fresh grasp plan wait timed out after {timeout:g}s: {reason}"
+            time.sleep(0.02)
+        return False, "ROS shutdown while waiting for a fresh plan"
 
-        _state_for(self).request_stop("operator stop requested")
-        self._request_stop()
-        response.success = True
-        response.message = "visual grasp stop requested"
+    def _poll_stop_confirmation(self):
+        state = _state_for(self)
+        with state.lock:
+            if state.run_callback_active or not self._io_gateway.stop_pending:
+                return
+            if not state.plans_blocked:
+                state.request_stop("waiting for motion stop confirmation")
+            ok, message = self._io_gateway.poll_stop_confirmation()
+            if ok:
+                state.confirm_stop()
+                self.get_logger().info("visual grasp stop confirmed; waiting for a new plan")
+            elif ok is False:
+                if state.abort_reason != message:
+                    self.get_logger().error(message)
+                state.mark_aborting(message)
+
+    def _stop_visual_grasp(self, _request, response):
+        """停止并保持当前位置；成功表示已确认停止，不附带自动回位。"""
+        state = _state_for(self)
+        with state.lock:
+            state.request_stop("operator stop; waiting for confirmation")
+            self._request_stop()
+        deadline = time.monotonic() + 16.0
+        while rclpy.ok() and time.monotonic() < deadline:
+            with state.lock:
+                if not state.plans_blocked:
+                    response.success = True
+                    response.message = "visual grasp stopped and confirmed; holding current position"
+                    return response
+                if state.phase == "ABORTING" and not state.run_callback_active:
+                    response.success = False
+                    response.message = state.abort_reason
+                    return response
+            time.sleep(.02)
+        response.success = False
+        response.message = "stop not confirmed; execution remains blocked"
         return response
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def _request_stop(self) -> None:
         """同时向运动执行与轨迹层发出停止请求，双通道保险，任一可用即可生效。"""

@@ -1,4 +1,4 @@
-"""Shared validation for vision node parameter snapshots."""
+"""视觉节点参数快照的公共校验逻辑。"""
 
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def validate_candidate_parameters(values: Mapping[str, object]) -> None:
 
 
 def validate_parameter_geometry(values: Mapping[str, object]) -> None:
-    """Shared finite geometry checks, including nonzero direction/quaternion."""
+    """公共几何数值校验：要求数值有限，且方向向量和四元数非零。"""
     for name in ("fixed_grasp_orientation_xyzw", "place_orientation_xyzw", "base_approach_axis_xyz"):
         if name in values:
             size = 4 if name.endswith("xyzw") else 3

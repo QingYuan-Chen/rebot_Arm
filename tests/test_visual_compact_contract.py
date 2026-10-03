@@ -14,9 +14,7 @@ LAUNCH = ROOT / "src/rebotarm_bringup/launch"
 
 
 @pytest.mark.parametrize("entry", [
-    "visual_grasp_compact.launch.py",
-    "visual_plan_only.launch.py",
-    "visual_execute.launch.py",
+    "visual_grasp_system.launch.py",
 ])
 def test_real_public_argument_inventory_is_compact(entry):
     # --show-args expands the real include graph, but never launches a process.
@@ -31,6 +29,7 @@ def test_real_public_argument_inventory_is_compact(entry):
     assert 15 <= len(set(names)) <= 25, names
     assert "candidate_min_confidence" not in names
     assert "gripper_grasp_close_force" not in names
+    assert "execution_mode" not in names
     assert "use_sim_time" in names
     assert "visual_interfaces_config" in names
 
@@ -45,7 +44,7 @@ from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument
 
 root = Path(sys.argv[1])
-spec = importlib.util.spec_from_file_location("compact", root / "src/rebotarm_bringup/launch/visual_grasp_compact.launch.py")
+spec = importlib.util.spec_from_file_location("compact", root / "src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 context = LaunchContext()
@@ -60,7 +59,7 @@ assert len(stages) == 2
 assert context.launch_configurations["candidate_min_confidence"] == "0.61"
 assert context.launch_configurations["max_plan_age_sec"] == "4.0"
 assert context.launch_configurations["use_hardware"] == "false"
-assert context.launch_configurations["move_to_visual_ready_on_start"] == "false"
+assert context.launch_configurations["start_visual_grasp_executor"] == "true"
 assert context.launch_configurations["auto_retry_enabled"] == "false"
 '''
     result = subprocess.run([sys.executable, "-", str(ROOT)], input=script,
@@ -77,3 +76,29 @@ def test_stage_launches_do_not_reintroduce_literal_frame_and_ik_names():
             for key, value in zip(node.keys, node.values):
                 if isinstance(key, ast.Constant) and key.value in interface_keys:
                     assert not isinstance(value, ast.Constant), (path, key.value)
+
+@pytest.mark.parametrize('hardware', [False, True])
+def test_backend_selects_required_stages_without_launching(hardware):
+    import importlib.util
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+    spec = importlib.util.spec_from_file_location('system', LAUNCH / 'visual_grasp_system.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    context = LaunchContext()
+    context.launch_configurations.update(use_hardware=str(hardware).lower(), execute_gripper='true')
+    for action in module.generate_launch_description().entities:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
+    stages = module._prepare_stages(context)
+    enabled = 'true'
+    assert context.launch_configurations['execution_mode'] == 'execute'
+    for name in ('start_candidate_ik_filter','start_motion_execution','start_visual_grasp_executor'):
+        assert context.launch_configurations[name] == enabled
+    assert context.launch_configurations['start_sim_trajectory_controller'] == str(not hardware).lower()
+    assert context.launch_configurations['execute_gripper'] == 'true'
+    assert len(stages) == 2
+    for old_mode in ('plan_only', 'readonly'):
+        context.launch_configurations['execution_mode'] = old_mode
+        with pytest.raises(RuntimeError, match='execution_mode is retired'):
+            module._prepare_stages(context)
