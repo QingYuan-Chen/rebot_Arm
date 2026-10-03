@@ -23,6 +23,9 @@
   <exec_depend>builtin_interfaces</exec_depend>
   <!-- 刚体动力学库：计算重力补偿所需的重力广义力与雅可比 -->
   <exec_depend>pinocchio</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <!-- 重力补偿与规划/仿真共用权威模型资源，不导入规划实现。 -->
+  <exec_depend>rebotarm_moveit_config</exec_depend>
   <!-- 几何消息：位姿 Pose 用于笛卡尔目标下发与反馈 -->
   <exec_depend>geometry_msgs</exec_depend>
   <!-- ROS 2 Python 客户端库：节点、服务、动作、参数与 QoS -->

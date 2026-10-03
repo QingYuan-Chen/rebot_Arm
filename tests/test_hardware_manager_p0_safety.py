@@ -303,7 +303,13 @@ def configure_gravity_compensation_test(
     manager.arm._rate = 500.0
     manager.arm.mode_mit = lambda **_kwargs: True
     mit_commands: list[dict[str, object]] = []
-    manager.arm.mit = lambda **kwargs: mit_commands.append(dict(kwargs))
+    manager._send_gravity_mit = lambda **kwargs: mit_commands.append(dict(kwargs))
+    from rebotarmcontroller.gravity_control import GravitySettings
+    manager._gc_settings = GravitySettings()
+    manager._gc_torque_limits = np.array([27., 27., 27., 7., 7., 7.])
+    manager._gravity_comp_last_total = np.zeros(6)
+    manager._gravity_comp_fault = None
+    manager._gravity_comp_hold_feedforward = None
     manager._gc_compute_generalized_gravity = lambda q: np.zeros_like(q)
     manager._gc_model = object()
     manager._gc_data = object()
@@ -312,6 +318,7 @@ def configure_gravity_compensation_test(
     class FakePin:
         class ReferenceFrame:
             WORLD = object()
+            LOCAL_WORLD_ALIGNED = object()
 
         @staticmethod
         def computeJointJacobians(_model, _data, _q) -> None:
@@ -327,6 +334,110 @@ def configure_gravity_compensation_test(
 
     manager._gc_pin = FakePin
     return mit_commands
+
+
+def test_gravity_integral_has_same_effect_at_different_control_rates():
+    def integrate(dt):
+        manager = make_manager(gripper_feedback_stale_timeout_sec=2.)
+        q = np.array([.2, -.3, -.4, .1, .2, -.1])
+        configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
+        manager._gravity_comp_active = True
+        manager._gravity_comp_q_target = q + .01
+        manager._gravity_comp_integral = np.zeros(6)
+        for _ in range(round(.1 / dt)):
+            manager._gravity_comp_tick(manager.arm, dt)
+        return manager._gravity_comp_integral
+    np.testing.assert_allclose(integrate(.01), integrate(.002), atol=1e-12)
+    np.testing.assert_allclose(integrate(.01), .001, atol=1e-12)
+
+
+def test_gravity_mode_failure_rolls_back_to_verified_position_hold():
+    manager = make_manager()
+    q = np.array([.2, -.3, -.4, .1, .2, -.1])
+    commands = configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
+    manager.arm.mode_mit = lambda **kwargs: False
+    with pytest.raises(RuntimeError, match='MIT mode'):
+        manager.start_gravity_compensation()
+    assert commands == []
+    assert not manager.gravity_compensation_active()
+    assert manager.enabled
+    assert manager.arm.mode_pos_vel_calls == 1
+    np.testing.assert_allclose(manager._endpos_ctrl._q_target, q)
+
+
+def test_gravity_sender_does_not_swallow_motor_send_failure():
+    manager = make_manager()
+    configure_gravity_compensation_test(manager, positions=np.zeros(6), velocities=np.zeros(6))
+    del manager._send_gravity_mit
+    for motor in manager.arm._motor_map.values():
+        motor.send_mit = lambda *args: None
+    manager.arm._motor_map['joint3'].send_mit = lambda *args: (_ for _ in ()).throw(
+        RuntimeError('serial write failed'))
+    with pytest.raises(RuntimeError, match='joint3.*serial write failed'):
+        manager._send_gravity_mit(pos=np.zeros(6), vel=np.zeros(6), kp=np.ones(6),
+                                  kd=np.ones(6), tau=np.zeros(6))
+
+
+def test_gravity_model_exception_keeps_healthy_arm_enabled_in_guarded_hold(monkeypatch):
+    manager = make_manager()
+    q = np.array([.2, -.3, -.4, .1, .2, -.1])
+    commands = configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
+    manager.start_gravity_compensation()
+    manager._gc_compute_generalized_gravity = lambda **kwargs: (_ for _ in ()).throw(
+        RuntimeError('invalid model output'))
+    monkeypatch.setattr(manager, 'refresh_feedback_if_due', lambda **kwargs: False)
+    manager._gravity_hardware_tick(manager.arm, .002)
+    assert manager.enabled and manager.gravity_compensation_active()
+    assert manager._gravity_comp_fault is not None
+    np.testing.assert_allclose(commands[-1]['pos'], q)
+    assert manager.arm.disable_calls == 0
+
+
+def test_gravity_preflight_model_failure_leaves_position_hold_running():
+    manager = make_manager()
+    q = np.array([.2, -.3, -.4, .1, .2, -.1])
+    configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
+    manager._gc_compute_generalized_gravity = lambda **kwargs: np.full(6, np.nan)
+    with pytest.raises(ValueError, match='finite'):
+        manager.start_gravity_compensation()
+    assert manager.arm.control_loop_active and manager.enabled
+    assert not manager.gravity_compensation_active()
+    np.testing.assert_allclose(manager._endpos_ctrl._q_target, q)
+
+
+def test_gravity_deadline_fault_keeps_healthy_arm_enabled(monkeypatch):
+    manager = make_manager()
+    q = np.array([.2, -.3, -.4, .1, .2, -.1])
+    configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
+    manager.start_gravity_compensation()
+    from rebotarmcontroller.gravity_control import LoopTiming
+    manager._gravity_timing = LoopTiming(100.)
+    monkeypatch.setattr(manager, 'refresh_feedback_if_due', lambda **kwargs: False)
+    for i in range(4):
+        now = 10. + i * .02
+        monkeypatch.setattr(hardware_manager_module.time, 'monotonic', lambda: now)
+        seed_verified_feedback(manager, observed_at=now, arm_status=1)
+        manager._gravity_hardware_tick(manager.arm, .01)
+    assert manager._gravity_comp_fault == 'three consecutive control deadline misses'
+    assert manager.enabled and manager.arm.disable_calls == 0
+
+
+def test_gravity_send_failure_requests_protective_disable(monkeypatch):
+    manager = make_manager()
+    q = np.array([.2, -.3, -.4, .1, .2, -.1])
+    configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
+    manager.start_gravity_compensation()
+    from rebotarmcontroller.hardware_manager import GravityCommandError
+    manager._send_gravity_mit = lambda **kwargs: (_ for _ in ()).throw(
+        GravityCommandError('serial write failed'))
+    monkeypatch.setattr(manager, 'refresh_feedback_if_due', lambda **kwargs: False)
+    disables = []
+    manager.arm._ctrl_map['fake'].disable_all = lambda: disables.append(True)
+    manager._gravity_hardware_tick(manager.arm, .002)
+    assert disables == [True]
+    assert not manager.gravity_compensation_active()
+    assert 'GRAVITY_COMMAND_PROTECTIVE_DISABLE' in manager.error_codes
+    assert 'FEEDBACK_PROTECTIVE_DISABLE' not in manager.error_codes
 
 
 class FakeThread:

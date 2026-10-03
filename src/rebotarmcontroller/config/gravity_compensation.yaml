@@ -1,0 +1,12 @@
+# 软件约束；未作为新基线实机调参结果验收。
+kp: 7.0
+kd: 0.8
+integral_gain: 1.0  # N.m/(rad*s)，按实测 dt 积分
+integral_limit_nm: 0.5
+# 总力矩限幅读取权威 URDF effort；变化率按 N.m/s 计算。
+torque_rate_limits_nm_s: [108.0, 108.0, 108.0, 28.0, 28.0, 28.0]
+# 重力在 base_link 中表达；默认基座水平安装。
+gravity_xyz_m_s2: [0.0, 0.0, -9.81]
+# 额外负载，不重复计入 URDF 已包含的夹爪质量。
+payload_mass_kg: 0.0
+payload_com_xyz_m: [0.0, 0.0, 0.0]

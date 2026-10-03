@@ -17,6 +17,7 @@ def generate_launch_description():
 
     controller_parameters = {
         "arm_config": LaunchConfiguration("arm_config"),
+        "gravity_config": LaunchConfiguration("gravity_config"),
         "gripper_config": LaunchConfiguration("gripper_config"),
         "channel": LaunchConfiguration("channel"),
         "shutdown_safe_home": LaunchConfiguration("shutdown_safe_home"),
@@ -48,6 +49,7 @@ def generate_launch_description():
                 "arm_config",
                 default_value=PathJoinSubstitution([bringup_share, "config", "arm.yaml"]),
             ),
+            DeclareLaunchArgument("gravity_config", default_value=""),
             # gripper_config：夹爪电机配置。
             DeclareLaunchArgument(
                 "gripper_config",

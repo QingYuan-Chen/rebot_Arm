@@ -2,7 +2,7 @@
 
 本模块属于硬件包，向上层（服务/动作/话题适配层）暴露一个
 ``HardwareManager``；它独占厂商控制库的机械臂实例、串口/总线通道与
-唯一的 500 Hz 硬件控制循环，是整条链路中唯一真正向电机写命令的地方。
+唯一的配置频率硬件控制循环，是整条链路中唯一真正向电机写命令的地方。
 
 主要职责：
 - 连接/断开、使能/失能（真机默认失能，必须显式 enable 才能运动）；
@@ -40,6 +40,12 @@ import numpy as np
 import yaml
 
 from .conversions import fk_to_pose
+from .gravity_control import (GravitySettings, LoopTiming, bounded_mit_command,
+                              load_gravity_model, package_file, vector)
+
+
+class GravityCommandError(RuntimeError):
+    """Motor command transport failed; holding torque cannot be trusted."""
 
 _LOG = logging.getLogger(__name__)
 
@@ -103,7 +109,7 @@ _G_GRASP_HOLD_KD = 1.0
 _G_GRASP_CLOSE_FORCE_DEFAULT = 0.40
 _G_GRASP_CLOSE_FORCE_MAX = 1.0
 _G_GRASP_HOLD_FORCE_DEFAULT = 0.40
-# grasp_holding 会以 500 Hz 持续加载电机。上游从不退出该状态，因此一次成功
+# grasp_holding 会在控制循环中持续加载电机。上游从不退出该状态，因此一次成功
 # 抓取会把力矩一直顶到下一条命令或控制器关闭——这正是 2026-08-12 Joint4 过温
 # 所涉及的持续加载机理。故保持必须有时限，且总以中性释放收尾。
 _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC = 30.0
@@ -219,6 +225,7 @@ class HardwareManager:
         gripper_position_timeout_margin_sec: float = _G_POSITION_TIMEOUT_MARGIN_SEC,
         gripper_feedback_stale_timeout_sec: float = _G_FEEDBACK_STALE_TIMEOUT_SEC,
         grasp_hold_timeout_sec: float = _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC,
+        gravity_config: Optional[str] = None,
     ) -> None:
         requested_feedback_rate = float(hardware_feedback_rate_hz)
         if not (
@@ -273,19 +280,23 @@ class HardwareManager:
 
         from reBotArm_control_py.actuator import RobotArm
         from reBotArm_control_py.controllers import ArmEndPos
-        from reBotArm_control_py.kinematics import load_robot_model
-        from reBotArm_control_py.dynamics import compute_generalized_gravity
         import pinocchio as pin
 
+        settings_path = (Path(gravity_config).expanduser() if gravity_config else
+                         package_file('rebotarmcontroller', 'config/gravity_compensation.yaml'))
+        self._gc_settings = GravitySettings.from_yaml(settings_path)
+        self._gravity_model = load_gravity_model(
+            package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'), self._gc_settings)
+        self._gc_torque_limits = self._gravity_model.effort
         cfg_path = Path(arm_cfg).expanduser() if arm_cfg else self.default_arm_cfg()
         cfg_path = self._arm_cfg_with_channel(cfg_path, channel)
         self._arm = RobotArm(cfg_path=str(cfg_path))
         # 重力补偿用的动力学模型：pinocchio 模型 + 数据缓冲 + 末端帧 id，
-        # 计算函数引用缓存在实例上，避免在 500 Hz 回路里重复导入。
-        self._gc_model = load_robot_model()
+        # 计算函数和数据缓冲来自同一个权威模型，不再使用 SDK 的另一份 URDF。
+        self._gc_model = self._gravity_model.model
         self._gc_data = self._gc_model.createData()
         self._gc_ee_frame_id = self._gc_model.getFrameId(_GC_EE_FRAME)
-        self._gc_compute_generalized_gravity = compute_generalized_gravity
+        self._gc_compute_generalized_gravity = self._gravity_model.gravity
         self._gc_pin = pin
 
         self._gripper_cfg_path = (
@@ -353,6 +364,12 @@ class HardwareManager:
         self._gravity_comp_integral: np.ndarray | None = None
         self._gravity_comp_lock_counter = 0
         self._gravity_comp_q_last: np.ndarray | None = None
+        self._gravity_comp_last_total = np.zeros(6)
+        self._gravity_comp_fault: str | None = None
+        self._gravity_comp_hold_feedforward = None
+        self._gravity_timing = None
+        self._gravity_feedback_metrics = {}
+        self._gravity_next_log = 0.
 
         self._patch_arm_bus_lock()
 
@@ -792,7 +809,7 @@ class HardwareManager:
             _LOG.info("arm feedback recovered updated=%.6f", observed_at)
 
     def _record_arm_feedback_error(self, reason: str) -> None:
-        # 只在错误内容变化时打日志，避免 500 Hz 回路上刷屏。
+        # 只在错误内容变化时打日志，避免硬件回路上刷屏。
         message = str(reason)
         changed = message != self._arm_feedback_error
         self._arm_feedback_error = message
@@ -1737,50 +1754,101 @@ class HardwareManager:
         self.set_state_machine("LOWLEVEL_STREAMING")
 
     def start_gravity_compensation(self) -> None:
+        with self._motor_lifecycle_lock:
+            self._start_gravity_compensation_locked()
+
+    def _start_gravity_compensation_locked(self) -> None:
         """进入重力补偿：MIT 模式 + 广义重力前馈 + 目标位置 PI 锁定。
 
         流程：停掉位置-速度循环与发送线程 -> 刷新反馈并把当前角度设为目标 ->
-        以 _GC_KP/_GC_KD 进入 MIT 模式 -> 启动统一控制循环执行
+        以配置的 Kp/Kd 进入 MIT 模式 -> 启动统一控制循环执行
         ``_gravity_hardware_tick``。补偿期间操作员可以推动机械臂（目标会跟随），
         停止时再回到位置-速度保持。
         """
         self._require_enabled()
+        timing = LoopTiming(float(self._arm._rate))
         self.stop_gravity_compensation()
         self._stop_control_loop()
         self._endpos_ctrl._stop_send.set()
         self._endpos_ctrl._moving = False
-        self._refresh_arm_feedback()
-        self._gravity_comp_q_target = self._read_gravity_comp_positions()
+        try:
+            self._refresh_arm_feedback()
+            self._gravity_comp_q_target = self._read_gravity_comp_positions()
+        except Exception as exc:
+            self._protective_disable_from_hardware_loop(str(exc))
+            raise
         self._gravity_comp_q_last = self._gravity_comp_q_target.copy()
-        self._arm.mode_mit(
-            kp=np.full(self._arm.num_joints, _GC_KP, dtype=np.float64),
-            kd=np.full(self._arm.num_joints, _GC_KD, dtype=np.float64),
-        )
+        # Before switching modes reject a model that cannot support this pose.
+        try:
+            gravity = vector(self._gc_compute_generalized_gravity(q=self._gravity_comp_q_target),
+                             6, 'gravity torque')
+            if (np.abs(gravity) > self._gc_torque_limits).any():
+                raise RuntimeError('gravity torque exceeds model effort limits')
+        except Exception:
+            self._start_pos_vel_loop(target=self._gravity_comp_q_target)
+            raise
+        self._gravity_comp_fault = None
+        self._gravity_comp_hold_feedforward = None
         self._gravity_comp_integral = np.zeros_like(self._gravity_comp_q_target)
         self._gravity_comp_lock_counter = 0
-        self._gravity_comp_active = True
-        self._gravity_comp_tick(self._arm, 1.0 / float(self._arm._rate))
+        try:
+            if not self._arm.mode_mit(
+                kp=np.full(6, self._gc_settings.kp), kd=np.full(6, self._gc_settings.kd)
+            ):
+                raise RuntimeError('MIT mode switch did not succeed on all joints')
+            # Mode switching can take hundreds of ms; refresh after, not only before.
+            self._refresh_arm_feedback()
+            self._gravity_comp_q_target = self._read_gravity_comp_positions()
+            samples = self._verified_feedback_samples(self.joint_names)
+            self._gravity_comp_last_total = np.clip(
+                [float(s.state.torq) for s in samples],
+                -self._gc_torque_limits, self._gc_torque_limits)
+            self._gravity_comp_active = True
+            self._gravity_comp_tick(self._arm, 1. / float(self._arm._rate))
+        except Exception:
+            self._gravity_comp_active = False
+            # Restore healthy hardware to verified current-position hold.
+            # A failed restore is a motor/communication fault, not a task failure.
+            try:
+                self._refresh_arm_feedback()
+                target = self._read_gravity_comp_positions()
+                if not self._arm.mode_pos_vel():
+                    raise GravityCommandError('POS_VEL restore failed')
+                self._start_pos_vel_loop(target=target)
+                self.set_state_machine('IDLE')
+            except Exception as restore_error:
+                self._protective_disable_from_hardware_loop(str(restore_error))
+            raise
+        self._gravity_timing = timing
+        self._gravity_feedback_metrics = {}
+        self._gravity_next_log = 0.
         self._arm.start_control_loop(self._gravity_hardware_tick, rate=self._arm._rate)
         self.set_state_machine("GRAVITY_COMP")
 
     def stop_gravity_compensation(self) -> None:
-        """退出重力补偿：用最后的目标角接管位置-速度保持，避免姿态跌落。"""
+        with self._motor_lifecycle_lock:
+            self._stop_gravity_compensation_locked()
+
+    def _stop_gravity_compensation_locked(self) -> None:
+        """退出重力补偿：用最新验证角度接管位置-速度保持。"""
         if not self._gravity_comp_active:
             return
-        hold_target = (
-            self._gravity_comp_q_last.copy()
-            if self._gravity_comp_q_last is not None
-            else None
-        )
-        self._arm.stop_control_loop()
+        self._stop_control_loop()
         self._gravity_comp_active = False
         self._gravity_comp_q_target = None
         self._gravity_comp_integral = None
         self._gravity_comp_lock_counter = 0
         self._gravity_comp_q_last = None
         if self._enabled:
-            self._arm.mode_pos_vel()
-            self._start_pos_vel_loop(target=hold_target)
+            try:
+                self._refresh_arm_feedback()
+                hold_target = self._read_gravity_comp_positions()
+                if not self._arm.mode_pos_vel():
+                    raise GravityCommandError('gravity POS_VEL restore failed')
+                self._start_pos_vel_loop(target=hold_target)
+            except Exception as exc:
+                self._protective_disable_from_hardware_loop(str(exc))
+                raise
         self.set_state_machine("IDLE")
 
     def gravity_compensation_active(self) -> bool:
@@ -1857,25 +1925,28 @@ class HardwareManager:
         """重力补偿的单周期控制律（运行在统一控制循环里）。
 
         1) 读反馈；2) 用动力学模型算广义重力力矩并按增益缩放，作为前馈 tau；
-        3) 目标角误差积分（限幅 +/-0.5 rad*s）用于抵消稳态摩擦/模型误差；
+        3) 目标角误差按实际 dt 积分，以 N.m 限幅用于抵消稳态摩擦/模型误差；
         4) 用末端雅可比把关节速度映到笛卡尔空间：一旦线速度/角速度超过阈值，
         说明人正在拖动，于是把目标角更新为当前角并衰减积分（"跟随"模式）；
         否则累加锁定计数（"锁定"模式）。
         下发时位置/速度目标固定，仅用 tau 项补偿重力，因此机械臂呈现"轻"的手感。
         """
-        del dt
         if not self._gravity_comp_active or self._gravity_comp_q_target is None:
             return
 
         q, qd = self._read_gravity_comp_feedback()
-        tau_g = self._gc_compute_generalized_gravity(q=q)
+        if self._gravity_comp_fault is not None:
+            self._emit_bounded_gravity_command(q, qd, self._gravity_comp_hold_feedforward, dt)
+            return
+        tau_g = vector(self._gc_compute_generalized_gravity(q=q), 6, 'gravity torque')
         tau_g = apply_gravity_compensation_tau_scale(tau_g)
 
         q_error = self._gravity_comp_q_target - q
         if self._gravity_comp_integral is None:
             self._gravity_comp_integral = np.zeros_like(q)
-        self._gravity_comp_integral += q_error * 1.0
-        np.clip(self._gravity_comp_integral, -0.5, 0.5, out=self._gravity_comp_integral)
+        self._gravity_comp_integral += q_error * self._gc_settings.integral_gain * dt
+        cap = self._gc_settings.integral_limit_nm
+        np.clip(self._gravity_comp_integral, -cap, cap, out=self._gravity_comp_integral)
 
         self._gc_pin.computeJointJacobians(self._gc_model, self._gc_data, q)
         self._gc_pin.updateFramePlacements(self._gc_model, self._gc_data)
@@ -1883,7 +1954,7 @@ class HardwareManager:
             self._gc_model,
             self._gc_data,
             self._gc_ee_frame_id,
-            self._gc_pin.ReferenceFrame.WORLD,
+            self._gc_pin.ReferenceFrame.LOCAL_WORLD_ALIGNED,
         )
         # 空间速度前三维是线速度、后三维是角速度（世界系表达）。
         spatial_velocity = jacobian @ qd
@@ -1894,18 +1965,58 @@ class HardwareManager:
             # 检测到外部拖动：目标随之移动，并把积分项衰减 10%。
             self._gravity_comp_q_target = q.copy()
             self._gravity_comp_lock_counter = 0
-            self._gravity_comp_integral *= 0.9
+            self._gravity_comp_integral *= np.exp(-dt / .2)
         else:
             self._gravity_comp_lock_counter += 1
 
-        arm.mit(
+        self._emit_bounded_gravity_command(q, qd, tau_g + self._gravity_comp_integral, dt)
+
+    def _emit_bounded_gravity_command(self, q, qd, feedforward, dt):
+        settings = self._gc_settings
+        kp, kd, tau, total = bounded_mit_command(
+            self._gravity_comp_q_target, q, qd, np.full(6, settings.kp),
+            np.full(6, settings.kd), feedforward, self._gc_torque_limits,
+            settings.torque_rate_limits_nm_s, self._gravity_comp_last_total, dt)
+        self._send_gravity_mit(
             pos=self._gravity_comp_q_target,
-            vel=np.zeros(arm.num_joints),
-            kp=np.full(arm.num_joints, _GC_KP),
-            kd=np.full(arm.num_joints, _GC_KD),
-            tau=tau_g + self._gravity_comp_integral,
-            request_feedback=False,
+            vel=np.zeros(6), kp=kp, kd=kd, tau=tau,
         )
+        self._gravity_comp_last_total = total
+
+    def _send_gravity_mit(self, *, pos, vel, kp, kd, tau):
+        # SDK arm.mit catches CallError and continues. Send through the already
+        # bus-locked motor wrappers here so partial/failed sends reach the guard.
+        for index, name in enumerate(self.joint_names):
+            try:
+                self._arm._motor_map[name].send_mit(
+                    float(pos[index]), float(vel[index]), float(kp[index]),
+                    float(kd[index]), float(tau[index]))
+            except Exception as exc:
+                raise GravityCommandError(f'{name} MIT send failed: {exc}') from exc
+
+    def _gravity_fault_hold(self, reason):
+        q, _ = self._read_gravity_comp_feedback()
+        if self._gravity_comp_fault is None:
+            self._gravity_comp_fault = str(reason)
+            self._gravity_comp_q_target = q.copy()
+            self._gravity_comp_integral.fill(0.)
+            self._gravity_comp_hold_feedforward = self._gravity_comp_last_total.copy()
+            self._error_codes.append(f'GRAVITY_HOLD: {reason}')
+            _LOG.error('gravity compensation stopped; enabled guarded hold: %s', reason)
+
+    def gravity_compensation_diagnostics(self):
+        timing = getattr(self, '_gravity_timing', None)
+        model = getattr(self, '_gravity_model', None)
+        settings = getattr(self, '_gc_settings', None)
+        return dict(timing=timing.snapshot() if timing else {},
+                    feedback={k: dict(v) for k, v in getattr(self, '_gravity_feedback_metrics', {}).items()},
+                    configured_feedback_rate_hz=self._hardware_feedback_rate_hz,
+                    fault=getattr(self, '_gravity_comp_fault', None),
+                    model_path=model.path if model else None,
+                    model_sha256=model.sha256 if model else None,
+                    gravity_xyz_m_s2=list(settings.gravity_xyz_m_s2) if settings else None,
+                    payload_mass_kg=settings.payload_mass_kg if settings else None,
+                    payload_com_xyz_m=list(settings.payload_com_xyz_m) if settings else None)
 
     def current_pose(self):
         """用厂商正运动学把当前关节角换算成 Pose（供状态发布使用）。"""
@@ -1965,7 +2076,7 @@ class HardwareManager:
         # 位置/抓取入口会按需启动该循环。
 
     def set_gripper_target(self, position_m: float, max_effort: float = 0.0) -> None:
-        """下发夹爪位置目标（异步）：只登记目标，实际下发由 500 Hz 循环完成。
+        """下发夹爪位置目标（异步）：只登记目标，实际下发由 统一硬件循环完成。
 
         ``position_m``：0 表示完全闭合、正值为张开距离（m），会被夹到
         [0, _G_VERIFIED_OPEN_LIMIT_M]；``max_effort`` <= 0 时使用默认力矩
@@ -2143,7 +2254,7 @@ class HardwareManager:
 
         close_effort = float(np.clip(close_force, 0.05, _G_GRASP_CLOSE_FORCE_MAX))
         hold_effort = float(np.clip(hold_force, 0.05, _G_TAU_MAX))
-        # 抓取保持必须有界；无界保持会让电机以 500 Hz 持续加载且没有退出路径。
+        # 抓取保持必须有界；无界保持会让电机在控制循环中持续加载且没有退出路径。
         requested_hold = (
             self._grasp_hold_timeout_sec
             if hold_timeout_sec is None
@@ -2406,9 +2517,50 @@ class HardwareManager:
         self._hardware_control_tick(arm, dt, self._endpos_ctrl._loop_cb)
 
     def _gravity_hardware_tick(self, arm, dt: float) -> None:
-        self._hardware_control_tick(arm, dt, self._gravity_comp_tick)
+        timing = getattr(self, '_gravity_timing', None)
+        if timing is None:
+            timing = self._gravity_timing = LoopTiming(float(arm._rate))
+        started = time.monotonic()
+        actual_dt = timing.begin(started)
+        try:
+            self._hardware_control_tick(arm, actual_dt, self._gravity_comp_tick)
+        except GravityCommandError as exc:
+            self._protective_disable_from_hardware_loop(str(exc), category='GRAVITY_COMMAND')
+            return
+        except Exception as exc:
+            # Programming/model failure must not kill the sole writer thread
+            # and leave a stale MIT target running on healthy motors.
+            try:
+                self._gravity_fault_hold(str(exc))
+                q, qd = self._read_gravity_comp_feedback()
+                self._emit_bounded_gravity_command(
+                    q, qd, self._gravity_comp_hold_feedforward, actual_dt)
+            except Exception as hold_error:
+                self._protective_disable_from_hardware_loop(str(hold_error))
+                return
+        finally:
+            timing.finish(time.monotonic())
+        if not self._gravity_comp_active:
+            return
+        if timing.faulted:
+            self._gravity_fault_hold('three consecutive control deadline misses')
+        metrics = getattr(self, '_gravity_feedback_metrics', {})
+        with self._feedback_lock:
+            for name, sample in zip(self.joint_names, self._verified_feedback_samples(self.joint_names)):
+                entry = metrics.setdefault(name, dict(sequence=sample.sequence, first=sample.observed_at,
+                                                       last=sample.observed_at, updates=0))
+                if sample.sequence != entry['sequence']:
+                    entry.update(sequence=sample.sequence, last=sample.observed_at,
+                                 updates=entry['updates'] + 1)
+                elapsed = entry['last'] - entry['first']
+                entry['effective_rate_hz'] = entry['updates'] / elapsed if elapsed > 0 else 0.
+                entry['age_sec'] = max(0., time.monotonic() - sample.observed_at)
+        self._gravity_feedback_metrics = metrics
+        if started >= getattr(self, '_gravity_next_log', 0.):
+            _LOG.info('gravity diagnostics: %s', self.gravity_compensation_diagnostics())
+            self._gravity_next_log = started + 5.
 
-    def _protective_disable_from_hardware_loop(self, reason: str) -> None:
+    def _protective_disable_from_hardware_loop(self, reason: str, *, category: str = 'FEEDBACK') -> None:
         """停掉唯一写入者并请求控制器失能，且不自连接（避免线程自 join 死锁）。"""
         message = str(reason)
         with self._gripper_lock:
@@ -2431,8 +2583,9 @@ class HardwareManager:
         self._gravity_comp_integral = None
         self._state_machine = "IDLE"
         self._set_lifecycle_state("DISABLING")
-        if "FEEDBACK_PROTECTIVE_DISABLE" not in self._error_codes:
-            self._error_codes.append("FEEDBACK_PROTECTIVE_DISABLE")
+        code = f'{category}_PROTECTIVE_DISABLE'
+        if code not in self._error_codes:
+            self._error_codes.append(code)
 
         controllers: list[object] = []
         for controller in getattr(self._arm, "_ctrl_map", {}).values():
@@ -2453,7 +2606,7 @@ class HardwareManager:
                 disable_errors.append(f"{type(controller).__name__}: {exc}")
         if disable_errors:
             self._error_codes.append(
-                "FEEDBACK_PROTECTIVE_DISABLE_FAILED: " + "; ".join(disable_errors)
+                f"{category}_PROTECTIVE_DISABLE_FAILED: " + "; ".join(disable_errors)
             )
         _LOG.error(
             "hardware writer stopped and controller protective disable requested: %s",
@@ -2492,6 +2645,9 @@ class HardwareManager:
 
     def _stop_control_loop(self) -> None:
         self._arm.stop_control_loop()
+        thread = getattr(self._arm, '_ctrl_thread', None)
+        if thread is not None and thread.is_alive():
+            raise RuntimeError('hardware writer did not stop; refusing a second writer')
         self._endpos_ctrl._running = False
 
     def _gripper_safe_mit(
@@ -2607,7 +2763,7 @@ class HardwareManager:
         """结束一次常规位置移动，并让夹爪回到空闲。
 
         上游 ``wait_gripper_target`` 只返回成功而不改 ``_gripper_active``/
-        ``_gripper_mode``，于是 500 Hz 循环在服务已经应答之后仍在继续下发 MIT
+        ``_gripper_mode``，于是统一硬件循环在服务已经应答之后仍在继续下发 MIT
         位置命令。这里改为原子地切到空闲，并在确认成功之前为唯一的硬件循环写入者
         排队一条中性 MIT 命令（零刚度、零阻尼、零前馈）。
 
@@ -2638,7 +2794,7 @@ class HardwareManager:
         arrived_angle = float(self._gripper_pos)
         if require_arrived and abs(arrived_angle - expected_goal) >= _G_ARRIVE_TOL:
             return False
-        # 在排队中性命令之前先清掉所有权。500 Hz 循环先判断 _gripper_active，
+        # 在排队中性命令之前先清掉所有权。统一硬件循环先判断 _gripper_active，
         # 因此它一旦为假就不会再产生任何位置命令，排队的中性命令即是最后一条。
         self._gripper_target_angle = arrived_angle
         self._gripper_active = False

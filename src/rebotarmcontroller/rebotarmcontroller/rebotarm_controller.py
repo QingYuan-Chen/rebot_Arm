@@ -75,6 +75,7 @@ class reBotArmController(Node):
 
         # arm_config: 机械臂 SDK 配置文件路径；空串表示使用 SDK 内置默认配置。
         self.declare_parameter("arm_config", "")
+        self.declare_parameter("gravity_config", "")
         # gripper_config: 夹爪配置文件路径；空串表示使用默认夹爪配置。
         self.declare_parameter("gripper_config", "")
         # channel: 电机总线通道（串口设备）；空串表示由配置文件决定。
@@ -158,6 +159,7 @@ class reBotArmController(Node):
         self.motor_passthrough = None
         self.hardware = HardwareManager(
             arm_cfg=arm_config,
+            gravity_config=self.get_parameter("gravity_config").value or None,
             gripper_cfg=gripper_config,
             channel=channel,
             hardware_feedback_rate_hz=hardware_feedback_rate_hz,

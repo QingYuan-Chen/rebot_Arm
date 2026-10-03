@@ -18,6 +18,7 @@ setup(
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
         # 清单文件随包安装到 share 目录，供运行时按包名定位资源
         (f"share/{package_name}", ["package.xml"]),
+        (f"share/{package_name}/config", ["config/gravity_compensation.yaml"]),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
