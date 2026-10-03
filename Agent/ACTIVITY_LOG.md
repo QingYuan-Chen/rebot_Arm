@@ -1211,3 +1211,5 @@
 - 2026-10-03T17:35:32+08:00 | actor=codex | event=start | note=Delete vision benchmarks and upload current progress to GitHub | verification=-
 - 2026-10-03T17:39:27+08:00 | actor=codex | event=checkpoint | note=Benchmarks removed and validated; preparing full current-worktree commit and GitHub push | verification=Layering 23 passed; full suite 747 passed,16 skipped; vision build and compileall passed; no hardware run
 - 2026-10-03T17:41:26+08:00 | actor=codex | event=complete | note=Deleted vision benchmarks and pushed all current progress to origin/main | verification=commit 4a4f959; origin/main updated; 23 layering passed; 747 passed,16 skipped; vision build/compileall passed; no hardware run
+- 2026-10-03T17:45:39+08:00 | actor=codex | event=start | note=Audit tools scripts and remove confirmed unused files | verification=-
+- 2026-10-03T17:50:50+08:00 | actor=codex | event=complete | note=Removed confirmed-unused historical P5/P6 tools; retained active environment and runtime tools | verification=23 layering passed; 744 passed,16 skipped; no current references; no camera or hardware run

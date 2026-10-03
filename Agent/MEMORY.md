@@ -4,6 +4,8 @@
 
 ## 当前焦点
 
+- 2026-10-03：审计 tools 后删除已关闭历史验收阶段的 `p5_*` 九个脚本、`p6_single_bottle_grasp_runner.py` 及其专属测试。视觉/GraspNet/相机/udev/MotorBridge 环境与运行工具均仍被构建、文档或测试使用，保留。现行代码、文档和测试无 P5/P6 runner 引用；分层 23 passed，全量 744 passed/16 skipped。未启动相机或真机。
+
 - 2026-10-03：按用户要求删除视觉包 benchmarks 目录、两个 benchmark console script、相关文档和测试引用。日常视觉启动与 execute 链路不受影响；分层 23 passed，全量 747 passed/16 skipped，vision 重建、compileall 与 diff 检查通过，未启动相机或真机。待将当前工作区整体提交并推送 GitHub。
 
 - 2026-10-03：视觉包残留英文说明注释与文档字符串已翻译为中文，保留接口、参数、日志和代码指令。对修改前后 84 个 Python/YAML 文件比较非文档 AST 与配置值，结果一致。纠正 benchmarks 过时注释及命令文档“只读”表述；两工具会调用 execute，统计服务成功率，不验证物体夹起，hybrid 名称不保证仿真且默认命名空间仍为历史 rebotarm_sim。日常视觉链路不依赖 benchmarks，建议无批量评测需求时删除，本轮仅分析未删除。分层 23 passed，全量 749 passed/16 skipped，规定 compileall、vision 构建与 diff 检查通过；未启动相机或真机。
