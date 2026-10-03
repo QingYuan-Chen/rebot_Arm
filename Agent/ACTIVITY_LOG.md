@@ -1218,3 +1218,4 @@
 - 2026-10-03T18:05:44+08:00 | actor=codex | event=start | note=Consolidate root dependency manifests and reference docs; document tools | verification=-
 - 2026-10-03T18:07:52+08:00 | actor=codex | event=complete | note=Consolidated dependency manifests, SDK/context docs and third-party manifest; documented tools | verification=23 layering passed; 744 passed/16 skipped full; shell syntax, selected document links, manifest identity, compileall and diff checks passed; no hardware
 - 2026-10-03T18:09:15+08:00 | actor=codex | event=start | note=Publish reviewed repository layout and vision resource ownership changes to GitHub | verification=-
+- 2026-10-03T18:09:45+08:00 | actor=codex | event=complete | note=Published repository layout and vision resources in commit 0bf407d to origin/main | verification=Push succeeded; prior verification 744 passed/16 skipped, vision build and installed assets verified; model tracked at new path
