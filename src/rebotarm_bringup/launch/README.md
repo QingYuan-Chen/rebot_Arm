@@ -21,8 +21,6 @@ src/rebotarm_bringup/launch/
 ├── moveit_hardware.launch.py
 ├── moveit_demo.launch.py
 ├── mujoco_moveit_sim.launch.py
-├── mujoco_headless.launch.py
-├── mujoco_rviz_viewer.launch.py
 ├── interactive_system.launch.py
 ├── rebotarm_app.launch.py
 ├── teleop_keyboard.launch.py
@@ -90,10 +88,15 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 | `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 启动唯一 MuJoCo 执行后端并包含本包的 MoveIt 演示入口；无头和桌面薄入口位于同目录 |
 | `interactive_system.launch.py` | 共享实现 | 统一拥有状态发布、MoveIt、RViz 以及真机/无硬件状态源的互斥选择；不建议用户手写其内部组合参数启动真机 |
 | `rebotarm_app.launch.py` | 完整真机入口 | 包含真机 MoveIt 组合，再增加示教录制、Dashboard 和状态 RViz；不启动键盘节点 |
-| `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认不接真机。无硬件模式使用轻量仿真轨迹控制器，按键可以改变 RViz 姿态，但不代表物理仿真 |
+| `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认不接真机。无硬件模式使用 RViz 轨迹插值预演控制器，按键可以改变 RViz 姿态，但不代表物理仿真 |
 | `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；不启动 MoveIt，默认不接真机。无硬件模式可驱动 RViz 仿真姿态，真机点动仍由控制器执行 |
-| `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 使用仿真轨迹控制器提供 Plan/Execute，不打开真机 |
-| `visual_grasp_system.launch.py` | 唯一视觉入口 | 固定执行流程；默认 `use_hardware=false`，在仿真后端执行，不打开真机 |
+| `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 使用 RViz 轨迹插值预演控制器提供 Plan/Execute，无物理引擎 |
+| `visual_grasp_system.launch.py` | 唯一视觉入口 | 固定执行流程；默认 `use_hardware=false`，在 RViz 轨迹插值预演后端执行，无物理引擎 |
+
+这里的 RViz 轨迹插值预演只验证 ROS/MoveIt/视觉流程和姿态显示，**不代表 MuJoCo
+物理验证**。它不计算动力学、执行器力、接触、碰撞或抓取结果；这些内容必须使用
+`mujoco_moveit_sim.launch.py` 验证；无窗口时设置
+`use_rviz:=false use_mujoco_viewer:=false`。
 
 ## 两组容易混淆的入口
 
@@ -110,7 +113,8 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 
 视觉主入口固定为执行流程，`use_hardware` 选择仿真或真机。启动后等待操作员调用
 `/rebotarm/visual_grasp/execute`，不自动使能或抓取。IK、运动服务和抓取编排自动启动，
-无硬件时自动提供仿真轨迹控制器。
+无硬件时自动提供 `rebotarm_preview/rebotarm_sim_trajectory_controller`，仅验证 ROS 执行流程和 RViz 姿态；
+物理、动力学和接触验证使用 MuJoCo 组合入口。
 
 ```bash
 # 仿真轨迹执行 + Open3D（真实相机输入，不是物体接触物理仿真）
@@ -136,7 +140,7 @@ ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
 
 | 内部文件 | 负责的组合 | 不负责 |
 |---|---|---|
-| `visual_backend.launch.py` | 包含 interactive_system；无硬件时启动仿真轨迹控制器 | 不重复定义真实硬件节点，不实现抓取策略 |
+| `visual_backend.launch.py` | 包含 interactive_system；无硬件时启动 `rebotarm_preview` 的 RViz 轨迹插值预演控制器 | 不重复定义真实硬件节点，不实现抓取策略 |
 | `visual_lifecycle.launch.py` | 顺序列出下面六个视觉处理片段 | 不触发自动摆位；文件名沿用历史命名 |
 | `visual_input.launch.py` | 包含 vision.launch，启动 Gemini 2、YOLO、手眼 TF 与 TCP TF | 不执行机械臂动作 |
 | `grasp_candidate.launch.py` | GraspNet、原始候选 Marker、可选 Open3D | 不保证候选可达，不执行候选 |
@@ -152,7 +156,7 @@ visual_grasp_system.launch.py
 ├── includes/visual_backend.launch.py
 │   ├── interactive_system.launch.py
 │   │   └── hardware_controller.launch.py（仅真机）
-│   └── 仿真轨迹控制器（仅无硬件）
+│   └── RViz 轨迹插值预演控制器（仅无硬件）
 └── includes/visual_lifecycle.launch.py
     ├── visual_input.launch.py
     ├── grasp_candidate.launch.py

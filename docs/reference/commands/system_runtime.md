@@ -55,7 +55,7 @@ ros2 launch rebotarm_bringup bringup.launch.py \
 无 RViz 的 headless 物理检查：
 
 ```bash
-ros2 launch rebotarm_bringup mujoco_headless.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=false use_mujoco_viewer:=false
 ```
 
 带 MoveIt/RViz Plan & Execute 的仿真入口：
@@ -74,7 +74,7 @@ MuJoCo Viewer 与单独 ROS 后端也可以分别启动。它们不会打开真�
 
 ```bash
 # MuJoCo Viewer + RViz 组合
-ros2 launch rebotarm_bringup mujoco_rviz_viewer.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true use_mujoco_viewer:=true
 
 # 只启动 MuJoCo ROS 后端（维护/调试入口）
 ros2 launch rebotarm_simulation mujoco_sim.launch.py
@@ -102,9 +102,10 @@ ros2 run rebotarm_simulation rebotarm_mujoco_cli -- --headless --duration 5
 ros2 run rebotarm_simulation rebotarm_urdf_to_mjcf -- --repo-root . --check
 ```
 
-`rebotarm_mujoco` 是 `rebotarm_mujoco_cli` 的兼容别名。`rebotarm_mujoco_node` 和
-`rebotarm_sim_trajectory_controller` 属于 launch 内部节点，不应和上述入口并行手动
-启动，否则可能产生重复仿真后端。
+`rebotarm_mujoco_cli` 是无头交互式 MuJoCo CLI。`rebotarm_mujoco_node` 是 MuJoCo
+物理后端；`rebotarm_sim_trajectory_controller` 是不加载物理引擎的 RViz 轨迹插值预演后端，
+用于无硬件键盘、RViz 拖动和视觉流程。两者由各自的组合 launch 启动，同一命名空间
+只运行一个轨迹 Action 服务端。CLI 使用独立模型实例，不发布 ROS 控制器接口。
 
 ## 验证：纯软件与分层检查
 

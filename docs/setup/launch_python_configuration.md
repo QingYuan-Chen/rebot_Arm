@@ -67,7 +67,7 @@ MuJoCo 模型资源的选择方式保持原有契约；本次只解除解释器�
 
 旧 `mujoco_ros_adapter_node.py` 和快照进程转发器 `upstream_backend.py` 已退出
 活动源码包，`rebotarm_simulation` 不再依赖 `rebotarm_motion`。正式 ROS 入口仍是
-`rebotarm_mujoco_node = rebotarm_simulation.mujoco_ros_node:main`，ROS action/service
+`rebotarm_mujoco_node = rebotarm_simulation.ros.mujoco_ros_node:main`，ROS action/service
 接口不变。历史源码可从 Git 历史追溯，本机参考归档不再随源码发布。
 模型分析、指标和独立离线工具仍使用的公共模块继续保留。
 

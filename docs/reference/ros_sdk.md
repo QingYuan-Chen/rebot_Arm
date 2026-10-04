@@ -38,6 +38,7 @@
 | `rebotarm_moveit_config` | URDF、网格、SRDF 与规划模型 |
 | `rebotarm_vision` | 相机、识别与抓取候选 |
 | `rebotarm_simulation` | MuJoCo 模型与仿真执行 |
+| `rebotarm_preview` | 轻量 FollowJointTrajectory 与 RViz 状态预演 |
 | `rebotarm_calibration` | 标定与 TF/TCP 验证 |
 
 ---

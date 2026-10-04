@@ -20,13 +20,13 @@ ROS launch 的解释器可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYT
 日常桌面联调可直接使用专用入口：
 
 ```bash
-ros2 launch rebotarm_bringup mujoco_rviz_viewer.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true use_mujoco_viewer:=true
 ```
 
 服务器、CI 或只做后台物理测试使用：
 
 ```bash
-ros2 launch rebotarm_bringup mujoco_headless.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=false use_mujoco_viewer:=false
 ```
 
 在当前工作区根目录、未激活venv的新终端执行。系统依赖按
@@ -47,9 +47,9 @@ launch使用显式解释器prefix；更换运行环境只需更新路径，不�
 直接运行模块时也必须显式选择解释器：
 
 ```bash
-MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_health --renderer-timeout 30
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_cli --headless --duration 5
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_viewer --duration 30
+MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.mujoco_cli --headless --duration 5
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.mujoco_viewer --duration 30
 ```
 
 ## 健康检查与无界面运行
@@ -57,7 +57,7 @@ MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_health --r
 EGL 渲染检查在隔离子进程中运行，并有超时保护，避免驱动挂起拖死主进程：
 
 ```bash
-MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_health --renderer-timeout 30
+MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
 ```
 
 预期 JSON 关键字段如下；版本和路径允许不同，但关节/执行器均应为 8，
@@ -74,7 +74,7 @@ MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_health --r
 不依赖窗口的定时运行：
 
 ```bash
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_cli --headless --duration 5
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.mujoco_cli --headless --duration 5
 ```
 
 输出同时含 `"requested_duration"` 和 `"achieved_duration"`；后者会按物理
@@ -86,7 +86,7 @@ MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_health --r
 在 Ubuntu 图形桌面的终端运行，而不是普通无显示 SSH 会话：
 
 ```bash
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_viewer --duration 30
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.mujoco_viewer --duration 30
 ```
 
 按 `1`–`6` 选择关节，按住 `J/K` 连续正/反向移动当前关节，按住 `C/O`
@@ -103,6 +103,16 @@ Viewer 中互相闪烁或遮挡，collision 网格保留参与碰撞，但显示
 旧的手写机械臂模型。
 
 ## ROS 2 适配层
+
+工作区提供两种独立包拥有的后端，验证含义不同：
+
+- `rebotarm_mujoco_node`：加载 MJCF 并推进 MuJoCo 物理，可用于物理状态、执行器力、
+  接触和桌面/瓶子场景验证；
+- `rebotarm_preview/rebotarm_sim_trajectory_controller`：不加载 MuJoCo，只做轨迹插值和 RViz 姿态预演；该轻量后端已从 `rebotarm_simulation` 拆出。
+
+RViz 预演的 Action 成功、姿态变化或视觉流程完成，不能作为 MuJoCo 物理、动力学、
+接触、碰撞或抓取成功证据。需要这些证据时必须启动 MuJoCo 组合入口，并确认只有一个
+轨迹 Action 服务端。
 
 只启动 MuJoCo 后端：
 
@@ -164,20 +174,21 @@ passive 发布器是为了让 `/rebotarm/joint_states` 只有 MuJoCo 这一份�
 核心类不依赖 ROS 2：
 
 ```python
-from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
 with RebotArmMujoco() as sim:
     sim.reset(seed=7)
     sim.set_joint_position_targets([0.1, -0.2, -0.2, 0.2, 0.0, 0.0])
     sim.set_gripper_width(0.05)
-    sim.set_object_pose("bottle", [0.45, 0.0, 0.44], [0.0, 0.0, 0.0, 1.0])
+    # 以下仅适用于显式加载含 bottle 的自定义场景；默认空桌面不可调用。
+    # sim.set_object_pose("bottle", [0.45, 0.0, 0.44], [0.0, 0.0, 0.0, 1.0])
     saved = sim.save_state()
     state = sim.step(10)
     sim.restore_state(saved)
     contacts = sim.get_contacts()
 ```
 
-当前 canonical scene / 规范仿真场景使用 `bottle` 作为与真机示例一致的目标；它是可复现的 bottle proxy / 瓶子代理几何，不代表真实瓶子的动力学、接触或抓取标定已经完成。
+默认 `scene.xml` 仅包含机器人与空桌面，不含 bottle；物体操作和抓取评估需要显式加载含目标的自定义场景。
 
 `get_state()` 返回关节位置/速度、执行器力、末端位姿、夹爪宽度、物体位姿
 和仿真时间。公开的末端与物体四元数顺序都是 XYZW；MuJoCo 内部 WXYZ 已在

@@ -12,7 +12,7 @@ def test_mujoco_multiaxis_handeye_recovery():
     script=r'''
 import numpy as np
 import mujoco
-from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 from rebotarm_calibration.handeye_residual import matrix_transform,transform_matrix
 from rebotarm_calibration.handeye_workflow import solve_dataset
 sim=RebotArmMujoco();model=sim._model;data=sim._data
@@ -52,7 +52,7 @@ def test_mujoco_projected_marker_detection_and_handeye(tmp_path):
     if not python.exists(): pytest.skip('configured MuJoCo interpreter unavailable')
     script=r'''
 import numpy as np,cv2,mujoco,json,sys
-from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 from rebotarm_calibration.handeye_residual import matrix_transform,transform_matrix
 from rebotarm_calibration.handeye_workflow import solve_dataset,atomic_write_json
 from rebotarm_calibration.aruco_pose import detect_aruco_pose

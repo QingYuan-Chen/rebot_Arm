@@ -4,6 +4,14 @@
 
 ## 当前焦点
 
+- 2026-10-04：用户连接真实相机后验证visual_grasp_system(use_hardware=false)+新preview；75秒含启动采样：RGB756/depth627帧(640×480)，bottle非空960/960，GraspNet非空95/95，filtered_plan有效62/62，末条到达年龄2.666秒；preview状态30Hz，无运行ERROR/迁移导入异常，测试进程已退出。未调用execute，不宣称相机驱动抓取闭环或真机验收。证据 Agent/evidence/current/preview-real-camera-2026-10-04/README.md。
+
+- 2026-10-04：用户连接真实相机后，隔离域224跑visual_grasp_system无硬件入口，Gemini2/YOLO/本地GraspNet/IK过滤与新preview同时正常。reliable复核40秒含启动：RGB/depth/CameraInfo/detections各433条，40条非空候选、27条有效filtered_plan；没有调用execute或真机动作。best-effort探针丢大帧，改reliable后计数一致；无运行期ERROR/导入失败，退出后子进程清理。证据 Agent/evidence/current/preview-real-camera-2026-10-04/README.md。
+
+- 2026-10-04：preview拆包运行回归：keyboard实际按键+0.02rad，drag和visual无硬件入口完成MoveIt Plan/Execute（请求缩放0.1/0.1），三入口轨迹/夹爪/停止保持/safe_home通过；show-args通过，专项43 passed。视觉关闭真实感知，RViz未人工鼠标拖动，键盘FIFO代替TTY。默认0缩放首轮Ruckig失败、RViz缺recognize_objects及退出阶段异常保留在证据中；无测试子进程残留。证据 Agent/evidence/current/preview-package-launch-2026-10-04/README.md。
+
+- 2026-10-04：按用户决定拆出 `rebotarm_preview`，拥有轻量 FollowJointTrajectory/RViz 状态预演；console script 名保持 `rebotarm_sim_trajectory_controller`，直接 ros2 run 的包名改为 rebotarm_preview。键盘、RViz 拖动、visual_backend 三处节点声明已切换，visual_grasp_system 经 include 自动使用新包；simulation 不再安装预演入口。新包不依赖物理引擎或 simulation，bringup 仍因 MuJoCo 组合保留 simulation 依赖。清理旧 simulation 安装目录两个预演脚本后重建三包成功；全量741 passed/17 skipped，随后补充依赖边界测试分层25 passed，compileall/diff及安装入口核验通过。未操作真机，未提交推送；保留任务开始前已有改动。
+
 - 2026-10-03：按用户确认完成根目录整理第一步：六份 requirements-*.txt 原样移入 requirements/；根 README_zh.md 移为 docs/reference/ros_sdk.md，CONTEXT.md 移为 docs/reference/context.md；SDK repos 清单移入 third_party/。同步安装脚本、文档链接、AGENTS/执行流程和测试读取路径，新增 tools/README.md 与 requirements/README.md。依赖版本、上下文契约及 SDK 清单内容校验不变；分层23 passed，全量744 passed/16 skipped，Shell语法、文档链接、compileall/diff通过。本轮仅路径、文档及对应测试变更，不改ROS包结构、环境或Agent状态机制，未启动硬件，尚未提交推送。
 
 - 2026-10-03：GraspNet 推理实现从 tools 移入 `rebotarm_vision.backends.graspnet_baseline_inference`，默认配置和节点改用完整模块名；取消 tools/share 源码搜索与后端 data_files 安装。YOLO 权重移入 `src/rebotarm_vision/models/`，仍安装到 share/rebotarm_vision/models；同步模型说明、文档和测试。推理文件与模型 SHA-256 迁移前后一致。清理安装目录旧模型失效软链接后 vision 重建成功；包外 /tmp 验证后端导入和已安装权重校验通过，专项54 passed/1 skipped（含分层），全量744 passed/16 skipped，compileall/diff通过。未启动推理、相机或硬件，未提交推送。
@@ -962,3 +970,41 @@ Dashboard 的 `TeachReplayWorkflow` 已定为唯一正式示教回放实现，�
 - 2026-10-01：完成目录重组后的全项目只读审计。排除 build/install/log 后，仓库内旧 `rebotarm_vision.<顶层模块>` 引用为 0；AST 扫描 134 个视觉包 import、50 个唯一模块目标，缺失目标为 0；15 个 console script 均指向 canonical `nodes/`、`benchmarks/`、`diagnostics/` 子包。分层测试 `23 passed`，全量 `779 passed, 18 skipped`，dashboard/teleop/teach/motion 与 bringup compileall、git diff check 通过。未启动相机、MoveIt 或硬件。剩余风险仅是仓库外部脚本若仍导入旧顶层 Python 路径，需要按新路径迁移。
 
 - 2026-10-01：按用户授权新增可选 `mjlab + MuJoCo Warp + PyTorch/RSL-RL` GPU Reach 训练线，保留 CPU MuJoCo/MJX 和 ROS 仿真入口不变。新增 `rebotarm_simulation.mjlab_reach` 任务插件、`requirements-mjlab.txt`、`docs/reference/commands/mjlab_rl.md` 和静态边界测试；插件使用现有 reach_scene.xml 的六个 torque actuator，明确不等同 CPU Reach 的 position-target action，需独立 mjlab 环境安装。`rebotarm_simulation` 构建通过，分层/集成测试26通过，全量782 passed/18 skipped，compileall/diff通过；未安装或运行 mjlab GPU 训练，未操作真机。
+
+- 2026-10-04：按用户确认将 RL 拆为仓库根目录 `rebotarm_rl/` 独立 Python 项目（无 learning 层、无 ROS package.xml，COLCON_IGNORE）。mjlab Reach 任务、PPO runner 配置和 CPU/GPU 配对评估迁入 tasks/agents/evaluation；simulation 不再注册 mjlab 插件，不保留旧 Python 模块兼容壳。共享 robot.xml/mesh/reach_scene.xml 仍归 simulation 资源所有，RL 通过源码位置或 REBOTARM_MJLAB_SCENE 定位，不导入 simulation 实现。AST 比较确认原任务定义仅模型定位函数变化，任务 ID 和算法语义保持。simulation 构建、editable 安装、wheel 构建及显式模型加载通过；唯一插件注册通过。分层25 passed，全量743 passed/17 skipped，compileall/diff通过。RTX4060 CUDA 8环境×1迭代训练与2目标×20步配对评估通过，初始观测最大差异4.738e-8，两后端成功数均0；仅迁移链路 smoke，不代表收敛或硬件验收。证据：Agent/evidence/current/rl-package-split-2026-10-04；checkpoint：runs/rl-package-smoke/。未操作硬件。
+
+- 2026-10-04：RL/preview 迁出后 simulation 只读审查：顶层22个 Python 文件；mujoco_ros_node.py 987行、mujoco_sim.py 751行。正式ROS使用RebotArmMujoco，但旧MuJoCoArmAdapter仅在测试引用且直接将位置写ctrl；用canonical robot.xml无步进复现ctrl=0.1、gain=1、position bias=0，夹爪旧名称均未找到。run_step_response同样直接写ctrl且只检查joint transmission；run_grasp_benchmark仍固定box并用全场景ncon，当前scene对象为bottle，因此现有评估命名/物理语义需先修正。建议先清理旧实现和评估契约，再按core/control/execution/ros/model_tools/diagnostics/apps分类；资源路径和运行时对urdf_to_mjcf命名函数依赖需统一。仅建议，未改业务代码；分层测试25 passed，未重跑全量、未启动ROS或硬件。
+
+- 2026-10-04：按用户授权实施 simulation 重构步骤1-3。1) 删除仅测试引用且控制语义错误的 mujoco_adapter_core；run_step_response 改用正式 RebotArmMujoco 位置控制器驱动力矩；run_grasp_benchmark 要求显式 target_body、双 finger body 和 command，只统计目标-双指接触，目标抬升与结束接触共同判定。2) 新增 core/model_contract.py、core/resource_paths.py，control/control_config.py；运行时不再导入 urdf_to_mjcf，控制参数支持注入；ROS 与离线执行共用 execution/trajectory_sampler。3) simulation Python 模块归入 core/control/execution/ros/model_tools/diagnostics/apps 七目录，console script 名称保持不变，README/architecture 同步。验证：simulation colcon build；聚焦68 passed；分层+重构33 passed/2 skipped；全量742 passed/19 skipped；compileall、entrypoint import、git diff check通过；未启动ROS、未操作硬件。证据 Agent/evidence/current/simulation-refactor-123-2026-10-04。
+
+- 2026-10-04：实施 simulation 第4步：新增 `execution/runtime.py`，从 `ros/mujoco_ros_node.py` 提取 GoalSettlingPolicy、trajectory validation、MonotonicStamp、FeedbackRateLimiter、ActiveTrajectory、GateOutcome、TrajectoryCommandGate、ExecutionLifecycle、SerializedSimulationAccess；ROS节点只保留ROS协议/参数/回调适配，通过显式导入使用执行策略，锁序与取消/停止/异常清理语义保持不变。新增 runtime contract 测试。simulation构建、compileall、focused 38 passed、全量747 passed/19 skipped、git diff check通过；未启动ROS或硬件。证据 Agent/evidence/current/simulation-refactor-step4-2026-10-04。
+
+- 2026-10-04：继续simulation解耦：core/observations.py提取不可变状态和接触读取，RebotArmMujoco保留资源所有权和关闭检查；新增has_body只读查询，抓取诊断不再获取Viewer可变句柄。diagnostics/physics_probe.py统一health与raw smoke模型加载和逐步有限性判定（qpos/qvel/actuator_force/time），严格拒绝非整数步数；删除无生产调用的旧关键帧回退函数及对应孤立测试。控制器、reset、保存恢复、canonical模型生成检查与渲染子进程语义未合并。构建通过；实际MuJoCo聚焦68 passed；分层25 passed；全量757 passed/21 skipped；6个安装入口导入与健康检查通过；compileall/diff通过。未启动ROS或硬件；证据Agent/evidence/current/simulation-observations-probes-2026-10-04。
+
+- 2026-10-04：按用户选定优化边界，删除execution/runtime.py并分离goal_policy/trajectory_state/feedback_timing/simulation_access；ROS消息转换和时间戳归ros/message_codec.py。Viewer交互与关闭保护分离至apps/viewer_interaction.py、viewer_lifecycle.py；主循环、控制参数、锁序、终态及资源释放语义保持，迁移定义AST一致。内部调用及测试改为canonical路径，无runtime兼容壳。构建/compileall/diff通过；全量757 passed/21 skipped（新增3条边界测试另在28项分层+边界测试中通过）；MuJoCo聚焦81 passed。原生GLFW Viewer实际启动并按duration正常退出；ROS_DOMAIN_ID173隔离纯仿真实际验证Action成功、取消、服务停止和后续目标成功，63帧状态；没有真实硬件操作。证据Agent/evidence/current/simulation-boundaries-2026-10-04。
+
+- 2026-10-04：用户要求删除桌面bottle。默认models/rebotarm/scene.xml移除bottle自由体及几何，home/safe_home位置向量缩为8项，机器人/桌面不变；teach_preview缺少瓶子时报告位置null，不再KeyError。瓶子几何仅保留tests/fixtures用于显式抓取/随机化/接触测试，不打包进运行资源。实际MuJoCo测试80 passed；默认Viewer启动退出成功；安装模型确认table存在/bottle不存在/nq8；构建通过。完整测试结果见Agent/evidence/current/empty-tabletop-2026-10-04。未操作硬件。
+
+
+## 2026-10-04 控制与快照组件拆分
+- RebotArmMujoco 保留模型/数据与 reset/step/close 唯一所有权；SimControlRuntime
+  集中目标、模式、节拍和控制器记忆；StateSnapshot 集中同实例快照校验/保存/恢复。
+- Viewer 改为显式 borrow_viewer_handles，保留既有串行同步和原生关闭时序；
+  无只读句柄或自动锁承诺，无旧 private 名称兼容层。
+- 修正原有 reset_joint_positions 复用最后索引导致仅更新第六轴目标的问题，
+  补全六轴目标与保留夹爪目标回归。快照先校验所有数值再写入状态。
+- 验证：完整套件 759 passed/37 skipped；MuJoCo 专项 96 passed；分层25 passed；
+  15 个拆分前后物理/控制/接触检查点完全一致；simulation重建与compileall通过；
+  原生Viewer退出0；隔离ROS成功/取消/停止/后续目标通过。没有真机操作或验收。
+- 证据：Agent/evidence/current/simulation-components-2026-10-04/RESULTS.md。
+
+## 2026-10-04 本地环境 MuJoCo 解释器路径修复
+- tools/source_local_environment.bash 原来仍导出退役 rebotarm_mujoco_venv，覆盖 launch 正确默认路径并导致 FileNotFoundError；已统一为 third_party/rebotarm_mjlab_venv/bin/python。
+- 按 source 脚本后 ros2 launch rebotarm_simulation mujoco_sim.launch.py 验证，隔离 domain175 收到5帧8关节状态，单次SIGINT退出0；首次timeout对进程组重复发信号导致退出被打断，后改用仅向launch父进程发信号验证正常关闭。
+- 完整测试759 passed/37 skipped；分层25 passed；要求的compileall、bash -n、diff检查通过。仅修改未打包的环境脚本，无需colcon重建；未操作真机。
+
+## 2026-10-04 当前重构进度发布检查
+- 汇总 simulation 子模块拆分、preview 独立 ROS 包、根目录 rebotarm_rl、空桌面模型、launch简化、文档及环境解释器修复；保留并提交现有用户维护TODO改动，本轮未编辑其内容。
+- 当前完整套件759 passed/37 skipped，MuJoCo专项96 passed，分层25 passed；preview/simulation/bringup/moveit_config四包构建通过；compileall通过。
+- 待提交文件检查未发现密钥格式或新增大文件；虚拟环境、权重、构建产物及Agent/evidence遵循忽略规则。新文件的末尾冗余空行已清理。
+- GitHub直连超时；使用已运行的本机HTTP代理127.0.0.1:7897成功fetch，提交前HEAD与origin/main一致。未更改持久Git代理配置。

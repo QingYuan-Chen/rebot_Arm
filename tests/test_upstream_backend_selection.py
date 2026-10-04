@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_active_package_installs_direct_upstream_node_only():
     setup_text = (ROOT / "src/rebotarm_simulation/setup.py").read_text(encoding="utf-8")
 
-    assert "rebotarm_mujoco_node = rebotarm_simulation.mujoco_ros_node:main" in setup_text
+    assert "rebotarm_mujoco_node = rebotarm_simulation.ros.mujoco_ros_node:main" in setup_text
     assert "rebotarm_upstream_mujoco_node = rebotarm_simulation.upstream_backend:main" not in setup_text
     assert "rebotarm_mujoco_adapter = rebotarm_simulation.mujoco_ros_adapter_node:main" not in setup_text
 

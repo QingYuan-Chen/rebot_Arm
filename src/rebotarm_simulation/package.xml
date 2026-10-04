@@ -8,7 +8,7 @@
   <name>rebotarm_simulation</name>
   <version>0.1.0</version>
   <!-- 人类可读的包说明（英文原文保留）。 -->
-  <description>RViz/offline simulation utilities for reBotArm bringup tests.</description>
+  <description>MuJoCo physics, simulated execution and diagnostics for reBotArm.</description>
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 

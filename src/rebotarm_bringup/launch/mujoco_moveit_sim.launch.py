@@ -22,8 +22,8 @@
       否则规划会基于与仿真不一致的状态；
     - ``use_sim_time=true``：规划与执行统一使用仿真时钟，避免墙钟漂移影响轨迹判定；
     - ``use_rviz`` 默认 true，只影响可视化，不影响控制；
-    - ``use_mujoco_viewer`` 默认 true，仅打开本地查看器；无显示环境应改用bringup 包的无头
-      启动文件；
+    - ``use_mujoco_viewer`` 默认 true，仅打开本地查看器；无显示环境设置
+      use_rviz:=false use_mujoco_viewer:=false；
     - ``python_executable`` 默认取环境变量 ``REBOTARM_MUJOCO_PYTHON``，否则回退到当前
       工作目录下的第三方虚拟环境解释器；该解释器必须装有物理引擎依赖，用它启动可
       避免污染系统 ROS 环境。

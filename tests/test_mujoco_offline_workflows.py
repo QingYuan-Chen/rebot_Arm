@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarm_simulation.offline_trajectory import normalized_path
+from rebotarm_simulation.execution.offline_trajectory import normalized_path
 
 
 JOINTS = tuple(f"joint{i}" for i in range(1, 7))
@@ -26,7 +26,7 @@ def _sample(index, position):
 
 def test_teach_preview_uses_prepared_path_without_touching_record(tmp_path: Path):
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.teach_preview import preview_record
+    from rebotarm_simulation.apps.teach_preview import preview_record
     from rebotarm_teach.teach_recording import encode_teach_sample
 
     path = tmp_path / "teach.jsonl"
@@ -36,6 +36,8 @@ def test_teach_preview_uses_prepared_path_without_touching_record(tmp_path: Path
     assert result["raw_samples"] == 20
     assert result["prepared_points"] > 20
     assert result["simulation_only"] is True
+    assert result["initial_bottle_xyz_m"] is None
+    assert result["final_bottle_xyz_m"] is None
     assert result["trajectory"]["steps"] > 0
     assert result["trajectory"]["max_tracking_error_rad"] < 0.1
     assert path.read_bytes() == original
@@ -44,7 +46,7 @@ def test_teach_preview_uses_prepared_path_without_touching_record(tmp_path: Path
 def test_teach_preview_does_not_reach_into_private_viewer_state():
     source = (
         Path(__file__).resolve().parents[1]
-        / "src/rebotarm_simulation/rebotarm_simulation/teach_preview.py"
+        / "src/rebotarm_simulation/rebotarm_simulation/apps/teach_preview.py"
     ).read_text(encoding="utf-8")
     assert "_RETAINED_UNSAFE_VIEWERS" not in source
     assert "close_passive_viewer_safely" in source
@@ -52,7 +54,7 @@ def test_teach_preview_does_not_reach_into_private_viewer_state():
 
 def test_public_viewer_close_waits_for_native_release():
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_viewer import close_passive_viewer_safely
+    from rebotarm_simulation.apps.viewer_lifecycle import close_passive_viewer_safely
 
     events = []
     viewer = SimpleNamespace(m=object())
@@ -64,7 +66,7 @@ def test_public_viewer_close_waits_for_native_release():
 
 def test_public_viewer_close_timeout_preserves_simulation():
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_viewer import close_passive_viewer_safely
+    from rebotarm_simulation.apps.viewer_lifecycle import close_passive_viewer_safely
 
     events = []
     viewer = SimpleNamespace(m=object(), close=lambda: events.append("viewer.close"))
@@ -77,7 +79,7 @@ def test_public_viewer_close_timeout_preserves_simulation():
 
 
 def test_teach_preview_rejects_structural_record_error(tmp_path: Path):
-    from rebotarm_simulation.teach_preview import preview_record
+    from rebotarm_simulation.apps.teach_preview import preview_record
     from rebotarm_teach.teach_recording import encode_teach_sample
 
     path = tmp_path / "bad.jsonl"

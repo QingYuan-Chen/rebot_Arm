@@ -135,7 +135,7 @@ def generate_launch_description():
             # 无硬件分支的轨迹服务端：提供键盘所需的 FollowJointTrajectory，并发布可视化用的
             # /<arm_namespace>/joint_states；它不加载物理引擎、不接触真实电机。
             Node(
-                package="rebotarm_simulation",
+                package="rebotarm_preview",
                 executable="rebotarm_sim_trajectory_controller",
                 name="rebotarm_sim_trajectory_controller",
                 output="screen",

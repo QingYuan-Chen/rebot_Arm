@@ -29,7 +29,7 @@ def generate_launch_description():
     start_sim_trajectory_controller = LaunchConfiguration("start_sim_trajectory_controller")
     return LaunchDescription([
                                     Node(
-            package="rebotarm_simulation",
+            package="rebotarm_preview",
             executable="rebotarm_sim_trajectory_controller",
             name="rebotarm_sim_trajectory_controller",
             output="screen",

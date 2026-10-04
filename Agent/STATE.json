@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-03T18:09:45+08:00",
+  "generated_at": "2026-10-04T14:46:19+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "0bf407d",
+    "head": "1bcb464",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-03T18:09:45+08:00 | actor=codex | event=complete | note=Published repository layout and vision resources in commit 0bf407d to origin/main | verification=Push succeeded; prior verification 744 passed/16 skipped, vision build and installed assets verified; model tracked at new path"
+  "last_event": "- 2026-10-04T14:46:19+08:00 | actor=codex | event=complete | note=当前进度发布检查完成，准备提交并推送main | verification=759 passed/37 skipped；MuJoCo96 passed；分层25 passed；四包构建与compileall通过；远程无分叉"
 }

@@ -4,8 +4,8 @@ import shutil
 from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
-from rebotarm_simulation import resource_paths
-from rebotarm_simulation.motor_control import load_motor_control_parameters
+from rebotarm_simulation.core import resource_paths
+from rebotarm_simulation.control.control_config import load_motor_control_parameters
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +61,8 @@ def test_lower_layers_do_not_resolve_bringup_resources():
 def test_motor_parameters_load_from_install_without_source_tree(tmp_path, monkeypatch):
     import ament_index_python.packages
 
+    monkeypatch.delenv("AMENT_PREFIX_PATH", raising=False)
+    monkeypatch.setattr(resource_paths.sys, "prefix", str(tmp_path))
     share = tmp_path / "share"
     for package, relative in (
         ("rebotarm_simulation", "config/motor_control_calibration.yaml"),

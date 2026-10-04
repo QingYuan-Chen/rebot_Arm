@@ -2,7 +2,7 @@
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import pytest
-from rebotarm_simulation.motor_control import load_motor_control_parameters
+from rebotarm_simulation.control.control_config import load_motor_control_parameters
 
 ROOT = Path(__file__).resolve().parents[1]
 

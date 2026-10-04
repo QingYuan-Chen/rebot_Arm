@@ -10,7 +10,7 @@ if str(SIM_SRC) not in sys.path:
 
 
 def test_metrics_recorder_writes_csv_and_summary(tmp_path):
-    from rebotarm_simulation.mujoco_metrics import TrajectoryMetricsRecorder
+    from rebotarm_simulation.diagnostics.mujoco_metrics import TrajectoryMetricsRecorder
 
     recorder = TrajectoryMetricsRecorder(tmp_path, joint_names=["joint1", "joint2"])
     recorder.record(
@@ -41,7 +41,7 @@ def test_metrics_recorder_writes_csv_and_summary(tmp_path):
 
 
 def test_metrics_summary_includes_violation_context(tmp_path):
-    from rebotarm_simulation.mujoco_metrics import TrajectoryMetricsRecorder
+    from rebotarm_simulation.diagnostics.mujoco_metrics import TrajectoryMetricsRecorder
 
     recorder = TrajectoryMetricsRecorder(tmp_path, joint_names=["joint1"])
     recorder.record(
@@ -66,7 +66,7 @@ def test_metrics_summary_includes_violation_context(tmp_path):
 
 
 def test_metrics_recorder_can_downsample_written_rows(tmp_path):
-    from rebotarm_simulation.mujoco_metrics import TrajectoryMetricsRecorder
+    from rebotarm_simulation.diagnostics.mujoco_metrics import TrajectoryMetricsRecorder
 
     recorder = TrajectoryMetricsRecorder(tmp_path, joint_names=["joint1"], sample_stride=2)
     for index in range(5):

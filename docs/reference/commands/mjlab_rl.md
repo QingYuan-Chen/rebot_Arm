@@ -5,32 +5,40 @@
 ## 运行边界
 
 该入口使用 `mjlab + MuJoCo Warp + PyTorch/RSL-RL` 在 GPU 上运行并行 Reach
-环境。它不启动 ROS，不读取电机 SDK，不连接真实机械臂，也不会修改现有 CPU
-mjlab 训练入口。
+环境。它不启动 ROS，不读取电机 SDK，不连接真实机械臂。
+任务、PPO 配置和配对评估属于根目录独立 Python 项目 `rebotarm_rl/`。
+共享 MJCF 仍由 `rebotarm_simulation/models/rebotarm/` 提供。
 
-当前任务显式使用 `robot.xml` 已有的六个 torque actuator。它与 CPU Reach
-环境的关节位置增量 action 不是同一个控制契约；训练结果必须先回到 CPU
-MuJoCo 用同一目标集复评，才能进入后续 sim-to-real 分析。
+当前任务使用六轴力矩动作；CPU/GPU 配对评估使用同一个 mjlab 编译模型、
+观测和动作契约。ROS 的关节位置轨迹接口不能直接接收这类策略输出。
 
 ## 隔离安装
 
-当前 mjlab 版本需要单独的 Python 环境、Linux/NVIDIA GPU，并建议 CUDA 12.4
-或更新版本。该环境同时提供 CPU MuJoCo 3.11 正确性基准和 GPU Warp/RSL-RL 训练依赖。
+使用统一的 mjlab Python 环境，同时提供 CPU MuJoCo 基准和 GPU Warp/RSL-RL 训练。
+已有环境直接复用；首次创建时执行：
 
 ```bash
 cd /home/huangbin/robotarm_ros2
 uv venv third_party/rebotarm_mjlab_venv --python 3.12
-uv pip install --python third_party/rebotarm_mjlab_venv/bin/python \
-  --extra-index-url https://download.pytorch.org/whl/cu130 \
-  "mjlab[cu130]==1.6.0"
-third_party/rebotarm_mjlab_venv/bin/python -m pip install -e src/rebotarm_simulation --no-deps
-colcon build --packages-select rebotarm_simulation --symlink-install
+uv pip install --python third_party/rebotarm_mjlab_venv/bin/python -r requirements/requirements-mjlab.txt
 ```
 
-The editable install registers this package's `mjlab.tasks` entry point inside
-the isolated environment. The `colcon` build is still required for the normal
-ROS package/install verification, but the mjlab interpreter discovers the task
-from its own Python environment.
+安装独立训练项目：
+
+```bash
+third_party/rebotarm_mjlab_venv/bin/python -m pip install -e rebotarm_rl --no-deps
+```
+
+该安装注册 `mjlab.tasks` 插件，不需要 source ROS 或 colcon。
+从旧版迁移且环境曾安装 simulation 时，还需刷新旧包元数据以移除旧插件：
+
+```bash
+third_party/rebotarm_mjlab_venv/bin/python -m pip install -e src/rebotarm_simulation --no-deps
+```
+
+ROS 工作区另按 colcon 流程重建受影响包。wheel/服务器安装需通过
+`REBOTARM_MJLAB_SCENE` 指定完整模型资源中的 Reach 场景，详见
+[项目说明](../../../rebotarm_rl/README.md)。
 
 ## 检查、训练和回放
 
@@ -61,7 +69,7 @@ python -m mjlab.scripts.play RebotArm-Reach-Mjlab \
 ```bash
 export REBOTARM_MJLAB_SCENE="$PWD/src/rebotarm_simulation/models/rebotarm/reach_scene.xml"
 MUJOCO_GL=egl third_party/rebotarm_mjlab_venv/bin/python \
-  -m rebotarm_simulation.mjlab_paired_eval \
+  -m rebotarm_rl.evaluation.paired_eval \
   --checkpoint runs/mjlab/rebotarm_mjlab_reach/<run>/model_*.pt \
   --episodes 100 \
   --steps 250 \

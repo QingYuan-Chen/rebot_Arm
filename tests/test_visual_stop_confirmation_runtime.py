@@ -30,7 +30,7 @@ def run_probe():
     from rebotarm_msgs.srv import ExecutePose
     from rebotarm_msgs.msg import GraspPlan
     from rebotarm_motion.pose_execution_node import PoseExecutionNode
-    from rebotarm_simulation.sim_trajectory_controller_node import SimTrajectoryControllerNode
+    from rebotarm_preview.rviz_preview_controller_node import SimTrajectoryControllerNode
     from rebotarm_vision.nodes.visual_grasp_executor_node import VisualGraspExecutorNode
     from rebotarm_vision.visual_grasp_runtime import VisualGraspRuntime
 

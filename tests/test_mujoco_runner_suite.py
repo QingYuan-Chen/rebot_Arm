@@ -10,8 +10,8 @@ if str(SIM_SRC) not in sys.path:
 
 
 def test_step_response_suite_runs_each_requested_joint(monkeypatch, tmp_path):
-    import rebotarm_simulation.mujoco_runner as runner
-    from rebotarm_simulation.mujoco_runner import StepResponseResult, run_step_response_suite
+    import rebotarm_simulation.diagnostics.mujoco_runner as runner
+    from rebotarm_simulation.diagnostics.mujoco_runner import StepResponseResult, run_step_response_suite
 
     calls = []
 
@@ -48,13 +48,14 @@ def test_step_response_suite_runs_each_requested_joint(monkeypatch, tmp_path):
 
 
 def test_grasp_benchmark_result_can_report_quality_status():
-    from rebotarm_simulation.mujoco_runner import GraspBenchmarkResult
+    from rebotarm_simulation.diagnostics.mujoco_runner import GraspBenchmarkResult
 
     result = GraspBenchmarkResult(
         xml_path=Path("scene.xml"),
+        target_body="bottle",
         finite=True,
-        initial_box_height_m=0.05,
-        box_height_m=0.12,
+        initial_object_height_m=0.05,
+        object_height_m=0.12,
         max_contacts=3,
         final_contacts=2,
         contact_detected=True,

@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from rebotarm_simulation.gemini2_payload import add_gemini2_payload
+from rebotarm_simulation.model_tools.gemini2_payload import add_gemini2_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = ROOT / "src/rebotarm_simulation/models/rebotarm/robot.xml"
@@ -37,7 +37,7 @@ def test_missing_mount_parent_fails_instead_of_silently_dropping_payload(monkeyp
 def test_generated_model_loads_and_has_no_payload_contact_at_home(monkeypatch, tmp_path):
     mujoco = pytest.importorskip('mujoco')
     import numpy as np
-    from rebotarm_simulation.urdf_to_mjcf import generate_mjcf_bytes
+    from rebotarm_simulation.model_tools.urdf_to_mjcf import generate_mjcf_bytes
     assert generate_mjcf_bytes(ROOT) == MODEL.read_bytes()
     assert ET.parse(MODEL).find('.//body[@name="gemini2_camera"]') is not None
     candidate = candidate_root(monkeypatch)

@@ -51,7 +51,7 @@ def generate_launch_description():
             # 仿真执行后端：发布关节状态并提供规划执行所需的动作服务端；
             # arm_namespace 与共享启动文件中的命名空间保持一致，否则话题/动作前缀对不上
             Node(
-                package="rebotarm_simulation",
+                package="rebotarm_preview",
                 executable="rebotarm_sim_trajectory_controller",
                 name="rebotarm_sim_trajectory_controller",
                 output="screen",

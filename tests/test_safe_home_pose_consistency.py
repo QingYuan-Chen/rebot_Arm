@@ -69,13 +69,15 @@ def test_driver_safe_home_default_matches_the_srdf_named_state():
 
 
 def test_mujoco_keyframe_matches_the_srdf_safe_home_state():
-    source = _read("src/rebotarm_simulation/rebotarm_simulation/mujoco_model_profile.py")
-    arm = " ".join(
-        ("0" if value == 0.0 else repr(value)) for value in SAFE_HOME
-    )
-    assert f'key.set("name", "safe_home")' in source
-    assert f'key.set("qpos", "{arm} 0.04 -0.04")' in source
-    assert f'key.set("ctrl", "{arm} 0.04")' in source
+    scene = ROOT / "src/rebotarm_simulation/models/rebotarm/scene.xml"
+    key = ET.parse(scene).getroot().find("./keyframe/key[@name='safe_home']")
+    assert key is not None
+    qpos = [float(value) for value in key.get("qpos", "").split()]
+    ctrl = [float(value) for value in key.get("ctrl", "").split()]
+    assert tuple(qpos[:6]) == SAFE_HOME
+    assert qpos[6:8] == [0.04, -0.04]
+    assert tuple(ctrl[:6]) == SAFE_HOME
+    assert ctrl[6:8] == [0.04, 0.04]
 
 
 def test_driver_safe_home_does_not_delegate_to_the_vendor_zero_homing():

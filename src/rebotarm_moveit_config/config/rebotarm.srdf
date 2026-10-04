@@ -34,7 +34,7 @@
   <end_effector name="gripper" parent_link="end_link" group="gripper" parent_group="arm" />
 
   <!-- 命名状态与仿真关键帧的约定：以下 group_state 的名称与数值和 MuJoCo 模型配置
-       （mujoco_model_profile.py）中的 keyframe 保持一致，使同一个姿态名在仿真与真机上
+       （rebotarm_simulation/models/rebotarm/scene.xml）中的 keyframe 保持一致，使同一个姿态名在仿真与真机上
        含义相同。
 
        这里刻意不提供全零命名状态：joint3 的原点在 x 方向为 -0.264 m，joint4 的原点为

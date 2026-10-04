@@ -36,6 +36,7 @@
   <exec_depend>rebotarm_dashboard</exec_depend>
   <exec_depend>rebotarm_motion</exec_depend>
   <exec_depend>rebotarm_moveit_config</exec_depend>
+  <exec_depend>rebotarm_preview</exec_depend>
   <exec_depend>rebotarm_simulation</exec_depend>
   <exec_depend>rebotarm_teach</exec_depend>
   <exec_depend>rebotarm_teleop</exec_depend>

@@ -99,9 +99,47 @@ def test_teach_preview_entrypoint_is_owned_by_simulation() -> None:
     simulation = ROOT / "src/rebotarm_simulation"
     assert not (teach / "rebotarm_teach/mujoco_preview.py").exists()
     assert "rebotarm_mujoco_teach_preview" not in (teach / "setup.py").read_text(encoding="utf-8")
-    assert "rebotarm_simulation.teach_preview:main" in (simulation / "setup.py").read_text(
+    assert "rebotarm_simulation.apps.teach_preview:main" in (simulation / "setup.py").read_text(
         encoding="utf-8"
     )
+
+
+def test_rviz_preview_backend_is_owned_by_preview_package() -> None:
+    preview = ROOT / "src/rebotarm_preview"
+    simulation = ROOT / "src/rebotarm_simulation"
+    assert (preview / "package.xml").is_file()
+    assert (preview / "rebotarm_preview/rviz_preview_controller_node.py").is_file()
+    assert "rebotarm_preview.rviz_preview_controller_node:main" in (
+        preview / "setup.py"
+    ).read_text(encoding="utf-8")
+    assert not (simulation / "rebotarm_simulation/rviz_preview_controller_node.py").exists()
+    assert "rebotarm_sim_trajectory_controller" not in (
+        simulation / "setup.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_preview_is_independent_of_physics_and_hardware() -> None:
+    preview = ROOT / "src/rebotarm_preview"
+    forbidden = {"mujoco", "mjlab", "torch", "numpy", "rebotarm_simulation",
+                 "rebotarmcontroller", "rebotarm_motion"}
+    for source in (preview / "rebotarm_preview").rglob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                modules = [node.module or ""]
+            else:
+                continue
+            assert not forbidden.intersection(m.split(".")[0] for m in modules), source
+    manifest = ET.parse(preview / "package.xml").getroot()
+    assert not forbidden.intersection(child.text for child in manifest)
+    bringup = ET.parse(ROOT / "src/rebotarm_bringup/package.xml").getroot()
+    assert any(child.text == "rebotarm_preview" for child in bringup)
+    for name in ("teleop_keyboard.launch.py", "rviz_ee_drag_sim.launch.py",
+                 "includes/visual_backend.launch.py"):
+        source = (ROOT / "src/rebotarm_bringup/launch" / name).read_text()
+        assert 'package="rebotarm_preview"' in source
+        assert 'package="rebotarm_simulation"' not in source
 
 
 def test_motion_does_not_import_teach_implementation() -> None:
