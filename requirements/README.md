@@ -9,8 +9,8 @@
 | `requirements-vision.txt` | 相机、YOLO、ROS 图像桥接依赖 |
 | `requirements-graspnet.txt` | GraspNet 点云与推理依赖 |
 | `requirements-tensorrt.txt` | TensorRT 运行库，由视觉安装脚本单独安装 |
-| `requirements-mjlab.txt` | 统一仿真与 GPU 强化学习环境 |
-| `requirements-mujoco.txt` | 统一环境中的 CPU MuJoCo 组件版本 |
+| 外部 rebotarm_rl/requirements/mjlab-cu130.txt | 独立训练仓库维护的 GPU 环境 |
+| `requirements-mujoco.txt` | ROS 仿真使用的 CPU MuJoCo 组件版本 |
 
 安装步骤和目标环境见 [部署说明](../docs/setup/ubuntu_ros2_jazzy.md)。
 `src/rebotarm_simulation/requirements-mujoco.txt` 仍是仿真包自己的依赖声明，

@@ -5,10 +5,10 @@
 > 基线日期：2026-08-06
 > 说明：这里衡量的是有验收证据的实施完成度，不是代码量、文档完成度或主观进度。
 
-## 当前阶段（2026-10-02）
+## 当前阶段（2026-10-04）
 
 - 当前主线是纯仿真的 MuJoCo Reach 正确性基准与 mjlab + MuJoCo Warp + RSL-RL GPU Reach 训练线。
-- CPU MuJoCo 3.11.0、mjlab/Warp/RSL-RL/PyTorch CUDA 13.0 已统一到 `third_party/rebotarm_mjlab_venv`；旧 Gymnasium/SB3/MJX 训练路线已移除。
+- RL 已迁移到独立仓库 https://github.com/huangbinai/rebotarm_rl，使用自己的 .venv；ROS CPU MuJoCo 仍使用原解释器路径以保持 launch 可用。模型源由本仓库维护，训练按固定提交与哈希下载资源。
 - mjlab 训练链路已完成 GPU smoke 和集成验证；这不代表策略已经稳定收敛，也不构成 sim-to-real 或硬件验收。
 - 当前不授权真实机械臂或夹爪动作；P0-P6 只作为已关闭历史基线保存。
 - 当前源码中的真机视觉 `tcp_offset_xyz` 为 `[-0.04, 0.0, 0.0] m`；旧 `-0.105 m` 仅为历史 upstream nominal 值，不能写成当前实测 TCP。

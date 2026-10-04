@@ -2,7 +2,7 @@
 
 本目录提供可独立使用的 MuJoCo 物理仿真核心、桌面 Viewer 和 ROS 2
 适配层。已验证的目标环境是 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。
-已提供复用现有 MJCF 的 mjlab / MuJoCo Warp / RSL-RL 末端位姿 Reach 训练入口。
+独立 rebotarm_rl 仓库提供复用版本化 MJCF 的 mjlab Reach 训练入口。
 克隆后配置、环境契约和验证步骤见 [强化学习命令参考](../../docs/reference/commands/mjlab_rl.md)。
 
 ## 安装与构建
@@ -37,7 +37,7 @@ MuJoCo虚拟环境只用于运行，不需要相机、视觉权重或历史上�
 source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 -m colcon build --base-paths src --executor sequential --symlink-install
 python3 -m venv --system-site-packages third_party/rebotarm_mjlab_venv
-third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements/requirements-mjlab.txt
+third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements/requirements-mujoco.txt
 source install/setup.bash
 export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mjlab_venv/bin/python"
 ```

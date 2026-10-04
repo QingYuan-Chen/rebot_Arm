@@ -1268,3 +1268,5 @@
 - 2026-10-04T14:35:19+08:00 | actor=codex | event=complete | note=修复本地环境脚本MuJoCo退役解释器路径，用户原命令启动验证通过 | verification=source后MuJoCo3.11/rclpy导入成功；launch收到5帧8关节状态且退出0；759 passed/37 skipped；分层25 passed；compileall/bash -n通过
 - 2026-10-04T14:43:42+08:00 | actor=codex | event=start | note=检查并上传当前simulation preview RL重构进度到GitHub | verification=-
 - 2026-10-04T14:46:19+08:00 | actor=codex | event=complete | note=当前进度发布检查完成，准备提交并推送main | verification=759 passed/37 skipped；MuJoCo96 passed；分层25 passed；四包构建与compileall通过；远程无分叉
+- 2026-10-04T15:00:28+08:00 | actor=codex | event=start | note=迁移RL到独立GitHub仓库并验证独立模型与训练入口 | verification=-
+- 2026-10-04T15:20:31+08:00 | actor=codex | event=complete | note=RL独立仓库迁移完成，新仓库b349e3d已推送，ROS侧完成迁移清理与验证 | verification=RL8测试；独立GPU8环境1迭代及CPU/GPU配对通过；ROS757 passed/37 skipped；物理96 passed；分层25 passed；构建compileall和实际launch通过

@@ -39,7 +39,7 @@ MuJoCo + MoveIt、无头和桌面组合入口位于 `rebotarm_bringup/launch`。
 | 示教轨迹预演 | 示教记录质量检查、准备、MuJoCo 轨迹执行和接触统计 | `apps/teach_preview.py`、`offline_trajectory.py` | 已接入，属于离线软件仿真 |
 | 健康检查与离线评估 | 模型健康、限位、阶跃响应、抓取质量、成对轨迹统计 | `diagnostics/mujoco_health.py`、`diagnostics/mujoco_limit_checks.py`、`diagnostics/mujoco_runner.py`、`diagnostics/mujoco_grasp_quality.py`、`diagnostics/paired_trajectory_analysis.py` | 维护/测试/评估工具；不自动连接硬件 |
 
-训练任务和配对评估已移入根目录独立 Python 项目 [`rebotarm_rl`](../../rebotarm_rl/README.md)。本包仅提供共享模型和 CPU 物理后端。
+训练任务和配对评估已移入独立仓库 [rebotarm_rl](https://github.com/huangbinai/rebotarm_rl)。本包仅提供共享模型和 CPU 物理后端。
 
 ### RViz 预演的边界
 

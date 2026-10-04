@@ -22,8 +22,7 @@
 | `requirements/requirements-runtime.txt` | 控制器 MotorBridge 基础依赖，随后必须安装本地审查补丁 | 系统 Python；本节命令 |
 | `requirements/requirements-vision.txt` | 相机、YOLO、OpenCV，固定 NumPy 1.x 兼容 ROS cv_bridge | `.venv-vision`；`tools/setup_ubuntu_vision.sh` |
 | `requirements/requirements-graspnet.txt`（PyTorch cu130） | GraspNet 抓取候选、点云及固定 PyTorch/CUDA 依赖 | `.venv-graspnet`；`tools/setup_ubuntu_graspnet.sh` |
-| `requirements/requirements-mujoco.txt` | 统一环境中的 CPU MuJoCo 组件说明 | 随 `requirements/requirements-mjlab.txt` 安装 |
-| `requirements/requirements-mjlab.txt` | CPU MuJoCo 3.11 + mjlab + MuJoCo Warp + RSL-RL + PyTorch CUDA 13.0 | 唯一仿真/RL venv；见 `../reference/commands/mjlab_rl.md` |
+| `requirements/requirements-mujoco.txt` | ROS 仿真所需 CPU MuJoCo 组件 | 与独立 RL 环境分开安装 |
 | `requirements/requirements-tensorrt.txt`（TensorRT cu13） | TensorRT 推理扩展，单独以 `--no-deps` 安装以避免拉取额外 CUDA 工具链 | 与 vision 共用环境；由视觉安装脚本调用 |
 
 GraspNet 与 MuJoCo 的 PyYAML 固定版本分别为6.0.1和6.0.3；直接合并会产生
@@ -216,7 +215,7 @@ python3 -m pytest tests -q
 
 ```bash
 python3 -m venv --system-site-packages third_party/rebotarm_mjlab_venv
-third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements/requirements-mjlab.txt
+third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements/requirements-mujoco.txt
 export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mjlab_venv/bin/python"
 ```
 
@@ -297,4 +296,4 @@ P0 Gate B/C 自动使能、保持与失能验收工具已于 2026-09-19 移除�
 
 ## 可选：MuJoCo 强化学习
 
-按 [强化学习命令参考](../reference/commands/mjlab_rl.md) 安装 `requirements/requirements-mjlab.txt`，并检查 Reach 环境。纯离线训练无需启动 ROS 或连接真机。
+按 [强化学习命令参考](../reference/commands/mjlab_rl.md) 进入独立 rebotarm_rl 仓库安装训练依赖，并检查 Reach 环境。纯离线训练无需启动 ROS 或连接真机。

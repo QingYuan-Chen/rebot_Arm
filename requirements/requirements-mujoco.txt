@@ -1,5 +1,4 @@
-# CPU MuJoCo component of the unified third_party/rebotarm_mjlab_venv.
-# Install requirements-mjlab.txt once; do not create a second MuJoCo venv.
+# CPU MuJoCo environment for ROS simulation; RL owns a separate environment.
 mujoco==3.11.0
 numpy==2.5.3
 cffi==2.1.1

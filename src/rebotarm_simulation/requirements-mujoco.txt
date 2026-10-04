@@ -1,5 +1,3 @@
-# CPU MuJoCo component of the unified mjlab environment.
-# The repository setup installs requirements-mjlab.txt, which also provides
-# MuJoCo Warp, RSL-RL and PyTorch for the GPU training path.
+# CPU simulation dependencies; GPU training is maintained in rebotarm_rl.
 mujoco==3.11.0
 numpy==2.5.3

@@ -344,13 +344,13 @@ RViz 拖动控制现在采用原生 MoveIt MotionPlanning 工作流。不再使�
 - 运行 `python -m pytest tests -q`
 - 对变更过的 Python 包运行 `python -m compileall`
 
-### 独立 RL Python 项目
+### 独立 RL 仓库
 
-根目录 `rebotarm_rl/` 拥有 mjlab 任务、奖励/观测/动作、PPO配置、策略评估与后续导出。
-它不是 ROS 包，使用 pip 安装，以 COLCON_IGNORE 排除 colcon 发现。
-通过 mjlab.tasks 注册任务，不导入 ROS、simulation 实现或硬件 SDK。
-当前复用 simulation 唯一维护的 MJCF 资源；独立部署必须显式指定固定版本模型资源路径。
-CPU 仿真不反向依赖训练项目，算法实现复用 mjlab/RSL-RL。
+[https://github.com/huangbinai/rebotarm_rl](https://github.com/huangbinai/rebotarm_rl) 拥有 mjlab 任务、奖励/观测/动作、PPO配置、策略评估与导出。
+训练代码不再位于本仓库，使用独立虚拟环境，不需要 ROS 或 colcon。
+通过 mjlab.tasks 注册任务，不导入 simulation Python 实现或硬件 SDK。
+模型源仍由本仓库维护；训练仓库固定提交号和模型文件哈希，下载到独立缓存。
+CPU 仿真不反向依赖训练项目。Isaac Lab 后端尚未实现。
 
 仿真状态和接触的只读转换由 `core/observations.py` 提供；`RebotArmMujoco`
 仍持有模型、数据与生命周期。诊断通过 `has_body()` 查询模型成员，不再获取 Viewer 原生句柄。

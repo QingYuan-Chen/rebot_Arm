@@ -74,7 +74,5 @@ third_party/rebotarm_mjlab_venv/
 # Editable Python installs generate local package metadata.
 src/rebotarm_simulation/*.egg-info/
 
-# Independent RL Python project build metadata.
-/rebotarm_rl/*.egg-info/
-/rebotarm_rl/build/
-/rebotarm_rl/dist/
+# MuJoCo local runtime diagnostics
+MUJOCO_LOG.TXT

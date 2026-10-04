@@ -37,7 +37,7 @@
 基线为 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。先按
 [安装说明](docs/setup/ubuntu_ros2_jazzy.md) 准备系统依赖和所需运行组件；
 `requirements/requirements-*.txt` 按控制器、视觉、GraspNet、MuJoCo、TensorRT 拆分；
-`requirements/requirements-mjlab.txt` 在独立 mjlab 环境中安装 GPU 强化学习依赖。其它用途的依赖
+GPU 强化学习代码与依赖由独立 [rebotarm_rl](https://github.com/huangbinai/rebotarm_rl) 仓库维护。其它用途的依赖
 不要合并安装到同一个环境。
 
 ```bash

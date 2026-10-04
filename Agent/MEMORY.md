@@ -1008,3 +1008,22 @@ Dashboard 的 `TeachReplayWorkflow` 已定为唯一正式示教回放实现，�
 - 当前完整套件759 passed/37 skipped，MuJoCo专项96 passed，分层25 passed；preview/simulation/bringup/moveit_config四包构建通过；compileall通过。
 - 待提交文件检查未发现密钥格式或新增大文件；虚拟环境、权重、构建产物及Agent/evidence遵循忽略规则。新文件的末尾冗余空行已清理。
 - GitHub直连超时；使用已运行的本机HTTP代理127.0.0.1:7897成功fetch，提交前HEAD与origin/main一致。未更改持久Git代理配置。
+
+
+## 2026-10-04 RL 独立仓库迁移
+- 新项目 /home/huangbin/rebotarm_rl，对应 https://github.com/huangbinai/rebotarm_rl；
+  git subtree split 保留原 rebotarm_rl 子目录历史。任务、PPO、评估源码逐字节不变。
+- 模型源仍由ROS仓库维护，新项目manifest固定00065fb及14个XML/STL文件哈希，
+  从GitHub下载到独立缓存；不依赖相邻ROS源码路径。wheel在无ROS环境中验证可用。
+- 新建独立.venv，GPU短训练8环境/1迭代、CPU/GPU配对2回合20步完成；
+  CPU/GPU成功次数均为0，只证明训练/评估链路，不代表策略收敛或实机验收。
+- 新项目8项测试通过；ROS完整757 passed/37 skipped、分层25 passed、
+  MuJoCo专项96 passed；simulation重建、compileall通过。
+- 原ROS环境仅卸载rebotarm-rl插件，保持MuJoCo和launch解释器路径；
+  旧训练源与训练依赖文件移出本仓库，文档改指新项目。
+- 历史训练产物复制到新项目runs/imported-robotarm-ros2，旧副本保留，
+  全部不入Git；新环境ROS PYTHONPATH污染需清理，README已注明。
+- 无云端部署、Isaac Lab实现或真机操作。Codex项目目录可由用户单独添加。
+
+- 新仓库main已发布并核验为b349e3d；新仓库使用与ROS仓库相同的本地Git身份，未修改全局配置。
+- 删除旧RL插件后，隔离ROS域177启动mujoco_sim成功，收到5帧关节状态并正常退出0。

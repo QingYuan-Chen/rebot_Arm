@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-04T14:46:19+08:00",
+  "generated_at": "2026-10-04T15:20:31+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
   "overall_completion_percent": 100.0,
-  "active_phase": "旧 Gymnasium/SB3/MJX RL 路线已移除；当前主线为 mjlab + MuJoCo Warp + RSL-RL，正在做 GPU 环境验证和任务迁移",
+  "active_phase": "RL 已迁移至独立 rebotarm_rl 仓库；本仓库维护 ROS 应用、CPU MuJoCo 集成和模型源",
   "current_checklist": {
     "completed_items": 4,
     "total_items": 7,
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "1bcb464",
+    "head": "00065fb",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-04T14:46:19+08:00 | actor=codex | event=complete | note=当前进度发布检查完成，准备提交并推送main | verification=759 passed/37 skipped；MuJoCo96 passed；分层25 passed；四包构建与compileall通过；远程无分叉"
+  "last_event": "- 2026-10-04T15:20:31+08:00 | actor=codex | event=complete | note=RL独立仓库迁移完成，新仓库b349e3d已推送，ROS侧完成迁移清理与验证 | verification=RL8测试；独立GPU8环境1迭代及CPU/GPU配对通过；ROS757 passed/37 skipped；物理96 passed；分层25 passed；构建compileall和实际launch通过"
 }

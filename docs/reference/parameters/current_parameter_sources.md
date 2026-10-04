@@ -21,7 +21,7 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 | 轨迹安全、视觉准备位和执行 | `src/rebotarm_motion/config/`、`launch/includes/motion_execution.launch.py`、`grasp_executor.launch.py` | `rebotarm_motion` |
 | Gemini 2、YOLO、GraspNet | `src/rebotarm_vision/config/` | `rebotarm_vision` |
 | 视觉抓取跨节点接口 | `src/rebotarm_bringup/config/visual_grasp_interfaces.yaml` | `rebotarm_bringup` |
-| MuJoCo 模型、动力学和 RL | `src/rebotarm_simulation/config/`、`requirements/requirements-mjlab.txt` | `rebotarm_simulation` |
+| MuJoCo 模型、动力学 | `src/rebotarm_simulation/config/`、`requirements/requirements-mujoco.txt` | `rebotarm_simulation` |
 | 标定会话和手眼输入 | `src/rebotarm_vision/config/handeye.yaml`、标定 launch 参数 | `rebotarm_calibration` |
 
 ## 视觉抓取入口层级
@@ -34,3 +34,5 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 视觉策略归 rebotarm_vision/config，运动策略归 rebotarm_motion/config。
 必需执行节点由主入口统一启动，不再由模式包装文件复制默认值。
 策略 profile 与 reusable policy YAML 的既有覆盖关系仍保留，本轮未改变抓取调参。
+
+RL 任务与训练参数由独立仓库 https://github.com/huangbinai/rebotarm_rl 维护。
