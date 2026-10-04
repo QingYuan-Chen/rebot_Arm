@@ -36,7 +36,7 @@ def generate_launch_description():
     mujoco_gl = LaunchConfiguration("mujoco_gl")
     # 兜底的解释器路径：工作目录下的 MuJoCo 虚拟环境；相对于 PWD 解析，找不到会由进程启动阶段报错。
     default_mujoco_python = PathJoinSubstitution(
-        [EnvironmentVariable("PWD", default_value="."), "third_party", "rebotarm_mujoco_venv", "bin", "python"]
+        [EnvironmentVariable("PWD", default_value="."), ".venv-mujoco", "bin", "python"]
     )
     return LaunchDescription(
         [
@@ -82,7 +82,7 @@ def generate_launch_description():
                     },
                 ],
                 # 只给该子进程注入 MUJOCO_GL，避免污染父进程与其它节点。
-                additional_env={"MUJOCO_GL": mujoco_gl},
+                additional_env={"MUJOCO_GL": mujoco_gl, "PYTHONNOUSERSITE": "1"},
             )
         ]
     )

@@ -69,7 +69,7 @@ Thumbs.db
 # Local reinforcement-learning outputs
 /runs/
 
-third_party/rebotarm_mujoco_venv/
+.venv-mujoco/
 
 # Editable Python installs generate local package metadata.
 src/rebotarm_simulation/*.egg-info/

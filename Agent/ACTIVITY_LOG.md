@@ -1278,3 +1278,14 @@
 - 2026-10-04T15:48:08+08:00 | actor=codex | event=complete | note=完成用户授权缓存与旧日志清理，删除占用约584.75 MiB | verification=50缓存目录、59旧日志、3失效链接、16空日志目录及MotorBridge target已移除；运行依赖和wheel保留；未改源码未运行硬件
 - 2026-10-04T15:50:47+08:00 | actor=codex | event=start | note=发布ROS轻量环境基线与RL框架基线，随后独立推进Reach V2 | verification=-
 - 2026-10-04T15:51:02+08:00 | actor=codex | event=complete | note=ROS轻量MuJoCo环境基线发布，RL V2开发在独立仓库继续 | verification=沿用本轮已完成验证：757 passed/37 skipped；98专项；两包构建；实际launch正常
+- 2026-10-04T15:56:42+08:00 | actor=codex | event=start | note=核查README、AGENTS、第三方说明与LICENSE用途 | verification=-
+- 2026-10-04T15:56:43+08:00 | actor=codex | event=complete | note=完成四份根目录文档用途检查，建议保留；第三方说明存在旧版本和旧模型路径 | verification=读取四文件并核对README链接、分层测试和MotorBridge安装脚本；未修改四文件
+- 2026-10-04T15:58:10+08:00 | actor=codex | event=start | note=校正根目录文档并中文化，审查third_party现行依赖与遗留内容 | verification=-
+- 2026-10-04T16:01:30+08:00 | actor=codex | event=complete | note=完成根目录说明中文化和third_party审查，未删除依赖 | verification=分层25 passed；全量757 passed/37 skipped；compileall、文档链接、LICENSE原文及diff检查通过；仅文档无重建
+- 2026-10-04T16:06:52+08:00 | actor=codex | event=start | note=迁移CPU MuJoCo环境到根目录.venv-mujoco，验证后删除旧环境 | verification=-
+- 2026-10-04T16:10:35+08:00 | actor=codex | event=complete | note=CPU MuJoCo环境已迁至.venv-mujoco并验证，旧环境已删除 | verification=两包重建；分层25/全量757通过37跳过/专项20通过；EGL与headless成功；ROS新路径出帧，SIGINT退出异常已记录；既有pip冲突不变
+- 2026-10-04T16:16:23+08:00 | actor=codex | event=start | note=修复MuJoCo环境pip冲突，隔离用户包并固定兼容SciPy | verification=-
+- 2026-10-04T16:19:14+08:00 | actor=codex | event=complete | note=MuJoCo依赖冲突已通过局部用户包隔离与固定SciPy解决 | verification=python -s -m pip check通过；两包重建；专项16/分层25/全量757通过37跳过；EGL、物理、隔离及正常ROS退出验证通过
+- 2026-10-04T16:20:12+08:00 | actor=codex | event=start | note=用户授权将当前文档与MuJoCo环境修复进度提交并推送GitHub | verification=-
+- 2026-10-04T16:20:49+08:00 | actor=codex | event=verified | note=上传前复核：包含根目录文档中文化、third_party说明、MuJoCo环境迁移与依赖隔离修复 | verification=沿用本轮两包重建、757通过37跳过、专项16通过和pip check通过结果；仅提交受Git管理的源码文档，不上传本机环境与构建产物
+- 2026-10-04T16:21:49+08:00 | actor=codex | event=complete | note=上传前审查完成，当前21个文件纳入发布提交；随后推送并核验远程提交号 | verification=暂存区diff检查和疑似密钥扫描通过；环境/构建产物已忽略；代理fetch确认本地与origin/main基线一致

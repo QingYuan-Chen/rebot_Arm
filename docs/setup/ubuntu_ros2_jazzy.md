@@ -214,9 +214,9 @@ python3 -m pytest tests -q
 ### 可选MuJoCo运行环境
 
 ```bash
-python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
-third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements/requirements-mujoco.txt
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
+python3 -m venv --system-site-packages .venv-mujoco
+.venv-mujoco/bin/python -s -m pip install -r requirements/requirements-mujoco.txt
+export REBOTARM_MUJOCO_PYTHON="$PWD/.venv-mujoco/bin/python"
 ```
 
 不需要激活该venv或重新构建ROS包。仿真入口和模型见
@@ -297,3 +297,14 @@ P0 Gate B/C 自动使能、保持与失能验收工具已于 2026-09-19 移除�
 ## 可选：MuJoCo 强化学习
 
 按 [强化学习命令参考](../reference/commands/mjlab_rl.md) 进入独立 rebotarm_rl 仓库安装训练依赖，并检查 Reach 环境。纯离线训练无需启动 ROS 或连接真机。
+
+### MuJoCo 用户包隔离
+
+该环境复用系统 ROS 包，因此仍启用 `--system-site-packages`。MuJoCo 启动节点单独设置
+`PYTHONNOUSERSITE=1`，屏蔽 `~/.local` 中无关的用户包；直接执行 Python 时使用 `-s`。
+不要在整个 ROS 会话中全局设置此变量，以免影响其他节点需要的用户安装依赖。
+环境内固定的 SciPy 与 NumPy 2 配套，不修改系统 SciPy 或视觉环境。
+
+```bash
+.venv-mujoco/bin/python -s -m pip check
+```

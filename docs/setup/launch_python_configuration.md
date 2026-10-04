@@ -3,10 +3,12 @@
 > 状态：SETUP；类型：启动解释器和环境配置契约；适用范围：MuJoCo、视觉和 GraspNet 进程。
 
 2026-09-06 起，MuJoCo、视觉、GraspNet 的 ROS launch 不再向上搜索工作区内的
-`.venv-*` 或 `third_party/rebotarm_mujoco_venv`，也不向整组节点注入视觉
+`.venv-*`，也不向整组节点注入视觉
 `site-packages/PYTHONPATH`。每类 Python 节点使用自己的解释器 prefix。
 
-选择优先级：显式 launch 参数 > 对应环境变量 > `PATH` 中的 `python3`。
+选择优先级：显式 launch 参数 > 对应环境变量 > 默认解释器。
+MuJoCo 默认解释器为 `$PWD/.venv-mujoco/bin/python`；视觉和 GraspNet 默认使用
+`PATH` 中的 `python3`。MuJoCo 从其他目录启动时，应设置绝对路径环境变量或参数。
 解释器必须具有该节点所需依赖，并能读取 source ROS/工作区后提供的 ROS 包路径。
 
 | 节点 | 环境变量 | launch 参数 |
@@ -15,16 +17,19 @@
 | 相机、普通候选、TCP frame、离线 YOLO | `REBOTARM_VISION_PYTHON` | `vision_python_executable` |
 | in-process GraspNet | `GRASPNET_PYTHON` | `graspnet_python_executable` |
 
+MuJoCo 节点另外设置 `PYTHONNOUSERSITE=1`，仅屏蔽该进程的用户安装包。
+直接使用 MuJoCo 解释器运行模块或 pip 时添加 `-s`，无需向整个 ROS 会话导出此变量。
+
 这些参数分别传递给对应进程；不会修改 MoveIt、控制器或其他节点的 Python 环境。
-环境变量设置在启动前完成，路径允许放在工作区外。未设置时，依赖需安装在当前
-`PATH` 所选 Python 中；不再自动切换到恰好在邻近目录找到的虚拟环境。
+环境变量设置在启动前完成，路径允许放在工作区外。默认解释器必须具有所需依赖；
+launch 不探测相邻目录是否存在其他虚拟环境，也不因默认环境缺失而静默回退。
 
 本机现有环境可在终端中明确选择（仅配置环境，不启动节点）：
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
+export REBOTARM_MUJOCO_PYTHON="$PWD/.venv-mujoco/bin/python"
 export REBOTARM_VISION_PYTHON="$PWD/.venv-vision/bin/python"
 export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 ```

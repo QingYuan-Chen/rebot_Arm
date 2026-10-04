@@ -9,7 +9,7 @@
 
 ROS launch 的解释器可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYTHON`
 环境变量指定；未设置时，MuJoCo launch 默认使用仓库中的
-`third_party/rebotarm_mujoco_venv/bin/python`，避免误用不含 `mujoco` 的系统
+`.venv-mujoco/bin/python`，避免误用不含 `mujoco` 的系统
 `python3`。从其他工作目录启动时请传绝对路径或设置环境变量。
 混合视觉入口的配置见 [启动解释器说明](../../docs/setup/launch_python_configuration.md)。
 
@@ -36,10 +36,10 @@ MuJoCo虚拟环境只用于运行，不需要相机、视觉权重或历史上�
 ```bash
 source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 -m colcon build --base-paths src --executor sequential --symlink-install
-python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
-third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements/requirements-mujoco.txt
+python3 -m venv --system-site-packages .venv-mujoco
+.venv-mujoco/bin/python -s -m pip install -r requirements/requirements-mujoco.txt
 source install/setup.bash
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
+export REBOTARM_MUJOCO_PYTHON="$PWD/.venv-mujoco/bin/python"
 ```
 
 该环境通过 --system-site-packages 复用系统 ROS 依赖，不安装 mjlab、Warp、PyTorch 或 CUDA 训练库。
@@ -50,9 +50,9 @@ launch使用显式解释器prefix；更换运行环境只需更新路径，不�
 直接运行模块时也必须显式选择解释器：
 
 ```bash
-MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.mujoco_cli --headless --duration 5
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.mujoco_viewer --duration 30
+MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -s -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
+"$REBOTARM_MUJOCO_PYTHON" -s -m rebotarm_simulation.apps.mujoco_cli --headless --duration 5
+"$REBOTARM_MUJOCO_PYTHON" -s -m rebotarm_simulation.apps.mujoco_viewer --duration 30
 ```
 
 ## 健康检查与无界面运行
@@ -60,7 +60,7 @@ MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoc
 EGL 渲染检查在隔离子进程中运行，并有超时保护，避免驱动挂起拖死主进程：
 
 ```bash
-MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
+MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -s -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
 ```
 
 预期 JSON 关键字段如下；版本和路径允许不同，但关节/执行器均应为 8，
@@ -77,7 +77,7 @@ MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoc
 不依赖窗口的定时运行：
 
 ```bash
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.mujoco_cli --headless --duration 5
+"$REBOTARM_MUJOCO_PYTHON" -s -m rebotarm_simulation.apps.mujoco_cli --headless --duration 5
 ```
 
 输出同时含 `"requested_duration"` 和 `"achieved_duration"`；后者会按物理
@@ -89,7 +89,7 @@ MUJOCO_GL=egl "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoc
 在 Ubuntu 图形桌面的终端运行，而不是普通无显示 SSH 会话：
 
 ```bash
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.mujoco_viewer --duration 30
+"$REBOTARM_MUJOCO_PYTHON" -s -m rebotarm_simulation.apps.mujoco_viewer --duration 30
 ```
 
 按 `1`–`6` 选择关节，按住 `J/K` 连续正/反向移动当前关节，按住 `C/O`
@@ -262,3 +262,14 @@ sha256sum src/rebotarm_simulation/models/rebotarm/robot.xml
 
 生成、检查和运行均不连接实机，不探测 CAN、串口或机械臂控制器；ROS 2 联调继续明确
 使用 `use_hardware:=false`。
+
+### MuJoCo 用户包隔离
+
+该环境复用系统 ROS 包，因此仍启用 `--system-site-packages`。MuJoCo 启动节点单独设置
+`PYTHONNOUSERSITE=1`，屏蔽 `~/.local` 中无关的用户包；直接执行 Python 时使用 `-s`。
+不要在整个 ROS 会话中全局设置此变量，以免影响其他节点需要的用户安装依赖。
+环境内固定的 SciPy 与 NumPy 2 配套，不修改系统 SciPy 或视觉环境。
+
+```bash
+.venv-mujoco/bin/python -s -m pip check
+```

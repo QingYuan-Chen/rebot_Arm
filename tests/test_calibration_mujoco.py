@@ -7,7 +7,7 @@ import pytest
 
 def test_mujoco_multiaxis_handeye_recovery():
     root=Path(__file__).resolve().parents[1]
-    python=Path(os.environ.get('REBOTARM_MUJOCO_PYTHON',str(root/'third_party/rebotarm_mujoco_venv/bin/python')))
+    python=Path(os.environ.get('REBOTARM_MUJOCO_PYTHON',str(root/'.venv-mujoco/bin/python')))
     if not python.exists(): pytest.skip('configured MuJoCo interpreter unavailable')
     script=r'''
 import numpy as np
@@ -42,13 +42,13 @@ finally:sim.close()
 '''
     env=dict(os.environ)
     env['PYTHONPATH']=os.pathsep.join([str(root/'src/rebotarm_calibration'),str(root/'src/rebotarm_simulation'),env.get('PYTHONPATH','')])
-    result=subprocess.run([str(python),'-c',script],env=env,capture_output=True,text=True,timeout=30)
+    result=subprocess.run([str(python),'-s','-c',script],env=env,capture_output=True,text=True,timeout=30)
     assert result.returncode==0,result.stdout+result.stderr
 
 
 def test_mujoco_projected_marker_detection_and_handeye(tmp_path):
     root=Path(__file__).resolve().parents[1]
-    python=Path(os.environ.get('REBOTARM_MUJOCO_PYTHON',str(root/'third_party/rebotarm_mujoco_venv/bin/python')))
+    python=Path(os.environ.get('REBOTARM_MUJOCO_PYTHON',str(root/'.venv-mujoco/bin/python')))
     if not python.exists(): pytest.skip('configured MuJoCo interpreter unavailable')
     script=r'''
 import numpy as np,cv2,mujoco,json,sys
@@ -107,5 +107,5 @@ finally:sim.close()
 '''
     env=dict(os.environ)
     env['PYTHONPATH']=os.pathsep.join([str(root/'src/rebotarm_calibration'),str(root/'src/rebotarm_simulation'),env.get('PYTHONPATH','')])
-    result=subprocess.run([str(python),'-c',script,str(tmp_path/'mujoco_dataset.json')],env=env,capture_output=True,text=True,timeout=40)
+    result=subprocess.run([str(python),'-s','-c',script,str(tmp_path/'mujoco_dataset.json')],env=env,capture_output=True,text=True,timeout=40)
     assert result.returncode==0,result.stdout+result.stderr

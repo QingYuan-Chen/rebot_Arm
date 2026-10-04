@@ -4,6 +4,12 @@
 
 ## 当前焦点
 
+- 2026-10-04：修复MuJoCo运行模式pip冲突：.venv-mujoco安装并在requirements固定SciPy 1.18.1（元数据要求NumPy>=2.0,<2.8，兼容本地2.5.3）；两个MuJoCo launch仅给仿真节点设置PYTHONNOUSERSITE=1，直接CLI/pip与标定子进程使用python -s，屏蔽~/.local的rapidocr，保留系统ROS路径。未全局导出变量、未改系统SciPy/视觉环境；不加-s直接运行仍会看到用户包。python -s -m pip check为No broken requirements found；两包重建成功，专项16 passed、分层25 passed、全量757 passed/37 skipped，EGL/物理健康及SciPy求解通过。隔离域229实测子节点环境变量生效、父进程未设置，单次父进程SIGINT正常退出返回0；compileall/diff通过，无硬件操作。
+
+- 2026-10-04：用户授权迁移CPU MuJoCo环境到根目录 .venv-mujoco；重建新venv并按旧环境补齐本地包，新旧pip list --local版本完全一致。更新环境脚本、两个launch、测试、安装/命令/third_party文档、当前状态与gitignore；历史记录保留原路径。simulation/bringup重建成功，分层25 passed，全量757 passed/37 skipped，新环境专项20 passed，EGL渲染/5秒物理步进通过；隔离ROS域227实际默认launch使用新路径并收到3条joint_states。探针对进程组发SIGINT时退出出现KeyboardInterrupt（exit -2），不宣称平滑退出通过。新旧pip check均有rapidocr缺opencv-python和系统SciPy 1.11.4与NumPy 2.5.3冲突，属迁移前已有；未扩展为依赖升级。验证后确认旧环境无占用并删除third_party/rebotarm_mujoco_venv，删除后新解释器导入/模型初始化通过。无真机动作；新终端需source tools/source_local_environment.bash。
+
+- 2026-10-04：根目录说明校正与中文化：AGENTS保留原有安全规则并补充preview职责；README修正12个ROS包、RL外迁入口和许可说明；第三方说明更新MotorBridge 0.4.7+rebotarm.1/2b7b350提交及YOLO路径，LICENSE英文原文不变。新增third_party/README.md：四个本机依赖目录均有当前引用，SDK HEAD符合固定清单；GraspNet两目录无.git，确切上游提交未确认，未检查上游最新版本。PointNet2/KNN build约163 MiB为后续清理候选，本轮未删除；记录baseline本机许可的非商业研究限制。分层25 passed，全量757 passed/37 skipped，compileall、链接与diff检查通过；仅文档无需重建，未操作硬件。
+
 - 2026-10-04：按用户授权完成缓存清理：删除50处项目缓存、59份修改时间超过48小时的日志、3个失效日志链接、16个空日志目录及 MotorBridge target 编译目录，删除前分配占用约584.75 MiB。运行虚拟环境、模型、third_party、build_local_dependencies、build/install 和 MotorBridge source/toolchain/wheel 均保留；末尾存在性检查发现 MUJOCO_LOG.TXT 不存在，未单独记录其删除来源，不能确认原因。未改源码或运行硬件；未运行会重建缓存的测试。
 
 - 2026-10-04：缓存/文件只读审计：工作区约23 GiB，主要为 .venv-vision 约11 GiB 和 .venv-graspnet 约9.5 GiB，当前环境脚本仍引用，非垃圾。排除依赖环境及 build/install 后项目缓存50处约8.9 MiB；log约157 MiB、Log约2.6 MiB；log/latest_test-result、latest_list、latest_test 为失效链接。build_local_dependencies/root 仍被 source_local_environment.bash 使用，不能按 build_* 一概删除。MotorBridge target 约556 MiB 为可重建编译产物候选；未删除任何文件、未运行硬件或测试。

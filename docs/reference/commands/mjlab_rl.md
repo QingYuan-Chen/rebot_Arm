@@ -27,6 +27,6 @@ MUJOCO_GL=egl python -m mjlab.scripts.train RebotArm-Reach-Mjlab --env.scene.num
 训练/回放/CPU-GPU 配对评估及云端记录要求以
 [训练仓库说明](https://github.com/huangbinai/rebotarm_rl#readme) 为准。短 smoke 不代表策略收敛或实机验收。
 
-ROS 仿真使用专用轻量环境 third_party/rebotarm_mujoco_venv；
+ROS 仿真使用专用轻量环境 .venv-mujoco；
 新安装只需 requirements/requirements-mujoco.txt。训练使用独立仓库的 .venv。
 Isaac Lab 仍为计划中的后端，本次迁移没有实现其训练任务。
