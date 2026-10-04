@@ -8,6 +8,26 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_drl_workspace_is_isolated_from_ros_and_real_hardware() -> None:
+    import tomllib
+    root = ROOT / "DRL"
+    assert (root / "COLCON_IGNORE").is_file()
+    config = tomllib.loads((root / "pyproject.toml").read_text())
+    assert config["project"]["entry-points"]["mjlab.tasks"] == {
+        "rebotarm_reach_hold": "rebotarm_drl.tasks"
+    }
+    forbidden = {"rclpy", "serial", "MotorBridge", "rebotarmcontroller", "rebotarm_motion"}
+    for source in (root / "src/rebotarm_drl").rglob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text())):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                modules = [node.module or ""]
+            else:
+                continue
+            assert not {module.split(".")[0] for module in modules} & forbidden, source
+
+
 def test_simulation_has_no_motion_implementation_or_manifest_dependency() -> None:
     package = ROOT / "src/rebotarm_simulation"
     for source in (package / "rebotarm_simulation").rglob("*.py"):

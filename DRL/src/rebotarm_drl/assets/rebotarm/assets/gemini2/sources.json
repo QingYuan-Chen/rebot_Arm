@@ -1,0 +1,75 @@
+{
+  "gemini2_body.STL": {
+    "url": "https://raw.githubusercontent.com/orbbec/OrbbecSDK_ROS2/main/orbbec_description/meshes/gemini2/base_link.STL",
+    "sha256": "574379850b84e67e7e2b5def236e35270e4f5d3f1bcf029589969fd9ba468fdd",
+    "bytes": 2493384
+  },
+  "upstream_gemini2.urdf.xacro": {
+    "url": "https://raw.githubusercontent.com/orbbec/OrbbecSDK_ROS2/main/orbbec_description/urdf/gemini2.urdf.xacro",
+    "sha256": "1848fd5a909fadeed24f43651ae8c35b3627ce98114922dd15ca1e4109b73dc0",
+    "bytes": 12310
+  },
+  "ORBBEC_LICENSE.txt": {
+    "url": "https://raw.githubusercontent.com/orbbec/OrbbecSDK_ROS2/main/LICENSE",
+    "sha256": "1a325fd390b54e7b142d31dfcbfa4ed4621b83d2ec8e3b9fad054d491b3a4c49",
+    "bytes": 11359
+  },
+  "D435_Gemini2_Mount.step": {
+    "url": "https://raw.githubusercontent.com/Seeed-Projects/reBot-DevArm/840971c817a9289f24bf6dfb82d92627026c77de/hardware/reBot_B601_DM/3D_Printed_Parts/D435_Gemini2_Mount.step",
+    "sha256": "38aa815b210ee4fe73275a46bb305ebb92315b5b0ae1167a030ad5bccbae1c35",
+    "bytes": 79366
+  },
+  "SEEED_LICENSE.txt": {
+    "url": "https://raw.githubusercontent.com/Seeed-Projects/reBot-DevArm/35e04bd3356af9c96671ad1d8592ec7a43eb0725/LICENSE",
+    "sha256": "e258a9c6833bfd17fb90252df8c33e29d13fabc2768508248927824c17878db7",
+    "bytes": 14392
+  },
+  "physics": {
+    "mass_kg": 0.098,
+    "dimensions_depth_width_height_m": [
+      0.03,
+      0.09,
+      0.025
+    ],
+    "source": "https://www.orbbec.com/products/stereo-vision-camera/gemini-2/",
+    "inertia_estimate_kg_m2": [
+      7.125416666666668e-05,
+      1.2454166666666668e-05,
+      7.35e-05
+    ],
+    "COM_assumption": "bounding box center",
+    "mesh_bounds_m": [
+      [
+        -0.009900002740323544,
+        -0.044718917459249496,
+        -1.2350455108389724e-05
+      ],
+      [
+        0.020099999383091927,
+        0.044707924127578735,
+        0.025012345984578133
+      ]
+    ],
+    "mount_mass_kg": 0.022,
+    "mount_transform": null,
+    "integrated_into_robot": true,
+    "mount_mass_source": "user_measured_printed_bracket_22g",
+    "mount_inertia_status": "CAD uniform density estimate scaled to measured mass"
+  },
+  "conversion": {
+    "tool": "cadquery-ocp-novtk 7.8.1.1.post1",
+    "step_scale_to_m": 0.001,
+    "mesh_deflection_m": 8e-05,
+    "mount_part_mass_kg": 0.02,
+    "mass_is_estimate": true,
+    "note": "CAD mass properties retain the original 0.020 kg reference normalization; generator scales inertia to configured measured mass."
+  },
+  "generated_hashes": {
+    "ORBBEC_LICENSE.txt": "1a325fd390b54e7b142d31dfcbfa4ed4621b83d2ec8e3b9fad054d491b3a4c49",
+    "mount_part0.stl": "d5c645a166b36c38b4bee7485b51b9ccb706b740c807bfc09a22387fd9669108",
+    "cad_mass_properties.json": "ce08ca986f41789e43e057f4c9bc9fc5116903dab26be3e809c50dc2c49c0507",
+    "camera.STL": "574379850b84e67e7e2b5def236e35270e4f5d3f1bcf029589969fd9ba468fdd",
+    "D435_Gemini2_Mount.step": "38aa815b210ee4fe73275a46bb305ebb92315b5b0ae1167a030ad5bccbae1c35",
+    "SEEED_LICENSE.txt": "e258a9c6833bfd17fb90252df8c33e29d13fabc2768508248927824c17878db7"
+  }
+}

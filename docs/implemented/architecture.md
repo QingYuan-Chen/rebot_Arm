@@ -151,6 +151,16 @@ Ready-pose 运动（`visual_ready_node` 及其参数 profile）位于 `rebotarm_
 
 不得导入或调用真实电机 SDK。仿真 launch 不得启动 `rebotarmcontroller`、打开硬件通道，或以相同名称暴露第二个活动 `FollowJointTrajectory` server。
 
+### 独立强化学习工作区
+
+按用户指定，新的 MJLab 环境、模型导出、报告比较、记录回放和远端部署工具统一归属
+根目录 `DRL/`，由 `COLCON_IGNORE` 排除在 ROS 构建之外。其 Python 环境和缓存独立，
+不注入现有 ROS/视觉环境，不导入真实控制器或直接访问硬件。规范 MuJoCo 模型仍归属
+`rebotarm_simulation`；DRL 使用带来源提交和摘要的显式快照。
+首个学习任务 Reach-and-Hold 已注册，任务PD控制、观测动作契约、训练、IK基线和策略评测均封装在DRL内；
+不作为ROS运动包或硬件控制接口。本机只做导出、测试与回放，训练在独立远端服务器执行。
+具体命令与部署说明见 [DRL 工作区](../../DRL/README.md)。
+
 ### Bringup 职责
 
 `rebotarm_bringup` 负责 launch 时的组合和后端选择。
