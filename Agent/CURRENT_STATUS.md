@@ -6,7 +6,8 @@
 ## 当前阶段
 
 - 当前阶段：RL 已迁移至独立 rebotarm_rl 仓库；本仓库维护 ROS 应用、CPU MuJoCo 集成和模型源。
-- 当前范围：纯仿真、RL 环境、训练/评估口径和后续接口设计。
+- 当前范围：ROS 应用、CPU MuJoCo 仿真及策略部署接口；RL 训练由独立仓库维护。
+- ROS 仿真环境：third_party/rebotarm_mujoco_venv，约298 MB；旧ROS内训练环境已退役。
 - 当前安全状态：没有新的真实机械臂 enable、trajectory、gripper、approach、lift、retreat 或接触授权。
 
 ## 当前验收清单

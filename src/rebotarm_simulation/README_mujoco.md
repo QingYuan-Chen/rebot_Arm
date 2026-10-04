@@ -9,7 +9,7 @@
 
 ROS launch 的解释器可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYTHON`
 环境变量指定；未设置时，MuJoCo launch 默认使用仓库中的
-`third_party/rebotarm_mjlab_venv/bin/python`，避免误用不含 `mujoco` 的系统
+`third_party/rebotarm_mujoco_venv/bin/python`，避免误用不含 `mujoco` 的系统
 `python3`。从其他工作目录启动时请传绝对路径或设置环境变量。
 混合视觉入口的配置见 [启动解释器说明](../../docs/setup/launch_python_configuration.md)。
 
@@ -36,11 +36,14 @@ MuJoCo虚拟环境只用于运行，不需要相机、视觉权重或历史上�
 ```bash
 source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 -m colcon build --base-paths src --executor sequential --symlink-install
-python3 -m venv --system-site-packages third_party/rebotarm_mjlab_venv
-third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements/requirements-mujoco.txt
+python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
+third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements/requirements-mujoco.txt
 source install/setup.bash
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mjlab_venv/bin/python"
+export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
 ```
+
+该环境通过 --system-site-packages 复用系统 ROS 依赖，不安装 mjlab、Warp、PyTorch 或 CUDA 训练库。
+OpenCV headless 用于 NumPy 2 下的仿真标定检查；Viewer/EGL 仍使用 MuJoCo 图形依赖。
 
 新终端source ROS和本工作区，再设置上述环境变量，不需要激活venv。
 launch使用显式解释器prefix；更换运行环境只需更新路径，不必重新构建。

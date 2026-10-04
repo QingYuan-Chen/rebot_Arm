@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-04T15:20:31+08:00",
+  "generated_at": "2026-10-04T15:51:02+08:00",
   "plan_source": "Agent/PROJECT_STATUS.md",
   "current_status_source": "Agent/CURRENT_STATUS.md",
   "completion_basis": "weighted verified checklist; not code volume or hardware readiness",
@@ -80,8 +80,8 @@
   ],
   "git": {
     "branch": "main",
-    "head": "00065fb",
+    "head": "e2814d8",
     "working_tree_dirty": true
   },
-  "last_event": "- 2026-10-04T15:20:31+08:00 | actor=codex | event=complete | note=RL独立仓库迁移完成，新仓库b349e3d已推送，ROS侧完成迁移清理与验证 | verification=RL8测试；独立GPU8环境1迭代及CPU/GPU配对通过；ROS757 passed/37 skipped；物理96 passed；分层25 passed；构建compileall和实际launch通过"
+  "last_event": "- 2026-10-04T15:51:02+08:00 | actor=codex | event=complete | note=ROS轻量MuJoCo环境基线发布，RL V2开发在独立仓库继续 | verification=沿用本轮已完成验证：757 passed/37 skipped；98专项；两包构建；实际launch正常"
 }

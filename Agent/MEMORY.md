@@ -4,6 +4,10 @@
 
 ## 当前焦点
 
+- 2026-10-04：按用户授权完成缓存清理：删除50处项目缓存、59份修改时间超过48小时的日志、3个失效日志链接、16个空日志目录及 MotorBridge target 编译目录，删除前分配占用约584.75 MiB。运行虚拟环境、模型、third_party、build_local_dependencies、build/install 和 MotorBridge source/toolchain/wheel 均保留；末尾存在性检查发现 MUJOCO_LOG.TXT 不存在，未单独记录其删除来源，不能确认原因。未改源码或运行硬件；未运行会重建缓存的测试。
+
+- 2026-10-04：缓存/文件只读审计：工作区约23 GiB，主要为 .venv-vision 约11 GiB 和 .venv-graspnet 约9.5 GiB，当前环境脚本仍引用，非垃圾。排除依赖环境及 build/install 后项目缓存50处约8.9 MiB；log约157 MiB、Log约2.6 MiB；log/latest_test-result、latest_list、latest_test 为失效链接。build_local_dependencies/root 仍被 source_local_environment.bash 使用，不能按 build_* 一概删除。MotorBridge target 约556 MiB 为可重建编译产物候选；未删除任何文件、未运行硬件或测试。
+
 - 2026-10-04：用户连接真实相机后验证visual_grasp_system(use_hardware=false)+新preview；75秒含启动采样：RGB756/depth627帧(640×480)，bottle非空960/960，GraspNet非空95/95，filtered_plan有效62/62，末条到达年龄2.666秒；preview状态30Hz，无运行ERROR/迁移导入异常，测试进程已退出。未调用execute，不宣称相机驱动抓取闭环或真机验收。证据 Agent/evidence/current/preview-real-camera-2026-10-04/README.md。
 
 - 2026-10-04：用户连接真实相机后，隔离域224跑visual_grasp_system无硬件入口，Gemini2/YOLO/本地GraspNet/IK过滤与新preview同时正常。reliable复核40秒含启动：RGB/depth/CameraInfo/detections各433条，40条非空候选、27条有效filtered_plan；没有调用execute或真机动作。best-effort探针丢大帧，改reliable后计数一致；无运行期ERROR/导入失败，退出后子进程清理。证据 Agent/evidence/current/preview-real-camera-2026-10-04/README.md。
@@ -1027,3 +1031,18 @@ Dashboard 的 `TeachReplayWorkflow` 已定为唯一正式示教回放实现，�
 
 - 新仓库main已发布并核验为b349e3d；新仓库使用与ROS仓库相同的本地Git身份，未修改全局配置。
 - 删除旧RL插件后，隔离ROS域177启动mujoco_sim成功，收到5帧关节状态并正常退出0。
+
+
+## 2026-10-04 重建ROS轻量MuJoCo环境
+- 创建 third_party/rebotarm_mujoco_venv（system-site-packages复用系统ROS），
+  本地安装MuJoCo3.11/NumPy2.5.3/YAML和必要运行依赖，无torch/mjlab/Warp/RSL-RL。
+- 保留opencv-python-headless4.11用于NumPy2下标定测试，写入CPU requirements。
+  Viewer/EGL依赖仍保留，测试工具pytest仅用于开发验证。
+- 环境脚本、两个MuJoCo launch、校准/解释器测试和文档统一新路径。
+- 新环境约298 MiB（du -sh），旧环境约6.8 GiB；旧环境已在验证后删除，
+  独立RL/vision/GraspNet环境未修改。旧依赖清单保留在本地验证证据中。
+- 验证：物理与标定98 passed；完整757 passed/37 skipped；分层25 passed；
+  simulation/bringup重建、compileall通过；EGL渲染、Viewer退出0；
+  ROS轨迹成功/取消/停止/后续执行通过；source脚本后实际launch收到5帧并退出0。
+- 清理后另核对ROS仿真步进及独立RL CUDA/模型可用；无真机操作。
+- 证据：Agent/evidence/current/mujoco-light-env-2026-10-04/。

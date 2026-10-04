@@ -1270,3 +1270,11 @@
 - 2026-10-04T14:46:19+08:00 | actor=codex | event=complete | note=当前进度发布检查完成，准备提交并推送main | verification=759 passed/37 skipped；MuJoCo96 passed；分层25 passed；四包构建与compileall通过；远程无分叉
 - 2026-10-04T15:00:28+08:00 | actor=codex | event=start | note=迁移RL到独立GitHub仓库并验证独立模型与训练入口 | verification=-
 - 2026-10-04T15:20:31+08:00 | actor=codex | event=complete | note=RL独立仓库迁移完成，新仓库b349e3d已推送，ROS侧完成迁移清理与验证 | verification=RL8测试；独立GPU8环境1迭代及CPU/GPU配对通过；ROS757 passed/37 skipped；物理96 passed；分层25 passed；构建compileall和实际launch通过
+- 2026-10-04T15:23:58+08:00 | actor=codex | event=start | note=重建ROS专用轻量MuJoCo环境并验证后切换 | verification=-
+- 2026-10-04T15:28:03+08:00 | actor=codex | event=complete | note=ROS轻量MuJoCo环境重建并切换完成，验证后移除旧6.8GB训练环境 | verification=98专项通过；757 passed/37 skipped；分层25；两包构建compileall；EGL/Viewer/ROS动作及实际launch通过
+- 2026-10-04T15:44:51+08:00 | actor=codex | event=start | note=只读检查缓存、构建产物与疑似遗留文件，不删除文件 | verification=-
+- 2026-10-04T15:45:48+08:00 | actor=codex | event=complete | note=完成缓存与文件占用审计，未删除文件 | verification=du占用统计、git跟踪/忽略检查、当前环境引用核对；未改源码，未运行测试或硬件
+- 2026-10-04T15:47:06+08:00 | actor=codex | event=start | note=按用户授权清理项目缓存、两天前日志及MotorBridge target编译产物 | verification=-
+- 2026-10-04T15:48:08+08:00 | actor=codex | event=complete | note=完成用户授权缓存与旧日志清理，删除占用约584.75 MiB | verification=50缓存目录、59旧日志、3失效链接、16空日志目录及MotorBridge target已移除；运行依赖和wheel保留；未改源码未运行硬件
+- 2026-10-04T15:50:47+08:00 | actor=codex | event=start | note=发布ROS轻量环境基线与RL框架基线，随后独立推进Reach V2 | verification=-
+- 2026-10-04T15:51:02+08:00 | actor=codex | event=complete | note=ROS轻量MuJoCo环境基线发布，RL V2开发在独立仓库继续 | verification=沿用本轮已完成验证：757 passed/37 skipped；98专项；两包构建；实际launch正常

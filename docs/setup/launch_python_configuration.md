@@ -3,7 +3,7 @@
 > 状态：SETUP；类型：启动解释器和环境配置契约；适用范围：MuJoCo、视觉和 GraspNet 进程。
 
 2026-09-06 起，MuJoCo、视觉、GraspNet 的 ROS launch 不再向上搜索工作区内的
-`.venv-*` 或 `third_party/rebotarm_mjlab_venv`，也不向整组节点注入视觉
+`.venv-*` 或 `third_party/rebotarm_mujoco_venv`，也不向整组节点注入视觉
 `site-packages/PYTHONPATH`。每类 Python 节点使用自己的解释器 prefix。
 
 选择优先级：显式 launch 参数 > 对应环境变量 > `PATH` 中的 `python3`。
@@ -24,7 +24,7 @@
 ```bash
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mjlab_venv/bin/python"
+export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
 export REBOTARM_VISION_PYTHON="$PWD/.venv-vision/bin/python"
 export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 ```

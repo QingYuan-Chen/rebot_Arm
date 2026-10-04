@@ -21,5 +21,5 @@ export REBOTARM_VISION_PYTHON="${_rebotarm_local_root}/.venv-vision/bin/python"
 export GRASPNET_PYTHON="${_rebotarm_local_root}/.venv-graspnet/bin/python"
 export GRASPNET_MODEL_ROOT="${GRASPNET_MODEL_ROOT:-${_rebotarm_local_root}/third_party/graspnet-baseline}"
 export GRASPNET_CHECKPOINT_PATH="${GRASPNET_CHECKPOINT_PATH:-${_rebotarm_local_root}/.local-models/checkpoints/checkpoint-rs.tar}"
-export REBOTARM_MUJOCO_PYTHON="${_rebotarm_local_root}/third_party/rebotarm_mjlab_venv/bin/python"
+export REBOTARM_MUJOCO_PYTHON="${_rebotarm_local_root}/third_party/rebotarm_mujoco_venv/bin/python"
 unset _rebotarm_local_root _rebotarm_local_ros

@@ -214,9 +214,9 @@ python3 -m pytest tests -q
 ### 可选MuJoCo运行环境
 
 ```bash
-python3 -m venv --system-site-packages third_party/rebotarm_mjlab_venv
-third_party/rebotarm_mjlab_venv/bin/python -m pip install -r requirements/requirements-mujoco.txt
-export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mjlab_venv/bin/python"
+python3 -m venv --system-site-packages third_party/rebotarm_mujoco_venv
+third_party/rebotarm_mujoco_venv/bin/python -m pip install -r requirements/requirements-mujoco.txt
+export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_mujoco_venv/bin/python"
 ```
 
 不需要激活该venv或重新构建ROS包。仿真入口和模型见
