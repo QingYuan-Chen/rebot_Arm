@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from rebotarm_simulation import mujoco_ros_acceptance
+from rebotarm_simulation.diagnostics import mujoco_ros_acceptance
 
 
 def test_ros_acceptance_entrypoint_reports_runtime_errors_as_json_free_failure(monkeypatch):
@@ -24,7 +24,7 @@ def test_ros_acceptance_entrypoint_reports_runtime_errors_as_json_free_failure(m
 
 def test_ros_acceptance_source_checks_required_runtime_interfaces_without_hardware():
     source = Path(
-        "src/rebotarm_simulation/rebotarm_simulation/mujoco_ros_acceptance.py"
+        "src/rebotarm_simulation/rebotarm_simulation/diagnostics/mujoco_ros_acceptance.py"
     ).read_text(encoding="utf-8")
 
     required = (

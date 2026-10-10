@@ -49,5 +49,8 @@
   </worldbody>
   <keyframe>
     <key name="home" qpos="0 -0.8 -1.0 0.3 0 0 0.03 -0.03 0.28 0 0.04 1 0 0 0"/>
+    <!-- Match the SRDF resting pose; ctrl is torque/force, not joint position.
+         The runtime seeds gravity compensation after any physical reset. -->
+    <key name="safe_home" qpos="0 0 -0.017453292519943295 0 0 0 0.04 -0.04 0.28 0 0.04 1 0 0 0" ctrl="0 0 0 0 0 0 0 0"/>
   </keyframe>
 </mujoco>

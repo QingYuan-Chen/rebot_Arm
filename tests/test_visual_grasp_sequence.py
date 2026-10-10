@@ -1,4 +1,5 @@
 from __future__ import annotations
+from rebotarm_vision.visual_grasp_workflow import VisualGraspWorkflow
 
 from pathlib import Path
 import sys
@@ -93,7 +94,7 @@ def test_build_sequence_rejects_too_low_grasp():
 
 
 def test_build_sequence_allows_low_grasp_by_default_and_retreats_along_reverse_approach():
-    from rebotarm_vision.retreat_policy import RetreatPolicyConfig
+    from rebotarm_vision.policies.retreat_policy import RetreatPolicyConfig
     from rebotarm_vision.visual_grasp_sequence import (
         PoseTarget,
         VisualGraspSequenceConfig,
@@ -177,7 +178,7 @@ def test_auto_gripper_width_clamps_to_safe_range():
 
 
 def test_gripper_policy_adapts_width_but_uses_fixed_default_effort():
-    from rebotarm_vision.gripper_policy import GripperPolicyConfig, resolve_gripper_command
+    from rebotarm_vision.policies.gripper_policy import GripperPolicyConfig, resolve_gripper_command
 
     narrow = resolve_gripper_command(
         jaw_width_m=0.028,
@@ -201,7 +202,7 @@ def test_gripper_policy_adapts_width_but_uses_fixed_default_effort():
 
 
 def test_gripper_policy_does_not_add_class_based_effort_bonus():
-    from rebotarm_vision.gripper_policy import GripperPolicyConfig, resolve_gripper_command
+    from rebotarm_vision.policies.gripper_policy import GripperPolicyConfig, resolve_gripper_command
 
     bottle = resolve_gripper_command(
         jaw_width_m=0.060,
@@ -221,7 +222,7 @@ def test_gripper_policy_does_not_add_class_based_effort_bonus():
 
 
 def test_gripper_policy_rejects_objects_outside_gripper_range():
-    from rebotarm_vision.gripper_policy import GripperPolicyConfig, resolve_gripper_command
+    from rebotarm_vision.policies.gripper_policy import GripperPolicyConfig, resolve_gripper_command
 
     command = resolve_gripper_command(
         jaw_width_m=0.20,
@@ -235,7 +236,7 @@ def test_gripper_policy_rejects_objects_outside_gripper_range():
 
 
 def test_gripper_policy_default_accepts_85mm_and_rejects_anything_wider():
-    from rebotarm_vision.gripper_policy import resolve_gripper_command
+    from rebotarm_vision.policies.gripper_policy import resolve_gripper_command
 
     accepted = resolve_gripper_command(jaw_width_m=0.085)
     rejected = resolve_gripper_command(jaw_width_m=0.085001)
@@ -247,8 +248,8 @@ def test_gripper_policy_default_accepts_85mm_and_rejects_anything_wider():
 
 
 def test_sequence_adds_reverse_approach_retreat_before_safe_home():
-    from rebotarm_vision.gripper_policy import GripperCommand
-    from rebotarm_vision.retreat_policy import RetreatPolicyConfig
+    from rebotarm_vision.policies.gripper_policy import GripperCommand
+    from rebotarm_vision.policies.retreat_policy import RetreatPolicyConfig
     from rebotarm_vision.visual_grasp_sequence import (
         PoseTarget,
         VisualGraspSequenceConfig,
@@ -294,7 +295,7 @@ def test_sequence_adds_reverse_approach_retreat_before_safe_home():
 
 
 def test_safe_retreat_uses_grasp_to_pregrasp_direction():
-    from rebotarm_vision.retreat_policy import RetreatPolicyConfig, build_retreat_pose
+    from rebotarm_vision.policies.retreat_policy import RetreatPolicyConfig, build_retreat_pose
     from rebotarm_vision.visual_grasp_sequence import PoseTarget
 
     grasp = PoseTarget(
@@ -311,7 +312,7 @@ def test_safe_retreat_uses_grasp_to_pregrasp_direction():
 
 
 def test_safe_retreat_rejects_coincident_pregrasp_and_grasp():
-    from rebotarm_vision.retreat_policy import RetreatPolicyConfig, build_retreat_pose
+    from rebotarm_vision.policies.retreat_policy import RetreatPolicyConfig, build_retreat_pose
     from rebotarm_vision.visual_grasp_sequence import PoseTarget
 
     pose = PoseTarget(position=(0.30, 0.0, 0.13), orientation=(0.0, 0.0, 0.0, 1.0))
@@ -346,7 +347,7 @@ def test_close_gripper_contact_rejects_no_motion_from_open_position():
 
 
 def test_base_axis_grasp_policy_builds_tcp_aligned_targets():
-    from rebotarm_vision.visual_grasp_pose_policy import (
+    from rebotarm_vision.policies.visual_grasp_pose_policy import (
         BaseAxisGraspPolicyConfig,
         build_base_axis_grasp_targets,
     )
@@ -371,7 +372,7 @@ def test_base_axis_grasp_policy_builds_tcp_aligned_targets():
 
 def test_visual_servo_policy_builds_bounded_step_toward_refreshed_grasp():
     from rebotarm_vision.visual_grasp_sequence import PoseTarget
-    from rebotarm_vision.visual_servo_policy import VisualServoApproachConfig, build_visual_servo_step
+    from rebotarm_vision.policies.visual_servo_policy import VisualServoApproachConfig, build_visual_servo_step
 
     current = PoseTarget(position=(0.20, 0.00, 0.20), orientation=(0.0, 0.0, 0.0, 1.0))
     desired = PoseTarget(position=(0.30, 0.00, 0.20), orientation=(0.0, 0.0, 0.0, 1.0))
@@ -386,7 +387,7 @@ def test_visual_servo_policy_builds_bounded_step_toward_refreshed_grasp():
 
 def test_visual_servo_policy_reports_reached_inside_threshold():
     from rebotarm_vision.visual_grasp_sequence import PoseTarget
-    from rebotarm_vision.visual_servo_policy import VisualServoApproachConfig, build_visual_servo_step
+    from rebotarm_vision.policies.visual_servo_policy import VisualServoApproachConfig, build_visual_servo_step
 
     current = PoseTarget(position=(0.295, 0.00, 0.20), orientation=(0.0, 0.0, 0.0, 1.0))
     desired = PoseTarget(position=(0.300, 0.00, 0.20), orientation=(0.0, 0.0, 0.0, 1.0))
@@ -398,7 +399,7 @@ def test_visual_servo_policy_reports_reached_inside_threshold():
 
 
 def test_retry_policy_orders_best_candidate_first_then_others():
-    from rebotarm_vision.grasp_retry_policy import RetryPolicyConfig, ordered_candidate_indices
+    from rebotarm_vision.policies.grasp_retry_policy import RetryPolicyConfig, ordered_candidate_indices
 
     assert ordered_candidate_indices(
         candidate_count=4,
@@ -409,7 +410,7 @@ def test_retry_policy_orders_best_candidate_first_then_others():
 
 
 def test_retry_policy_returns_only_best_when_disabled():
-    from rebotarm_vision.grasp_retry_policy import RetryPolicyConfig, ordered_candidate_indices
+    from rebotarm_vision.policies.grasp_retry_policy import RetryPolicyConfig, ordered_candidate_indices
 
     assert ordered_candidate_indices(
         candidate_count=4,
@@ -420,7 +421,7 @@ def test_retry_policy_returns_only_best_when_disabled():
 
 
 def test_grasp_verification_requires_contact_and_sufficient_closure():
-    from rebotarm_vision.grasp_verification_policy import (
+    from rebotarm_vision.policies.grasp_verification_policy import (
         GraspVerificationConfig,
         GraspVerificationInput,
         verify_grasp_after_close,
@@ -447,7 +448,7 @@ def test_grasp_verification_requires_contact_and_sufficient_closure():
 
 
 def test_place_policy_builds_place_open_and_retreat_stages():
-    from rebotarm_vision.place_task_policy import PlaceTaskConfig, build_place_stages
+    from rebotarm_vision.policies.place_task_policy import PlaceTaskConfig, build_place_stages
     from rebotarm_vision.visual_grasp_sequence import PoseTarget
 
     stages = build_place_stages(
@@ -468,7 +469,7 @@ def test_place_policy_builds_place_open_and_retreat_stages():
 
 
 def test_recovery_policy_allows_retry_for_motion_failures_only():
-    from rebotarm_vision.trajectory_recovery_policy import RecoveryConfig, recovery_decision_for_stage
+    from rebotarm_vision.policies.trajectory_recovery_policy import RecoveryConfig, recovery_decision_for_stage
 
     config = RecoveryConfig(auto_retry_enabled=True, safe_retreat_before_retry=True)
 
@@ -496,7 +497,7 @@ def test_filtered_plan_targets_are_used_without_reapplying_base_axis_policy():
 
     from geometry_msgs.msg import Pose
     from rebotarm_msgs.msg import GraspPlan
-    from rebotarm_vision.visual_grasp_executor_node import VisualGraspExecutorNode
+    from rebotarm_vision.nodes.visual_grasp_executor_node import VisualGraspExecutorNode
 
     plan = GraspPlan()
     plan.header.frame_id = "base_link"
@@ -513,10 +514,10 @@ def test_filtered_plan_targets_are_used_without_reapplying_base_axis_policy():
     plan.grasp_pose.position.z = 0.18
     plan.grasp_pose.orientation.w = 1.0
 
-    node = object.__new__(VisualGraspExecutorNode)
+    node = object.__new__(VisualGraspWorkflow)
     node._target_frame = "base_link"
 
-    pregrasp, grasp = VisualGraspExecutorNode._build_motion_targets_from_filtered_plan(node, plan)
+    pregrasp, grasp = VisualGraspWorkflow._build_motion_targets_from_filtered_plan(node, plan)
 
     assert pregrasp.position == pytest.approx((0.30, 0.10, 0.25))
     assert grasp.position == pytest.approx((0.38, 0.10, 0.18))

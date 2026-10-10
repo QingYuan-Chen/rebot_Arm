@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 
 def test_latest_only_work_queue_processes_current_then_newest_pending_frame() -> None:
-    from rebotarm_vision.latest_only_work_queue import LatestOnlyWorkQueue
+    from rebotarm_vision.utils.latest_only_work_queue import LatestOnlyWorkQueue
 
     queue = LatestOnlyWorkQueue[str]()
 
@@ -32,7 +32,7 @@ def test_latest_only_work_queue_processes_current_then_newest_pending_frame() ->
 
 
 def test_latest_only_work_queue_starts_a_new_owner_after_becoming_idle() -> None:
-    from rebotarm_vision.latest_only_work_queue import LatestOnlyWorkQueue
+    from rebotarm_vision.utils.latest_only_work_queue import LatestOnlyWorkQueue
 
     queue = LatestOnlyWorkQueue[str]()
     assert queue.submit("frame-1", received_at=1.0) is not None
@@ -44,7 +44,7 @@ def test_latest_only_work_queue_starts_a_new_owner_after_becoming_idle() -> None
 
 
 def test_candidate_precheck_rejects_low_confidence_and_invalid_width() -> None:
-    from rebotarm_vision.candidate_precheck_policy import (
+    from rebotarm_vision.policies.candidate_precheck_policy import (
         CandidatePrecheckConfig,
         evaluate_candidate_precheck,
     )
@@ -80,7 +80,9 @@ def test_candidate_precheck_rejects_low_confidence_and_invalid_width() -> None:
 
 def test_candidate_filter_rejects_low_confidence_before_target_or_ik_work() -> None:
     from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
-    from rebotarm_vision.candidate_ik_filter_node import CandidateIkFilterNode
+    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
+    from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
+    from types import SimpleNamespace
 
     msg = GraspCandidateArray()
     candidate = GraspCandidate()
@@ -96,7 +98,7 @@ def test_candidate_filter_rejects_low_confidence_before_target_or_ik_work() -> N
         "candidate_min_jaw_width_m": 0.006,
         "candidate_max_jaw_width_m": 0.085,
     }
-    node = object.__new__(CandidateIkFilterNode)
+    node = object.__new__(CandidateIkPolicy)
     node.get_parameter = lambda name: SimpleNamespace(value=parameters[name])
     node.get_logger = lambda: SimpleNamespace(warn=warnings.append)
     node._candidate_target_variants = lambda *_args: (_ for _ in ()).throw(
@@ -104,7 +106,12 @@ def test_candidate_filter_rejects_low_confidence_before_target_or_ik_work() -> N
     )
     node._publish_ranked = lambda original, ranked: published.append((original, ranked))
 
-    CandidateIkFilterNode._on_candidates_unlocked(node, msg)
+    CandidateIkRuntime(
+        policy=node, gateway=SimpleNamespace(
+            check_target=getattr(node, "_check_ik_and_collision", None),
+            publish_ranked=node._publish_ranked, publish_empty=lambda message: None,
+        ), max_candidates=10, logger=node.get_logger(),
+    ).filter_frame(msg)
 
     assert published == [(msg, [])]
     assert warnings == []
@@ -112,7 +119,9 @@ def test_candidate_filter_rejects_low_confidence_before_target_or_ik_work() -> N
 
 def test_candidate_filter_runs_geometry_gate_before_ik_service_calls() -> None:
     from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
-    from rebotarm_vision.candidate_ik_filter_node import CandidateIkFilterNode
+    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
+    from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
+    from types import SimpleNamespace
     from rebotarm_vision.visual_grasp_sequence import PoseTarget
 
     msg = GraspCandidateArray()
@@ -130,7 +139,7 @@ def test_candidate_filter_runs_geometry_gate_before_ik_service_calls() -> None:
         "candidate_min_jaw_width_m": 0.006,
         "candidate_max_jaw_width_m": 0.085,
     }
-    node = object.__new__(CandidateIkFilterNode)
+    node = object.__new__(CandidateIkPolicy)
     node.get_parameter = lambda name: SimpleNamespace(value=parameters[name])
     node.get_logger = lambda: SimpleNamespace(warn=lambda _message: None)
     node._candidate_target_variants = lambda *_args: [(target, target, "original")]
@@ -138,7 +147,12 @@ def test_candidate_filter_runs_geometry_gate_before_ik_service_calls() -> None:
     node._check_ik_and_collision = lambda *args: ik_calls.append(args)
     node._publish_ranked = lambda original, ranked: published.append((original, ranked))
 
-    CandidateIkFilterNode._on_candidates_unlocked(node, msg)
+    CandidateIkRuntime(
+        policy=node, gateway=SimpleNamespace(
+            check_target=getattr(node, "_check_ik_and_collision", None),
+            publish_ranked=node._publish_ranked, publish_empty=lambda message: None,
+        ), max_candidates=10, logger=node.get_logger(),
+    ).filter_frame(msg)
 
     assert published == [(msg, [])]
     assert ik_calls == []

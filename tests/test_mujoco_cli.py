@@ -11,8 +11,9 @@ from types import MappingProxyType
 
 import pytest
 
-from rebotarm_simulation import mujoco_cli, mujoco_health
-from rebotarm_simulation.mujoco_types import SimulationState
+from rebotarm_simulation.apps import mujoco_cli
+from rebotarm_simulation.diagnostics import mujoco_health
+from rebotarm_simulation.core.mujoco_types import SimulationState
 
 
 class FakeSim:

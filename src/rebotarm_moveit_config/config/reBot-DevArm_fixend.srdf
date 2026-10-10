@@ -8,7 +8,7 @@
 <robot name="reBot-DevArm_fixend">
   <!-- 虚拟关节：把固定基座机械臂挂到世界坐标系上，parent_frame=world、child_link=base_link。
        type="fixed" 表示两者之间没有自由度，它同时定义了规划场景里的“世界”连接点。
-       demo.launch.py 里另有 static_transform_publisher 发布同一对坐标系的 TF，
+       moveit_demo.launch.py 里另有 static_transform_publisher 发布同一对坐标系的 TF，
        因此 RViz 的 Fixed Frame 可以选择 world。 -->
   <virtual_joint name="world_joint" type="fixed" parent_frame="world" child_link="base_link" />
 
@@ -38,7 +38,7 @@
   <end_effector name="gripper" parent_link="end_link" group="gripper" parent_group="arm" />
 
   <!-- 命名姿态与仿真关键帧的约定：下面的 group_state 名称与数值和 MuJoCo 模型配置
-       （mujoco_model_profile.py）中的 keyframe 一一对应，使同一个姿态名在仿真与真机上
+       （rebotarm_simulation/models/rebotarm/scene.xml）中的 keyframe 一一对应，使同一个姿态名在仿真与真机上
        含义相同。
 
        这里故意没有提供全零命名姿态：joint3 的原点在 x 方向为 -0.264 m，joint4 的原点为

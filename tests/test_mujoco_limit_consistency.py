@@ -12,20 +12,20 @@ if str(SIM_SRC) not in sys.path:
 
 
 def test_mujoco_motor_ctrlranges_match_urdf_position_limits():
-    from rebotarm_simulation.mujoco_limit_checks import motor_profile_position_limit_mismatches
-    from rebotarm_simulation.mujoco_model_profile import MOTOR_PROFILES
+    from rebotarm_simulation.diagnostics.mujoco_limit_checks import motor_profile_position_limit_mismatches
+    from rebotarm_simulation.diagnostics.mujoco_limit_checks import load_canonical_motor_profiles
 
     mismatches = motor_profile_position_limit_mismatches(
         ROOT / "src/rebotarm_moveit_config/config/rebotarm.urdf",
-        MOTOR_PROFILES,
+        load_canonical_motor_profiles(),
     )
 
     assert mismatches == []
 
 
 def test_limit_check_reports_drifted_motor_ctrlrange():
-    from rebotarm_simulation.mujoco_limit_checks import motor_profile_position_limit_mismatches
-    from rebotarm_simulation.mujoco_model_profile import MotorProfile
+    from rebotarm_simulation.diagnostics.mujoco_limit_checks import motor_profile_position_limit_mismatches
+    from rebotarm_simulation.diagnostics.mujoco_limit_checks import MotorProfile
 
     profiles = [
         MotorProfile("joint1", "-2.7 2.8", "-27 27", "270", "24"),
@@ -43,7 +43,7 @@ def test_limit_check_reports_drifted_motor_ctrlrange():
 
 
 def test_urdf_effort_velocity_limits_are_exposed_for_cross_layer_checks():
-    from rebotarm_simulation.mujoco_limit_checks import load_urdf_joint_limits
+    from rebotarm_simulation.diagnostics.mujoco_limit_checks import load_urdf_joint_limits
 
     limits = load_urdf_joint_limits(ROOT / "src/rebotarm_moveit_config/config/rebotarm.urdf")
 
@@ -55,7 +55,7 @@ def test_urdf_effort_velocity_limits_are_exposed_for_cross_layer_checks():
 
 def test_moveit_runtime_limits_are_conservative_and_complete_for_arm_joints():
     from rebotarm_motion.trajectory_runtime_limits import load_joint_runtime_limits
-    from rebotarm_simulation.mujoco_limit_checks import load_urdf_joint_limits
+    from rebotarm_simulation.diagnostics.mujoco_limit_checks import load_urdf_joint_limits
 
     joint_names = [f"joint{index}" for index in range(1, 7)]
     urdf_limits = load_urdf_joint_limits(
@@ -76,15 +76,15 @@ def test_moveit_runtime_limits_are_conservative_and_complete_for_arm_joints():
 
 def test_mujoco_arm_force_limits_match_urdf_effort_limits(tmp_path: Path):
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_adapter_core import MuJoCoArmAdapter
-    from rebotarm_simulation.mujoco_limit_checks import load_urdf_joint_limits
-    from rebotarm_simulation.mujoco_model_profile import write_physics_profile
+    import mujoco
+    from rebotarm_simulation.diagnostics.mujoco_limit_checks import load_urdf_joint_limits
+    from rebotarm_simulation.core.resource_paths import package_resource
 
-    adapter = MuJoCoArmAdapter(write_physics_profile(tmp_path / "robot.xml"))
+    model = mujoco.MjModel.from_xml_path(str(package_resource("rebotarm_simulation", "models/rebotarm/robot.xml")))
     urdf_limits = load_urdf_joint_limits(
         ROOT / "src/rebotarm_moveit_config/config/rebotarm.urdf"
     )
 
-    assert adapter.arm_actuator_force_limits() == pytest.approx(
+    assert [max(abs(x) for x in model.actuator(f"joint{i}_torque").forcerange) for i in range(1, 7)] == pytest.approx(
         [urdf_limits[f"joint{index}"].effort for index in range(1, 7)]
     )

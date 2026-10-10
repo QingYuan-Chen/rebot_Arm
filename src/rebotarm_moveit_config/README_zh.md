@@ -9,7 +9,7 @@
 - `joint_limits.yaml` 关节速度/加速度限制
 - `ompl_planning.yaml` 规划器参数
 - `moveit_controllers.yaml` 控制器映射
-- `demo.launch.py` 和 `moveit.rviz` 调试入口
+- `moveit.rviz` 调试布局；启动入口 `moveit_demo.launch.py` 位于 `rebotarm_bringup`
 
 ## 当前状态
 
@@ -34,7 +34,7 @@
 
 ## 推荐推进顺序
 
-1. 先把 `demo.launch.py` 升级为真正的 MoveIt `move_group` 启动文件
+1. 使用 `rebotarm_bringup/moveit_demo.launch.py` 启动 MoveIt `move_group`
 2. 在 Ubuntu / ROS2 Jazzy 中验证：
    - 模型能加载
    - `arm` group 能识别
@@ -85,7 +85,7 @@ ros2 pkg list | grep rebotarm_moveit_config
 ### 第 2 步：启动 MoveIt 基础演示
 
 ```bash
-ros2 launch rebotarm_moveit_config demo.launch.py use_rviz:=true
+ros2 launch rebotarm_bringup moveit_demo.launch.py use_rviz:=true
 ```
 
 验证方式：

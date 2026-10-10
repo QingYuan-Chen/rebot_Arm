@@ -3,14 +3,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1]
-DEMO = ROOT / "src" / "rebotarm_moveit_config" / "launch" / "demo.launch.py"
-MOVEIT_SIM = ROOT / "src" / "rebotarm_simulation" / "launch" / "mujoco_moveit_sim.launch.py"
+DEMO = ROOT / "src" / "rebotarm_bringup" / "launch" / "moveit_demo.launch.py"
+MOVEIT_SIM = ROOT / "src" / "rebotarm_bringup" / "launch" / "mujoco_moveit_sim.launch.py"
 README = ROOT / "src" / "rebotarm_simulation" / "README_mujoco.md"
 MUJOCO_NODE = (
     ROOT
     / "src"
     / "rebotarm_simulation"
     / "rebotarm_simulation"
+    / "ros"
     / "mujoco_ros_node.py"
 )
 MUJOCO_LAUNCH = (
@@ -101,7 +102,7 @@ def test_mujoco_moveit_launch_selects_one_simulated_state_source():
 
 def test_documented_moveit_command_uses_sim_time_and_safe_targeted_shutdown():
     text = _text(README)
-    command = "ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py use_sim_time:=true"
+    command = "ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_sim_time:=true"
     assert command in text
     assert "pgrep -af rebotarm_mujoco_node" in text
     assert "ps -fp <confirmed-pid>" in text

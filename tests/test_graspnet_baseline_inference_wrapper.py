@@ -9,7 +9,7 @@ import pytest
 
 def _load_wrapper():
     repo_root = Path(__file__).resolve().parents[1]
-    module_path = repo_root / "scripts" / "graspnet_baseline_inference.py"
+    module_path = repo_root / "src/rebotarm_vision/rebotarm_vision/backends/graspnet_baseline_inference.py"
     spec = importlib.util.spec_from_file_location("graspnet_baseline_inference", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None

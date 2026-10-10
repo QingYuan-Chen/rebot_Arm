@@ -15,14 +15,11 @@
 - :func:`predictions_to_candidate_array` / :func:`payload_to_candidate_array`：把推理结果
   （对象、字典或嵌套 payload）统一转成候选数组消息，按输入顺序即得分降序排列，最优候选
   ``best_index`` 置 0（列表为空时保持 -1）。
-- :class:`GraspNetBackendProtocol` / :class:`GraspNetBaselineBackend` /
-  :class:`InProcessGraspNetBackend`：两种推理后端形态，见下。
+- :class:`GraspNetBackendProtocol` / :class:`InProcessGraspNetBackend`：正式节点使用的推理接口。
 
-两条后端路线
-------------
-1. ``GraspNetBaselineBackend``：面向已安装的 GraspNet 基线研究代码，只要求一个极小的本地包装
-   模块提供稳定 API：``GraspNetBaselineInference(model_root, checkpoint_path, device).infer(...)``。
-2. ``InProcessGraspNetBackend``：当前 Ubuntu 生产路线，在本 ROS 候选节点进程内直接加载完整的
+正式后端
+--------
+``InProcessGraspNetBackend`` 是当前 Ubuntu 生产路线，在本 ROS 候选节点进程内直接加载完整的
    RGB-D 推理引擎，并保留原有的全场景碰撞点云、目标掩膜/深度分离、确定性采样、投影过滤与
    夹爪开口过滤，同时去掉了历史上的 localhost JSON/HTTP 传输层。
 
@@ -286,59 +283,6 @@ def payload_to_candidate_array(
     return candidates
 
 
-class GraspNetBaselineBackend:
-    """已安装的 GraspNet 基线推理模块的轻量可选包装。
-
-    上游 GraspNet 基线仓库是研究代码，接口不稳定，因此本适配层刻意只依赖一个极小的本地
-    包装模块，要求其提供稳定 API：
-    ``GraspNetBaselineInference(model_root, checkpoint_path, device).infer(...)``。
-    ``model_root`` 为空时不做任何导入，后端保持不可用（``available`` 为 False）。
-    """
-
-    def __init__(
-        self,
-        *,
-        model_root: str,
-        checkpoint_path: str = "",
-        device: str = "cuda:0",
-        module_name: str = "graspnet_baseline_inference",
-    ) -> None:
-        self.model_root = str(model_root).strip()
-        self.checkpoint_path = str(checkpoint_path).strip()
-        self.device = str(device).strip()
-        self.module_name = str(module_name).strip()
-        self._runner = None
-        if not self.model_root:
-            return
-        root = Path(self.model_root)
-        # 让包装模块能 import 到模型仓库内的同级包；插到 sys.path 最前以免被同名模块遮蔽。
-        if str(root) not in sys.path:
-            sys.path.insert(0, str(root))
-        module = importlib.import_module(self.module_name)
-        runner_cls = getattr(module, "GraspNetBaselineInference")
-        self._runner = runner_cls(
-            model_root=self.model_root,
-            checkpoint_path=self.checkpoint_path,
-            device=self.device,
-        )
-
-    @property
-    def available(self) -> bool:
-        return self._runner is not None
-
-    def infer(self, *, points: np.ndarray, colors: np.ndarray, max_grasps: int) -> list[GraspNetPrediction]:
-        """把裁剪点云交给包装模块推理，并把返回的原始结果规范化成预测对象。
-
-        points/colors：形状 (N, 3) 的点云与 RGB 颜色，单位 m / 归一化到 [0, 1]。
-        max_grasps：请求的最大抓取数，由后端自行解释。
-        后端不可用时抛 RuntimeError（失败关闭，不返回空列表）。
-        """
-        if self._runner is None:
-            raise RuntimeError("GraspNet baseline backend is not configured")
-        raw_predictions = self._runner.infer(points=points, colors=colors, max_grasps=max_grasps)
-        return [_prediction_from_raw(item) for item in raw_predictions]
-
-
 class InProcessGraspNetBackend:
     """在本 ROS 候选节点进程内直接加载完整的 RGB-D GraspNet 推理引擎。
 
@@ -355,7 +299,7 @@ class InProcessGraspNetBackend:
         model_root: str,
         checkpoint_path: str,
         device: str = "cuda:0",
-        module_name: str = "graspnet_baseline_inference",
+        module_name: str = "rebotarm_vision.backends.graspnet_baseline_inference",
         module_path: str = "",
         num_point: int = 20_000,
     ) -> None:
@@ -418,6 +362,8 @@ class InProcessGraspNetBackend:
         detection: dict[str, Any],
         max_grasps: int,
         max_jaw_width_m: float | None,
+        min_depth_m: float = 0.05,
+        max_depth_m: float = 1.5,
     ) -> dict[str, Any]:
         """在进程内跑一次完整 RGB-D 推理，返回与 payload 字典同构的结果。
 
@@ -453,6 +399,8 @@ class InProcessGraspNetBackend:
         # 引擎对深度缩放的默认值是 0.001（适配整型毫米图）；这里传的是浮点米制数组，
         # 因此显式置 1.0，表示"数值已是米，无需再缩放"。
         intrinsics["depth_scale_m"] = 1.0
+        intrinsics["workspace_min_depth_m"] = float(min_depth_m)
+        intrinsics["workspace_max_depth_m"] = float(max_depth_m)
         candidates = self._runner.infer(
             color_bgr=color,
             # 本地推理引擎沿用历史参数名 depth_mm，但 depth_scale_m=1.0 使这个 float32 数组
@@ -476,43 +424,10 @@ class InProcessGraspNetBackend:
 
 
 def _load_inprocess_backend_module(module_name: str, *, module_path: str = ""):
-    """定位并加载进程内推理引擎模块，按三条优先级依次尝试。
-
-    1. 显式配置的 module_path：直接按文件路径加载；
-    2. 常规 import：模块已装进当前 Python 环境时最为直接；
-    3. 兜底在共享资源目录的 graspnet_backend/ 与源码树各级 scripts/ 下按文件名查找，
-       以兼容未安装、直接从源码树运行的场景。
-    只有确认是"该模块本身找不到"（ModuleNotFoundError.name 相同）才继续兜底；若只是该模块
-    内部缺依赖，则原样抛出，避免把真实环境问题掩盖成路径问题。
-    """
-    configured_path = Path(module_path).expanduser() if module_path else None
-    if configured_path is not None:
-        return _load_python_module_from_path(module_name, configured_path)
-    try:
-        return importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:
-        # exc.name 与请求的模块名不同 => 缺的是引擎内部依赖，交由调用方报错。
-        if exc.name != module_name:
-            raise
-        candidates: list[Path] = []
-        try:
-            from ament_index_python.packages import get_package_share_directory
-
-            candidates.append(
-                Path(get_package_share_directory("rebotarm_vision"))
-                / "graspnet_backend"
-                / f"{module_name}.py"
-            )
-        except Exception:
-            # 资源索引不可用（例如未 source 环境）时跳过该候选，继续走源码树兜底。
-            pass
-        source = Path(__file__).resolve()
-        for parent in source.parents:
-            candidates.append(parent / "scripts" / f"{module_name}.py")
-        for candidate in candidates:
-            if candidate.is_file():
-                return _load_python_module_from_path(module_name, candidate)
-        raise
+    """加载显式文件路径或可导入的后端模块，不再搜索 tools 或 share 下的源码。"""
+    if module_path:
+        return _load_python_module_from_path(module_name, Path(module_path).expanduser())
+    return importlib.import_module(module_name)
 
 
 def _load_python_module_from_path(module_name: str, path: Path):

@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from rebotarm_simulation.mujoco_telemetry import MujocoTelemetryHistory
-from rebotarm_simulation.mujoco_types import ControlStatus
-from rebotarm_simulation.mujoco_visualization import GhostArmOverlay, TelemetryFigures
+from rebotarm_simulation.diagnostics.mujoco_telemetry import MujocoTelemetryHistory
+from rebotarm_simulation.core.mujoco_types import ControlStatus
+from rebotarm_simulation.apps.mujoco_visualization import GhostArmOverlay, TelemetryFigures
 
 
 ROOT = Path(__file__).resolve().parents[1]

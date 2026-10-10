@@ -1,5 +1,7 @@
 # 网页、键盘与示教命令
 
+> reBotArm 遥操作使用文档
+
 > 状态：REFERENCE；类型：操作命令；适用范围：Dashboard、键盘遥操作、示教录制和回放；真机动作需要本次操作授权。
 
 ## 适用范围
@@ -18,6 +20,8 @@ source install/setup.bash
 
 ## 网页工作台
 
+网页遥操作通过统一的 `rebotarm_app.launch.py` 入口提供。
+
 仿真或只读模式：
 
 ```bash
@@ -35,6 +39,8 @@ ros2 launch rebotarm_bringup rebotarm_app.launch.py \
   web_execute_enabled:=true \
   channel:=/dev/ttyACM0
 ```
+
+未指定设备时也可以使用自动串口选择：`channel:=auto`。该模式只会在候选串口唯一且可用时继续。
 
 打开 `http://127.0.0.1:8088/`。网页功能含 Preview、Execute、Stop、Safe Home、夹爪、示教录制和回放。
 
@@ -63,6 +69,8 @@ ros2 launch rebotarm_bringup teleop_system.launch.py \
 
 ## 示教录制
 
+这是重力补偿手拖示教录制流程。
+
 1. 启动网页工作台；
 2. 打开 `Teach Trajectory`；
 3. 输入文件名；
@@ -85,6 +93,8 @@ ros2 launch rebotarm_bringup teleop_system.launch.py \
 回放使用准备后的轨迹，并执行起点对齐、速度/加速度/jerk 检查、碰撞预检和运行时跟踪门。
 
 ## 停止与安全
+
+需要回安全位时使用 `safe_home`，确认静止后再失能。
 
 真机结束顺序：
 

@@ -10,13 +10,13 @@ START = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)
 
 
 def point(time_from_start: float, *positions: float):
-    from rebotarm_simulation.trajectory_sampler import NamedTrajectoryPoint
+    from rebotarm_simulation.execution.trajectory_sampler import NamedTrajectoryPoint
 
     return NamedTrajectoryPoint(time_from_start, positions)
 
 
 def sampler(names=ARM_JOINTS, points=None, initial_positions=START):
-    from rebotarm_simulation.trajectory_sampler import TrajectorySampler
+    from rebotarm_simulation.execution.trajectory_sampler import TrajectorySampler
 
     return TrajectorySampler(
         names,
@@ -35,14 +35,14 @@ def sampler(names=ARM_JOINTS, points=None, initial_positions=START):
     ],
 )
 def test_rejects_invalid_joint_name_sets(names, points, message: str) -> None:
-    from rebotarm_simulation.trajectory_sampler import TrajectorySampler
+    from rebotarm_simulation.execution.trajectory_sampler import TrajectorySampler
 
     with pytest.raises(ValueError, match=message):
         TrajectorySampler(names, points, initial_positions=START)
 
 
 def test_rejects_missing_canonical_joints_without_initial_positions() -> None:
-    from rebotarm_simulation.trajectory_sampler import TrajectorySampler
+    from rebotarm_simulation.execution.trajectory_sampler import TrajectorySampler
 
     with pytest.raises(ValueError, match="initial positions"):
         TrajectorySampler(("joint2",), [point(1.0, 0.8)])

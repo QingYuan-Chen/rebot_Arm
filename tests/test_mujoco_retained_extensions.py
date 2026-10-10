@@ -6,9 +6,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_bottle_randomization_is_repeatable_and_stays_in_scene():
+def test_bottle_randomization_is_repeatable_and_stays_in_scene(bottle_scene):
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     with RebotArmMujoco(ROOT / "src/rebotarm_simulation/models/rebotarm/scene_bottle.xml") as sim:
         first = sim.randomize_bottle_pose(seed=17)
@@ -22,7 +22,7 @@ def test_bottle_randomization_is_repeatable_and_stays_in_scene():
 
 def test_invalid_joint_reset_does_not_partially_change_state():
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     with RebotArmMujoco() as sim:
         before = sim.save_state()
@@ -31,11 +31,11 @@ def test_invalid_joint_reset_does_not_partially_change_state():
         assert sim.save_state() == before
 
 
-def test_contact_details_are_bounded_and_finite():
+def test_contact_details_are_bounded_and_finite(bottle_scene):
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
-    with RebotArmMujoco() as sim:
+    with RebotArmMujoco(bottle_scene) as sim:
         sim.reset_home()
         sim.step(300)
         contacts = sim.get_contacts()

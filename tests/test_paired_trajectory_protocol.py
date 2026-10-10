@@ -44,7 +44,7 @@ def test_quintic_command_is_deterministic_and_hash_checked() -> None:
 
 def test_analysis_reports_per_joint_and_paired_metrics() -> None:
     from rebotarm_motion.paired_trajectory_protocol import build_quintic_command, sample_command
-    from rebotarm_simulation.paired_trajectory_analysis import analyze_run, compare_runs
+    from rebotarm_simulation.diagnostics.paired_trajectory_analysis import analyze_run, compare_runs
 
     command = build_quintic_command(
         [0.0] * 6,
@@ -82,7 +82,7 @@ def test_analysis_reports_per_joint_and_paired_metrics() -> None:
 
 def test_mujoco_can_reset_to_exact_paired_start_state() -> None:
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     start = [-1.6, -0.01, -0.04, 0.07, 0.03, 0.03]
     with RebotArmMujoco() as simulation:

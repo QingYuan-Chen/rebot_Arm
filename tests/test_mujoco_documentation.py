@@ -34,9 +34,9 @@ def test_mujoco_readme_documents_reproducible_install_and_runtime_commands():
         "rebotarm_mujoco_viewer --duration",
         "joints 0.0 -0.8 -1.0 0.3 0.0 0.0",
         "--no-command-input",
-        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_health",
-        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_cli",
-        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_viewer",
+        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.diagnostics.mujoco_health",
+        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_cli",
+        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_viewer",
     )
     for value in required:
         assert value in text
@@ -63,7 +63,7 @@ def test_mujoco_readme_documents_ros_interfaces_examples_and_moveit_safety():
         "rebotarm_mujoco_moveit_acceptance --timeout 30",
         "use_hardware:=false",
         "MoveIt",
-        "ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py use_sim_time:=true",
+        "ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_sim_time:=true",
         "use_rviz:=false",
         "fake joint state publisher",
     )
@@ -126,7 +126,8 @@ def test_feature_commands_links_to_mujoco_readme_and_safe_entry_points():
     assert "../../../src/rebotarm_simulation/README_mujoco.md" in text
     assert "ros2 launch rebotarm_simulation mujoco_sim.launch.py" in text
     assert "rebotarm_mujoco_cli run --duration" in text
-    assert "mujoco_rviz_viewer.launch.py" in text
+    assert "ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py" in text
+    assert "mujoco_rviz_viewer.launch.py" not in text
 
 
 def test_mujoco_readme_documents_local_urdf_to_mjcf_workflow() -> None:
@@ -151,12 +152,12 @@ def test_sim2real_documentation_has_complete_no_hardware_workflow() -> None:
     assert "../../docs/sim2real_workflow_zh.md" in readme
     for value in (
         "不连接机械臂实机",
-        "rebotarm_simulation.sim2real_cli rollout",
+        "rebotarm_simulation.apps.sim2real_cli rollout",
         "--randomization-profile training_profile",
         "--record logs/sim2real/seed-7-reference.jsonl",
-        "rebotarm_simulation.sim2real_cli replay",
-        "rebotarm_simulation.sim2real_cli compare",
-        "rebotarm_simulation.sim2real_cli batch-check",
+        "rebotarm_simulation.apps.sim2real_cli replay",
+        "rebotarm_simulation.apps.sim2real_cli compare",
+        "rebotarm_simulation.apps.sim2real_cli batch-check",
         "seed_reproducible",
         "joint_limit",
         "actuator_torque",
@@ -173,7 +174,7 @@ def test_pick_documentation_defines_task_contract_and_acceptance() -> None:
     for value in (
         "不进行强化学习训练，也不连接实机",
         "RebotArmPickEnv",
-        "rebotarm_simulation.mujoco_pick_batch",
+        "rebotarm_simulation.diagnostics.mujoco_pick_batch",
         "force_closure_candidate",
         "dropped_after_grasp",
         "success_rate=0",

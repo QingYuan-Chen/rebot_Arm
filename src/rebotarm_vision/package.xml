@@ -30,11 +30,9 @@
   <exec_depend>launch_ros</exec_depend>
   <!-- Python 客户端库：节点、话题、服务、动作、参数与执行器。 -->
   <exec_depend>rclpy</exec_depend>
-  <!-- 手眼标定包：提供相机与机械臂之间的外参/标定结果（由标定流程产出，另见下方备注）。 -->
-  <exec_depend>rebotarm_calibration</exec_depend>
   <!-- 本仓库自定义消息与服务：检测结果、抓取候选/规划、夹爪与位姿执行接口。 -->
   <exec_depend>rebotarm_msgs</exec_depend>
-  <!-- 运动包：抓取前后运动服务/规划能力的提供方（另见下方备注）。 -->
+  <!-- 正式单瓶抓取复用运动包的受控轨迹与失败恢复接口。 -->
   <exec_depend>rebotarm_motion</exec_depend>
   <!-- 传感器消息：彩色/深度图像与相机内参消息类型。 -->
   <exec_depend>sensor_msgs</exec_depend>

@@ -36,8 +36,9 @@ python3 scripts/install_python_dependencies.py mujoco --user --break-system-pack
 `--no-deps` 语义保留。各功能环境版本不同，不合并安装到同一环境。
 已有 MotorBridge 补丁版本时不要再次执行 runtime bootstrap；依赖安装不构成实机验收。
 
-MJX 专属依赖已删除；独立 MJLab 环境使用 [DRL 工作区](../../../DRL/README.md) 的
-`uv.lock` / `requirements.lock`，全部安装在 `DRL/.venv`，不由本目录安装脚本管理。
+MJX 专属依赖已删除；独立 MJLab 环境使用 [MJLab 工作区](../../../../rebot_Arm_rl/MJLab/README.md) 的
+`uv.lock` / `requirements.lock`，全部安装在 `/home/a/project/rebot_Arm_rl/MJLab/.venv`，不由本目录安装脚本管理。
+后续 IsaacLab 将使用独立目录与环境，不与 MJLab 共用依赖。
 `src/rebotarm_simulation/requirements-mujoco.txt` 是仿真包独立发布的最低兼容声明，
 本机复现使用本目录固定版本。
 

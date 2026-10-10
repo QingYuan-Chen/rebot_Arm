@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-import rebotarm_simulation.urdf_to_mjcf as urdf_to_mjcf
-from rebotarm_simulation.urdf_to_mjcf import (
+import rebotarm_simulation.model_tools.urdf_to_mjcf as urdf_to_mjcf
+from rebotarm_simulation.model_tools.urdf_to_mjcf import (
     authoritative_urdf_path,
     check_generated_model,
     collision_config_path,

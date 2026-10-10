@@ -18,7 +18,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE_PATH = ROOT / "src/rebotarm_simulation/config/mujoco_collision_baseline.json"
+BASELINE_PATH = ROOT / "tests/fixtures/mujoco_collision_baseline.json"
 SCENE_PATH = ROOT / "src/rebotarm_simulation/models/rebotarm/scene.xml"
 ROBOT_PATH = SCENE_PATH.with_name("robot.xml")
 

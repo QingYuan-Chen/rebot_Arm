@@ -46,4 +46,10 @@ MoveIt / RViz
   -> simulated joint states / metrics
 ```
 
-仿真后端不得启动 `rebotarmcontroller`，也不得打开真实串口。视觉 `plan_only` 可使用假关节状态，但不能作为真实手眼或实物定位证据。
+视觉总入口、无硬件键盘和 RViz 拖动使用 `rebotarm_preview` 提供轻量轨迹插值及关节状态；
+该后端不加载 MuJoCo，不验证动力学或接触。MuJoCo 的独立入口继续提供物理仿真。
+两种后端都不得启动 `rebotarmcontroller` 或打开真实串口，且同一命名空间只能有一个
+`FollowJointTrajectory` 服务端。预演姿态不能作为真实手眼或实物定位证据。
+
+通用视觉执行器启动后等待显式 execute。stop 会排空旧请求并等待运动层停止确认，
+确认失败时继续阻断执行；停止静止判定不等于已回安全基线或允许失能。

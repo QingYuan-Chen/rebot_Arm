@@ -18,7 +18,7 @@ ALL_JOINTS = ARM_JOINTS + ("left_finger_joint", "right_finger_joint")
 
 
 def test_state_records_are_immutable() -> None:
-    from rebotarm_simulation.mujoco_types import ContactInfo, RandomizedScene, SimulationState
+    from rebotarm_simulation.core.mujoco_types import ContactInfo, RandomizedScene, SimulationState
 
     state = SimulationState(
         joint_names=ALL_JOINTS,
@@ -82,7 +82,7 @@ def test_mirror_joint_state_rejects_out_of_range_position(runtime_sim) -> None:
     ],
 )
 def test_state_record_rejects_invalid_numeric_shapes(overrides, message: str) -> None:
-    from rebotarm_simulation.mujoco_types import SimulationState
+    from rebotarm_simulation.core.mujoco_types import SimulationState
 
     values = dict(
         joint_names=ALL_JOINTS,
@@ -101,7 +101,7 @@ def test_state_record_rejects_invalid_numeric_shapes(overrides, message: str) ->
 
 
 def test_contact_record_validates_names_shape_finiteness_and_force() -> None:
-    from rebotarm_simulation.mujoco_types import ContactInfo
+    from rebotarm_simulation.core.mujoco_types import ContactInfo
 
     with pytest.raises(ValueError, match="names"):
         ContactInfo("", "b", "ga", "gb", (0.0, 0.0, 0.0), 0.0)
@@ -132,7 +132,7 @@ def test_contact_record_validates_names_shape_finiteness_and_force() -> None:
     ],
 )
 def test_randomized_scene_record_validates_shapes_and_finiteness(overrides, message: str) -> None:
-    from rebotarm_simulation.mujoco_types import RandomizedScene
+    from rebotarm_simulation.core.mujoco_types import RandomizedScene
 
     values = dict(
         cube_pose=(0.28, 0.0, 0.04, 0.0, 0.0, 0.0, 1.0),
@@ -145,7 +145,7 @@ def test_randomized_scene_record_validates_shapes_and_finiteness(overrides, mess
 
 
 def test_missing_mujoco_dependency_has_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    from rebotarm_simulation import mujoco_sim
+    from rebotarm_simulation.core import mujoco_sim
 
     original = importlib.import_module
 
@@ -162,7 +162,7 @@ def test_missing_mujoco_dependency_has_actionable_error(monkeypatch: pytest.Monk
 @pytest.fixture()
 def runtime_sim():
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     with RebotArmMujoco(SCENE) as sim:
         yield sim
@@ -170,7 +170,7 @@ def runtime_sim():
 
 def test_default_model_path_is_portable_and_model_uses_canonical_order() -> None:
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     with RebotArmMujoco() as sim:
         assert sim.joint_names == ALL_JOINTS
@@ -241,9 +241,9 @@ def test_reentering_hold_is_an_exact_noop(runtime_sim) -> None:
     runtime_sim.step(200)
     targets_before = tuple(runtime_sim.control_targets)
     status_before = runtime_sim.get_control_status()
-    controller_state_before = runtime_sim._arm_controller.applied_torque.copy()
+    controller_state_before = runtime_sim.save_state().applied_torque
     actuator_control_before = runtime_sim._data.ctrl.copy()
-    control_phase_before = runtime_sim._control_phase
+    control_phase_before = runtime_sim.save_state().control_phase
 
     assert runtime_sim.set_mode("hold") == "hold"
 
@@ -252,11 +252,11 @@ def test_reentering_hold_is_an_exact_noop(runtime_sim) -> None:
     assert status_after.joint_targets == status_before.joint_targets
     assert status_after.requested_torques == status_before.requested_torques
     assert status_after.applied_torques == status_before.applied_torques
-    assert runtime_sim._arm_controller.applied_torque == pytest.approx(
+    assert runtime_sim.save_state().applied_torque == pytest.approx(
         controller_state_before
     )
     assert runtime_sim._data.ctrl == pytest.approx(actuator_control_before)
-    assert runtime_sim._control_phase == control_phase_before
+    assert runtime_sim.save_state().control_phase == control_phase_before
 
 
 def test_entering_hold_from_gravity_comp_captures_pose(runtime_sim) -> None:
@@ -347,7 +347,7 @@ def test_small_joint_step_settles_under_motor_control(runtime_sim) -> None:
 
 def test_end_effector_orientation_comes_from_site_frame_in_xyzw_order(tmp_path: Path) -> None:
     mujoco = pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     model_dir = tmp_path / "rebotarm"
     shutil.copytree(SCENE.parent, model_dir)
@@ -478,7 +478,7 @@ def test_save_restore_recovers_full_runtime_state(runtime_sim) -> None:
 
 
 def test_saved_state_rejects_a_different_model_instance(runtime_sim) -> None:
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     saved = runtime_sim.save_state()
     with RebotArmMujoco(SCENE) as other:

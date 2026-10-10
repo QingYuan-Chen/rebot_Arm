@@ -8,10 +8,10 @@ from types import MappingProxyType, SimpleNamespace
 import numpy as np
 import pytest
 
-from rebotarm_simulation import mujoco_pick_batch
-from rebotarm_simulation.mujoco_pick_env import PickEnvConfig, RebotArmPickEnv
-from rebotarm_simulation.mujoco_types import ContactInfo, RandomizedScene
-from rebotarm_simulation.pick_task import (
+from rebotarm_simulation.diagnostics import mujoco_pick_batch
+from rebotarm_simulation.core.mujoco_pick_env import PickEnvConfig, RebotArmPickEnv
+from rebotarm_simulation.core.mujoco_types import ContactInfo, RandomizedScene
+from rebotarm_simulation.core.pick_task import (
     PickTaskConfig,
     pick_failure_reason,
     summarize_cube_contacts,

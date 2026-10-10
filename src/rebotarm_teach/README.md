@@ -1,6 +1,6 @@
 # rebotarm_teach
 
-示教 JSONL 可通过 `rebotarm_mujoco_teach_preview` 在独立 MuJoCo 实例中预演；
+示教 JSONL 可通过 `rebotarm_simulation` 的 `rebotarm_mujoco_teach_preview` 在独立 MuJoCo 实例中预演；
 操作说明见 [MuJoCo 离线预演](../../docs/reference/commands/mujoco_teach_preview.md)。
 
 示教录制、轨迹预处理和安全回放工作流包。它拥有示教文件与回放生命周期，但把重定时、起点对齐、碰撞预检和运行时跟踪能力交给 `rebotarm_motion`；不实现 Dashboard 页面，也不直接访问电机 SDK。
@@ -11,10 +11,17 @@
 rebotarm_teach/
 ├── rebotarm_teach/
 │   ├── teach_recorder_node.py          # 唯一示教录制 ROS 节点
-│   ├── teach_recording.py              # JSONL 数据模型、质量检查和预处理
+│   ├── teach_models.py                 # 不可变数据模型与回放决策类型
+│   ├── teach_record_io.py              # JSONL 编解码和文件读写
+│   ├── teach_quality.py                # 质量评估与文件巡检
+│   ├── teach_preparation.py            # 滤波、重采样与 prepared 轨迹
+│   ├── teach_replay_gates.py           # dry-run / Execute 纯门控
+│   ├── teach_recording.py              # 原有 Python 导入路径兼容导出
 │   ├── recording_feedback.py           # 同批次/新鲜反馈 -> TeachSample
 │   ├── teach_record_client.py          # 设置路径、开始、停止录制的客户端
 │   ├── teach_replay_workflow.py        # 回放完整生命周期与安全门
+│   ├── replay_moveit_precheck.py       # MoveIt 预检适配
+│   ├── replay_action_lifecycle.py      # Action 回调与活动目标状态
 │   ├── teach_replay_coordinator.py     # 回放状态和协调
 │   ├── teach_replay_trajectory_builder.py # 起点/对齐/录制/保持段拼接
 │   ├── teach_replay_settings.py        # speed、对齐、末尾保持参数
@@ -28,8 +35,9 @@ rebotarm_teach/
 ## 核心职责
 
 - `teach_recorder_node.py` 订阅已校验的关节/电机反馈，以 JSONL 写入示教样本；重复或跨批次反馈不会伪造新样本。
-- `teach_recording.py` 负责读写、列举、异常检查、平滑、滤波、重采样、重定时、质量分级和 prepared trajectory。
-- `teach_replay_workflow.py` 是唯一回放实现：文件/质量检查 → 起始对齐评估 → 碰撞预检 → `FollowJointTrajectory` → 运行时跟踪与最终保持。
+- `teach_models.py` 只定义示教样本、质量结果、prepared trajectory 和回放门控数据类型。
+- `teach_recording.py` 只兼容导出原有 Python API；实现分别位于数据模型、文件、质量、预处理和门控模块。
+- `teach_replay_workflow.py` 保持唯一回放编排入口；MoveIt 预检适配与 Action 回调实现已移至独立模块。
 - `teach_replay_trajectory_builder.py` 只构造时间轴，`teach_replay_settings.py` 只规范化设置；二者不决定硬件是否可执行。
 - `teach_record_client.py` 和 `teach_replay_client.py` 是给 Dashboard 等上层使用的 ROS 适配，不拥有 HTTP 或页面逻辑。
 

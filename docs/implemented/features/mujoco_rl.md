@@ -1,4 +1,4 @@
-# MuJoCo / Gymnasium Reach
+# MuJoCo CPU Reach 与独立 MJLab
 
 > 状态：IMPLEMENTED；范围：CPU 无接触位姿环境和可选 SB3/PPO 工具；GPU训练质量未在本地验收。
 
@@ -10,5 +10,5 @@
 环境关闭接触/碰撞，不提供夹爪策略、图像观测、避障或实机动作。
 本轮没有运行 GPU 训练，不能把上游历史结果当成本机验收。
 
-MJX 专属模块与依赖已移除；后续引入 MJLab，目前尚未接入。
+MJX 专属模块与依赖已移除；MJLab 已在同级独立工程 `/home/a/project/rebot_Arm_rl/MJLab` 接入。
 完整命令和任务契约见 [Reach 命令参考](../../reference/commands/mujoco_rl.md)。

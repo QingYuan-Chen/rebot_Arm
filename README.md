@@ -1,7 +1,7 @@
 # reBotArm ROS 2
 
 面向 reBot B601 的 ROS 2 Jazzy 工作空间，包含机械臂与夹爪控制、MoveIt 规划、
-网页遥操作、示教、RGB-D 视觉抓取和 MuJoCo 仿真。
+网页遥操作、示教、RGB-D 视觉抓取、轻量 RViz 预演和 MuJoCo 仿真。
 
 ## 从这里开始
 
@@ -11,14 +11,14 @@
 | 网页遥操作、RViz 与实机操作 | [功能命令参考](docs/reference/commands/rebotarm_feature_commands.md) |
 | 控制器接口 | [ROS SDK 说明](docs/reference/ros_sdk.md) |
 | 仿真 | [MuJoCo 使用说明](src/rebotarm_simulation/README_mujoco.md) |
-| Gymnasium / PPO 强化学习 | [训练与评估命令](docs/reference/commands/mujoco_rl.md) |
+| CPU Reach 与独立 MJLab | [CPU 命令](docs/reference/commands/mujoco_rl.md) / [MJLab 入口](docs/reference/commands/mjlab_rl.md) |
 | 包职责与依赖边界 | [架构说明](docs/implemented/architecture.md) |
 | 当前状态及验证边界 | [项目状态](docs/reference/project_status.md) |
 | 其他文档 | [文档索引](docs/README_zh.md) |
 
 ## 工程结构
 
-- `src/`：11 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属。
+- `src/`：12 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属。
 - `docs/setup/dependencies/`：分环境的 Markdown 依赖版本清单与安装说明。
 - `scripts/`：环境安装、验证和离线工具。
 - `tests/`：软件回归与架构检查。
@@ -26,9 +26,12 @@
 - `third_party/`：固定 SDK 清单和厂商 SDK；本机依赖不纳入版本管理。
 - `star_arm_102_rebot_b601_follow/`：独立 Star Arm 跟随工具，不由主项目自动启动。
 
+视觉与 GraspNet 分别使用 `.venv-vision/` 和 `.venv-graspnet/`，不提交到 Git。
+MuJoCo 默认使用系统 Python 3.12 的用户级依赖，固定 MuJoCo 3.3.0、NumPy 1.26.4。
+
 标准本机构建目录为 `build/`、`install/`、`log/`，不提交到 Git。
 模型下载、TensorRT engine、本地运行数据及额外实验原始证据也不自动纳入提交。
-当前仍随仓库提供 `scripts/yolo26s-seg.pt`。
+当前仍随仓库提供 `src/rebotarm_vision/models/yolo26s-seg.pt`。
 正式仿真资源及其来源见 [第三方说明](docs/reference/third_party_notices.md)。
 
 ## 环境与构建
@@ -49,14 +52,14 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests -q
 
 在未激活其他虚拟环境的新终端构建。源码构建不要求相机、GPU、TensorRT engine
 或 GraspNet 权重；视觉依赖安装脚本不再重建工作区。检测启动时才检查模型，
-可用现有 `.pt` 或显式指定本机 engine，见 [视觉安装与模型准备](docs/setup/ubuntu_vision_setup_zh.md)。
+可用现有 `.pt` 或显式指定本机推理引擎，见 [视觉安装与模型准备](docs/setup/ubuntu_vision_setup_zh.md)。
 运行时按节点设置 [解释器参数](docs/setup/launch_python_configuration.md)，不要全局注入视觉依赖。
 完整回归还需要已构建的 ROS 消息及固定厂商 SDK；纯源码构建通过不代表真机验收。
 
-视觉只支持 Ubuntu 原生 Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/detections -> 本机
-GraspNet。Windows、HTTP、MJPEG、远端 JSON 和独立 GraspNet service 已删除。
-MoveIt Execute 还需要 `ros-jazzy-moveit-simple-controller-manager`；Plan 成功不等于
-Execute 成功。真机启动默认失能，必须在新鲜反馈和现场安全检查后显式 Enable。
+视觉只支持 Ubuntu 原生 Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/检测结果 -> 本机
+GraspNet。Windows、HTTP、MJPEG、远端 JSON 和独立 GraspNet 服务已删除。
+MoveIt 执行还需要 `ros-jazzy-moveit-simple-controller-manager`；规划成功不等于
+执行成功。真机启动默认失能，必须在新鲜反馈和现场安全检查后显式使能。
 
 ## 真机边界
 
@@ -76,4 +79,6 @@ python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed
 
 ## 许可
 
-项目许可见 [LICENSE](LICENSE)，第三方资产分别遵守其来源与许可记录。
+项目许可证为 Apache License 2.0，正式英文条款见 [LICENSE](LICENSE)。该文件保留原文。
+第三方代码、模型和资源分别遵守其来源与许可记录，详见
+[第三方说明](docs/reference/third_party_notices.md)；本机依赖目录说明见 [third_party 目录说明](third_party/README.md)。

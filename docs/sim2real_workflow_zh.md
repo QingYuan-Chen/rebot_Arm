@@ -33,7 +33,7 @@ mkdir -p logs/sim2real
 ## 1. 随机化运行并记录
 
 ```bash
-python3 -m rebotarm_simulation.sim2real_cli rollout \
+python3 -m rebotarm_simulation.apps.sim2real_cli rollout \
   --randomization-profile training_profile \
   --seed 7 \
   --steps 100 \
@@ -47,7 +47,7 @@ python3 -m rebotarm_simulation.sim2real_cli rollout \
 ## 2. 确定性回放
 
 ```bash
-python3 -m rebotarm_simulation.sim2real_cli replay \
+python3 -m rebotarm_simulation.apps.sim2real_cli replay \
   logs/sim2real/seed-7-reference.jsonl \
   --randomization-profile training_profile \
   --seed 7 \
@@ -61,7 +61,7 @@ seed 和动作下，各误差应为 `0` 或在设置的阈值内。
 ## 3. 单独比较两条轨迹
 
 ```bash
-python3 -m rebotarm_simulation.sim2real_cli compare \
+python3 -m rebotarm_simulation.apps.sim2real_cli compare \
   logs/sim2real/seed-7-reference.jsonl \
   logs/sim2real/seed-7-replay.jsonl \
   --joint-position-max 0.001 \
@@ -78,7 +78,7 @@ python3 -m rebotarm_simulation.sim2real_cli compare \
 ## 4. 批量安全与复现性验收
 
 ```bash
-python3 -m rebotarm_simulation.sim2real_cli batch-check \
+python3 -m rebotarm_simulation.apps.sim2real_cli batch-check \
   --randomization-profile training_profile \
   --seed 7 \
   --episodes 20 \

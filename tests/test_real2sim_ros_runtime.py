@@ -19,7 +19,7 @@ try:
 except ImportError:
     pytest.skip("real ROS 2 Python runtime is unavailable", allow_module_level=True)
 
-from rebotarm_simulation.real2sim_ros_node import build_node_class
+from rebotarm_simulation.ros.real2sim_ros_node import build_node_class
 
 
 HOME = (0.0, -0.8, -1.0, 0.3, 0.0, 0.0)

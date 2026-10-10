@@ -15,50 +15,36 @@ if str(SIM_SRC) not in sys.path:
 pytestmark = pytest.mark.skipif(find_spec("mujoco") is None, reason="mujoco is not installed")
 
 
-def test_generated_physics_profile_loads_and_steps(tmp_path):
-    from rebotarm_simulation.mujoco_model_profile import DEFAULT_GRIPPER_XML, write_physics_profile
-    from rebotarm_simulation.mujoco_runner import run_smoke
+def test_canonical_robot_model_loads_and_steps():
+    from rebotarm_simulation.core.resource_paths import package_resource
+    from rebotarm_simulation.diagnostics.mujoco_runner import run_smoke
 
-    if not DEFAULT_GRIPPER_XML.exists():
-        pytest.skip("reference MuJoCo checkout is not available")
-
-    robot_xml = write_physics_profile(tmp_path / "robot.xml", DEFAULT_GRIPPER_XML)
-    result = run_smoke(robot_xml, seconds=1.0)
+    result = run_smoke(package_resource("rebotarm_simulation", "models/rebotarm/robot.xml"), seconds=1.0)
 
     assert result.nq == 8
-    assert result.nu == 7
+    assert result.nu == 8
     assert result.finite
 
 
-def test_generated_step_response_is_force_limited(tmp_path):
-    from rebotarm_simulation.mujoco_model_profile import DEFAULT_GRIPPER_XML, write_physics_profile
-    from rebotarm_simulation.mujoco_runner import run_step_response
+def test_canonical_step_response_is_force_limited():
+    from rebotarm_simulation.core.resource_paths import package_resource
+    from rebotarm_simulation.diagnostics.mujoco_runner import run_step_response
 
-    if not DEFAULT_GRIPPER_XML.exists():
-        pytest.skip("reference MuJoCo checkout is not available")
-
-    robot_xml = write_physics_profile(tmp_path / "robot.xml", DEFAULT_GRIPPER_XML)
-    result = run_step_response(robot_xml, joint="joint2", target=-0.6, seconds=1.0)
+    result = run_step_response(package_resource("rebotarm_simulation", "models/rebotarm/robot.xml"), joint="joint1", target=0.05, seconds=1.0)
 
     assert result.max_abs_actuator_force <= 27.0 + 1e-6
-    assert result.max_abs_error >= 0.0
+    assert result.final_abs_error < 0.015
+    assert result.final_position > 0.03
 
 
-def test_generated_grasp_scene_loads_and_steps(tmp_path):
-    from rebotarm_simulation.mujoco_model_profile import (
-        DEFAULT_GRASP_SCENE_XML,
-        DEFAULT_GRIPPER_XML,
-        write_grasp_scene_profile,
-        write_physics_profile,
-    )
-    from rebotarm_simulation.mujoco_runner import run_grasp_benchmark
+def test_canonical_grasp_scene_loads_and_steps(bottle_scene):
+    from rebotarm_simulation.core.resource_paths import package_resource
+    from rebotarm_simulation.diagnostics.mujoco_runner import run_grasp_benchmark
 
-    if not DEFAULT_GRIPPER_XML.exists() or not DEFAULT_GRASP_SCENE_XML.exists():
-        pytest.skip("reference MuJoCo checkout is not available")
-
-    robot_xml = write_physics_profile(tmp_path / "robot.xml", DEFAULT_GRIPPER_XML, include_keyframes=False)
-    scene_xml = write_grasp_scene_profile(tmp_path / "scene.xml", robot_xml, DEFAULT_GRASP_SCENE_XML)
-    result = run_grasp_benchmark(scene_xml, seconds=1.0)
+    result = run_grasp_benchmark(bottle_scene, target_body="bottle", gripper_bodies=("left_finger_link", "right_finger_link"), command=lambda sim, elapsed: None, seconds=0.1)
 
     assert result.finite
-    assert result.max_contacts >= 0
+    assert result.target_body == "bottle"
+    assert not result.grasp_success
+    assert result.max_contacts >= result.final_contacts
+    assert not result.lift_detected

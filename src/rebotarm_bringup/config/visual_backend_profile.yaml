@@ -1,0 +1,9 @@
+# 跨包启动 profile（非 ROS 参数文件）：硬件保护转发，不包含使能。
+launch:
+  gripper_position_torque_cap_nm: 1.0
+  gripper_position_max_speed_rad_s: 1.5
+  gripper_position_timeout_margin_sec: 1.5
+  gripper_feedback_stale_timeout_sec: 0.15
+  hardware_feedback_rate_hz: 50.0
+  grasp_hold_timeout_sec: 30.0
+  shutdown_safe_home: false

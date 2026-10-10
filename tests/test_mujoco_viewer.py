@@ -10,9 +10,9 @@ import warnings
 
 import pytest
 
-from rebotarm_simulation import mujoco_viewer
-from rebotarm_simulation.mujoco_dashboard import compose_dashboard
-from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+from rebotarm_simulation.apps import mujoco_viewer, viewer_lifecycle
+from rebotarm_simulation.apps.mujoco_dashboard import compose_dashboard
+from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
 
 class FakeSim:
@@ -1111,7 +1111,7 @@ def test_cleanup_timeout_retains_unsafe_handles_and_does_not_close_sim():
             pass
 
     viewer = StuckViewer()
-    retained_before = len(mujoco_viewer._RETAINED_UNSAFE_VIEWERS)
+    retained_before = len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS)
     with pytest.raises(TimeoutError, match="did not finish"):
         mujoco_viewer._close_viewer_then_sim(
             viewer,
@@ -1123,7 +1123,7 @@ def test_cleanup_timeout_retains_unsafe_handles_and_does_not_close_sim():
             timeout=1.0,
         )
     assert sim.closed is False
-    assert len(mujoco_viewer._RETAINED_UNSAFE_VIEWERS) == retained_before + 1
+    assert len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS) == retained_before + 1
 
 
 def test_close_error_with_live_public_model_retains_handles_without_sim_close():
@@ -1136,11 +1136,11 @@ def test_close_error_with_live_public_model_retains_handles_without_sim_close():
             raise RuntimeError("close failed")
 
     viewer = LiveViewer()
-    retained_before = len(mujoco_viewer._RETAINED_UNSAFE_VIEWERS)
+    retained_before = len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS)
     with pytest.raises(RuntimeError, match="close failed"):
         mujoco_viewer._close_viewer_then_sim(viewer, sim, object(), object())
     assert sim.closed is False
-    assert len(mujoco_viewer._RETAINED_UNSAFE_VIEWERS) == retained_before + 1
+    assert len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS) == retained_before + 1
 
 
 def test_close_error_with_cleared_public_model_safely_closes_sim_then_reraises():
@@ -1171,8 +1171,8 @@ def test_close_error_with_unreadable_public_model_conservatively_retains_handles
             raise RuntimeError("close failed")
 
     viewer = UnreadableViewer()
-    retained_before = len(mujoco_viewer._RETAINED_UNSAFE_VIEWERS)
+    retained_before = len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS)
     with pytest.raises(RuntimeError, match="close failed"):
         mujoco_viewer._close_viewer_then_sim(viewer, sim, object(), object())
     assert sim.closed is False
-    assert len(mujoco_viewer._RETAINED_UNSAFE_VIEWERS) == retained_before + 1
+    assert len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS) == retained_before + 1

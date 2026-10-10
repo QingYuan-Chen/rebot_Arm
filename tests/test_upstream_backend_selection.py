@@ -9,14 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_active_package_installs_direct_upstream_node_only():
     setup_text = (ROOT / "src/rebotarm_simulation/setup.py").read_text(encoding="utf-8")
 
-    assert "rebotarm_mujoco_node = rebotarm_simulation.mujoco_ros_node:main" in setup_text
+    assert "rebotarm_mujoco_node = rebotarm_simulation.ros.mujoco_ros_node:main" in setup_text
     assert "rebotarm_upstream_mujoco_node = rebotarm_simulation.upstream_backend:main" not in setup_text
     assert "rebotarm_mujoco_adapter = rebotarm_simulation.mujoco_ros_adapter_node:main" not in setup_text
 
 
 def test_mujoco_moveit_launch_has_no_selectable_current_backend():
     launch_text = (
-        ROOT / "src/rebotarm_simulation/launch/mujoco_moveit_sim.launch.py"
+        ROOT / "src/rebotarm_bringup/launch/mujoco_moveit_sim.launch.py"
     ).read_text(encoding="utf-8")
 
     assert 'executable="rebotarm_mujoco_node"' in launch_text
@@ -29,7 +29,7 @@ def test_mujoco_moveit_launch_has_no_selectable_current_backend():
 
 def test_active_launch_uses_package_owned_upstream_model_not_snapshot_process_boundary():
     launch_text = (
-        ROOT / "src/rebotarm_simulation/launch/mujoco_moveit_sim.launch.py"
+        ROOT / "src/rebotarm_bringup/launch/mujoco_moveit_sim.launch.py"
     ).read_text(encoding="utf-8")
 
     assert 'FindPackageShare("rebotarm_simulation")' in launch_text

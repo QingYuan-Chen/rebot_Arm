@@ -24,7 +24,7 @@
 `reBotArm_control_py` Python 控制库封装为 ROS2 topic、service 和 action，
 作为二次开发、上层规划、可视化和单电机调试的统一入口。
 
-当前工作空间包含11个 ROS2 包：
+当前工作空间包含12个 ROS2 包：
 
 | 包 | 作用 |
 |---|---|
@@ -38,6 +38,7 @@
 | `rebotarm_moveit_config` | URDF、网格、SRDF 与规划模型 |
 | `rebotarm_vision` | 相机、识别与抓取候选 |
 | `rebotarm_simulation` | MuJoCo 模型与仿真执行 |
+| `rebotarm_preview` | 轻量 FollowJointTrajectory 与 RViz 状态预演 |
 | `rebotarm_calibration` | 标定与 TF/TCP 验证 |
 
 ---
@@ -186,7 +187,7 @@ rebot_Arm/
 ├── docs/                  # 架构、环境与操作手册
 ├── scripts/               # 环境、启动、检查与模型
 ├── patches/               # MotorBridge 补丁
-├── src/                   # 11个活动ROS包
+├── src/                   # 12个活动ROS包
 ├── tests/
 ├── third_party/           # 本机参考、运行依赖与固定SDK清单
 └── star_arm_102_rebot_b601_follow/  # 独立跟随工具

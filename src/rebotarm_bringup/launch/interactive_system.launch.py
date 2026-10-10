@@ -47,7 +47,6 @@ def generate_launch_description():
     """
     arm_namespace = LaunchConfiguration("arm_namespace")
     bringup_share = FindPackageShare("rebotarm_bringup")
-    moveit_share = FindPackageShare("rebotarm_moveit_config")
     arm_config = LaunchConfiguration("arm_config")
     gripper_config = LaunchConfiguration("gripper_config")
     channel = LaunchConfiguration("channel")
@@ -151,7 +150,7 @@ def generate_launch_description():
             # 预览模式：包含 MoveIt demo 启动文件（提供 move_group 与假状态），不接真实控制器
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
-                    PathJoinSubstitution([moveit_share, "launch", "demo.launch.py"])
+                    PathJoinSubstitution([bringup_share, "launch", "moveit_demo.launch.py"])
                 ),
                 condition=IfCondition(use_moveit_preview),
                 launch_arguments={
@@ -216,7 +215,7 @@ def generate_launch_description():
                 condition=UnlessCondition(use_moveit_preview),
             ),
             # 被动关节状态源：只在无硬件、非 MoveIt 预览且显式开启时发布假关节状态。
-            # MoveIt 预览由 demo.launch.py 自己提供同一话题，必须互斥，避免两个发布器竞争。
+            # MoveIt 预览由 moveit_demo.launch.py 自己提供同一话题，必须互斥，避免两个发布器竞争。
             Node(
                 package="joint_state_publisher",
                 executable="joint_state_publisher",

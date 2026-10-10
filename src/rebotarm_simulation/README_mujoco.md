@@ -1,7 +1,7 @@
 # reBotArm MuJoCo 仿真底座
 
-当前项目基线是 [`huangbinai/robotarm_ros2`](https://github.com/huangbinai/robotarm_ros2)
-`main@19f2939e27c52e07f73e7ff1ab8f723c01852ce0`。本包在该新基线上选择性整合
+本包整合 [`huangbinai/robotarm_ros2`](https://github.com/huangbinai/robotarm_ros2)
+`main@8c02470f594cfa0180e2ebfb86d1e14a640b4db3` 的仿真分层与轻量 preview 拆分，并保留本地
 Viewer、Reach/Pick、Sim2Real、Real2Sim、诊断与批量验收能力，同时保留上游的
 包结构、启动组合、MoveIt 权威 URDF及安全限制；虚拟 RGB-D 发布已随上游退役。
 
@@ -17,13 +17,14 @@ Sim2Real/Real2Sim 的仿真侧随机化、JSONL 记录、确定性回放、轨�
 
 本目录提供可独立使用的 MuJoCo 物理仿真核心、桌面 Viewer 和 ROS 2
 适配层。已验证的目标环境是 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12。
-已提供基于现有物理核心的 Gymnasium 末端位姿 Reach 环境与 GPU PPO 训练入口。
-克隆后配置、环境契约和验证步骤见 [强化学习命令参考](../../docs/reference/commands/mujoco_rl.md)。
+CPU Gymnasium Reach 与可选 SB3/PPO 入口保留；独立 MJLab 工程位于
+`/home/a/project/rebot_Arm_rl/MJLab/`，复用带来源提交和摘要的模型快照。
+环境契约与路径见 [强化学习命令参考](../../docs/reference/commands/mjlab_rl.md)。
 
 ## 安装与构建
 
 ROS launch 默认使用 PATH 中的 `python3`，本机部署使用系统 Python 3.12 和用户级
-MuJoCo 依赖，不需要 MuJoCo 专属虚拟环境、激活脚本或解释器环境变量。
+MuJoCo 3.3.0 / NumPy 1.26.4 依赖，不需要 MuJoCo 专属虚拟环境、激活脚本或解释器环境变量。
 外部部署可用 `python_executable` 参数或 `REBOTARM_MUJOCO_PYTHON` 显式覆盖；
 启动目录不会影响解释器选择。混合视觉入口见
 [启动解释器说明](../../docs/setup/launch_python_configuration.md)。
@@ -35,13 +36,13 @@ MuJoCo 依赖，不需要 MuJoCo 专属虚拟环境、激活脚本或解释器�
 日常桌面联调可直接使用专用入口：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_rviz_viewer.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true use_mujoco_viewer:=true
 ```
 
 服务器、CI 或只做后台物理测试使用：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_headless.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=false use_mujoco_viewer:=false
 ```
 
 在当前工作区根目录、未激活venv的新终端执行。系统依赖按
@@ -67,9 +68,9 @@ colcon 安装的 console script 使用构建时的解释器 shebang；本机统�
 以下是从工作区源码直接运行的完整等价命令：
 
 ```bash
-MUJOCO_GL=egl PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_health --renderer-timeout 30
-PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_cli run --duration 5
-PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.mujoco_viewer --duration 30
+MUJOCO_GL=egl PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
+PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_cli run --duration 5
+PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_viewer --duration 30
 ```
 
 ## 健康检查与无界面运行
@@ -294,6 +295,16 @@ contacts
 
 ## ROS 2 适配层
 
+工作区提供两种独立包拥有的后端，验证含义不同：
+
+- `rebotarm_mujoco_node`：加载 MJCF 并推进 MuJoCo 物理，可用于物理状态、执行器力、
+  接触和桌面/瓶子场景验证；
+- `rebotarm_preview/rebotarm_sim_trajectory_controller`：不加载 MuJoCo，只做轨迹插值和 RViz 姿态预演；该轻量后端已从 `rebotarm_simulation` 拆出。
+
+RViz 预演的 Action 成功、姿态变化或视觉流程完成，不能作为 MuJoCo 物理、动力学、
+接触、碰撞或抓取成功证据。需要这些证据时必须启动 MuJoCo 组合入口，并确认只有一个
+轨迹 Action 服务端。
+
 只启动 MuJoCo 后端：
 
 ```bash
@@ -347,7 +358,7 @@ bringup 必须显式使用 `use_hardware:=false`，且只保留一个该 Action 
 使用主项目保留的组合入口启动唯一 MuJoCo 轨迹服务端和 MoveIt：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py use_sim_time:=true
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_sim_time:=true
 ```
 
 如不需要 RViz，可追加 `use_rviz:=false`。该入口固定关闭 fake joint state publisher，
@@ -372,7 +383,7 @@ rebotarm_mujoco_moveit_acceptance --timeout 30
 核心类不依赖 ROS 2：
 
 ```python
-from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
 with RebotArmMujoco() as sim:
     sim.reset(seed=7)
@@ -399,7 +410,7 @@ Reach/Pick 场景随机化。
 轻量 Gym 风格 Reach 环境不依赖 `gymnasium`：
 
 ```python
-from rebotarm_simulation.mujoco_env import RebotArmReachEnv
+from rebotarm_simulation.core.mujoco_env import RebotArmReachEnv
 
 with RebotArmReachEnv() as env:
     obs, info = env.reset(seed=7)
@@ -421,7 +432,7 @@ with RebotArmReachEnv() as env:
 ```python
 from pathlib import Path
 
-from rebotarm_simulation.mujoco_env import RebotArmReachEnv
+from rebotarm_simulation.core.mujoco_env import RebotArmReachEnv
 from rebotarm_simulation.sim2real import (
     RandomizationConfig,
     TrajectoryRecorder,

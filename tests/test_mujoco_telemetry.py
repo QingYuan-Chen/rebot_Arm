@@ -4,8 +4,8 @@ import math
 
 import pytest
 
-from rebotarm_simulation.mujoco_telemetry import MujocoTelemetryHistory
-from rebotarm_simulation.mujoco_types import ContactInfo, ControlStatus
+from rebotarm_simulation.diagnostics.mujoco_telemetry import MujocoTelemetryHistory
+from rebotarm_simulation.core.mujoco_types import ContactInfo, ControlStatus
 
 
 def _status(offset: float = 0.0) -> ControlStatus:

@@ -6,13 +6,13 @@ import sys
 import pytest
 
 ROS2_ROOT = Path(__file__).resolve().parents[1]
-SIM_SRC = ROS2_ROOT / "src" / "rebotarm_simulation"
-if str(SIM_SRC) not in sys.path:
-    sys.path.insert(0, str(SIM_SRC))
+PREVIEW_SRC = ROS2_ROOT / "src" / "rebotarm_preview"
+if str(PREVIEW_SRC) not in sys.path:
+    sys.path.insert(0, str(PREVIEW_SRC))
 
 
 def test_gripper_width_maps_to_symmetric_finger_joints():
-    from rebotarm_simulation.sim_gripper import gripper_joint_positions_for_width
+    from rebotarm_preview.sim_gripper import gripper_joint_positions_for_width
 
     left, right, reached = gripper_joint_positions_for_width(0.06, min_width=0.0, max_width=0.09)
 
@@ -22,7 +22,7 @@ def test_gripper_width_maps_to_symmetric_finger_joints():
 
 
 def test_gripper_width_is_clamped_before_mapping():
-    from rebotarm_simulation.sim_gripper import gripper_joint_positions_for_width
+    from rebotarm_preview.sim_gripper import gripper_joint_positions_for_width
 
     left, right, reached = gripper_joint_positions_for_width(0.12, min_width=0.0, max_width=0.09)
 

@@ -108,7 +108,7 @@ sudo apt install ros-jazzy-moveit-simple-controller-manager
 cd /home/a/project/rebot_Arm
 source scripts/source_local_environment.bash
 export ROS_DOMAIN_ID=173
-ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py
 ```
 
 应不再出现插件加载失败或空控制器列表；确认唯一 Action server 后，
@@ -198,7 +198,8 @@ source install/setup.bash
 ```
 
 不需要连接设备，也不需要先提供YOLO/GraspNet权重。构建时存在的
-`scripts/yolo26s-seg.pt` 和旧默认engine会按原路径打包；不存在时不阻塞构建。
+`src/rebotarm_vision/models/` 中的默认 YOLO 权重和可选 TensorRT 引擎安装到
+`share/rebotarm_vision/models/`；不存在时不阻塞构建。
 运行时显式传入外部模型路径无需重建。不要把“构建通过”等同于“推理资产已准备”。
 
 安装控制器依赖并构建后可运行软件回归（不会授权真机动作）：
@@ -247,7 +248,7 @@ Ubuntu 物理机直连 Gemini2 并在本机运行 CUDA YOLO 时，使用：
 ```bash
 ./scripts/setup_ubuntu_vision.sh
 ./scripts/install_orbbec_udev_rules.sh
-./scripts/run_ubuntu_vision.sh yolo_model_path:="$PWD/scripts/yolo26s-seg.pt" yolo_device:=0
+./scripts/run_ubuntu_vision.sh yolo_model_path:="$PWD/src/rebotarm_vision/models/yolo26s-seg.pt" yolo_device:=0
 ```
 
 上述命令只启动相机和YOLO，不启动机械臂。CPU可改为`yolo_device:=cpu`。
@@ -265,13 +266,7 @@ ros2 launch rebotarm_vision vision.launch.py \
   handeye_config:=/absolute/path/to/my_handeye.yaml
 ```
 
-旧的 `ordinary_grasp` 算法不是本仓库依赖，默认不启动。安装对应旧工程后显式启用：
-
-```bash
-ros2 launch rebotarm_vision vision.launch.py \
-  start_ordinary_grasp:=true \
-  ordinary_grasp_root:=/absolute/path/to/rebot_grasp
-```
+旧的 `ordinary_grasp` 节点及其 launch 参数已退役；当前候选由本地 GraspNet 链路生成。
 
 ## 5. 安全顺序
 
@@ -280,14 +275,12 @@ ros2 launch rebotarm_vision vision.launch.py \
 3. 检查串口或 CAN、关节方向、零位、软限位和 enable 失败回滚。
 4. 在失能状态验证 `joint_states`，再显式 enable 并保持当前位置。
 5. 使用低速度验证停止服务、单关节小角度和单个安全姿态。
-6. 依次开放网页执行、示教回放、视觉 plan-only 和视觉低速执行。
+6. 依次核验网页执行、示教回放、视觉候选/规划预检和明确授权的视觉低速执行；通用视觉 launch 不再提供 plan-only 模式参数。
 
 完整视觉抓取的目标安全默认值是：
 
 ```text
 use_hardware:=false
-execution_mode:=plan_only
-move_to_visual_ready_on_start:=false
 shutdown_safe_home:=false
 auto_enable:=false
 ```

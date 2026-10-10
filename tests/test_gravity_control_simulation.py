@@ -21,7 +21,7 @@ EXTRA_BODIES = ('left_finger_link', 'right_finger_link',
 def test_shared_gravity_model_with_explicit_simulation_payload_holds_pose(pose):
     mujoco = pytest.importorskip('mujoco')
     pytest.importorskip('pinocchio')
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     sim = RebotArmMujoco(collisionless=True)
     try:

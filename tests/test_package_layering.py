@@ -9,23 +9,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_drl_workspace_is_isolated_from_ros_and_real_hardware() -> None:
-    import tomllib
-    root = ROOT / "DRL"
-    assert (root / "COLCON_IGNORE").is_file()
-    config = tomllib.loads((root / "pyproject.toml").read_text())
-    assert config["project"]["entry-points"]["mjlab.tasks"] == {
-        "rebotarm_reach_hold": "rebotarm_drl.tasks"
-    }
-    forbidden = {"rclpy", "serial", "MotorBridge", "rebotarmcontroller", "rebotarm_motion"}
-    for source in (root / "src/rebotarm_drl").rglob("*.py"):
-        for node in ast.walk(ast.parse(source.read_text())):
+    assert not (ROOT / "DRL").exists()
+    for source in (ROOT / "src").rglob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Import):
                 modules = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and not node.level:
                 modules = [node.module or ""]
             else:
                 continue
-            assert not {module.split(".")[0] for module in modules} & forbidden, source
+            assert all(module.split(".")[0] != "rebotarm_drl" for module in modules), source
 
 
 def test_simulation_has_no_motion_implementation_or_manifest_dependency() -> None:
@@ -41,6 +34,42 @@ def test_simulation_has_no_motion_implementation_or_manifest_dependency() -> Non
             assert all(module.split(".")[0] != "rebotarm_motion" for module in modules), source
     manifest = ET.parse(package / "package.xml").getroot()
     assert not any(child.text == "rebotarm_motion" for child in manifest)
+
+
+def test_vision_declares_motion_execution_interface_without_owning_calibration() -> None:
+    vision = ET.parse(ROOT / "src/rebotarm_vision/package.xml").getroot()
+    bringup = ET.parse(ROOT / "src/rebotarm_bringup/package.xml").getroot()
+    assert not any(child.text == "rebotarm_calibration" for child in vision)
+    assert any(child.text == "rebotarm_motion" for child in vision)
+    for package in ("rebotarm_calibration", "rebotarm_motion"):
+        assert any(child.text == package for child in bringup)
+
+
+def test_vision_uses_canonical_subpackage_entrypoints_without_compatibility_shims() -> None:
+    package = ROOT / "src/rebotarm_vision"
+    module_root = package / "rebotarm_vision"
+    retired_shims = (
+        "vision_node.py",
+        "graspnet_baseline_node.py",
+        "candidate_ik_filter_node.py",
+        "visual_grasp_executor_node.py",
+        "debug_camera_preview.py",
+        "grasp_depth_probe_node.py",
+        "graspnet_open3d_viewer.py",
+        "transform_points.py",
+        "tf_message_adapter.py",
+        "parameter_validation.py",
+        "message_freshness.py",
+        "latest_only_work_queue.py",
+        "visual_grasp_messages.py",
+        "candidate_workspace_gate.py",
+    )
+    for name in retired_shims:
+        assert not (module_root / name).exists(), name
+
+    setup_text = (package / "setup.py").read_text(encoding="utf-8")
+    assert "rebotarm_vision.nodes.vision_node:main" in setup_text
+    assert "rebotarm_vision.diagnostics.debug_camera_preview:main" in setup_text
 
 
 def test_retired_mujoco_ros_backends_are_absent_from_active_package() -> None:
@@ -63,12 +92,82 @@ def test_motion_package_exports_core_modules() -> None:
 
 def test_teach_package_exports_core_modules() -> None:
     import rebotarm_teach.teach_recording as teach_recording
+    import rebotarm_teach.teach_models as teach_models
     import rebotarm_teach.teach_replay_coordinator as teach_replay_coordinator
     import rebotarm_teach.teach_replay_settings as teach_replay_settings
 
     assert hasattr(teach_recording, "TeachSample")
+    assert teach_recording.TeachSample is teach_models.TeachSample
+    assert teach_recording.PreparedTeachReplay is teach_models.PreparedTeachReplay
+    from rebotarm_teach.teach_record_io import encode_teach_sample
+    from rebotarm_teach.teach_replay_gates import validate_teach_replay_execute_request
+
+    assert teach_recording.encode_teach_sample is encode_teach_sample
+    assert teach_recording.validate_teach_replay_execute_request is validate_teach_replay_execute_request
     assert hasattr(teach_replay_coordinator, "TeachReplayCoordinator")
     assert hasattr(teach_replay_settings, "TeachReplaySettingsProvider")
+
+
+def test_teach_preview_entrypoint_is_owned_by_simulation() -> None:
+    teach = ROOT / "src/rebotarm_teach"
+    simulation = ROOT / "src/rebotarm_simulation"
+    assert not (teach / "rebotarm_teach/mujoco_preview.py").exists()
+    assert "rebotarm_mujoco_teach_preview" not in (teach / "setup.py").read_text(encoding="utf-8")
+    assert "rebotarm_simulation.apps.teach_preview:main" in (simulation / "setup.py").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_rviz_preview_backend_is_owned_by_preview_package() -> None:
+    preview = ROOT / "src/rebotarm_preview"
+    simulation = ROOT / "src/rebotarm_simulation"
+    assert (preview / "package.xml").is_file()
+    assert (preview / "rebotarm_preview/rviz_preview_controller_node.py").is_file()
+    assert "rebotarm_preview.rviz_preview_controller_node:main" in (
+        preview / "setup.py"
+    ).read_text(encoding="utf-8")
+    assert not (simulation / "rebotarm_simulation/rviz_preview_controller_node.py").exists()
+    assert "rebotarm_sim_trajectory_controller" not in (
+        simulation / "setup.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_preview_is_independent_of_physics_and_hardware() -> None:
+    preview = ROOT / "src/rebotarm_preview"
+    forbidden = {"mujoco", "mjlab", "torch", "numpy", "rebotarm_simulation",
+                 "rebotarmcontroller", "rebotarm_motion"}
+    for source in (preview / "rebotarm_preview").rglob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                modules = [node.module or ""]
+            else:
+                continue
+            assert not forbidden.intersection(m.split(".")[0] for m in modules), source
+    manifest = ET.parse(preview / "package.xml").getroot()
+    assert not forbidden.intersection(child.text for child in manifest)
+    bringup = ET.parse(ROOT / "src/rebotarm_bringup/package.xml").getroot()
+    assert any(child.text == "rebotarm_preview" for child in bringup)
+    for name in ("teleop_keyboard.launch.py", "rviz_ee_drag_sim.launch.py",
+                 "includes/visual_backend.launch.py"):
+        source = (ROOT / "src/rebotarm_bringup/launch" / name).read_text()
+        assert 'package="rebotarm_preview"' in source
+        assert 'package="rebotarm_simulation"' not in source
+
+
+def test_motion_does_not_import_teach_implementation() -> None:
+    for source in (ROOT / "src/rebotarm_motion/rebotarm_motion").rglob("*.py"):
+        assert "rebotarm_teach" not in source.read_text(encoding="utf-8"), source
+
+
+def test_moveit_config_has_no_teleop_launch_owner() -> None:
+    package = ROOT / "src/rebotarm_moveit_config"
+    assert not (package / "launch/demo.launch.py").exists()
+    assert "rebotarm_teleop" not in (package / "package.xml").read_text(encoding="utf-8")
+    demo = (ROOT / "src/rebotarm_bringup/launch/moveit_demo.launch.py").read_text(encoding="utf-8")
+    assert 'package="rebotarm_teleop"' in demo
+    assert 'package_name="rebotarm_moveit_config"' in demo
 
 
 def test_teleop_package_exports_command_adapters() -> None:

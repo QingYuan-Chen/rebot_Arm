@@ -34,7 +34,7 @@ ros2 run rebotarm_teleop TeleopKeyboardNode
 ros2 run rebotarm_teleop GripperVisualJointStateNode
 ```
 
-`GripperVisualJointStateNode` 也被 `rebotarm_moveit_config/demo.launch.py` 复用。Web 适配通常由 `rebotarm_dashboard` 通过对象接口调用，不在本包提供 HTTP server。
+`GripperVisualJointStateNode` 也被 `rebotarm_bringup/moveit_demo.launch.py` 复用。Web 适配通常由 `rebotarm_dashboard` 通过对象接口调用，不在本包提供 HTTP server。
 
 ## 边界与安全
 

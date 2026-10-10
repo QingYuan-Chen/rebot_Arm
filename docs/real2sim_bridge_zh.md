@@ -60,11 +60,11 @@ source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 export PYTHONPATH="$PWD/src/rebotarm_simulation:$PYTHONPATH"
 
-python3 -m rebotarm_simulation.real2sim_acceptance \
+python3 -m rebotarm_simulation.diagnostics.real2sim_acceptance \
   --mode mirror \
   --steps 200
 
-python3 -m rebotarm_simulation.real2sim_acceptance \
+python3 -m rebotarm_simulation.diagnostics.real2sim_acceptance \
   --mode physics \
   --steps 200
 ```
@@ -84,7 +84,7 @@ Bridge 没有状态输入时只等待，不会打开硬件设备。
 启动带界面的实时跟随：
 
 ```bash
-python3 -m rebotarm_simulation.real2sim_viewer \
+python3 -m rebotarm_simulation.apps.real2sim_viewer \
   --ros-args \
   --params-file src/rebotarm_simulation/config/real2sim_bridge.yaml \
   -p mode:=mirror

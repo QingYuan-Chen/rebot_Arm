@@ -55,13 +55,13 @@ ros2 launch rebotarm_bringup bringup.launch.py \
 无 RViz 的 headless 物理检查：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_headless.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=false use_mujoco_viewer:=false
 ```
 
 带 MoveIt/RViz Plan & Execute 的仿真入口：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_moveit_sim.launch.py use_rviz:=true
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true
 ```
 
 RViz 末端拖动专用入口（包含仿真轨迹控制器）：
@@ -74,7 +74,7 @@ MuJoCo Viewer 与单独 ROS 后端也可以分别启动。它们不会打开真�
 
 ```bash
 # MuJoCo Viewer + RViz 组合
-ros2 launch rebotarm_simulation mujoco_rviz_viewer.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true use_mujoco_viewer:=true
 
 # 只启动 MuJoCo ROS 后端（维护/调试入口）
 ros2 launch rebotarm_simulation mujoco_sim.launch.py
@@ -102,9 +102,10 @@ ros2 run rebotarm_simulation rebotarm_mujoco_cli -- --headless --duration 5
 ros2 run rebotarm_simulation rebotarm_urdf_to_mjcf -- --repo-root . --check
 ```
 
-`rebotarm_mujoco` 是 `rebotarm_mujoco_cli` 的兼容别名。`rebotarm_mujoco_node` 和
-`rebotarm_sim_trajectory_controller` 属于 launch 内部节点，不应和上述入口并行手动
-启动，否则可能产生重复仿真后端。
+`rebotarm_mujoco_cli` 是无头交互式 MuJoCo CLI。`rebotarm_mujoco_node` 是 MuJoCo
+物理后端；`rebotarm_sim_trajectory_controller` 是不加载物理引擎的 RViz 轨迹插值预演后端，
+用于无硬件键盘、RViz 拖动和视觉流程。两者由各自的组合 launch 启动，同一命名空间
+只运行一个轨迹 Action 服务端。CLI 使用独立模型实例，不发布 ROS 控制器接口。
 
 ## 验证：纯软件与分层检查
 
@@ -128,8 +129,8 @@ python3 -m compileall src/rebotarm_bringup/launch -q
 | 网页/键盘遥操作、示教录制与回放、状态和停机 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
 | RViz MoveIt、网页工作台、真机 Plan/Execute | [rebotarm_feature_commands.md](rebotarm_feature_commands.md) |
 | Ubuntu Gemini 2/YOLO/GraspNet 只读链路 | [ubuntu_vision_readonly_test_zh.md](ubuntu_vision_readonly_test_zh.md) |
-| 视觉候选、plan-only、仿真检查和真机边界 | [visual_grasp_commands.md](visual_grasp_commands.md) |
+| 视觉候选、预演、停止确认和真机边界 | [visual_grasp_commands.md](visual_grasp_commands.md) |
 | 网页手眼/TCP 标定 | [calibration_web.md](calibration_web.md) |
 | MuJoCo 示教轨迹预演 | [mujoco_teach_preview.md](mujoco_teach_preview.md) |
-| Gymnasium Reach/RL | [mujoco_rl.md](mujoco_rl.md) |
+| CPU Reach 与独立 MJLab 工程 | [mujoco_rl.md](mujoco_rl.md) / [mjlab_rl.md](mjlab_rl.md) |
 | 控制器、仿真、构建和通用状态检查 | 本文 |

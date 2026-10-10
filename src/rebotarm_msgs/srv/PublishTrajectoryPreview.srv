@@ -1,6 +1,10 @@
 # 发布一组已经规划完成的关节轨迹，供 RViz 连续预览。
 # 本服务只负责显示，不会向 FollowJointTrajectory 动作服务器发送目标。
 trajectory_msgs/JointTrajectory[] trajectories
+# 夹爪显示事件：在第 N 段机械臂轨迹之前播放；N == 段数表示最后播放。
+# 两数组等长、索引非递减。空数组保持原机械臂预览行为。
+uint32[] gripper_before_trajectory
+float64[] gripper_openings_m
 ---
 bool success
 string message

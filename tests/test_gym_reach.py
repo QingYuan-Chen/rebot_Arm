@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("gymnasium")
 pytest.importorskip("mujoco")
-from rebotarm_simulation.gym_reach import RebotArmReachEnv
+from rebotarm_simulation.core.gym_reach import RebotArmReachEnv
 
 
 def test_seed_replays_targets_and_dynamics():

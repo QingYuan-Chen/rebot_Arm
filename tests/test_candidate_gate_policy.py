@@ -11,7 +11,7 @@ if str(VISION_SRC) not in sys.path:
 
 
 def test_candidate_gate_policy_rejects_jaw_width_outside_gripper_range():
-    from rebotarm_vision.candidate_gate_policy import CandidateGateConfig, evaluate_candidate_gate
+    from rebotarm_vision.policies.candidate_gate_policy import CandidateGateConfig, evaluate_candidate_gate
 
     too_small = evaluate_candidate_gate(
         jaw_width_m=0.004,
@@ -33,7 +33,7 @@ def test_candidate_gate_policy_rejects_jaw_width_outside_gripper_range():
 
 
 def test_candidate_gate_default_accepts_85mm_and_rejects_anything_wider():
-    from rebotarm_vision.candidate_gate_policy import evaluate_candidate_gate
+    from rebotarm_vision.policies.candidate_gate_policy import evaluate_candidate_gate
 
     accepted = evaluate_candidate_gate(
         jaw_width_m=0.085,
@@ -52,7 +52,7 @@ def test_candidate_gate_default_accepts_85mm_and_rejects_anything_wider():
 
 
 def test_candidate_gate_policy_rejects_grasp_below_minimum_without_blocking_low_table_grasp_by_default():
-    from rebotarm_vision.candidate_gate_policy import CandidateGateConfig, evaluate_candidate_gate
+    from rebotarm_vision.policies.candidate_gate_policy import CandidateGateConfig, evaluate_candidate_gate
 
     default_low_grasp = evaluate_candidate_gate(
         jaw_width_m=0.04,
@@ -73,7 +73,7 @@ def test_candidate_gate_policy_rejects_grasp_below_minimum_without_blocking_low_
 
 
 def test_candidate_gate_policy_rejects_workspace_outliers_and_object_center_outliers():
-    from rebotarm_vision.candidate_gate_policy import CandidateGateConfig, evaluate_candidate_gate
+    from rebotarm_vision.policies.candidate_gate_policy import CandidateGateConfig, evaluate_candidate_gate
 
     outside_workspace = evaluate_candidate_gate(
         jaw_width_m=0.04,

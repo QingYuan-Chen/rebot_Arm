@@ -1,8 +1,8 @@
 """抓取候选位姿的坐标系适配器（纯函数，不接触 TF 监听器本身）。
 
 职责：把候选位姿从"来源坐标系"换算到"目标坐标系"。变换查询通过调用方注入的回调
-完成，因此本模块不依赖运行中的 TF 系统，可以直接单测。位姿的数学运算复用抓取预览
-发送节点里的实现，避免同一套变换逻辑出现两份。
+完成，因此本模块不依赖运行中的 TF 系统，可以直接单测。消息转换与位姿运算复用
+``tf_message_adapter``，避免同一套变换逻辑出现两份。
 """
 
 from __future__ import annotations
@@ -12,10 +12,10 @@ from typing import Callable
 
 from geometry_msgs.msg import Pose
 
-from .grasp_preview_sender_node import _transform_from_msg, transform_pose_message
+from .utils.tf_message_adapter import transform_from_msg, transform_pose_message
 
 
-# 变换查询回调签名：(target_frame, source_frame) -> 带 .transform 字段的变换消息。
+# 变换查询回调签名：(target_frame, source_frame, stamp) -> 带 .transform 字段的变换消息。
 # 返回对象只要求具备 transform.translation/rotation 属性，具体类型由调用方决定。
 TransformLookup = Callable[[str, str, object], object]
 
@@ -34,7 +34,7 @@ def transform_candidate_pose_to_target_frame(
     - ``pose``：待换算的位姿（位置单位 m，姿态为四元数）。
     - ``source_frame``：``pose`` 当前所在的坐标系名。
     - ``target_frame``：希望得到的坐标系名。
-    - ``lookup_transform``：变换查询回调，按 ``(target_frame, source_frame)`` 顺序调用，
+    - ``lookup_transform``：变换查询回调，按 ``(target_frame, source_frame, stamp)`` 顺序调用，
       即"求 target 在 source 中的表示"所需的变换。
 
     返回：换算后的新位姿对象；入参 ``pose`` 不会被修改（返回的是副本）。
@@ -46,4 +46,4 @@ def transform_candidate_pose_to_target_frame(
     if not target_frame or not source_frame or source_frame == target_frame:
         return deepcopy(pose)
     transform_msg = lookup_transform(target_frame, source_frame, stamp)
-    return transform_pose_message(deepcopy(pose), _transform_from_msg(transform_msg))
+    return transform_pose_message(deepcopy(pose), transform_from_msg(transform_msg))

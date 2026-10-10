@@ -16,7 +16,6 @@ rebotarm_motion/
 │   ├── moveit_planner.py                  # MoveIt 规划客户端适配
 │   ├── execution_coordinator.py           # 预览到执行的唯一门控
 │   ├── pose_execution_node.py             # 位姿目标规划与 FollowJointTrajectory 执行
-│   ├── visual_ready_node.py               # 运动到视觉就绪位姿
 │   ├── paired_trajectory_protocol.py      # 真机/仿真共用轨迹命令协议
 │   ├── trajectory_time_parameterization.py# 示教轨迹重定时策略选择
 │   ├── trajectory_runtime_limits.py       # 速度/力矩/加速度/jerk 运行时守卫
@@ -28,7 +27,6 @@ rebotarm_motion/
 │   ├── real_failure_recovery.py           # 真机任务失败后的受保护恢复策略
 │   ├── parameter_helpers.py               # 参数结构与 QoS 辅助
 │   └── __init__.py
-├── config/visual_ready.yaml               # 视觉就绪位姿参数
 ├── setup.py / package.xml / resource/*
 ```
 
@@ -45,10 +43,8 @@ rebotarm_motion/
 
 ```bash
 ros2 run rebotarm_motion PoseExecutionNode
-ros2 run rebotarm_motion rebotarm_visual_ready
 ```
 
-当前包只注册这两个 console script。视觉就绪节点的参数在 `config/visual_ready.yaml`，完整启动通常由 `rebotarm_bringup` 组合。
 
 ## 依赖边界
 

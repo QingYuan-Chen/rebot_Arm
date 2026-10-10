@@ -1,4 +1,4 @@
-from rebotarm_vision.timestamp_policy import select_frame_timestamp_ns
+from rebotarm_vision.policies.timestamp_policy import select_frame_timestamp_ns
 
 
 def test_wall_clock_prefers_positive_camera_system_timestamp() -> None:

@@ -126,6 +126,23 @@ def test_depth_scale_is_applied_and_frame_metadata_is_recorded(monkeypatch):
     assert driver.get_frame_timestamp_ns("depth") == 1_786_000_000_000_000_000
 
 
+def test_color_format_configuration_is_used_for_profile_selection():
+    from rebotarm_vision.camera.gemini2_driver import Gemini2Config, Gemini2Driver
+
+    driver = Gemini2Driver(
+        Gemini2Config(
+            color_width=640, color_height=480, color_fps=30,
+            enable_depth=False, depth_width=0, depth_height=0, depth_fps=30,
+            frame_timeout_ms=1000, enable_align=False, color_format="RGB",
+        )
+    )
+    enum = types.SimpleNamespace(MJPG="MJPG", RGB="RGB")
+    assert driver._color_formats(enum) == ("RGB",)
+    driver._config.color_format = "unsupported"
+    with pytest.raises(ValueError, match="camera.color_format"):
+        driver._color_formats(enum)
+
+
 def test_camera_info_uses_rational_polynomial_distortion_order():
     from rebotarm_vision.camera.gemini2_driver import Gemini2Driver
 

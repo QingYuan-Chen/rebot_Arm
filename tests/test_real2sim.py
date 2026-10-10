@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarm_simulation.real2sim import (
+from rebotarm_simulation.core.real2sim import (
     JointMappingConfig,
     Real2SimMapper,
     Real2SimSynchronizer,

@@ -4,7 +4,7 @@ import io
 import json
 from types import SimpleNamespace
 
-from rebotarm_simulation import real2sim_acceptance
+from rebotarm_simulation.diagnostics import real2sim_acceptance
 
 
 HOME = [0.0, -0.8, -1.0, 0.3, 0.0, 0.0]

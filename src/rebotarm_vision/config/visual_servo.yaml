@@ -1,7 +1,7 @@
-# 接近段视觉伺服与计划刷新参数：由上层启动组合包加载到视觉抓取执行节点
+# 实验性配置：接近段视觉伺服与计划刷新参数，由上层启动组合包加载到视觉抓取执行节点
 # （rebotarm_visual_grasp_executor）。
-# 两组开关默认都关闭（refresh_plan_at_pregrasp_* 除外，见下），保证默认行为是
-# "一次规划、一次到位"的可复现路径；视觉伺服属增强手段，未验证前不要默认打开。
+# 当前正式视觉运行链路不启用本功能；两组开关均保持关闭，保证默认行为是
+# "一次规划、一次到位"的可复现路径。只有完成独立的 plan-only 验证后，才应显式开启。
 # 注意：本文件中的参数键都是对外接口，禁止改动；只允许增加注释。
 rebotarm_visual_grasp_executor:
   ros__parameters:
@@ -9,15 +9,15 @@ rebotarm_visual_grasp_executor:
     # 完整轨迹会在所有阶段规划成功后一次发送给 RViz，因此默认无需停顿。
     plan_only_stage_pause_sec: 0.0
     # 是否在到达接近点后等待更新版本的抓取计划（近距离视觉更准）。
-    # 注意：执行节点内部的参数默认是 true，本档显式置 false，即默认不做计划刷新。
+    # 实验性功能；正式链路默认关闭。执行节点内部默认值为 true，本档显式置 false。
     refresh_plan_at_pregrasp_enabled: false
     # 计划刷新是否为强制要求：开启且等不到新计划时本次尝试直接判失败（而不是沿用旧计划）。
     # 只有 refresh_plan_at_pregrasp_enabled 为真时才有意义。
     refresh_plan_at_pregrasp_required: false
     # 等待新抓取计划的最长时间（单位 s）；超时按上面的"是否强制"决定失败还是沿用旧计划
     refresh_plan_timeout_sec: 1.0
-    # 接近段是否用"迭代小步逼近 + 每步纠偏"替代一次到位的 approach_grasp。
-    # 默认 false；打开后接近更稳但节拍变长，且依赖可用的视觉更新。
+    # 实验性功能：是否用"迭代小步逼近 + 每步纠偏"替代一次到位的 approach_grasp。
+    # 默认 false；打开后接近节拍变长，并依赖持续可用的视觉更新。
     approach_visual_servo_enabled: false
     # 视觉伺服最大迭代步数（至少为 1）。调大更可能收敛到位，但接近段耗时成比例增加。
     approach_visual_servo_max_iterations: 5

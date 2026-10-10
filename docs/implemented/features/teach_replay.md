@@ -13,7 +13,12 @@
 - 示教文件列表、设置和状态 payload；
 - 速度/加速度/jerk 检查与轨迹构造；
 - MoveIt 起点对齐、碰撞预检和运行时跟踪门；
-- MuJoCo 独立示教预演。
+- 由 `rebotarm_simulation` 提供 MuJoCo 独立示教预演入口；`rebotarm_teach` 只提供记录读取和准备逻辑。
+
+示教包内的文件读写、数据模型、质量检查和轨迹准备分别归
+`teach_record_io.py`、`teach_models.py`、`teach_quality.py` 和 `teach_preparation.py`。
+MoveIt 预检与 Action 生命周期由专用辅助模块处理，`TeachReplayWorkflow` 继续统一
+dry-run token、对齐、执行和停止状态，Dashboard 不复制回放实现。
 
 ## 验证结果
 

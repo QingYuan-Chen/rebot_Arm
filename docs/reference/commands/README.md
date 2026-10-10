@@ -12,10 +12,11 @@
 | 网页/键盘遥操作、示教录制和回放 | [rebotarm_common_commands.md](rebotarm_common_commands.md) | 操作员工作流 |
 | RViz MoveIt 和真机 Plan/Execute | [rebotarm_feature_commands.md](rebotarm_feature_commands.md) | MoveIt 操作 |
 | Ubuntu 视觉只读链路 | [ubuntu_vision_readonly_test_zh.md](ubuntu_vision_readonly_test_zh.md) | 相机、YOLO、GraspNet 只读验证 |
-| 视觉候选、plan-only 和视觉执行边界 | [visual_grasp_commands.md](visual_grasp_commands.md) | 视觉抓取工作流 |
+| 视觉候选、预演和视觉执行边界 | [visual_grasp_commands.md](visual_grasp_commands.md) | 视觉抓取工作流 |
 | 网页手眼/TCP 标定 | [calibration_web.md](calibration_web.md) | 标定软件操作 |
 | MuJoCo 示教预演 | [mujoco_teach_preview.md](mujoco_teach_preview.md) | 六轴轨迹预演 |
-| Gymnasium Reach/RL | [mujoco_rl.md](mujoco_rl.md) | 环境、训练和评估 |
+| CPU Reach 与可选 SB3 工具 | [mujoco_rl.md](mujoco_rl.md) | 保留的 CPU 物理任务基准 |
+| 独立 MJLab 工程 | [mjlab_rl.md](mjlab_rl.md) | 现有同级工程入口，本轮不继续训练 |
 
 ## 源码入口覆盖
 
@@ -33,13 +34,11 @@
 | `rebotarm_bringup teleop_keyboard.launch.py` | 用户入口：键盘点动 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
 | `rebotarm_bringup teleop_system.launch.py` | 用户入口：键盘 + Dashboard + 示教 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
 | `rebotarm_bringup rviz_ee_drag_sim.launch.py` | 用户入口：仿真 RViz 拖动 | [rebotarm_feature_commands.md](rebotarm_feature_commands.md) |
-| `rebotarm_bringup visual_grasp_system.launch.py` | 用户入口：视觉只读/plan-only/受控执行 | [visual_grasp_commands.md](visual_grasp_commands.md) |
+| `rebotarm_bringup visual_grasp_system.launch.py` | 用户入口：视觉预演/受控执行，等待显式 execute | [visual_grasp_commands.md](visual_grasp_commands.md) |
 | `rebotarm_bringup interactive_system.launch.py` | 组合内部：真机/无硬件状态源和 MoveIt 共享实现 | [src/rebotarm_bringup/launch/README.md](../../../src/rebotarm_bringup/launch/README.md) |
-| `rebotarm_moveit_config demo.launch.py` | 组合内部：MoveIt 配置实现 | [src/rebotarm_bringup/launch/README.md](../../../src/rebotarm_bringup/launch/README.md) |
+| `rebotarm_bringup moveit_demo.launch.py` | 组合内部：MoveIt 配置实现 | [src/rebotarm_bringup/launch/README.md](../../../src/rebotarm_bringup/launch/README.md) |
 | `rebotarm_vision vision.launch.py` / `vision_ubuntu.launch.py` | 组合内部：由视觉总入口包含 | [ubuntu_vision_readonly_test_zh.md](ubuntu_vision_readonly_test_zh.md) |
-| `rebotarm_simulation mujoco_headless.launch.py` | 用户入口：无头物理仿真 | [system_runtime.md](system_runtime.md) |
-| `rebotarm_simulation mujoco_moveit_sim.launch.py` | 用户入口：MuJoCo + MoveIt/RViz | [system_runtime.md](system_runtime.md) |
-| `rebotarm_simulation mujoco_rviz_viewer.launch.py` | 用户入口：MuJoCo Viewer + RViz | [system_runtime.md](system_runtime.md) |
+| `rebotarm_bringup mujoco_moveit_sim.launch.py` | 用户入口：MuJoCo + MoveIt/RViz | [system_runtime.md](system_runtime.md) |
 | `rebotarm_simulation mujoco_sim.launch.py` | 维护/底层入口：单独 ROS 仿真后端 | [system_runtime.md](system_runtime.md) |
 
 ### `ros2 run` 入口
@@ -47,10 +46,11 @@
 | 入口类别 | 当前入口 | 说明 |
 |---|---|---|
 | 标定用户/维护 | `rebotarm_handeye_capture`、`rebotarm_handeye_calibration`、`rebotarm_handeye_residual`、`rebotarm_tcp_calibration` | 网页采样、离线求解、残差报告、TCP 交互；见 [calibration_web.md](calibration_web.md) |
-| MuJoCo 维护 | `rebotarm_mujoco_health`、`rebotarm_mujoco_cli`（别名 `rebotarm_mujoco`）、`rebotarm_urdf_to_mjcf` | 启动前健康检查、无头 CLI、URDF→MJCF 生成/一致性检查；见 [system_runtime.md](system_runtime.md) |
-| MuJoCo 组合内部 | `rebotarm_mujoco_node`、`rebotarm_sim_trajectory_controller` | 由仿真 launch 启动，不作为日常独立流程 |
+| MuJoCo 维护 | `rebotarm_mujoco_health`、`rebotarm_mujoco_cli`、`rebotarm_urdf_to_mjcf`、`rebotarm_mujoco_teach_preview` | 启动前健康检查、无头 CLI、URDF→MJCF 生成/一致性检查及示教预演；见 [system_runtime.md](system_runtime.md) 和 [mujoco_teach_preview.md](mujoco_teach_preview.md) |
+| MuJoCo 组合内部 | `rebotarm_mujoco_node` | 由 MuJoCo launch 启动，执行物理仿真 |
+| RViz 预演组合内部 | `rebotarm_sim_trajectory_controller` | 无硬件键盘、RViz 拖动和视觉流程的轨迹插值预演，无物理引擎 |
 | 视觉组合内部/维护 | `rebotarm_vision_node`、`rebotarm_graspnet_baseline_node`、`rebotarm_grasp_candidate_ik_filter`、`rebotarm_visual_grasp_executor` 等 | 由 `visual_grasp_system.launch.py` 按参数组合；不重复维护逐节点启动文档 |
-| 操作与示教 | `TeleopKeyboardNode`、`TeleopStatusPanelNode`、`TeachRecorderNode`、`rebotarm_mujoco_teach_preview` | 通过对应组合 launch 使用；预演见 [mujoco_teach_preview.md](mujoco_teach_preview.md) |
+| 操作与示教 | `TeleopKeyboardNode`、`TeleopStatusPanelNode`、`TeachRecorderNode` | 通过对应组合 launch 使用 |
 | 控制器示例 | `GravityCompensation`、`GripperControl`、`MoveTo`、`MoveToPose` | 示例客户端，不是推荐的正式用户入口；正式流程使用 Dashboard/MoveIt/视觉命令 |
 
 ## 维护规则

@@ -7,7 +7,7 @@ from types import MappingProxyType, SimpleNamespace
 import numpy as np
 import pytest
 
-from rebotarm_simulation import mujoco_contact_check
+from rebotarm_simulation.diagnostics import mujoco_contact_check
 
 
 class FakeContactSim:

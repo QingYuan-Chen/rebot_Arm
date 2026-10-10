@@ -76,21 +76,21 @@ Windows 和 Ubuntu VM 都可以执行。正式验收时建议在 VM 也跑一次
 
 ```powershell
 $env:PYTHONPATH="src/rebotarm_simulation"
-python -m rebotarm_simulation.urdf_to_mjcf --repo-root . --output src/rebotarm_simulation/models/rebotarm/robot.xml --check
+python -m rebotarm_simulation.model_tools.urdf_to_mjcf --repo-root . --output src/rebotarm_simulation/models/rebotarm/robot.xml --check
 ```
 
 Ubuntu 等价命令：
 
 ```bash
 export PYTHONPATH=src/rebotarm_simulation
-python3 -m rebotarm_simulation.urdf_to_mjcf --repo-root . --output src/rebotarm_simulation/models/rebotarm/robot.xml --check
+python3 -m rebotarm_simulation.model_tools.urdf_to_mjcf --repo-root . --output src/rebotarm_simulation/models/rebotarm/robot.xml --check
 ```
 
 如果 URDF 改过，需要重新生成：
 
 ```bash
 export PYTHONPATH=src/rebotarm_simulation
-python3 -m rebotarm_simulation.urdf_to_mjcf --repo-root . --output src/rebotarm_simulation/models/rebotarm/robot.xml
+python3 -m rebotarm_simulation.model_tools.urdf_to_mjcf --repo-root . --output src/rebotarm_simulation/models/rebotarm/robot.xml
 ```
 
 重点检查：
@@ -120,7 +120,7 @@ python3 -m pytest tests/test_mujoco_motor_control.py tests/test_mujoco_sim_core.
 Headless 运行：
 
 ```bash
-python3 -m rebotarm_simulation.mujoco_cli run --duration 5
+python3 -m rebotarm_simulation.apps.mujoco_cli run --duration 5
 ```
 
 预期：
@@ -135,7 +135,7 @@ joint_positions、joint_velocities、actuator_forces 都是有限数
 推荐的基础总验收入口：
 
 ```bash
-python3 -m rebotarm_simulation.mujoco_acceptance --skip-renderer
+python3 -m rebotarm_simulation.diagnostics.mujoco_acceptance --skip-renderer
 ```
 
 预期输出 JSON，`ok=true`，并包含 `health`、`headless_reach_batch` 和
@@ -143,13 +143,13 @@ python3 -m rebotarm_simulation.mujoco_acceptance --skip-renderer
 可追加 ROS 2 接口验收：
 
 ```bash
-python3 -m rebotarm_simulation.mujoco_acceptance --skip-renderer --include-ros --timeout 30
+python3 -m rebotarm_simulation.diagnostics.mujoco_acceptance --skip-renderer --include-ros --timeout 30
 ```
 
 EGL 渲染健康检查：
 
 ```bash
-MUJOCO_GL=egl python3 -m rebotarm_simulation.mujoco_health --renderer-timeout 30
+MUJOCO_GL=egl python3 -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
 ```
 
 如果 VM 没有可用 EGL，允许：
@@ -174,7 +174,7 @@ actuator_count = 8
 在 VM 图形桌面终端运行，不建议在普通无显示 SSH 中运行：
 
 ```bash
-python3 -m rebotarm_simulation.mujoco_viewer --duration 60
+python3 -m rebotarm_simulation.apps.mujoco_viewer --duration 60
 ```
 
 手动检查：
@@ -202,7 +202,7 @@ group，collision STL 仍参与碰撞但现在显示为半透明调试层，正�
 ```bash
 export PYTHONPATH=src/rebotarm_simulation
 python3 - <<'PY'
-from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
 with RebotArmMujoco() as sim:
     state0 = sim.reset_home(seed=7)
@@ -297,7 +297,7 @@ action 能收到反馈和结果
 自动化等价命令：
 
 ```bash
-python3 -m rebotarm_simulation.mujoco_ros_acceptance --timeout 15
+python3 -m rebotarm_simulation.diagnostics.mujoco_ros_acceptance --timeout 15
 ```
 
 ## MoveIt 联调验收
@@ -331,7 +331,7 @@ ros2 launch rebotarm_bringup interactive_system.launch.py \
 自动化等价命令需要先保持终端 1 和终端 2 正在运行，然后在第三个终端执行：
 
 ```bash
-python3 -m rebotarm_simulation.mujoco_moveit_acceptance --timeout 30
+python3 -m rebotarm_simulation.diagnostics.mujoco_moveit_acceptance --timeout 30
 ```
 
 预期输出 JSON，`moveit_plan_success=true`、`trajectory_action_success=true`、

@@ -30,7 +30,7 @@
 
 ## 当前状态和规则
 
-- 当前保留 MuJoCo 仿真与 CPU Gymnasium Reach 基线；后续训练框架为 MJLab，尚未接入。
+- 当前保留 MuJoCo 仿真与 CPU Gymnasium Reach 基线；MJLab 已在同级独立工程 `/home/a/project/rebot_Arm_rl/MJLab` 实现 Reach-and-Hold。
 - 历史阶段文档已清理；已有实测不自动授权新的真实机械臂动作。
 - 当前真实视觉、硬件和 RL 的边界以代码、测试、用户最新决定和 `reference/project_status.md` 为准。
 - 文档中的“计划”“有功能”“软件验证”不等于真实硬件验收或任务成功。
@@ -57,7 +57,8 @@
 - [`implemented/features/visual_grasp.md`](implemented/features/visual_grasp.md)：视觉候选、规划和阶段编排。
 - [`setup/ubuntu_vision_setup_zh.md`](setup/ubuntu_vision_setup_zh.md)：Gemini 2、YOLO、GraspNet 环境和启动。
 - [`implemented/features/vision_readonly.md`](implemented/features/vision_readonly.md)：Ubuntu 原生视觉只读链路的功能和边界。
-- [`implemented/features/mujoco_rl.md`](implemented/features/mujoco_rl.md)：MuJoCo/Gymnasium Reach 已实现能力和训练边界。
+- [`reference/commands/mujoco_rl.md`](reference/commands/mujoco_rl.md)：保留的 CPU Gymnasium Reach 与 SB3 工具。
+- [`reference/commands/mjlab_rl.md`](reference/commands/mjlab_rl.md)：现有独立 MJLab 工程入口和验证边界。
 - [`implemented/features/mujoco_teach_preview.md`](implemented/features/mujoco_teach_preview.md)：MuJoCo 示教预演已实现能力和边界。
 
 ### 当前软件验收和参数参考

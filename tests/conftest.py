@@ -266,3 +266,23 @@ def pytest_configure(config):
 
 def pytest_runtest_setup(item):
     _ensure_ros_stubs()
+
+
+import pytest
+
+@pytest.fixture
+def bottle_scene(tmp_path):
+    """Explicit test-only target scene; production defaults remain an empty table."""
+    import xml.etree.ElementTree as ET
+    import shutil
+    models = ROS2_ROOT / 'src/rebotarm_simulation/models/rebotarm'
+    directory = tmp_path / 'models'
+    shutil.copytree(models, directory)
+    scene = directory / 'scene.xml'
+    root = ET.parse(scene).getroot()
+    body = ET.parse(ROS2_ROOT / 'tests/fixtures/bottle_body.xml').getroot().find('body')
+    root.find('worldbody').append(body)
+    for key in root.findall('keyframe/key'):
+        key.set('qpos', key.get('qpos') + ' 0.28 0 0 1 0 0 0')
+    ET.ElementTree(root).write(scene, encoding='unicode')
+    return scene

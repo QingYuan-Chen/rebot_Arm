@@ -1,7 +1,7 @@
 # OMPL 规划流水线配置（MoveIt move_group 的 planning pipeline id 为 ompl）。
 #
 # 本文件只描述"规划器插件 + 请求/响应适配器 + arm 规划组的规划器清单"。它由演示启动文件与
-# 上层启动组合包以 YAML 形式整体下发给 move_group，同时 demo.launch.py 还会把它打印到终端，
+# 上层启动组合包以 YAML 形式整体下发给 move_group，同时 moveit_demo.launch.py 还会把它打印到终端，
 # 便于排查"规划失败但看不出原因"的问题。任何键名拼错都会表现为规划插件为空，从而规划失败。
 #
 # 三段结构：

@@ -2,7 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarm_teach.recording_feedback import feedback_teach_sample
+from rebotarm_teach.recording_feedback import (
+    feedback_teach_sample,
+    ordered_feedback_vector,
+)
 
 
 def sample_fixture():
@@ -26,6 +29,24 @@ def test_recording_uses_source_stamp_and_orders_joint_vectors():
     sample = feedback_teach_sample(msg, **options)
     assert sample.stamp == .02
     assert sample.positions == (1., 2., 3., 4., 5., 6.)
+
+
+def test_ordered_feedback_vector_is_independent_of_ros_messages():
+    assert ordered_feedback_vector(
+        [30.0, 10.0, 20.0],
+        source_names=("joint3", "joint1", "joint2"),
+        source_indices=(1, 2, 0),
+    ) == (10.0, 20.0, 30.0)
+
+
+@pytest.mark.parametrize("values", [[1.0], [1.0, float("nan"), 3.0]])
+def test_ordered_feedback_vector_rejects_invalid_values(values):
+    with pytest.raises(ValueError):
+        ordered_feedback_vector(
+            values,
+            source_names=("joint1", "joint2", "joint3"),
+            source_indices=(0, 1, 2),
+        )
 
 
 def test_recording_does_not_resample_duplicate_or_prestart_feedback():

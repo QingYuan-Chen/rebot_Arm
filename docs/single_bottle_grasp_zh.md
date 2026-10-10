@@ -47,7 +47,7 @@ python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed || exit 1
 fuser -v /dev/ttyUSB0 /dev/ttyACM0
 
 ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
-  channel:=/dev/ttyACM0 use_hardware:=true execution_mode:=execute
+  channel:=/dev/ttyACM0 use_hardware:=true
 ```
 
 确认现场安全、候选正确并取得本轮实机动作授权后，在第二个终端执行一次：

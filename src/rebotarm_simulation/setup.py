@@ -5,9 +5,8 @@
     本文件只描述安装布局，不会启动任何进程，也不开启硬件通道。
 
 资源安装策略
-    ``package_data`` 收进 Python 包内部的 ``assets/*.xml``（随代码一起导入的自带
-    物理模型）；``install_resources`` 则把 ``models/`` 下的 XML 模型、STL 网格、
-    ``config/*.yaml`` 与 ``launch/*.launch.py`` 按"源目录 → 同名安装目录"归并后
+    ``install_resources`` 把 ``models/`` 下的 XML 模型、STL 网格、
+    ``config/*.yaml`` 与保留的 ``launch/*.launch.py`` 按"源目录 → 同名安装目录"归并后
     安装到 ``share/<包名>/<原相对目录>``。运行期通过 ament 资源索引按相对路径定位，
     因此模型/网格必须与代码同版本安装，否则会加载到旧模型或找不到网格。
 
@@ -53,7 +52,6 @@ setup(
     name=package_name,
     version="0.1.0",
     packages=find_packages(exclude=["test"]),
-    package_data={package_name: ["assets/*.xml"]},
     include_package_data=True,
     data_files=[
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
@@ -65,32 +63,31 @@ setup(
     + install_resources("models/**/*.txt")
     + install_resources("models/**/*.step")
     + install_resources("config/*.yaml")
-    + install_resources("launch/*.launch.py")
-    + [(f"share/{package_name}/launch", sorted(launch_files))],
+    + install_resources("launch/*.launch.py"),
     install_requires=["setuptools", "mujoco>=3.3,<4", "numpy>=1.26", "PyYAML>=6"],
     zip_safe=True,
     maintainer="reBotArm Maintainers",
     maintainer_email="support@example.com",
-    description="RViz/offline simulation utilities for reBotArm bringup tests.",
+    description="MuJoCo physics, simulated execution and diagnostics for reBotArm.",
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
-            "rebotarm_sim_trajectory_controller = rebotarm_simulation.sim_trajectory_controller_node:main",
-            "rebotarm_mujoco_health = rebotarm_simulation.mujoco_health:main",
-            "rebotarm_mujoco_acceptance = rebotarm_simulation.mujoco_acceptance:main",
-            "rebotarm_mujoco_batch = rebotarm_simulation.mujoco_batch:main",
-            "rebotarm_mujoco_contact_check = rebotarm_simulation.mujoco_contact_check:main",
-            "rebotarm_mujoco_ros_acceptance = rebotarm_simulation.mujoco_ros_acceptance:main",
-            "rebotarm_mujoco_pick_batch = rebotarm_simulation.mujoco_pick_batch:main",
-            "rebotarm_real2sim_acceptance = rebotarm_simulation.real2sim_acceptance:main",
-            "rebotarm_real2sim_bridge = rebotarm_simulation.real2sim_ros_node:main",
-            "rebotarm_real2sim_viewer = rebotarm_simulation.real2sim_viewer:main",
-            "rebotarm_sim2real = rebotarm_simulation.sim2real_cli:main",
-            "rebotarm_mujoco_cli = rebotarm_simulation.mujoco_cli:main",
-            "rebotarm_mujoco = rebotarm_simulation.mujoco_cli:main",
-            "rebotarm_mujoco_viewer = rebotarm_simulation.mujoco_viewer:main",
-            "rebotarm_mujoco_node = rebotarm_simulation.mujoco_ros_node:main",
-            "rebotarm_urdf_to_mjcf = rebotarm_simulation.urdf_to_mjcf:main",
+            "rebotarm_mujoco_health = rebotarm_simulation.diagnostics.mujoco_health:main",
+            "rebotarm_mujoco_acceptance = rebotarm_simulation.diagnostics.mujoco_acceptance:main",
+            "rebotarm_mujoco_batch = rebotarm_simulation.diagnostics.mujoco_batch:main",
+            "rebotarm_mujoco_contact_check = rebotarm_simulation.diagnostics.mujoco_contact_check:main",
+            "rebotarm_mujoco_ros_acceptance = rebotarm_simulation.diagnostics.mujoco_ros_acceptance:main",
+            "rebotarm_mujoco_pick_batch = rebotarm_simulation.diagnostics.mujoco_pick_batch:main",
+            "rebotarm_real2sim_acceptance = rebotarm_simulation.diagnostics.real2sim_acceptance:main",
+            "rebotarm_real2sim_bridge = rebotarm_simulation.ros.real2sim_ros_node:main",
+            "rebotarm_real2sim_viewer = rebotarm_simulation.apps.real2sim_viewer:main",
+            "rebotarm_sim2real = rebotarm_simulation.apps.sim2real_cli:main",
+            "rebotarm_mujoco_cli = rebotarm_simulation.apps.mujoco_cli:main",
+            "rebotarm_mujoco = rebotarm_simulation.apps.mujoco_cli:main",
+            "rebotarm_mujoco_viewer = rebotarm_simulation.apps.mujoco_viewer:main",
+            "rebotarm_mujoco_teach_preview = rebotarm_simulation.apps.teach_preview:main",
+            "rebotarm_mujoco_node = rebotarm_simulation.ros.mujoco_ros_node:main",
+            "rebotarm_urdf_to_mjcf = rebotarm_simulation.model_tools.urdf_to_mjcf:main",
         ],
     },
 )

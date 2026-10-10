@@ -35,7 +35,7 @@ from rebotarm_motion.real_failure_recovery import (
     recover_real_failure,
     verify_recovery_baseline,
 )
-from rebotarm_vision.message_freshness import message_age_sec
+from rebotarm_vision.utils.message_freshness import message_age_sec
 
 
 REAL_CONFIRMATION = "REAL_SINGLE_BOTTLE_GRASP"

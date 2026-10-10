@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import json
 
-from rebotarm_simulation import mujoco_acceptance
+from rebotarm_simulation.diagnostics import mujoco_acceptance
 
 
 def test_acceptance_suite_aggregates_core_steps(monkeypatch):

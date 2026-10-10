@@ -113,7 +113,8 @@ def dispatch_post_request(node, path, payload_reader):
     with lock if lock is not None else nullcontext():
         if getattr(node, '_calibration_gravity_owned', False) and path not in {
             '/api/calibration/command', '/api/calibration/gravity', '/api/stop_execute',
-            '/api/teach_replay_stop', '/api/keyboard_disable', '/api/arm_disable',
+            '/api/teach_record_stop', '/api/teach_dry_run', '/api/teach_replay_stop',
+            '/api/keyboard_disable', '/api/arm_disable',
         }:
             return {'accepted': False, 'state': 'blocked',
                     'message': '标定拖动占用控制，请先明确退出重力补偿'}

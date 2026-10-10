@@ -5,7 +5,7 @@
 ## 当前范围
 
 Reach 是无接触的六轴末端位姿到达任务，不连接 ROS、相机或真实机械臂。
-原 MJX 批量训练与 CPU/MJX 对比工具已剥离；后续训练框架采用 MJLab，尚未接入。
+原 MJX 批量训练与 CPU/MJX 对比工具已剥离；MJLab 训练位于同级独立工程 `/home/a/project/rebot_Arm_rl/MJLab`。
 保留这套环境用于目标采样、动作/观测契约和迁移后的行为对照。
 物理步进在 CPU；现有 PPO 训练/推理显式要求 CUDA。
 本地已验证 Gymnasium reset/step 与契约，未验收 SB3/CUDA 训练质量或策略收敛。
@@ -22,8 +22,8 @@ python3 scripts/install_python_dependencies.py rl --python third_party/rebotarm_
 export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_rl_venv/bin/python"
 export PYTHONPATH="$PWD/src/rebotarm_simulation${PYTHONPATH:+:$PYTHONPATH}"
 "$REBOTARM_MUJOCO_PYTHON" -m pip check
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.mujoco_health --skip-renderer
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.rl_reach check
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoco_health --skip-renderer
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.rl_reach check
 ```
 
 `docs/setup/dependencies/rl.md` 的依赖块相对包含 `-r mujoco.md`，
@@ -35,13 +35,13 @@ Gymnasium、SB3 和 CUDA PyTorch 版本，与视觉/GraspNet 环境隔离。
 
 ```bash
 # fixed 只验证单个 home 附近的目标；预算不保证收敛。
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.rl_reach train \
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.rl_reach train \
   --curriculum-stage fixed --steps 500000 --seed 7 --model runs/reach/fixed_seed7.zip
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.rl_reach eval \
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.rl_reach eval \
   --curriculum-stage fixed --model runs/reach/fixed_seed7_best.zip --seed 20000 --episodes 100
 
 # local 在 home 附近采样可达构型，需要独立评估泛化。
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.rl_reach train \
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.rl_reach train \
   --curriculum-stage local --steps 1000000 --seed 7 --model runs/reach/local_seed7.zip
 ```
 
@@ -55,7 +55,7 @@ seed 10000 起的 20 回合选 best；最终模型另存。用未参与选模的
 在有 DISPLAY/OpenGL 的桌面终端中使用上述解释器和 PYTHONPATH：
 
 ```bash
-"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.rl_reach_viewer \
+"$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.rl_reach_viewer \
   --model runs/reach/fixed_seed7_best.zip --curriculum-stage fixed --episodes 5 --speed 0.25
 ```
 
@@ -76,5 +76,5 @@ seed 10000 起的 20 回合选 best；最终模型另存。用未参与选模的
 
 接触和碰撞关闭，成功率不证明抓取、自碰撞安全或真机可执行。
 低层 PI 积分等内部状态未全部进入观测，不宣称严格完整 Markov 状态。
-后续 MJLab 迁移需明确关节顺序、单位、动作缩放、控制周期、观测与成功门；
+MJLab 独立工程已定义关节顺序、单位、动作缩放、控制周期、观测与成功门；
 保持相同评估目标，分别比较误差、稳定性、成功率和实际训练时间。

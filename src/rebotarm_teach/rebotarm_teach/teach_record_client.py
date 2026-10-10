@@ -68,12 +68,24 @@ class TeachRecordClient:
             self._gravity_start_client,
             timeout_sec=2.0,
         )
+        gravity_already_active = "already" in gravity_message.lower()
+        if not gravity_ok and not gravity_already_active:
+            # 不得在重力补偿未建立时启动录制：否则录制节点会保持 active，
+            # 但因等待 GRAVITY_COMP 持续发布 waiting，界面会显示“停止后又恢复录制”。
+            return {
+                "accepted": False,
+                "state": "blocked",
+                "message": f"gravity: {gravity_message or gravity_ok}; record: not started",
+                "gravity_started": gravity_ok,
+                "record_started": False,
+                "record_path": normalized_path or requested_path,
+            }
         record_ok, record_message = call_trigger_service(
             self._start_client,
             timeout_sec=2.0,
         )
         # 放行条件：录制服务必须成功；重力补偿成功或返回 already（已在运行）均可。
-        accepted = record_ok and (gravity_ok or "already" in gravity_message.lower())
+        accepted = record_ok
         return {
             "accepted": accepted,
             "state": "starting" if accepted else "blocked",

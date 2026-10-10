@@ -68,7 +68,7 @@ POS_VEL 和夹爪控制器转换为 MuJoCo actuator 力矩或力。
 ## Python API
 
 ```python
-from rebotarm_simulation.mujoco_pick_env import RebotArmPickEnv
+from rebotarm_simulation.core.mujoco_pick_env import RebotArmPickEnv
 
 with RebotArmPickEnv() as env:
     obs, info = env.reset(seed=7)
@@ -91,7 +91,7 @@ source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 export PYTHONPATH="$PWD/src/rebotarm_simulation:$PYTHONPATH"
 
-python3 -m rebotarm_simulation.mujoco_pick_batch \
+python3 -m rebotarm_simulation.diagnostics.mujoco_pick_batch \
   --episodes 20 \
   --steps 400 \
   --seed 7 \
@@ -114,7 +114,7 @@ python3 -m rebotarm_simulation.mujoco_pick_batch \
 基础 MuJoCo 总验收现在也包含 Pick 环境 smoke test：
 
 ```bash
-python3 -m rebotarm_simulation.mujoco_acceptance --skip-renderer
+python3 -m rebotarm_simulation.diagnostics.mujoco_acceptance --skip-renderer
 ```
 
 ## 当前限制与下一步

@@ -2,7 +2,6 @@
 # 由启动文件加载，节点之间的输入/输出话题、相机取流 profile 与检测模型都集中在这里。
 # 三个顶层键必须与节点名完全一致，否则参数不会生效：
 #   rebotarm_vision_node            —— 相机取流 + YOLO 检测节点
-#   rebotarm_ordinary_grasp_node    —— 传统"检测框 + 深度"抓取规划节点（legacy，默认不启动）
 #   rebotarm_grasp_tcp_frame        —— 抓取 TCP 静态坐标系广播节点
 # 注意：本文件中的话题名、坐标系名、参数键都是对外接口，禁止改动；只允许增加注释。
 
@@ -10,8 +9,7 @@ rebotarm_vision_node:
   ros__parameters:
     # 相机型号选择器：目前仅支持 gemini2（其它取值会让节点在启动时抛 unsupported camera.type）。
     camera.type: gemini2
-    # Verified Gemini 2 HW D2C pair on this Ubuntu host.
-    # Verified Gemini 2 HW D2C pair on this Ubuntu host.
+    # 已在本 Ubuntu 主机验证的 Gemini 2 硬件深度到彩色对齐流组合。
     # 以下 color_*/depth_* 五元组是本机实测可用的 Gemini 2 硬件 D2C（深度-彩色对齐）配对组合，
     # 改动任一项都可能破坏对齐，导致深度图与彩色图不再逐像素对应；非必要不要调整。
     # 彩色流宽/高（像素）：640x480 是检测与内参默认值所对应的分辨率，换分辨率需同步更新内参。
@@ -32,6 +30,8 @@ rebotarm_vision_node:
     # 是否开启深度对齐到彩色坐标系（D2C）。开启后深度图可按彩色像素坐标索引，
     # 检测框无需再做坐标换算即可取深度；本仓库的相机内参与该开关配套使用，务必保持 true。
     camera.enable_align: true
+    # Gemini 2 SDK 按硬件时间戳配合彩色/深度帧；正式 RGB-D 抓取保持开启。
+    camera.enable_frame_sync: true
     # 启动时丢弃的前若干帧：自动曝光/自动白平衡与深度引擎尚未稳定，前几帧深度常为无效值。
     camera.warmup_frames: 15
     # 单帧等待超时，单位毫秒。超时即视为本帧失败（USB 抖动或设备被抢占）。
@@ -40,9 +40,8 @@ rebotarm_vision_node:
     # 同时改为持续发布空检测结果（不再假装有数据），避免下游用陈旧检测继续规划。
     # 调小会更快触发故障锁存，调大则容错更久但故障发现更慢。
     camera.max_empty_frames: 30
-    # The Ubuntu launch file overrides this with the installed model path.
-    # The Ubuntu launch file overrides this by the installed model path; leaving this empty here
-    # makes a bare `ros2 run` fail fast instead of loading an unintended model.
+    # Ubuntu 启动文件会用已安装模型的路径覆盖此值；这里留空，
+    # 使直接 ros2 run 且未配置模型时立即报错，避免加载非预期模型。
     # 留空表示"必须由启动文件注入"。启动文件会用 share 目录下安装好的模型路径覆盖该值；
     # 若直接 ros2 run 而未注入，节点检测到空路径会立即报错（yolo.model_path must not be empty），
     # 这样能快速失败，避免误加载到非预期模型。
@@ -74,8 +73,8 @@ rebotarm_vision_node:
     # 主循环频率（Hz）：取流 + 推理 + 发布的整体节奏上限。
     # 调高会更实时但更耗 CPU/GPU；调低会减轻负载，但检测结果更新变慢。
     ros.loop_rate_hz: 15.0
-    # Large 640x480 bgr8 samples are fragmented and lost with Fast DDS
-    # BEST_EFFORT on this host; RELIABLE passed the C++ payload control.
+    # 本机 Fast DDS 使用 BEST_EFFORT 时，640x480 bgr8 大图像样本会分片丢失；
+    # RELIABLE 已通过 C++ 数据载荷对照测试。
     # 本机 Fast DDS 在 BEST_EFFORT 下会分片丢失 640x480 bgr8 大样本；
     # 改用 RELIABLE 后通过了 C++ 侧载荷校验，因此这里必须是 reliable。
     # 合法取值仅 best_effort / reliable，其它取值节点会直接报错。
@@ -83,64 +82,12 @@ rebotarm_vision_node:
     # 是否启用检测（YOLO）推理。关闭时只取流与发布图像，不做检测。
     ros.enable_detection: true
 
-rebotarm_ordinary_grasp_node:
-  ros__parameters:
-    # 输入检测结果话题（检测框/掩膜，来自视觉检测节点）。
-    ordinary_grasp.input_detections_topic: /grasp/detections
-    # 输入深度图话题，单位毫米（16UC1），须与检测结果时间同步。
-    ordinary_grasp.input_depth_topic: /camera/depth/image_raw
-    # 输出抓取规划（GraspPlanArray）话题。
-    ordinary_grasp.output_topic: /grasp/plan
-    # 输出预抓取位姿（接近前的中间位姿）话题。
-    ordinary_grasp.pregrasp_pose_topic: /grasp/pregrasp_pose
-    # 输出抓取位姿（夹爪闭合中心对准物体）话题。
-    ordinary_grasp.grasp_pose_topic: /grasp/grasp_pose
-    # 传统抓取规划流程所依赖的模型/资源根目录。留空即为未配置；
-    # 仅在显式启用该 legacy 节点（start_ordinary_grasp:=true）时必填，否则节点启动即报错。
-    ordinary_grasp.root: ""
-    # 输出位姿的坐标系：与深度图同坐标系（配合 enable_align 即为彩色像素坐标下的深度坐标系）。
-    ordinary_grasp.output_frame_id: camera_depth_frame
-    # 相机内参（针孔模型，单位像素）：fx/fy 为焦距，cx/cy 为主点。
-    # 默认值对应 640x480 彩色图的视场角，换分辨率或换相机后必须重新标定，否则反投影会偏移。
-    ordinary_grasp.fx: 519.422
-    ordinary_grasp.fy: 519.17
-    ordinary_grasp.cx: 320.681
-    ordinary_grasp.cy: 241.362
-    # 深度取值分位数（0~1）。取检测框内有效深度的 0.75 分位而非中位数：
-    # 偏向"较近一侧"，与"宁可贴前一点抓、也不要伸到后面去"的安全取向一致。
-    ordinary_grasp.depth_quantile: 0.75
-    # 预抓取位姿沿接近轴后退的距离，单位米（0.08 m = 8 cm）。
-    # 调大后接近段更长、更保守，但空行程时间增加；调小则更容易在接近阶段擦到物体。
-    ordinary_grasp.pregrasp_offset_m: 0.08
-    # 深度质量门控：在把检测框转成三维抓取点之前先判断该处深度是否可信。
-    # enabled 为总开关，关闭后下列所有阈值都不起作用（等价于全部放行）。
-    depth_quality.enabled: true
-    # 检测区域（掩膜或检测框多边形）内有效深度像素数下限；低于此值认为是碎片/噪声。
-    depth_quality.min_valid_pixels: 80
-    # 有效深度像素占区域总像素的比例下限（0.20 = 20%）；反光/透明物体常在此被拦下。
-    depth_quality.min_valid_ratio: 0.20
-    # 允许的深度中位数区间，单位米。下限 0.15 m 排除过近的遮挡物，上限 1.2 m 排除超出工作范围的点。
-    depth_quality.min_depth_m: 0.15
-    depth_quality.max_depth_m: 1.2
-    # 深度中位数绝对偏差（MAD）上限，单位米（0.025 m = 2.5 cm）。
-    # 衡量区域内深度的离散程度，越大越可能落在斜面或多物体交界处。
-    depth_quality.max_depth_mad_m: 0.025
-    # 深度 5%~95% 分位跨度上限，单位米（0.080 m = 8 cm），用于排除"横跨前后两个面"的区域。
-    depth_quality.max_depth_span_m: 0.080
-    # 中心窗口边长，单位像素（9 表示以检测框中心为中心取 9x9 窗口）。
-    depth_quality.center_window_px: 9
-    # 中心窗口内有效深度像素比例下限（0.30 = 30%）：保证抓取点正下方确有深度数据。
-    depth_quality.min_center_valid_ratio: 0.30
-
 rebotarm_grasp_tcp_frame:
   ros__parameters:
     # 父坐标系：机械臂末端连杆；子坐标系：抓取 TCP。两者构成发布到 TF 树的静态变换。
     parent_frame: end_link
     child_frame: grasp_tcp
-    # Operator-measured end_link -> grasp_tcp translation.  Do not substitute
-    # the MuJoCo ee_site value here.
-    # Operator-measured end_link -> grasp_tcp translation.  Do not substitute
-    # the MuJoCo ee_site value here.
+    # 操作员实测的 end_link -> grasp_tcp 平移，不能用 MuJoCo 的 ee_site 值替代。
     # 操作员实测的 end_link -> grasp_tcp 平移，单位米（沿末端 X 轴 -4 cm）。
     # 不要用仿真模型（MuJoCo）里的 ee_site 取值替代：仿真等效点与真机实测点并不一致，
     # 混用会让真机所有抓取位姿整体偏移，可能直接压到桌面或物体。

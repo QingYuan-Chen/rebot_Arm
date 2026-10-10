@@ -7,11 +7,11 @@ from types import MappingProxyType, SimpleNamespace
 import numpy as np
 import pytest
 
-from rebotarm_simulation import mujoco_batch
-from rebotarm_simulation.mujoco_env import RebotArmReachEnv, ReachEnvConfig
+from rebotarm_simulation.diagnostics import mujoco_batch
+from rebotarm_simulation.core.mujoco_env import RebotArmReachEnv, ReachEnvConfig
 from rebotarm_simulation.sim2real.randomization import RandomizationSample
 from rebotarm_simulation.sim2real.trajectory_log import TrajectoryRecorder
-from rebotarm_simulation.mujoco_types import RandomizedScene
+from rebotarm_simulation.core.mujoco_types import RandomizedScene
 
 
 class FakeSim:

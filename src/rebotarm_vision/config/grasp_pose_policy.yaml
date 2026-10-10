@@ -5,9 +5,8 @@
 
 rebotarm_grasp_candidate_ik_filter:
   ros__parameters:
-    # 候选姿态生成策略。hybrid_geometry_with_base_axis_fallback = 先按候选自身几何构造抓取姿态，
-    # 几何不可用时回退到"沿 base 接近轴"的固定姿态。改动会改变所有候选的姿态来源。
-    pose_policy: hybrid_geometry_with_base_axis_fallback
+    # 正式候选姿态策略：完整保留 GraspNet 输出的 6D 姿态，仅按配置补充平行夹爪对称姿态。
+    pose_policy: preserve_candidate_pose
     # 固定抓取姿态四元数 (x, y, z, w)：沿用旧仓库 +X 工作区的单位姿态。
     # 这是"夹爪朝哪一边"的基准姿态，改动会让所有抓取姿态整体转向。
     fixed_grasp_orientation_xyzw: [0.0, 0.0, 0.0, 1.0]

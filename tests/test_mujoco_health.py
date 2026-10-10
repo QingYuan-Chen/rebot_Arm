@@ -14,22 +14,18 @@ if str(SIM_SRC) not in sys.path:
 
 def test_health_check_reports_finite_model_and_bounded_counts() -> None:
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_health import check_model_health
-    from rebotarm_simulation.mujoco_model_profile import DEFAULT_GRIPPER_XML
-
-    report = check_model_health(DEFAULT_GRIPPER_XML, steps=2)
+    from rebotarm_simulation.diagnostics.mujoco_health import check_model_health
+    report = check_model_health(steps=2)
 
     assert report.ok is True
     assert report.model_loaded is True
     assert report.physics_step_finite is True
     assert report.joint_count == 8
-    assert report.actuator_count == 7
-    assert report.simulation_time == pytest.approx(0.005)
+    assert report.actuator_count == 8
+    assert report.simulation_time == pytest.approx(0.004)
 
 
 def test_health_check_rejects_invalid_step_count() -> None:
-    from rebotarm_simulation.mujoco_health import check_model_health
-    from rebotarm_simulation.mujoco_model_profile import DEFAULT_GRIPPER_XML
-
+    from rebotarm_simulation.diagnostics.mujoco_health import check_model_health
     with pytest.raises(ValueError, match="steps"):
-        check_model_health(DEFAULT_GRIPPER_XML, steps=0)
+        check_model_health(steps=0)

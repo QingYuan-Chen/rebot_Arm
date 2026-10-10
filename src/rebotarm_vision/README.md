@@ -1,6 +1,6 @@
 # rebotarm_vision
 
-Ubuntu 原生视觉与抓取候选包。维护链路为 Gemini 2/RGB-D/CameraInfo → YOLO 检测 → 本机 GraspNet → 候选筛选/IK/工作空间/碰撞门 → MoveIt 规划接口。旧 Windows、HTTP、MJPEG、远程 JSON 和独立 GraspNet 服务路线不属于当前包。已有运行说明见 [`README_zh.md`](README_zh.md)。
+Ubuntu 原生视觉与抓取候选包。维护链路为 Gemini 2/RGB-D/CameraInfo → YOLO 检测 → 本机 GraspNet → 候选筛选/IK/工作空间/碰撞门 → MoveIt 规划接口。旧 Windows、HTTP、MJPEG、远程 JSON 和独立 GraspNet 服务路线不属于当前包。运行说明见 [视觉抓取命令](../../docs/reference/commands/visual_grasp_commands.md)。
 
 ## 目录结构
 
@@ -8,80 +8,78 @@ Ubuntu 原生视觉与抓取候选包。维护链路为 Gemini 2/RGB-D/CameraInf
 rebotarm_vision/
 ├── rebotarm_vision/
 │   ├── camera/
-│   │   ├── base.py                  # 相机抽象
 │   │   └── gemini2_driver.py        # Gemini 2 图像/深度/CameraInfo 发布
 │   ├── detector/
 │   │   └── yolo_detector.py         # YOLO 推理和检测结果
+│   ├── backends/
+│   │   └── graspnet_baseline_inference.py # GraspNet 进程内推理实现
 │   ├── converters/
 │   │   ├── detection_msgs.py        # 检测消息转换
 │   │   ├── image_msgs.py            # 图像消息转换
-│   │   └── ordinary_grasp_adapter.py# 普通抓取输入适配
-│   ├── vision_node.py                # 主相机/YOLO 视觉节点
+│   ├── diagnostics/                 # 只读诊断与开发可视化工具
+│   │   ├── debug_camera_preview.py  # 相机调试预览
+│   │   ├── grasp_depth_probe_node.py # 深度采样诊断
+│   │   └── graspnet_open3d_viewer.py # GraspNet 候选可视化
+│   ├── nodes/                        # 正式 ROS 适配节点
+│   │   ├── vision_node.py            # Gemini 2/YOLO 主节点
+│   │   ├── graspnet_baseline_node.py # RGB-D/检测 -> GraspCandidate
+│   │   ├── candidate_ik_filter_node.py # MoveIt IK/碰撞过滤
+│   │   ├── visual_grasp_executor_node.py # 抓取执行编排
+│   │   └── ...                       # 其余 ROS 节点适配器
+│   ├── policies/                     # 可测试的纯策略与门控函数
+│   │   ├── candidate_*_policy.py     # 候选预检、评分、门控与目标策略
+│   │   ├── visual_grasp_*_policy.py  # 抓取位姿、运行阶段与伺服策略
+│   │   └── ...                       # 夹爪、回撤、恢复和时间策略
+│   ├── utils/                        # 公共纯函数与消息适配
+│   │   ├── transform_points.py       # 坐标变换数学函数
+│   │   ├── tf_message_adapter.py     # TF/Pose 消息适配
+│   │   ├── visual_grasp_messages.py   # 位姿消息转换
+│   │   ├── parameter_validation.py    # 参数校验
+│   │   └── message_freshness.py / latest_only_work_queue.py
 │   ├── offline_yolo.py               # 离线检测纯逻辑
-│   ├── offline_yolo_node.py          # 离线图像检测 ROS 节点
 │   ├── graspnet_baseline_adapter.py  # 本机 GraspNet backend 适配
-│   ├── graspnet_baseline_node.py     # RGB-D/检测 -> GraspCandidate
-│   ├── ordinary_grasp_node.py        # OBB/mask/depth 普通候选
-│   ├── candidate_target_policy.py    # 目标标签和候选目标策略
-│   ├── candidate_precheck_policy.py  # 候选预检
-│   ├── candidate_workspace_gate.py   # 工作空间门
-│   ├── candidate_filter_policy.py    # 候选过滤
-│   ├── candidate_gate_policy.py      # 候选总门控
-│   ├── candidate_scoring_policy.py   # 候选评分
-│   ├── candidate_motion_policy.py    # 候选运动约束
 │   ├── candidate_tf_adapter.py       # 候选坐标变换适配
-│   ├── candidate_ik_filter_node.py   # MoveIt IK/碰撞/可执行性过滤
-│   ├── grasp_candidate_policy.py     # 候选生成策略
-│   ├── grasp_depth_probe_node.py     # 深度采样诊断
-│   ├── grasp_preview_sender_node.py  # 抓取计划预览发送
-│   ├── visual_grasp_marker_node.py   # RViz 抓取标记
-│   ├── visual_grasp_executor_node.py # 视觉抓取分阶段执行编排
-│   ├── visual_grasp_pose_policy.py   # pregrasp/grasp 位姿策略
 │   ├── visual_grasp_sequence.py      # 开爪/接近/闭合/抬升/回撤阶段构造
-│   ├── grasp_tcp_frame_node.py       # TCP/抓取坐标系广播
-│   ├── grasp_verification_policy.py  # 抓取结果验证策略
-│   ├── gripper_policy.py / gripper_quality.py # 夹爪开口与质量门
-│   ├── approach_policy.py / retreat_policy.py # 接近与回撤策略
-│   ├── place_task_policy.py           # 放置任务策略
-│   ├── pose_variant_policy.py        # 候选姿态变体
-│   ├── visual_servo_policy.py        # 单步视觉伺服限幅
-│   ├── grasp_retry_policy.py         # 抓取重试策略
-│   ├── retry_policy.py               # 通用重试策略
-│   ├── motion_feasibility_policy.py # 运动可行性策略
-│   ├── trajectory_recovery_policy.py # 轨迹恢复策略
-│   ├── depth_quality.py              # 深度质量
-│   ├── timestamp_policy.py / message_freshness.py / latest_only_work_queue.py # 时间与队列门
-│   ├── transform_points.py / candidate_tf_adapter.py # 坐标变换
-│   ├── aruco_reference.py / handeye_config.py # 参考物与手眼配置
-│   ├── visual_grasp_benchmark.py      # 视觉抓取软件 benchmark
-│   ├── hybrid_grasp_sim_benchmark.py  # 视觉 + 仿真 benchmark
-│   ├── debug_camera_preview.py        # 相机调试预览
-│   ├── graspnet_open3d_viewer.py      # GraspNet 候选可视化
+│   ├── single_bottle_grasp.py        # 正式单瓶流程，复用运动层保护与失败恢复
+│   ├── gripper_quality.py             # 夹爪质量判定（策略在 policies/）
+│   ├── handeye_config.py           # 手眼配置读取（ArUco 算法归标定包）
 │   ├── utils/visualization.py         # 可视化辅助
-│   ├── models/README.md               # 模型文件放置说明
 │   └── __init__.py
 ├── config/                            # 相机、YOLO/GraspNet、hand-eye、候选/夹爪/安全参数
+├── models/                            # YOLO 权重，安装到 share/rebotarm_vision/models/
 ├── launch/vision.launch.py            # 通用视觉入口
 ├── launch/vision_ubuntu.launch.py     # Ubuntu 原生相机入口
-├── setup.py / package.xml / resource/*
-└── ../../scripts/graspnet_baseline_inference.py # 构建时安装到 share/.../graspnet_backend/
+└── setup.py / package.xml / resource/*
 ```
 
-`candidate_*.py` 是一组独立策略模块，负责把候选逐层变成可执行计划；不要把这些门绕过后直接调用 controller。`visual_ready_node` 属于 `rebotarm_motion`，视觉包只保留其兼容/调用接口。
+`candidate_*.py` 是一组独立策略模块，负责把候选逐层变成可执行计划；不要把这些门绕过后直接调用 controller。抓取从当前姿态规划，无固定观察位调用接口。
 
-## 对外入口
+## 对外入口分类
+
+入口注册是为了保留可复制的命令名，不代表每个入口都是生产启动路径：
+
+| 类别 | 入口 | 说明 |
+| --- | --- | --- |
+| 正式运行 | `rebotarm_vision_node`, `rebotarm_graspnet_baseline_node`, `rebotarm_grasp_candidate_ik_filter`, `rebotarm_visual_grasp_executor`, `rebotarm_grasp_tcp_frame` | Ubuntu 主链路；节点裸启动默认 plan_only，正式视觉 launch 固定 execute，启动后仍等待服务触发且不自动使能 |
+| 正式单瓶抓取 | `rebotarm_single_bottle_grasp` | 使用独立配置、新鲜反馈与稳定候选；受控回到本轮基线并验收后才失能；健康回位失败保持使能，详见[视觉抓取命令](../../docs/reference/commands/visual_grasp_commands.md) |
+| 只读诊断 | `rebotarm_debug_camera_preview`, `rebotarm_grasp_depth_probe`, `rebotarm_grasp_candidate_markers`, `rebotarm_visual_grasp_markers` | 观察图像、深度或候选，不应下发运动 |
+| 开发调试 | `rebotarm_send_grasp_preview`, `rebotarm_graspnet_open3d_viewer`, `rebotarm_offline_yolo_node` | 离线或可视化工具，需单独准备输入 |
+| legacy 兼容 | （已退役）ordinary grasp 入口 | 历史路线已从安装包和 launch 移除 |
+
+正式 Ubuntu GraspNet 节点使用 `InProcessGraspNetBackend`。外部研究代码只作为该后端加载的
+推理引擎模块，不再在视觉包内维护第二个后端类。
+
+## 对外入口（命令名兼容表）
 
 ```text
 rebotarm_vision_node                  # Gemini 2/YOLO 主节点
-rebotarm_ordinary_grasp_node          # 普通深度/几何抓取
 rebotarm_graspnet_baseline_node       # 本机 GraspNet ROS 节点
 rebotarm_send_grasp_preview            # 发送抓取预览
 rebotarm_visual_grasp_markers          # RViz 抓取标记
 rebotarm_visual_grasp_executor         # 视觉抓取执行编排
+rebotarm_single_bottle_grasp           # 经显式确认的单瓶抓取与基线恢复
 rebotarm_grasp_candidate_ik_filter     # 候选 IK/碰撞过滤
 rebotarm_grasp_tcp_frame               # TCP 坐标系
-rebotarm_visual_grasp_benchmark        # 软件 benchmark
-rebotarm_hybrid_grasp_sim_benchmark    # 混合仿真 benchmark
 rebotarm_debug_camera_preview           # 相机调试
 rebotarm_grasp_depth_probe              # 深度探针
 rebotarm_graspnet_open3d_viewer         # Open3D 候选查看器
@@ -95,13 +93,13 @@ ros2 launch rebotarm_vision vision_ubuntu.launch.py
 ros2 launch rebotarm_vision vision.launch.py
 ```
 
-`vision_ubuntu.launch.py` 面向 Ubuntu 原生相机；模型、设备和是否启动普通抓取由 launch 参数和 `config/` profile 控制。缺少模型、相机或 GraspNet checkpoint 时应 fail closed。
+`vision_ubuntu.launch.py` 面向 Ubuntu 原生相机；模型、设备和 GraspNet 参数由 launch 参数与 `config/` profile 控制。缺少模型、相机或 GraspNet checkpoint 时应 fail closed。
 
 ## 运行边界
 
 ```text
 RGB-D + CameraInfo + detections
- -> graspnet/ordinary candidate
+ -> GraspNet candidate
  -> freshness/depth/TF/workspace/IK/collision/trajectory gates
  -> MoveIt / explicit executor
 ```

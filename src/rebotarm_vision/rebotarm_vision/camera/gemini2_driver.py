@@ -1,7 +1,7 @@
 """Gemini 2 深度相机的设备访问层（相机 SDK 封装）。
 
 本模块位于视觉包的最底层：向上只暴露「打开 / 预热 / 取帧 / 关闭」这一组
-与具体相机型号无关的能力（接口形状与同目录 base.py 中的协议一致），
+与具体相机型号无关的能力（打开、预热、取帧和关闭），
 不接触 ROS 话题、服务或运动规划，因此可在 ROS 之外的调试脚本里单独使用。
 
 职责边界：
@@ -58,6 +58,7 @@ class Gemini2Config:
       避免整个视觉循环被相机阻塞。
     - enable_align：是否请求深度到彩色的对齐（D2C）。开启后深度像素与彩色像素一一对应，
       深度流的内参会改为彩色内参，可直接用同一套像素坐标取三维点。
+    - enable_frame_sync：是否请求 SDK 按设备硬件时间戳配对彩色与深度帧。
     """
 
     color_width: int
@@ -69,6 +70,8 @@ class Gemini2Config:
     depth_fps: int
     frame_timeout_ms: int
     enable_align: bool
+    enable_frame_sync: bool = True
+    color_format: str = "MJPG"
 
 
 class Gemini2Driver:
@@ -245,6 +248,15 @@ class Gemini2Driver:
         except Exception:
             return default
 
+    def _color_formats(self, ob_format):
+        requested = str(self._config.color_format).strip().upper()
+        formats = {"MJPG": ob_format.MJPG, "RGB": ob_format.RGB}
+        if requested not in formats:
+            raise ValueError(
+                f"unsupported camera.color_format: {requested}; expected MJPG or RGB"
+            )
+        return (formats[requested],)
+
     def open(self) -> None:
         """打开设备并启动取流，同时固化本次会话的标定与设备信息。
 
@@ -276,7 +288,7 @@ class Gemini2Driver:
             stream_name="color",
             width=self._config.color_width,
             height=self._config.color_height,
-            formats=(OBFormat.MJPG, OBFormat.RGB),
+            formats=self._color_formats(OBFormat),
             fps=self._config.color_fps,
         )
         config.enable_stream(color_profile)
@@ -311,6 +323,13 @@ class Gemini2Driver:
             # 要求深度帧必须给出 depth scale（原始值→毫米的换算系数），
             # 否则取到的 16 位整数无法换算成物理距离。
             set_depth_scale_require(True)
+
+        # Gemini 2 支持 SDK 侧硬件时间戳配对；失败时保持显式错误，避免误以为已同步。
+        if self._config.enable_frame_sync and self._config.enable_depth:
+            enable_frame_sync = getattr(self._pipeline, "enable_frame_sync", None)
+            if not callable(enable_frame_sync):
+                raise RuntimeError("camera SDK does not provide enable_frame_sync")
+            enable_frame_sync()
 
         self._pipeline.start(config)
         device = self._pipeline.get_device()

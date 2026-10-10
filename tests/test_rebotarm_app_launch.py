@@ -126,6 +126,7 @@ def test_launches_reference_consumer_specific_operator_configs() -> None:
 def test_keyboard_no_hardware_mode_uses_one_simulated_trajectory_backend() -> None:
     keyboard = _read("src/rebotarm_bringup/launch/teleop_keyboard.launch.py")
 
+    assert keyboard.count('package="rebotarm_preview"') == 1
     assert keyboard.count('executable="rebotarm_sim_trajectory_controller"') == 1
     assert "condition=UnlessCondition(use_hardware)" in keyboard
     assert 'executable="joint_state_publisher"' not in keyboard

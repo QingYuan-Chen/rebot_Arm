@@ -4,11 +4,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from rebotarm_simulation.control.control_config import load_motor_control_parameters
 
-from rebotarm_simulation.motor_control import (
+from rebotarm_simulation.control.motor_control import (
     GripperMitController,
     PosVelController,
-    load_motor_control_parameters,
 )
 
 

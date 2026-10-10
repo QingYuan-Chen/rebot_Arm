@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarm_simulation.mujoco_ros_node import (
+from rebotarm_simulation.ros.mujoco_ros_node import (
     ActiveTrajectory,
     SerializedSimulationAccess,
     ExecutionLifecycle,
@@ -294,7 +294,7 @@ def test_execution_failure_holds_aborts_and_always_clears_active_token():
 
 
 def test_execute_callback_is_synchronous_and_does_not_use_asyncio():
-    source = Path("src/rebotarm_simulation/rebotarm_simulation/mujoco_ros_node.py").read_text()
+    source = Path("src/rebotarm_simulation/rebotarm_simulation/ros/mujoco_ros_node.py").read_text()
     assert "asyncio" not in source
     assert "async def _execute_goal" not in source
     assert "def _execute_goal" in source
@@ -353,7 +353,7 @@ def test_gate_timer_and_stop_sim_calls_are_serialized_on_one_sim_lock():
 
 
 def test_ros_adapter_source_has_required_safe_interfaces_and_no_hardware_imports():
-    source = Path("src/rebotarm_simulation/rebotarm_simulation/mujoco_ros_node.py").read_text()
+    source = Path("src/rebotarm_simulation/rebotarm_simulation/ros/mujoco_ros_node.py").read_text()
     assert "FollowJointTrajectory" in source
     assert 'f"/{self._arm_namespace}/follow_joint_trajectory"' in source
     assert 'f"/{self._arm_namespace}/joint_states"' in source
@@ -375,9 +375,13 @@ def test_ros_adapter_source_has_required_safe_interfaces_and_no_hardware_imports
     assert source.count("self._hold_current_position") >= 3
     assert "ActiveTrajectory(self._lock)" not in source
     assert "GOAL_TOLERANCE_VIOLATED" in source
-    assert "complete_if_active" in source
+    assert "complete_with_reason" in source
     assert "apply_with_reason" in source
-    assert "GateOutcome.ACTION_CANCEL" in source
+    execution_source = Path(
+        "src/rebotarm_simulation/rebotarm_simulation/execution/trajectory_state.py"
+    ).read_text()
+    assert "terminal_disposition" in source
+    assert "GateOutcome.ACTION_CANCEL" in execution_source
     assert "simulation trajectory stopped by service" in source
     assert "type(exc).__name__" in source
     assert "FeedbackRateLimiter" in source
@@ -398,7 +402,7 @@ def test_ros_adapter_configures_home_hold_and_bounded_diagnostics():
 
 
 def test_ros_adapter_trajectory_lifecycle_explicitly_enters_position_and_hold():
-    source = Path("src/rebotarm_simulation/rebotarm_simulation/mujoco_ros_node.py").read_text()
+    source = Path("src/rebotarm_simulation/rebotarm_simulation/ros/mujoco_ros_node.py").read_text()
     execute_body = source.split("def _execute_goal(self, goal_handle):", 1)[1].split(
         "\n        def _timer_callback", 1
     )[0]

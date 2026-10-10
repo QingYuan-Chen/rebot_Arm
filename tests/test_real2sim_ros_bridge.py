@@ -6,12 +6,12 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from rebotarm_simulation.real2sim_ros_node import (
+from rebotarm_simulation.ros.real2sim_ros_node import (
     joint_state_message_to_sample,
     stamp_to_seconds,
     validate_topic_separation,
 )
-from rebotarm_simulation.real2sim_viewer import build_parser as build_viewer_parser
+from rebotarm_simulation.apps.real2sim_viewer import build_parser as build_viewer_parser
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,14 +65,14 @@ def test_message_and_topic_validation_rejects_unsafe_shapes_and_loop():
 
 
 def test_ros_bridge_is_read_only_and_uses_separate_output_namespace():
-    source = (PACKAGE / "rebotarm_simulation/real2sim_ros_node.py").read_text(
+    source = (PACKAGE / "rebotarm_simulation/ros/real2sim_ros_node.py").read_text(
         encoding="utf-8"
     )
     config = yaml.safe_load(
         (PACKAGE / "config/real2sim_bridge.yaml").read_text(encoding="utf-8")
     )["rebotarm_real2sim_bridge"]["ros__parameters"]
     launch = (PACKAGE / "launch/real2sim_bridge.launch.py").read_text(encoding="utf-8")
-    viewer = (PACKAGE / "rebotarm_simulation/real2sim_viewer.py").read_text(
+    viewer = (PACKAGE / "rebotarm_simulation/apps/real2sim_viewer.py").read_text(
         encoding="utf-8"
     )
 

@@ -89,7 +89,7 @@ _install_ros_stubs_if_needed()
 
 
 def test_build_grasp_tcp_transform_uses_end_link_parent_and_offset():
-    from rebotarm_vision.grasp_tcp_frame_node import build_grasp_tcp_transform
+    from rebotarm_vision.nodes.grasp_tcp_frame_node import build_grasp_tcp_transform
 
     tf_msg = build_grasp_tcp_transform(
         parent_frame="end_link",

@@ -13,7 +13,7 @@ log_*/
 # Local model downloads and machine-specific inference artifacts.
 # Already tracked baseline assets remain tracked.
 *.pt
-!/scripts/yolo26s-seg.pt
+!/src/rebotarm_vision/models/yolo26s-seg.pt
 *.onnx
 *.engine
 *.whl
@@ -65,3 +65,11 @@ Thumbs.db
 
 # Local reinforcement-learning outputs
 /runs/
+
+.venv-mujoco/
+
+# Editable Python installs generate local package metadata.
+src/rebotarm_simulation/*.egg-info/
+
+# MuJoCo local runtime diagnostics
+MUJOCO_LOG.TXT

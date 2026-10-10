@@ -19,11 +19,13 @@
 | 示教录制 | 重力补偿录制、原子反馈批次、JSONL 文件、文件列表和记录状态 | `rebotarm_teach` | 录制不自动代表轨迹可执行；真机重力补偿需现场授权 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 示教检查与回放 | 滤波、重采样、重定时、速度/加速度/jerk 检查、MoveIt 起点对齐、碰撞预检、dry-run/execute、运行时跟踪门 | `rebotarm_teach` + `rebotarm_motion` | 原始记录不能直接下发；回放通过不等于真实运动安全 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 网页手眼/TCP 标定 | 会话保存恢复、同步采样、五方法求解、独立验证、质量门、导出和审计 | `rebotarm_calibration` + `rebotarm_dashboard` | 当前是软件/合成数据闭环；真实相机和物理精度需独立验收 | [网页标定命令](../../reference/commands/calibration_web.md) |
-| Ubuntu 原生视觉 | Gemini 2 RGB-D、CameraInfo、YOLO 检测、深度融合、本机 GraspNet 候选、Marker/Open3D 可视化 | `rebotarm_vision` + `rebotarm_bringup` | 默认只读/plan-only；不自动使能、不自动执行 | [视觉只读命令](../../reference/commands/ubuntu_vision_readonly_test_zh.md) |
+| Ubuntu 原生视觉 | Gemini 2 RGB-D、CameraInfo、YOLO 检测、深度融合、本机 GraspNet 候选、Marker/Open3D 可视化 | `rebotarm_vision` + `rebotarm_bringup` | 相机入口只读；完整抓取入口等待显式 execute，不自动使能或抓取 | [视觉只读命令](../../reference/commands/ubuntu_vision_readonly_test_zh.md) |
 | 视觉抓取规划 | 候选过滤、IK、工作空间/姿态/夹爪约束、MoveIt 碰撞门、预抓取/抓取/撤退阶段编排 | `rebotarm_vision` + `rebotarm_motion` | 候选和规划通过不等于抓取成功；真机执行需分级授权 | [视觉抓取命令](../../reference/commands/visual_grasp_commands.md) |
 | MuJoCo 仿真 | URDF→MJCF、headless/viewer、仿真关节状态、仿真轨迹控制器、MoveIt Plan/Execute 仿真后端、物理指标 | `rebotarm_simulation` | 不访问真实电机；仿真接触不替代现场碰撞/抓取验收 | [仿真命令](../../reference/commands/system_runtime.md) |
 | MuJoCo 示教预演 | 读取示教 JSONL，复用准备/重定时，在独立仿真中报告跟踪、接触和位移 | `rebotarm_teach` + `rebotarm_simulation` | 只覆盖仿真预演，不授权真机回放 | [示教预演命令](../../reference/commands/mujoco_teach_preview.md) |
-| Gymnasium Reach/RL | 末端位姿 Reach 环境、观测/奖励/成功门、Gymnasium/SB3、GPU PPO 训练评估 | `rebotarm_simulation` | 当前策略尚未达到稳定成功率；无相机、夹爪或 ROS 真机链 | [RL 命令](../../reference/commands/mujoco_rl.md) |
+| 轻量 RViz 预演 | 无物理引擎的轨迹插值、关节/夹爪状态和停止接口 | `rebotarm_preview` | 不验证动力学、碰撞、接触或真实硬件 | [架构说明](../architecture.md) |
+| CPU Reach/RL | Gymnasium 无接触 Reach 与可选 SB3/PPO 工具 | `rebotarm_simulation` | 软件基准不代表学习策略收敛或实机适用 | [CPU 命令](../../reference/commands/mujoco_rl.md) |
+| 独立 MJLab Reach-and-Hold | 独立环境中的任务、导出、回放和评测工具 | `/home/a/project/rebot_Arm_rl/MJLab/` | 训练与 ROS 分离，当前结果见唯一项目状态文档；本次整合不继续训练 | [MJLab 入口](../../reference/commands/mjlab_rl.md) |
 
 ## 本地保留的扩展
 
@@ -34,7 +36,7 @@
 
 ## 尚未列为已实现功能的内容
 
-- 稳定收敛的 Reach 策略和 sim-to-real 部署；本地完成物理/Gymnasium 软件检查，GPU 训练链路尚未在本机验收。
+- 稳定收敛的 Reach-and-Hold 策略和 sim-to-real 部署；独立训练与评测结果见[项目状态](../../reference/project_status.md)，软件链路通过不代表任务收敛。
 - 自动真机视觉抓取、lift/retreat、放置和抓取结果分类；当前执行器存在，但不能据此宣称现场成功。
 - 真实相机/机械臂联合精度、真实接触力和物理抓取成功率；这些属于单独的现场验收。
 - 已退役的 Windows、HTTP、MJPEG、远程 JSON、独立 GraspNet 服务和旧 interactive-control 路线。

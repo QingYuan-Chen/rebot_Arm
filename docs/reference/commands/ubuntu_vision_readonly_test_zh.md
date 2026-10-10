@@ -81,31 +81,14 @@ ros2 topic echo /grasp/graspnet_candidates --once
 ros2 topic hz /grasp/graspnet_candidates
 ```
 
-夹爪位姿优先使用 RViz Marker 显示。统一视觉入口的纯感知模式不会启动真机控制器、
-运动执行节点或抓取执行器；无硬件状态后端只为 TF 和 IK 提供假关节状态：
+相机只读诊断使用已有的视觉专用入口，不启动控制器、MoveIt 或抓取执行器：
 
 ```bash
-ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
-  use_hardware:=false \
-  execution_mode:=plan_only \
-  execute_gripper:=false \
-  start_visual_ready:=false \
-  start_motion_execution:=false \
-  start_visual_grasp_executor:=false \
-  start_open3d_viewer:=true \
-  use_local_rviz:=true
+./scripts/run_ubuntu_vision.sh
 ```
 
-在 RViz 中确认：
-
-- Fixed Frame 使用 `camera_depth_frame` 或当前消息 frame；
-- 添加 `MarkerArray`，话题选择视觉夹爪 Marker 话题；
-- 能看到候选物体、pregrasp、grasp、TCP、接近箭头和夹爪开口方向。
-
-这个模式不会启动真实机械臂，也不会执行候选。RViz Marker 保留 ROS 时间戳、TF 和
-过滤后计划；Open3D 是独立只读订阅者，复用同一组 RGB-D、内参与原始候选，在独立
-窗口显示完整点云和实体夹爪，不在 GraspNet 推理回调里运行。无桌面环境或不需要
-Open3D 时传 `start_open3d_viewer:=false`。
+上述入口负责相机、YOLO 和 TF；GraspNet/Open3D 与仿真执行组合参见
+[视觉抓取命令](visual_grasp_commands.md)，不能把该执行组合当作相机只读入口。
 
 ## 验证顺序与判定
 

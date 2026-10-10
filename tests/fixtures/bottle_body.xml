@@ -1,0 +1,15 @@
+<mujoco>
+    <body name="bottle" pos="0.28 0 0.0">
+      <freejoint/>
+      <!-- 整体质量 0.12 kg，质心在瓶身中部（z=0.095），对角惯量单位 kg·m²。 -->
+      <inertial pos="0 0 0.095" mass="0.12" diaginertia="0.00023 0.00023 0.00009"/>
+      <!-- 瓶身：圆柱，半径 0.038 m、半高 0.065 m（z 向覆盖 0～0.13 m）。 -->
+      <geom name="bottle_body" type="cylinder" pos="0 0 0.065" size="0.038 0.065" rgba="0.12 0.42 0.82 1" contype="1" conaffinity="1" friction="0.8 0.02 0.001"/>
+      <!-- 肩部：椭球过渡，三个半轴 0.038 / 0.038 / 0.020 m。 -->
+      <geom name="bottle_shoulder" type="ellipsoid" pos="0 0 0.128" size="0.038 0.038 0.020" rgba="0.12 0.42 0.82 1" contype="1" conaffinity="1" friction="0.8 0.02 0.001"/>
+      <!-- 瓶颈：圆柱，半径 0.018 m、半高 0.015 m。 -->
+      <geom name="bottle_neck" type="cylinder" pos="0 0 0.160" size="0.018 0.015" rgba="0.12 0.42 0.82 1" contype="1" conaffinity="1" friction="0.8 0.02 0.001"/>
+      <!-- 瓶盖：圆柱，半径 0.020 m、半高 0.010 m，颜色更深以示区分。 -->
+      <geom name="bottle_cap" type="cylinder" pos="0 0 0.185" size="0.020 0.010" rgba="0.04 0.12 0.20 1" contype="1" conaffinity="1" friction="0.8 0.02 0.001"/>
+    </body>
+</mujoco>

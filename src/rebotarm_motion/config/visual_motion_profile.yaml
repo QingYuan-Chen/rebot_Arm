@@ -1,0 +1,10 @@
+# 正式运动启动 profile（非 ROS 参数文件）：仿真初始姿态、MoveIt 和分阶段速度。
+launch:
+  # 与仿真 safe_home 一致：joint3=-1°，其余为零；仅初始化仿真状态。
+  sim_initial_joint_positions: [0.0, 0.0, -0.017453292519943295, 0.0, 0.0, 0.0]
+  moveit_planning_time: 8.0
+  moveit_num_planning_attempts: 5
+  move_velocity_scaling: 0.25
+  approach_velocity_scaling: 0.08
+  retreat_velocity_scaling: 0.15
+  acceleration_scaling: 0.12

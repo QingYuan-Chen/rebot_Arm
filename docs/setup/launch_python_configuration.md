@@ -6,18 +6,23 @@ MuJoCo、视觉、GraspNet 的 ROS launch 不依赖工作区内的虚拟环境�
 也不向整组节点注入视觉
 `site-packages/PYTHONPATH`。每类 Python 节点使用自己的解释器 prefix。
 
-选择优先级：显式 launch 参数 > 对应环境变量 > `PATH` 中的 `python3`。
+选择优先级：显式 launch 参数 > 对应环境变量 > 默认解释器。
+MuJoCo、视觉和 GraspNet 的 launch 默认使用 `PATH` 中的 `python3`。
+视觉和 GraspNet 的环境由入口脚本或显式参数选择；MuJoCo 不要求专属虚拟环境。
 解释器必须具有该节点所需依赖，并能读取 source ROS/工作区后提供的 ROS 包路径。
 
 | 节点 | 环境变量 | launch 参数 |
 | --- | --- | --- |
-| MuJoCo | `REBOTARM_MUJOCO_PYTHON` | 仿真包入口 `python_executable`；bringup 混合入口 `mujoco_python_executable` |
+| MuJoCo | `REBOTARM_MUJOCO_PYTHON` | 仿真包和 bringup 仿真组合入口均为 `python_executable` |
 | 相机、普通候选、TCP frame、离线 YOLO | `REBOTARM_VISION_PYTHON` | `vision_python_executable` |
 | in-process GraspNet | `GRASPNET_PYTHON` | `graspnet_python_executable` |
 
+MuJoCo 使用系统 Python 的用户级依赖，不设置 `PYTHONNOUSERSITE=1`，
+也不默认加入 `-s`；否则会屏蔽当前受支持的 MuJoCo 安装。
+
 这些参数分别传递给对应进程；不会修改 MoveIt、控制器或其他节点的 Python 环境。
-环境变量设置在启动前完成，路径允许放在工作区外。未设置时，依赖需安装在当前
-`PATH` 所选 Python 中；不再自动切换到恰好在邻近目录找到的虚拟环境。
+环境变量设置在启动前完成，路径允许放在工作区外。默认解释器必须具有所需依赖；
+launch 不探测相邻目录是否存在其他虚拟环境，也不因默认环境缺失而静默回退。
 
 本机 MuJoCo 已部署到系统 Python 的用户包目录，默认直接使用 `python3`，
 无需指定专属解释器。视觉和 GraspNet 仍可单独选择（仅配置环境，不启动节点）：
@@ -63,13 +68,12 @@ MuJoCo 模型资源的选择方式保持原有契约；本次只解除解释器�
 
 覆盖入口：
 
-- `rebotarm_simulation`: `mujoco_sim.launch.py`、`mujoco_moveit_sim.launch.py`
-- `rebotarm_bringup`: `visual_grasp_system.launch.py`
-- `rebotarm_vision`: `vision.launch.py`、`vision_ubuntu.launch.py`
+- MuJoCo：`rebotarm_simulation/mujoco_sim.launch.py`、`rebotarm_bringup/mujoco_moveit_sim.launch.py`
+- 视觉和 GraspNet：`rebotarm_bringup/visual_grasp_system.launch.py`、`rebotarm_vision/vision.launch.py`、`rebotarm_vision/vision_ubuntu.launch.py`。视觉总入口的无硬件模式使用 RViz 轻量预演，不启动 MuJoCo。
 
 旧 `mujoco_ros_adapter_node.py` 和快照进程转发器 `upstream_backend.py` 已退出
 活动源码包，`rebotarm_simulation` 不再依赖 `rebotarm_motion`。正式 ROS 入口仍是
-`rebotarm_mujoco_node = rebotarm_simulation.mujoco_ros_node:main`，ROS action/service
+`rebotarm_mujoco_node = rebotarm_simulation.ros.mujoco_ros_node:main`，ROS action/service
 接口不变。历史源码可从 Git 历史追溯，本机参考归档不再随源码发布。
 模型分析、指标和独立离线工具仍使用的公共模块继续保留。
 

@@ -10,7 +10,7 @@ if VISION_PATH not in sys.path:
 
 
 def test_quaternion_transform_point_applies_rotation_and_translation():
-    from rebotarm_vision.transform_points import Transform3D, transform_point
+    from rebotarm_vision.utils.transform_points import Transform3D, transform_point
 
     transform = Transform3D(
         translation=(1.0, 2.0, 3.0),
@@ -23,7 +23,7 @@ def test_quaternion_transform_point_applies_rotation_and_translation():
 
 
 def test_transform_pose_components_rotates_orientation():
-    from rebotarm_vision.transform_points import Transform3D, transform_pose_components
+    from rebotarm_vision.utils.transform_points import Transform3D, transform_pose_components
 
     transform = Transform3D(
         translation=(1.0, 2.0, 3.0),

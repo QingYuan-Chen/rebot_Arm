@@ -1,6 +1,6 @@
 # rebotarm_moveit_config
 
-MoveIt 2 模型与规划配置包。它是“数据 + 启动文件”包，没有 Python 业务模块，也不持有真实硬件。现有的中文操作说明见 [`README_zh.md`](README_zh.md)。
+MoveIt 2 模型与规划配置包。它只安装模型、规划参数、网格和 RViz 布局；启动组合由 `rebotarm_bringup` 负责。现有的中文操作说明见 [`README_zh.md`](README_zh.md)。
 
 ## 目录结构
 
@@ -18,12 +18,11 @@ rebotarm_moveit_config/
 │   ├── moveit_cpp.yaml           # MoveIt 通用参数
 │   └── sensors_3d.yaml           # 3D 传感器占位/配置
 ├── meshes/                       # URDF 引用的 STL 网格
-├── launch/demo.launch.py         # 规划与 RViz 独立演示入口
 ├── rviz/moveit.rviz              # MotionPlanning RViz 配置
 ├── setup.py / package.xml / resource/*
 ```
 
-## `demo.launch.py` 做什么
+## Bringup 演示入口
 
 启动参数为 `use_rviz`、`arm_namespace`、`use_fake_joint_states` 和 `use_sim_time`。启动组合包括：
 
@@ -35,10 +34,10 @@ rebotarm_moveit_config/
 6. 可选 `rviz2` MotionPlanning 面板。
 
 ```bash
-ros2 launch rebotarm_moveit_config demo.launch.py use_rviz:=true
+ros2 launch rebotarm_bringup moveit_demo.launch.py use_rviz:=true
 ```
 
-这个入口用于规划/可视化检查，不会自动连接真机。真实硬件或 MuJoCo 的执行后端由 `rebotarm_bringup` 或 `rebotarm_simulation` 选择，必须确保同名 `FollowJointTrajectory` 只有一个服务端。
+`moveit_demo.launch.py` 位于 `rebotarm_bringup`。这个入口用于规划/可视化检查，不会自动连接真机。真实硬件或 MuJoCo 的执行后端由启动组合选择，必须确保同名 `FollowJointTrajectory` 只有一个服务端。
 
 ## 配置职责
 

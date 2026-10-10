@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from rebotarm_simulation import sim2real_cli
+from rebotarm_simulation.apps import sim2real_cli
 from rebotarm_simulation.sim2real.schemas import TrajectorySample
 
 

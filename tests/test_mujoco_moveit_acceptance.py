@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarm_simulation import mujoco_moveit_acceptance
+from rebotarm_simulation.diagnostics import mujoco_moveit_acceptance
 
 
 def test_moveit_acceptance_entrypoint_reports_runtime_errors_without_hardware(monkeypatch):

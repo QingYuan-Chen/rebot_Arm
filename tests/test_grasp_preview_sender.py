@@ -171,7 +171,7 @@ _install_ros_stubs_if_needed()
 def test_select_pregrasp_pose_from_valid_plan():
     from geometry_msgs.msg import Pose
     from rebotarm_msgs.msg import GraspPlan
-    from rebotarm_vision.grasp_preview_sender_node import select_grasp_plan_pose
+    from rebotarm_vision.nodes.grasp_preview_sender_node import select_grasp_plan_pose
 
     plan = GraspPlan()
     plan.valid = True
@@ -186,7 +186,7 @@ def test_select_pregrasp_pose_from_valid_plan():
 
 def test_select_grasp_pose_from_valid_plan():
     from rebotarm_msgs.msg import GraspPlan
-    from rebotarm_vision.grasp_preview_sender_node import select_grasp_plan_pose
+    from rebotarm_vision.nodes.grasp_preview_sender_node import select_grasp_plan_pose
 
     plan = GraspPlan()
     plan.valid = True
@@ -200,7 +200,7 @@ def test_select_grasp_pose_from_valid_plan():
 
 def test_select_pose_rejects_invalid_plan():
     from rebotarm_msgs.msg import GraspPlan
-    from rebotarm_vision.grasp_preview_sender_node import select_grasp_plan_pose
+    from rebotarm_vision.nodes.grasp_preview_sender_node import select_grasp_plan_pose
 
     plan = GraspPlan()
     plan.valid = False
@@ -212,7 +212,7 @@ def test_select_pose_rejects_invalid_plan():
 
 def test_select_pose_rejects_unknown_mode():
     from rebotarm_msgs.msg import GraspPlan
-    from rebotarm_vision.grasp_preview_sender_node import select_grasp_plan_pose
+    from rebotarm_vision.nodes.grasp_preview_sender_node import select_grasp_plan_pose
 
     plan = GraspPlan()
     plan.valid = True
@@ -222,8 +222,8 @@ def test_select_pose_rejects_unknown_mode():
 
 
 def test_transform_pose_message_applies_tf_to_position_and_orientation():
-    from rebotarm_vision.grasp_preview_sender_node import transform_pose_message
-    from rebotarm_vision.transform_points import Transform3D
+    from rebotarm_vision.nodes.grasp_preview_sender_node import transform_pose_message
+    from rebotarm_vision.utils.transform_points import Transform3D
     from geometry_msgs.msg import Pose
 
     pose = Pose()
@@ -244,7 +244,7 @@ def test_transform_pose_message_applies_tf_to_position_and_orientation():
 
 
 def test_apply_tcp_offset_converts_grasp_tcp_target_to_end_link_target():
-    from rebotarm_vision.grasp_preview_sender_node import apply_tcp_offset_to_pose
+    from rebotarm_vision.nodes.grasp_preview_sender_node import apply_tcp_offset_to_pose
     from geometry_msgs.msg import Pose
 
     pose = Pose()

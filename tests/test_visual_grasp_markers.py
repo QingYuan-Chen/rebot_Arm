@@ -181,7 +181,7 @@ def _plan():
 
 
 def test_visual_marker_builder_uses_upright_object_marker():
-    from rebotarm_vision.visual_grasp_marker_node import VisualGraspMarkerBuilder
+    from rebotarm_vision.nodes.visual_grasp_marker_node import VisualGraspMarkerBuilder
 
     markers = VisualGraspMarkerBuilder(upright_object_marker=True).build(
         _plan(),
@@ -201,7 +201,7 @@ def test_visual_marker_builder_uses_upright_object_marker():
 
 def test_visual_marker_builder_shows_tcp_approach_and_gripper_open_axis():
     from visualization_msgs.msg import Marker
-    from rebotarm_vision.visual_grasp_marker_node import VisualGraspMarkerBuilder
+    from rebotarm_vision.nodes.visual_grasp_marker_node import VisualGraspMarkerBuilder
 
     plan = _plan()
     plan.pregrasp_pose.position.x = 0.20
@@ -237,7 +237,7 @@ def test_visual_marker_builder_shows_tcp_approach_and_gripper_open_axis():
 
 
 def test_preview_markers_hide_object_shape_center_and_label():
-    from rebotarm_vision.visual_grasp_marker_node import VisualGraspMarkerBuilder
+    from rebotarm_vision.nodes.visual_grasp_marker_node import VisualGraspMarkerBuilder
 
     plan = _plan()
     markers = VisualGraspMarkerBuilder(
@@ -258,7 +258,7 @@ def test_preview_markers_hide_object_shape_center_and_label():
 def test_visual_marker_builder_deletes_markers_for_invalid_plan():
     from rebotarm_msgs.msg import GraspPlan
     from visualization_msgs.msg import Marker
-    from rebotarm_vision.visual_grasp_marker_node import VisualGraspMarkerBuilder
+    from rebotarm_vision.nodes.visual_grasp_marker_node import VisualGraspMarkerBuilder
 
     plan = GraspPlan()
     plan.valid = False

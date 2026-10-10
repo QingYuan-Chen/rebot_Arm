@@ -56,10 +56,23 @@ The maintained vision path is native Ubuntu only:
 ```text
 Gemini 2 SDK -> YOLO -> ROS Image/CameraInfo/detections
 -> local GraspNet -> candidate IK/collision gates -> MoveIt
--> MuJoCo or explicitly enabled hardware
+-> lightweight RViz preview or explicitly enabled hardware
 ```
 
 Windows/HTTP/MJPEG/remote JSON and standalone GraspNet service paths are retired.
 Dashboard HTTP is local UI, not vision transport. `connected` means feedback
 communication, `enabled` means holding torque, and `ready_for_motion` requires
 both plus a healthy lifecycle. Motor feedback sequence counters are independent.
+
+`rebotarm_preview` owns lightweight trajectory interpolation without physics.
+MuJoCo remains a separate backend owned by `rebotarm_simulation`; neither backend
+opens real hardware. The teach package owns record preparation and replay policy,
+while MuJoCo teach-preview execution and Viewer lifecycle belong to simulation.
+
+The general visual-grasp entrypoint waits for an explicit execute request.
+Stopping drains old requests and requires fresh stationary feedback before new
+execution is allowed. A healthy real arm keeps enabled hold after a recoverable
+failure, or returns under guard to the captured baseline and verifies it before
+disable. Stop confirmation alone does not authorize disable or a new motion.
+The local single-bottle workflow retains its guarded motion interface and baseline
+recovery; vision never accesses motor SDKs directly.

@@ -42,6 +42,7 @@ except ImportError:
     sys.exit(77)
 
 root, relocated, mode = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+sys.path.insert(0, str(root / "src/rebotarm_bringup"))
 env_names = {"mujoco": "REBOTARM_MUJOCO_PYTHON", "vision": "REBOTARM_VISION_PYTHON", "graspnet": "GRASPNET_PYTHON"}
 expected = {}
 for kind, name in env_names.items():
@@ -53,7 +54,7 @@ for kind, name in env_names.items():
     if mode == "argument":
         expected[kind] = f"/opt/override-{kind}/bin/python"
 # The obsolete layouts deliberately exist: they must never override configuration.
-for relative in (".venv-graspnet/bin/python", ".venv-vision/lib/python3.12/site-packages/marker", "third_party/rebotarm_mujoco_venv/bin/python"):
+for relative in (".venv-graspnet/bin/python", ".venv-vision/lib/python3.12/site-packages/marker", ".venv-mujoco/bin/python", "third_party/rebotarm_mujoco_venv/bin/python"):
     target = relocated / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.touch()
@@ -61,8 +62,8 @@ os.chdir(relocated)
 os.environ["PWD"] = str(relocated)
 
 files = {
-    "rebotarm_simulation": ["mujoco_sim.launch.py", "mujoco_moveit_sim.launch.py"],
-    "rebotarm_bringup": ["visual_grasp_system.launch.py"],
+    "rebotarm_simulation": ["mujoco_sim.launch.py"],
+    "rebotarm_bringup": ["visual_grasp_system.launch.py", "mujoco_moveit_sim.launch.py"],
     "rebotarm_vision": ["vision.launch.py", "vision_ubuntu.launch.py"],
 }
 seen = set()
@@ -83,7 +84,7 @@ for package, names in files.items():
         shutil.copy2(root / "src" / package / "launch" / name, target)
         spec = importlib.util.spec_from_file_location("relocated_launch", target)
         module = importlib.util.module_from_spec(spec)
-        with patch("ament_index_python.packages.get_package_share_directory", side_effect=lambda pkg: str(root / "src" / pkg)):
+        with patch("ament_index_python.packages.get_package_share_directory", side_effect=lambda pkg: str(root / "src" / pkg)), patch("launch_ros.substitutions.find_package.get_package_share_directory", side_effect=lambda pkg: str(root / "src" / pkg)):
             spec.loader.exec_module(module)
             description = module.generate_launch_description()
             context = LaunchContext()
@@ -101,6 +102,20 @@ for package, names in files.items():
             entities = list(walk(description.entities))
             if name == "vision.launch.py":
                 entities += module._launch_setup(context)
+            if name == "visual_grasp_system.launch.py":
+                # Resolve the public profile/default contract, then inspect the
+                # two interpreter-owning stages without executing ROS actions.
+                module._prepare_stages(context)
+                for stage in ("visual_input", "grasp_candidate"):
+                    stage_path = target.parent / "includes" / (stage + ".launch.py")
+                    stage_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(root / "src/rebotarm_bringup/launch/includes" / stage_path.name, stage_path)
+                    stage_spec = importlib.util.spec_from_file_location("relocated_" + stage, stage_path)
+                    stage_module = importlib.util.module_from_spec(stage_spec)
+                    stage_spec.loader.exec_module(stage_module)
+                    stage_entities = (stage_module._build(context) if hasattr(stage_module, "_build")
+                                      else stage_module.generate_launch_description().entities)
+                    entities += list(walk(stage_entities))
             for entity in entities:
                 if isinstance(entity, SetEnvironmentVariable):
                     assert resolve(entity.name, context) != "PYTHONPATH", name
@@ -110,7 +125,6 @@ for package, names in files.items():
                         "rebotarm_mujoco_node": "mujoco",
                         "rebotarm_graspnet_baseline_node": "graspnet",
                         "rebotarm_vision_node": "vision",
-                        "rebotarm_ordinary_grasp_node": "vision",
                         "rebotarm_grasp_tcp_frame": "vision",
                         "rebotarm_offline_yolo_node": "vision",
                     }.get(executable)
@@ -125,5 +139,7 @@ for package, names in files.items():
                                 seen.add((name, kind))
 
 assert all(any(filename == name for filename, kind in seen) for names in files.values() for name in names), seen
+assert ("visual_grasp_system.launch.py", "vision") in seen
+assert ("visual_grasp_system.launch.py", "graspnet") in seen
 print("Relocated launch files resolved; no processes started:", mode)
 '''

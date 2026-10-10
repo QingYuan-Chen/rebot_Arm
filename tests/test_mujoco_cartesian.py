@@ -14,14 +14,14 @@ SCENE = ROOT / "src/rebotarm_simulation/models/rebotarm/scene.xml"
 @pytest.fixture()
 def simulation():
     pytest.importorskip("mujoco")
-    from rebotarm_simulation.mujoco_sim import RebotArmMujoco
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     with RebotArmMujoco(SCENE) as sim:
         yield sim
 
 
 def test_delta_and_options_validate_public_inputs() -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, IkOptions
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, IkOptions
 
     assert CartesianDelta().frame == "world"
     with pytest.raises(ValueError, match="3 values"):
@@ -37,7 +37,7 @@ def test_delta_and_options_validate_public_inputs() -> None:
 
 
 def test_world_translation_converges_without_mutating_live_simulation(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
 
     before_state = simulation.get_state()
     before_controls = simulation.get_control_status()
@@ -56,7 +56,7 @@ def test_world_translation_converges_without_mutating_live_simulation(simulation
 
 
 def test_tool_translation_uses_current_end_effector_axes(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
 
     model, data = simulation._unsafe_viewer_handles()
     mujoco = pytest.importorskip("mujoco")
@@ -76,7 +76,7 @@ def test_tool_translation_uses_current_end_effector_axes(simulation) -> None:
 
 @pytest.mark.parametrize("frame", ["world", "tool"])
 def test_roll_pitch_yaw_delta_converges_in_both_frames(simulation, frame: str) -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
 
     result = MujocoCartesianController(simulation).solve_delta(
         CartesianDelta(rpy_rad=(0.02, -0.01, 0.015), frame=frame)
@@ -88,7 +88,7 @@ def test_roll_pitch_yaw_delta_converges_in_both_frames(simulation, frame: str) -
 
 
 def test_command_delta_only_submits_successful_position_solution(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
 
     controller = MujocoCartesianController(simulation)
     before = simulation.control_targets[:6]
@@ -106,7 +106,7 @@ def test_command_delta_only_submits_successful_position_solution(simulation) -> 
 
 
 def test_absolute_pose_solve_has_no_live_side_effects(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import MujocoCartesianController
 
     before_state = simulation.get_state()
     before_control = simulation.get_control_status()
@@ -125,7 +125,7 @@ def test_absolute_pose_solve_has_no_live_side_effects(simulation) -> None:
 
 
 def test_absolute_pose_command_submits_only_converged_solution(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import MujocoCartesianController
 
     state = simulation.get_state()
     xyzw = state.end_effector_orientation
@@ -153,14 +153,14 @@ def test_absolute_pose_command_submits_only_converged_solution(simulation) -> No
 def test_absolute_pose_strictly_validates_position_and_quaternion(
     simulation, position, quaternion, message: str
 ) -> None:
-    from rebotarm_simulation.mujoco_cartesian import MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import MujocoCartesianController
 
     with pytest.raises((TypeError, ValueError), match=message):
         MujocoCartesianController(simulation).solve_pose(position, quaternion)
 
 
 def test_unreachable_target_is_bounded_and_reported(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
 
     controller = MujocoCartesianController(simulation)
     result = controller.solve_delta(CartesianDelta(xyz_m=(2.0, 0.0, 0.0)))
@@ -176,7 +176,7 @@ def test_unreachable_target_is_bounded_and_reported(simulation) -> None:
 
 
 def test_damping_keeps_zero_motion_and_near_singular_solves_finite(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, IkOptions, MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, IkOptions, MujocoCartesianController
 
     controller = MujocoCartesianController(
         simulation,
@@ -192,7 +192,7 @@ def test_damping_keeps_zero_motion_and_near_singular_solves_finite(simulation) -
 
 
 def test_result_records_are_immutable(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
 
     result = MujocoCartesianController(simulation).solve_delta(CartesianDelta())
     with pytest.raises(FrozenInstanceError):
@@ -200,7 +200,7 @@ def test_result_records_are_immutable(simulation) -> None:
 
 
 def test_result_exposes_finite_target_and_reached_rpy(simulation) -> None:
-    from rebotarm_simulation.mujoco_cartesian import CartesianDelta, MujocoCartesianController
+    from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
 
     result = MujocoCartesianController(simulation).solve_delta(
         CartesianDelta(rpy_rad=(0.01, -0.01, 0.005), frame="world")
