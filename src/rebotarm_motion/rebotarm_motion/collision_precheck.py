@@ -66,13 +66,13 @@ class CollisionPrecheckConfig:
 
     ``enabled``     预检总开关；关闭时直接返回 ``disabled``，不访问服务；
     ``service``     状态有效性查询服务名，仅用于回填结果与排查问题；
-    ``group_name``  规划组名，MoveIt 依据它决定检查哪些连杆与碰撞对；
+    ``group_name``  规划组名,MoveIt 依据它决定检查哪些连杆与碰撞对；
     ``max_samples`` 采样上限（个），越大越保险，但每次预检耗时线性增长；
-    ``timeout_sec`` 整轮预检的总超时（秒），下限 0.1 s，超时按 ``unknown`` 处理；
+    ``timeout_sec`` 整轮预检的总超时（秒），下限 0.1 s,超时按 ``unknown`` 处理；
     ``default_joint_positions``
                     轨迹样本里没有、但规划组需要的关节及其保持位置（例如夹爪指关节）。
-                    检查时补齐到 joint_state，否则服务会因状态不完整而拒绝或给出不可信
-                    结果。位置单位随关节量纲（旋转关节 rad，移动关节 m）。
+                    检查时补齐到 joint_state,否则服务会因状态不完整而拒绝或给出不可信
+                    结果。位置单位随关节量纲（旋转关节 rad,移动关节 m)。
     """
 
     enabled: bool

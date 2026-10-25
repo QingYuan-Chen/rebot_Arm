@@ -50,10 +50,8 @@ class GravityCommandError(RuntimeError):
 _LOG = logging.getLogger(__name__)
 
 _G_MAX_DIST_M = 0.09
-# 结构设计/软件标称行程为 90 mm，但当前安装的夹爪在齿轮损坏后，经操作员确认
-# 的机械极限只有 85 mm。保留上面的映射量程用于反馈解释，但绝不下发超过真实
-# 硬件极限的命令。
-_G_VERIFIED_OPEN_LIMIT_M = 0.085
+# 结构设计/软件标称行程为 90 mm，根据结构映射到电机角度的线性关系，闭合端点对应的电机原始角度（rad，正方向为闭合）。
+_G_VERIFIED_OPEN_LIMIT_M = 0.09
 # 全开位置对应的电机原始角度（rad，负方向为张开）。位置-角度线性映射的另一端。
 _G_ANGLE_OPEN = -5.0
 # DM4310 的 16 位反馈覆盖 +/-12.5 rad。这里给张开端点与置零验证留两个量化步长，
@@ -80,11 +78,6 @@ _HARDWARE_FEEDBACK_RATE_MIN_HZ = 20.0
 _HARDWARE_FEEDBACK_RATE_MAX_HZ = 100.0
 # 下面两个是 MOVE 阶段专用的电机侧力矩上限；到位后防止继续顶住机械限位的，
 # 是 _release_gripper_position_target 里的"中性 + 空闲"释放。
-#
-# 2026-08-14：齿轮修复后在真机上实测。0.40 N.m 上限下，0 -> 10 -> 0 mm 空载
-# 循环三段分别在 7.86-8.02 mm 与 1.83-1.93 mm 处堵转；三段都需要
-# kp*err = 0.536-0.594 N.m，即都是撞到上限饱和而非到达目标，留下约 2 mm
-# 稳态误差，仅以最小 0.02 mm 的余量通过 _G_ARRIVE_TOL。可见传动阻力确实很大。
 # 2026-09-04 操作员决定：采用 Web 遥操作已验证可用的默认值 1.0 N.m，仅把
 # 1.5 N.m 保留为可配置上限，并用上面的 0.5 rad/s 斜坡限制运动速度。
 _G_LARGE_MOVE_MAX_TAU_NM = 1.0
@@ -100,12 +93,6 @@ _G_GRASP_HOLD_KD = 1.0
 #   kp*(hold_angle - pos) + kd*(-vel) + hold_force
 # 其中 hold_angle 冻结在堵转位置，因此位置项占主导，hold_force 只是前馈叠加。
 # 实际夹持力取决于闭合阶段 close_force 把夹爪推到多深才堵转，而不是 hold_force。
-# 2026-08-14 真机、两次 hold_force 均为 0.4：
-#   close_force 0.4 -> 推进 2.02 mm 后堵转（50 mm 瓶子），保持 0.271-0.286 N.m
-#                      （10 s 后仍在缓慢闭合；夹不住）
-#   close_force 1.0 -> 推进 15.21 mm（压缩 30%），保持 0.423-0.437 N.m
-#                      （弹性回弹 0.158 mm；夹住了）
-# 整定时不要把 hold_force 当成夹持力旋钮。
 _G_GRASP_CLOSE_FORCE_DEFAULT = 0.40
 _G_GRASP_CLOSE_FORCE_MAX = 1.0
 _G_GRASP_HOLD_FORCE_DEFAULT = 0.40

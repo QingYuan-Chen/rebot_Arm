@@ -78,7 +78,7 @@ class MotorPassthrough:
     def _make_joint_callback(self, joint_name: str):
         """生成绑定到指定关节的命令回调（闭包，省去回调内再查名字）。"""
 
-        def _callback(msg: JointMotorCmd) -> None:
+        def _callback(msg: JointMotorCmd) -> None:  # 为每个关节生成一个独立的回调函数
             # 轨迹运行期间低层指令会与轨迹控制回路抢同一条电机通道，必须先仲裁
             if self._hardware.state_machine == "TRAJ_RUNNING":
                 if self._arbitration == "reject":

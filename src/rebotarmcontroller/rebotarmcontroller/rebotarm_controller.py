@@ -100,7 +100,7 @@ class reBotArmController(Node):
         self.declare_parameter("gripper_feedback_stale_timeout_sec", 0.15)
         # grasp_hold_timeout_sec: 抓取保持的最长时间（秒），到期自动松开，避免电机在 500 Hz 下
         # 持续堵转发热；硬件层限制在 [0.1, 120.0]。
-        self.declare_parameter("grasp_hold_timeout_sec", 30.0)
+        self.declare_parameter("grasp_hold_timeout_sec", 10.0)
         # arm_namespace: 话题/服务/动作的命名空间前缀，首尾斜杠会被去掉。
         self.declare_parameter("arm_namespace", "rebotarm")
         # cmd_arbitration: 轨迹运行期间收到单关节透传指令时的仲裁策略：

@@ -125,14 +125,14 @@ def generate_launch_description():
             # 抓爪反馈过期阈值（s）：超过该时长没有新反馈即判定为不新鲜
             DeclareLaunchArgument("gripper_feedback_stale_timeout_sec", default_value="0.15"),
             # 保持夹持的最长时间（s）：超时后松开，避免长时间堵转发热
-            DeclareLaunchArgument("grasp_hold_timeout_sec", default_value="30.0"),
+            DeclareLaunchArgument("grasp_hold_timeout_sec", default_value="10.0"),
             # 多路命令仲裁策略：reject 表示发现冲突命令直接拒绝（不做静默覆盖）
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             # 是否在本文件内启动 RViz
             DeclareLaunchArgument("use_local_rviz", default_value="true"),
             # 是否改用 MoveIt demo 预览栈（关掉硬件通道与被动状态源）
             DeclareLaunchArgument("use_moveit_preview", default_value="false"),
-            # 是否打开真实硬件通道；默认 false，必须显式开启
+            # 是否打开真实硬件通道：默认 false，必须显式开启
             DeclareLaunchArgument("use_hardware", default_value="false"),
             # 规划与执行使用的基座坐标系
             DeclareLaunchArgument("frame_id", default_value="base_link"),

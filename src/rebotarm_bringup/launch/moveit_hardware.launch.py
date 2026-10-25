@@ -77,7 +77,7 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_position_max_speed_rad_s", default_value="1.5"),
             DeclareLaunchArgument("gripper_position_timeout_margin_sec", default_value="1.5"),
             DeclareLaunchArgument("gripper_feedback_stale_timeout_sec", default_value="0.15"),
-            DeclareLaunchArgument("grasp_hold_timeout_sec", default_value="30.0"),
+            DeclareLaunchArgument("grasp_hold_timeout_sec", default_value="10.0"),
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             DeclareLaunchArgument("ee_frame_id", default_value="end_link"),

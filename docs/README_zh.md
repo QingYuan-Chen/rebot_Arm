@@ -70,6 +70,7 @@
 
 ## 设计文档和历史说明
 
+- [`design/controller_refactor_plan.md`](design/controller_refactor_plan.md)：硬件控制器按功能拆分与 C++ 迁移初步规划；已确认六轴与末端执行器分开控制，接口及选型待细化，尚未实施。
 - [`design/calibration_web_plan.md`](design/calibration_web_plan.md)：网页手眼标定完整技术路线；软件链路已实现，真实设备和物理精度仍在后续开发/验收范围。
 - 历史迁移快照和已删除文档当前不在工作树；需要追溯时从 Git 历史恢复，不作为当前源码清单。
 
