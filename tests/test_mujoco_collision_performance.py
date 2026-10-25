@@ -151,12 +151,14 @@ def test_arm_collision_contract_avoids_high_triangle_mesh_geoms() -> None:
 
     robot = ET.parse(ROBOT_PATH).getroot()
     collisions = [geom for geom in robot.findall('.//geom[@class="collision"]')
-                  if not geom.attrib.get("name", "").startswith("gemini2_")]
+                  if not geom.attrib.get("name", "").startswith("d405_")]
     mesh_collisions = [geom for geom in collisions if geom.attrib.get("type") == "mesh"]
 
-    assert len(collisions) == 10
+    assert len(collisions) == 14
     assert {geom.attrib["mesh"] for geom in mesh_collisions} == {
         "left_finger", "right_finger",
+        "left_soft_gripper_mount", "right_soft_gripper_mount",
+        "left_soft_gripper_finger", "right_soft_gripper_finger",
     }
     assert all(geom.attrib.get("group") == "3" for geom in collisions)
 

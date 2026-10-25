@@ -11,7 +11,7 @@ import sys
 
 
 DEPENDENCIES = Path(__file__).resolve().parents[1] / "docs/setup/dependencies"
-PROFILES = ("runtime", "vision", "graspnet", "mujoco", "rl", "tensorrt")
+PROFILES = ("runtime", "vision", "graspnet", "mujoco", "rl", "tensorrt", "cad")
 
 
 def read_requirements(document: Path, parents: tuple[Path, ...] = ()) -> list[str]:

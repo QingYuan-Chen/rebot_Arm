@@ -19,10 +19,10 @@ def test_canonical_robot_model_is_generated_and_contains_current_actuators():
     assert {"joint1_torque", "joint6_torque", "left_finger_force", "right_finger_force"} <= actuators
 
 
-def test_canonical_model_contains_gemini2_payload_and_collision_defaults():
+def test_canonical_model_contains_d405_payload_and_collision_defaults():
     robot = ROOT / "src/rebotarm_simulation/models/rebotarm/robot.xml"
     root = ET.parse(robot).getroot()
-    assert root.find(".//body[@name='gemini2_camera']") is not None
+    assert root.find(".//body[@name='d405_link']") is not None
     assert root.find(".//geom[@class='collision']") is not None
 
 

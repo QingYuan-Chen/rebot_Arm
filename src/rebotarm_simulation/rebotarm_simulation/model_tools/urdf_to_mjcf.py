@@ -11,7 +11,7 @@ import mujoco
 import yaml
 
 from rebotarm_simulation.core.resource_paths import package_resource
-from rebotarm_simulation.model_tools.gemini2_payload import add_gemini2_payload
+from rebotarm_simulation.model_tools.d405_payload import apply_d405_inertials
 
 
 PACKAGE_MESH_PREFIX = "package://rebotarm_moveit_config/meshes/"
@@ -41,6 +41,9 @@ def collision_config_path(repo_root: Path | None) -> Path:
 
 def stage_urdf(source: Path, repo_root: Path | None, temporary_dir: Path) -> Path:
     root = ET.parse(source).getroot()
+    apply_d405_inertials(root, _package_path(
+        repo_root, "rebotarm_simulation", "config/d405_payload.yaml"
+    ))
     extension = ET.SubElement(root, "mujoco")
     ET.SubElement(
         extension,
@@ -90,7 +93,6 @@ def generate_mjcf_bytes(repo_root: Path | None) -> bytes:
         _add_joint_dynamics(root, _load_joint_dynamics(repo_root))
         _add_actuators(root, urdf_root, repo_root)
         _add_sensors(root)
-        add_gemini2_payload(root, repo_root)
     return _canonicalize(root)
 
 
@@ -99,6 +101,19 @@ def _configure_compiler(root: ET.Element, collision_config: dict[str, object]) -
     if compiler is None:
         compiler = ET.SubElement(root, "compiler")
     compiler.set("angle", "radian")
+    # Finger links have no measured URDF inertials. Infer them once from the
+    # visual geometry, never again from the duplicate collision representation.
+    # Explicit arm/camera inertials remain authoritative.
+    compiler.set("inertiagrouprange", "2 2")
+    for mesh in root.findall("asset/mesh"):
+        if mesh.attrib["name"] in {
+            "left_finger", "right_finger",
+            "left_soft_gripper_mount", "right_soft_gripper_mount",
+            "left_soft_gripper_finger", "right_soft_gripper_finger",
+        }:
+            # A documented rigid estimate, avoiding legacy overcounting on
+            # nonconvex meshes. This is not measured material mass/inertia.
+            mesh.set("inertia", "convex")
     default = ET.Element("default")
     ET.SubElement(
         default,
@@ -278,6 +293,10 @@ def _add_contact_exclusions(root: ET.Element) -> None:
         ("link2", "link4"),
         ("link4", "link6"),
         ("left_finger_link", "right_finger_link"),
+        ("end_link", "d405_mount_link"),
+        ("link6", "d405_mount_link"),
+        ("d405_mount_link", "d405_link"),
+        ("end_link", "d405_link"),
     ):
         ET.SubElement(contact, "exclude", {"body1": body1, "body2": body2})
 

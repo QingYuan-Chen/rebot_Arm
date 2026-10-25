@@ -149,7 +149,9 @@ def test_robot_model_uses_original_meshes_for_visuals_and_hybrid_collisions() ->
     expected_assets = {
         "base_link", "link1", "link2", "link3", "link4", "link5", "link6",
         "gripper_base", "left_finger", "right_finger",
-        "gemini2_shell", "gemini2_mount_part0",
+        "left_soft_gripper_mount", "right_soft_gripper_mount",
+        "left_soft_gripper_finger", "right_soft_gripper_finger",
+        "d405", "d405_mount",
     }
     assert set(assets) == expected_assets
     for mesh in assets.values():
@@ -158,16 +160,18 @@ def test_robot_model_uses_original_meshes_for_visuals_and_hybrid_collisions() ->
 
     visual_geoms = robot.findall('.//geom[@class="visual"]')
     collision_geoms = [geom for geom in robot.findall('.//geom[@class="collision"]')
-                       if not geom.attrib.get("name", "").startswith("gemini2_")]
+                       if not geom.attrib.get("name", "").startswith("d405_")]
     assert {geom.attrib["mesh"] for geom in visual_geoms} == expected_assets
     assert collision_geoms
     assert {geom.attrib["mesh"] for geom in collision_geoms if geom.attrib["type"] == "mesh"} == {
         "left_finger", "right_finger",
+        "left_soft_gripper_mount", "right_soft_gripper_mount",
+        "left_soft_gripper_finger", "right_soft_gripper_finger",
     }
     assert {geom.attrib["type"] for geom in collision_geoms} == {
         "box", "capsule", "cylinder", "mesh",
     }
-    assert len(collision_geoms) == 10
+    assert len(collision_geoms) == 14
     assert all(geom.attrib.get("contype") == "1" for geom in collision_geoms)
     assert all(geom.attrib.get("conaffinity") == "1" for geom in collision_geoms)
     assert all("rgba" not in geom.attrib for geom in collision_geoms)
@@ -201,6 +205,10 @@ def test_robot_model_filters_adjacent_chain_and_gripper_parent_contacts() -> Non
             ("link2", "link4"),
             ("link4", "link6"),
             ("left_finger_link", "right_finger_link"),
+            ("end_link", "d405_mount_link"),
+            ("link6", "d405_mount_link"),
+            ("d405_mount_link", "d405_link"),
+            ("end_link", "d405_link"),
         )
     }
 
@@ -424,7 +432,9 @@ def test_finger_to_cube_contact_is_detectable_when_runtime_is_available() -> Non
 
     data.qpos[6:8] = (0.015, -0.015)
     mujoco.mj_forward(model, data)
-    local_cube_position = (-0.105, 0.0, -0.025)
+    # Contact the replacement soft fingers, rather than the old combined
+    # jaw hull behind the slider (which included empty space between parts).
+    local_cube_position = (0.005, 0.0, 0.0)
     rotation = data.xmat[end_link_id].reshape(3, 3)
     world_cube_position = data.xpos[end_link_id] + rotation @ local_cube_position
     data.qpos[cube_qpos:cube_qpos + 3] = world_cube_position

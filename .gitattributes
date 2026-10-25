@@ -4,3 +4,5 @@ src/rebotarm_simulation/models/rebotarm/robot.xml text eol=lf
 
 # Preserve the byte identity of upstream CAD source files.
 *.step -whitespace
+# The pinned RealSense reference retains its upstream indentation and SHA256.
+src/rebotarm_moveit_config/cad/d405/_d405.urdf.xacro whitespace=-space-before-tab

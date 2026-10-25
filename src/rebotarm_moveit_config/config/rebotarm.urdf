@@ -509,13 +509,14 @@
     <axis
       xyz="0 0 0" />
   </joint>
-<!-- 夹爪：end_link 上挂两个镜像的平移关节，左右行程合起来才是完整开口。
+<!-- 夹爪：end_link 上挂两个镜像的平移关节，左右位移合起来是总行程。
      left_finger_joint 沿 +Y 平移，范围 [0, 0.045] m；right_finger_joint 沿 -Y 平移，范围 [-0.045, 0] m；
-     两关节原点重合（xyz 全零），因此“张开量 a”对应左指 +a、右指 -a，总开口最大 0.09 m
+     两关节原点重合（xyz 全零），两侧位移分别为 +a、-a，总行程最大 0.09 m；
+     新软指的真实指间距与抓取 TCP 尚待实测，不把此行程直接视为已标定开口
      （rebotarm.srdf 的 open / closed 命名状态取值与这里一一对应）。
      effort 对平移关节按力（N）解释，即单指最大推力；velocity=0.2 m/s 与 joint_limits.yaml
-     的 max_velocity 一致。两个手指 link 的 visual 与 collision 各自使用对应 STL，
-     MoveIt 才能对夹爪做碰撞检测（有测试固定校验这一点）。 -->
+     的 max_velocity 一致。每个手指 link 包含保留的齿条/滑块、安装底座和软指三份网格，
+     visual 与 collision 均覆盖三部分。软指为未变形刚体模型；装配依据见 soft_gripper_model.md。 -->
   <link name="left_finger_link">
     <visual
       name="left_finger">
@@ -540,6 +541,32 @@
       <geometry>
         <mesh
           filename="package://rebotarm_moveit_config/meshes/left_finger.stl" />
+      </geometry>
+    </collision>
+    <visual name="left_soft_gripper_mount">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rebotarm_moveit_config/meshes/left_soft_gripper_mount.stl" />
+      </geometry>
+      <material name="left_soft_gripper_mount_material"><color rgba="0.627450980392157 0.627450980392157 0.627450980392157 1" /></material>
+    </visual>
+    <collision name="left_soft_gripper_mount_collision">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rebotarm_moveit_config/meshes/left_soft_gripper_mount.stl" />
+      </geometry>
+    </collision>
+    <visual name="left_soft_gripper_finger">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rebotarm_moveit_config/meshes/left_soft_gripper_finger.stl" />
+      </geometry>
+      <material name="left_soft_gripper_finger_material"><color rgba="0.627450980392157 0.627450980392157 0.627450980392157 1" /></material>
+    </visual>
+    <collision name="left_soft_gripper_finger_collision">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rebotarm_moveit_config/meshes/left_soft_gripper_finger.stl" />
       </geometry>
     </collision>
   </link>
@@ -589,6 +616,32 @@
           filename="package://rebotarm_moveit_config/meshes/right_finger.stl" />
       </geometry>
     </collision>
+    <visual name="right_soft_gripper_mount">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rebotarm_moveit_config/meshes/right_soft_gripper_mount.stl" />
+      </geometry>
+      <material name="right_soft_gripper_mount_material"><color rgba="0.627450980392157 0.627450980392157 0.627450980392157 1" /></material>
+    </visual>
+    <collision name="right_soft_gripper_mount_collision">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rebotarm_moveit_config/meshes/right_soft_gripper_mount.stl" />
+      </geometry>
+    </collision>
+    <visual name="right_soft_gripper_finger">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rebotarm_moveit_config/meshes/right_soft_gripper_finger.stl" />
+      </geometry>
+      <material name="right_soft_gripper_finger_material"><color rgba="0.627450980392157 0.627450980392157 0.627450980392157 1" /></material>
+    </visual>
+    <collision name="right_soft_gripper_finger_collision">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rebotarm_moveit_config/meshes/right_soft_gripper_finger.stl" />
+      </geometry>
+    </collision>
   </link>
   <joint
     name="right_finger_joint"
@@ -607,5 +660,33 @@
       upper="0.0"
       effort="1.0"
       velocity="0.2" />
+  </joint>
+  <!-- D405 CAD frames; metre meshes, hole-aligned mounting. These are not calibrated
+       optical frames. Simulation-only inertia estimates live in rebotarm_simulation. -->
+  <link name="d405_mount_link">
+    <visual name="d405_mount">
+      <geometry><mesh filename="package://rebotarm_moveit_config/meshes/d405_mount.stl" /></geometry>
+      <material name="d405_mount_silver"><color rgba="0.627450980392157 0.627450980392157 0.627450980392157 1" /></material>
+    </visual>
+    <collision name="d405_mount_collision">
+      <geometry><mesh filename="package://rebotarm_moveit_config/meshes/d405_mount.stl" /></geometry>
+    </collision>
+  </link>
+  <link name="d405_link">
+    <visual name="d405">
+      <geometry><mesh filename="package://rebotarm_moveit_config/meshes/d405.stl" /></geometry>
+      <material name="d405_silver"><color rgba="0.627450980392157 0.627450980392157 0.627450980392157 1" /></material>
+    </visual>
+    <collision name="d405_collision">
+      <geometry><mesh filename="package://rebotarm_moveit_config/meshes/d405.stl" /></geometry>
+    </collision>
+  </link>
+  <joint name="d405_mount_joint" type="fixed">
+    <parent link="end_link" /><child link="d405_mount_link" />
+    <origin xyz="-0.08630933 0.0002079068932795 0.0000007587263523" rpy="1.5707963267948966 0 1.5707963267948966" />
+  </joint>
+  <joint name="d405_joint" type="fixed">
+    <parent link="d405_mount_link" /><child link="d405_link" />
+    <origin xyz="0.0010014555241297094 0.06301963080951393 0.011604510071599904" rpy="0.26179625230552039 0 0" />
   </joint>
 </robot>

@@ -1,0 +1,19 @@
+{
+  "mount_source": "User supplied D405_305_Mount (1).step; geometry preserved",
+  "camera_source": "https://github.com/realsenseai/realsense-ros/tree/7a87097c499e3b0b69518d54a8e7a9ac1924e87c/realsense2_description",
+  "camera_commit": "7a87097c499e3b0b69518d54a8e7a9ac1924e87c",
+  "license": "REALSENSE_LICENSE.txt; Apache-2.0 applies to official camera assets",
+  "conversion": "scripts/import_d405_meshes.py; mm to m; original axes retained",
+  "sha256": {
+    "D405_305_Mount.step": "99df53e11fcdd192830ef205d080db310448cc39b891b62a8f64316f6565c28d",
+    "official_d405_mm.stl": "a248f41149d12b28311829feecbe7a80cf1481fd05e0f5df2c4c7ecd556edd48",
+    "REALSENSE_LICENSE.txt": "7092398b52290edddcb41c6e2297f4c6343eb315ea6c83edfdbeea2a73adfbdb",
+    "_d405.urdf.xacro": "81118e87388c06e4cf1b3dc8b114096de21c1b235bd283dafad84d2bd97aebb1",
+    "mount_geometry.json": "f136a8d87ee1f4116646e592b12a475cfc47c960d9bc3ffe0321a20c130627bf"
+  },
+  "source_urls": {
+    "official_d405_mm.stl": "https://raw.githubusercontent.com/realsenseai/realsense-ros/7a87097c499e3b0b69518d54a8e7a9ac1924e87c/realsense2_description/meshes/d405.stl",
+    "_d405.urdf.xacro": "https://raw.githubusercontent.com/realsenseai/realsense-ros/7a87097c499e3b0b69518d54a8e7a9ac1924e87c/realsense2_description/urdf/_d405.urdf.xacro",
+    "REALSENSE_LICENSE.txt": "https://raw.githubusercontent.com/realsenseai/realsense-ros/7a87097c499e3b0b69518d54a8e7a9ac1924e87c/LICENSE"
+  }
+}

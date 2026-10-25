@@ -32,7 +32,7 @@ MuJoCo + MoveIt、无头和桌面组合入口位于 `rebotarm_bringup/launch`。
 
 | 分组 | 当前实现 | 主要文件/入口 | 当前状态 |
 |---|---|---|---|
-| 模型与场景 | URDF→MJCF 生成、模型一致性检查、机器人本体、空桌面场景、Reach 场景 | `model_tools/urdf_to_mjcf.py`、`model_tools/gemini2_payload.py`、`models/rebotarm/` | 已接入；`robot.xml` 是机器人本体，`scene.xml` 是桌面物理场景，`reach_scene.xml` 是 Reach 训练场景 |
+| 模型与场景 | URDF→MJCF 生成、模型一致性检查、机器人本体、空桌面场景、Reach 场景 | `model_tools/urdf_to_mjcf.py`、`model_tools/d405_payload.py`、`models/rebotarm/` | 已接入软指与 D405 腕部装配；`robot.xml` 是机器人本体，`scene.xml` 是桌面物理场景，`reach_scene.xml` 是 Reach 训练场景 |
 | CPU MuJoCo 物理核心 | 物理步进、关节/夹爪控制、状态、接触、保存恢复、瓶子位姿 | `core/mujoco_sim.py`、`control/motor_control.py`、`core/mujoco_types.py`、`control/sim_gripper.py` | 当前 CPU 正确性和轨迹基准 |
 | ROS / MoveIt 执行 | FollowJointTrajectory、关节/夹爪状态、仿真时钟、停止、容差和诊断 | `ros/mujoco_ros_node.py`、`execution/trajectory_sampler.py`、`ros_diagnostics.py` | 已接入 MuJoCo 组合 launch |
 | CLI / Viewer 交互 | 无头 CLI、桌面 MuJoCo Viewer、键盘关节和夹爪操作 | `apps/mujoco_cli.py`、`apps/mujoco_viewer.py` | 已接入，属于人工调试/观察入口 |

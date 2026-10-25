@@ -10,7 +10,7 @@ from rebotarmcontroller.gravity_control import (
 
 URDF = Path(__file__).resolve().parents[1] / 'src/rebotarm_moveit_config/config/rebotarm.urdf'
 EXTRA_BODIES = ('left_finger_link', 'right_finger_link',
-                'gemini2_mount_part0', 'gemini2_camera')
+                'd405_mount_link', 'd405_link')
 
 
 @pytest.mark.parametrize('pose', [
@@ -34,6 +34,7 @@ def test_shared_gravity_model_with_explicit_simulation_payload_holds_pose(pose):
         # The URDF lacks these finger/camera inertials; compare equal payloads.
         for name in EXTRA_BODIES:
             body = mujoco.mj_name2id(sim._model, mujoco.mjtObj.mjOBJ_BODY, name)
+            assert body >= 0, name
             body_mass = float(sim._model.body_mass[body])
             mass += body_mass
             com += body_mass * (rotation.T @ (sim._data.xipos[body] - sim._data.xpos[tool]))

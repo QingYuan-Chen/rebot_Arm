@@ -60,7 +60,7 @@ def test_generated_model_preserves_named_bodies_and_joint_interface() -> None:
     assert body_names == {
         "base_link", "link1", "link2", "link3", "link4", "link5", "link6",
         "end_link", "left_finger_link", "right_finger_link",
-        "gemini2_camera", "gemini2_mount", "gemini2_mount_part0",
+        "d405_mount_link", "d405_link",
     }
     assert joint_names == {
         "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
@@ -77,6 +77,7 @@ def test_collision_config_covers_every_body_and_uses_fixed_display_groups() -> N
     assert set(config["bodies"]) == {
         "base_link", "link1", "link2", "link3", "link4", "link5", "link6",
         "end_link", "left_finger_link", "right_finger_link",
+        "d405_mount_link", "d405_link",
     }
 
 
@@ -85,20 +86,24 @@ def test_generated_model_preserves_mesh_visuals_and_uses_hybrid_collisions() -> 
     expected_meshes = {
         "base_link", "link1", "link2", "link3", "link4", "link5", "link6",
         "gripper_base", "left_finger", "right_finger",
-        "gemini2_shell", "gemini2_mount_part0",
+        "left_soft_gripper_mount", "right_soft_gripper_mount",
+        "left_soft_gripper_finger", "right_soft_gripper_finger",
+        "d405", "d405_mount",
     }
     visuals = root.findall('.//geom[@class="visual"]')
     collisions = [geom for geom in root.findall('.//geom[@class="collision"]')
-                  if not geom.attrib.get("name", "").startswith("gemini2_")]
+                  if not geom.attrib.get("name", "").startswith("d405_")]
 
     assert {geom.attrib["mesh"] for geom in visuals} == expected_meshes
     assert {geom.attrib["mesh"] for geom in collisions if geom.attrib["type"] == "mesh"} == {
         "left_finger", "right_finger",
+        "left_soft_gripper_mount", "right_soft_gripper_mount",
+        "left_soft_gripper_finger", "right_soft_gripper_finger",
     }
     assert {geom.attrib["type"] for geom in collisions} == {
         "box", "capsule", "cylinder", "mesh",
     }
-    assert len(collisions) == 10
+    assert len(collisions) == 14
     visual_defaults = root.find('default/default[@class="visual"]/geom')
     assert all(geom.attrib.get("contype", visual_defaults.attrib["contype"]) == "0" for geom in visuals)
     assert all(geom.attrib.get("conaffinity", visual_defaults.attrib["conaffinity"]) == "0" for geom in visuals)
@@ -137,7 +142,7 @@ def test_generated_model_adds_mujoco_control_and_observation_contract() -> None:
     assert coupling.attrib["polycoef"] == "0 -1 0 0 0"
 
     exclusions = root.findall("contact/exclude")
-    assert len(exclusions) == 12
+    assert len(exclusions) == 16
     assert root.find('.//site[@name="ee_site"]') is not None
     assert root.find('.//site[@name="wrist_camera_mount"]') is not None
     assert len(root.findall("sensor/jointpos")) == 8

@@ -4,9 +4,9 @@ collision_group: 3
 
 # Collision geoms are expressed in each URDF link frame.  Arm primitives are
 # deliberately a little smaller than the visual envelope to avoid false
-# contacts around adjacent joint housings.  The finger meshes are retained:
-# MuJoCo uses their convex hull for collision detection while rendering the
-# original STL independently as the visual geom.
+# contacts around adjacent joint housings. Each moving jaw has separate drive,
+# mount and soft-finger convex hulls, avoiding a hull spanning the entire jaw.
+# The soft finger is a rigid approximation; see soft_gripper_model.md.
 bodies:
   base_link:
     - {name: base, type: box, pos: [0.0, 0.0, 0.0438], size: [0.068, 0.098, 0.043]}
@@ -25,6 +25,54 @@ bodies:
   end_link:
     - {name: gripper_base, type: box, pos: [-0.090, 0.0, 0.0], size: [0.016, 0.075, 0.025]}
   left_finger_link:
-    - {name: finger, type: mesh, mesh: left_finger, friction: [1.2, 0.02, 0.001]}
+    - {name: drive, type: mesh, mesh: left_finger, friction: [0.8, 0.02, 0.001]}
+    - {name: mount, type: mesh, mesh: left_soft_gripper_mount, friction: [0.8, 0.02, 0.001]}
+    - {name: finger, type: mesh, mesh: left_soft_gripper_finger, friction: [1.2, 0.02, 0.001]}
   right_finger_link:
-    - {name: finger, type: mesh, mesh: right_finger, friction: [1.2, 0.02, 0.001]}
+    - {name: drive, type: mesh, mesh: right_finger, friction: [0.8, 0.02, 0.001]}
+    - {name: mount, type: mesh, mesh: right_soft_gripper_mount, friction: [0.8, 0.02, 0.001]}
+    - {name: finger, type: mesh, mesh: right_soft_gripper_finger, friction: [1.2, 0.02, 0.001]}
+  # D405 tray walls remain separate so the cavity is not a solid hull.
+  d405_mount_link:
+  - name: floor
+    type: box
+    pos: [0.0, 0.06988197974301359, -0.013990114624156572]
+    quat: &id001 [0.9914450660046141, 0.130524637885368, 0.0, 0.0]
+    size: [0.023, 0.023, 0.0035]
+  - name: left_wall
+    type: box
+    pos: [-0.02225, 0.06703500356209688, -0.003364921608248913]
+    quat: *id001
+    size: [0.00075, 0.0215, 0.0075]
+  - name: right_wall
+    type: box
+    pos: [0.02225, 0.06703500356209688, -0.003364921608248913]
+    quat: *id001
+    size: [0.00075, 0.0215, 0.0075]
+  - name: front_wall
+    type: box
+    pos: [0.0, 0.08943272731092905, -0.0009870084746379966]
+    quat: *id001
+    size: [0.0215, 0.00075, 0.011]
+  - name: back_wall
+    type: box
+    pos: [0.0, 0.04661319945682117, -0.012460322483732357]
+    quat: *id001
+    size: [0.0215, 0.0009, 0.011]
+  - name: wrist_base
+    type: box
+    pos: [-0.0002079, 0.03, -0.01945]
+    size: [0.018, 0.0075, 0.00255]
+  - name: wrist_left
+    type: box
+    pos: [-0.0169, 0.029, -0.00845]
+    size: [0.0011, 0.005, 0.00845]
+  - name: wrist_right
+    type: box
+    pos: [0.0167, 0.029, -0.00845]
+    size: [0.0013, 0.005, 0.00845]
+  d405_link:
+  - name: shell
+    type: box
+    pos: [0.0, 0.0, -0.0115]
+    size: [0.021, 0.021, 0.0115]

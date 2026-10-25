@@ -1,0 +1,31 @@
+# Simulation estimates only; never loaded by the hardware gravity controller.
+# Camera: provisional 72 g, matching the official Xacro placeholder; upstream
+# marks its inertial data unreliable. Recomputed uniform 42x42x23 mm box inertia.
+# Mount: provisional 35 g (~solid polymer at 1200 kg/m^3); CAD COM/inertia.
+# Printed infill, cable and actual payload properties require measurement.
+d405_mount_link:
+  mass_kg: 0.035
+  com_m:
+  - -0.0005775871657011034
+  - 0.05713129980863081
+  - -0.012337933543607635
+  inertia_kg_m2:
+  - 1.4102811573193567e-05
+  - 7.375323381384913e-06
+  - 1.8801150370004827e-05
+  - 2.884300514422937e-07
+  - 1.7295010633295622e-07
+  - -1.192595886957196e-06
+d405_link:
+  mass_kg: 0.072
+  com_m:
+  - 0.0
+  - 0.0
+  - -0.0115
+  inertia_kg_m2:
+  - 1.3757999999999998e-05
+  - 1.3757999999999998e-05
+  - 2.1167999999999998e-05
+  - 0.0
+  - 0.0
+  - 0.0

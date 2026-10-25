@@ -4,7 +4,7 @@
 
 ## 当前范围
 
-六份依赖清单已从独立 TXT 文件转换为本目录的 Markdown 文档。
+依赖清单以本目录的 Markdown 文档维护。
 每份文档的单个 `requirements` 代码块是依赖版本的唯一来源，正文说明不参与安装。
 安装工具直接将解析后的参数传给指定 Python 的 pip，无需另存临时清单。
 
@@ -16,6 +16,7 @@
 | [mujoco.md](mujoco.md) | MuJoCo 仿真与模型工具 | 系统 Python 3.12，用户级安装 |
 | [rl.md](rl.md) | CPU Reach 和可选 CUDA SB3/PPO | `third_party/rebotarm_rl_venv` |
 | [tensorrt.md](tensorrt.md) | TensorRT 推理运行库 | `.venv-vision`；单独使用 `--no-deps` |
+| [cad.md](cad.md) | 可选 STEP → STL 离线生成 | 独立临时环境；不加入 ROS 运行依赖 |
 
 ## 使用方式
 

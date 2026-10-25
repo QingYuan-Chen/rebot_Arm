@@ -69,14 +69,14 @@
     <joint name="joint6" value="0.0" />
   </group_state>
 
-  <!-- open：夹爪张开命名状态，单位米。左指 +0.045、右指 -0.045，合计开口 0.09 m，
-       即 URDF 中两指行程的上限。 -->
+  <!-- open：夹爪张开命名状态，单位米。左指 +0.045、右指 -0.045，合计行程 0.09 m。
+       新软指真实净开口仍需标定，不能把行程直接当作指面间距。 -->
   <group_state name="open" group="gripper">
     <joint name="left_finger_joint" value="0.045" />
     <joint name="right_finger_joint" value="-0.045" />
   </group_state>
 
-  <!-- closed：夹爪闭合命名状态，两指均回到 0（各自关节原点），表示完全夹紧；单位米。 -->
+  <!-- closed：保留的关节零位命名状态，两指均回到 0；新软指仍有间隙，不表示完全夹紧。 -->
   <group_state name="closed" group="gripper">
     <joint name="left_finger_joint" value="0.0" />
     <joint name="right_finger_joint" value="0.0" />
@@ -97,4 +97,9 @@
   <!-- 左右手指互碰：两指沿同一轴线相向运动，夹持时必然接近或接触，属结构性接触，
        因此用 reason="Never"（永不检查）禁用。 -->
   <disable_collisions link1="left_finger_link" link2="right_finger_link" reason="Never" />
+  <!-- Fixed wrist assembly mating surfaces; camera remains collidable with the rest of the robot. -->
+  <disable_collisions link1="end_link" link2="d405_mount_link" reason="Adjacent" />
+  <disable_collisions link1="link6" link2="d405_mount_link" reason="Adjacent" />
+  <disable_collisions link1="d405_mount_link" link2="d405_link" reason="Adjacent" />
+  <disable_collisions link1="end_link" link2="d405_link" reason="Never" />
 </robot>
