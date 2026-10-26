@@ -2454,7 +2454,7 @@ def test_set_zero_gripper_rejects_enabled_arm() -> None:
         manager.set_zero("gripper")
 
 
-@pytest.mark.parametrize("position", [2 * np.pi, 0.001 * 5 / 0.09 + 1e-6, 0.074, -5.02])
+@pytest.mark.parametrize("position", [2 * np.pi, 0.010 * 5 / 0.09 + 1e-6, 0.011 * 5 / 0.09, -5.02])
 def test_invalid_gripper_coordinate_preserves_raw_but_reports_unknown(position) -> None:
     manager = make_manager()
     gripper = FakeMotor(position=position)
@@ -2478,6 +2478,7 @@ def test_invalid_gripper_coordinate_preserves_raw_but_reports_unknown(position) 
     "position,width",
     [(0.000190735, 0.0), (0.00743866, 0.0), (0.01, 0.0),
      (0.01583099365234375, 0.0), (0.001 * 5 / 0.09, 0.0),
+     (0.005 * 5 / 0.09, 0.0), (0.428969, 0.0), (0.010 * 5 / 0.09, 0.0),
      (-0.000190735, 0.00000343323),
      (-5.000190735, 0.09), (-4.8, 0.0864)],
 )
@@ -2485,6 +2486,24 @@ def test_gripper_width_allows_closed_tolerance_and_open_quantization(position, w
     manager = make_manager()
     manager._gripper_pos = position
     assert manager.gripper_position_m() == pytest.approx(width)
+
+
+@pytest.mark.parametrize("equivalent_width_m", [0.005, 0.0077, 0.010])
+def test_closed_tolerance_keeps_feedback_valid_without_rezeroing(equivalent_width_m) -> None:
+    manager = make_manager()
+    position = equivalent_width_m * 5 / 0.09
+    gripper = FakeMotor(position=position)
+    manager._gripper_mot = gripper
+    manager._gripper_ctrl = FakeController([gripper])
+    manager.connect()
+
+    raw_position, _velocity, _torque, status = manager.get_gripper_state()
+    assert raw_position == pytest.approx(position)
+    assert status == 0
+    assert manager.gripper_position_m() == 0.0
+    assert manager.error_codes == []
+    assert gripper.set_zero_position_calls == 0
+    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
 
 
 @pytest.mark.parametrize("mode", ["position", "grasp_closing", "grasp_holding"])
@@ -2575,7 +2594,7 @@ def test_zero_failure_never_returns_success_or_retries_write(result, monkeypatch
         if result == "enabled":
             gripper.state.status_code = 1
         elif result == "closed_tolerance":
-            gripper.state.pos = 0.00743866
+            gripper.state.pos = 0.009 * 5 / 0.09
         elif result == "nonfinite":
             gripper.state.pos = float("nan")
         elif result == "write_error":

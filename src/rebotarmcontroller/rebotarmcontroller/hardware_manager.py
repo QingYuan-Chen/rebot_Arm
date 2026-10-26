@@ -57,8 +57,8 @@ _G_ANGLE_OPEN = -5.0
 # DM4310 的 16 位反馈覆盖 +/-12.5 rad。这里给张开端点与置零验证留两个量化步长，
 # 它是"反馈有效性"容差，不是运动到位容差。
 _G_COORDINATE_TOL_RAD = 2.0 * 25.0 / 65535.0
-# 操作员批准的 1 mm 闭合反馈容差（换算成电机角），不是命令容差或置零余量。
-_G_CLOSED_FEEDBACK_TOL_RAD = 0.001 * abs(_G_ANGLE_OPEN) / _G_MAX_DIST_M
+# 操作员批准的 10 mm 双指总开口等效闭合反馈容差，不改变命令限位或置零验证精度。
+_G_CLOSED_FEEDBACK_TOL_RAD = 0.010 * abs(_G_ANGLE_OPEN) / _G_MAX_DIST_M
 _G_ZERO_VERIFY_TIMEOUT_SEC = 0.5
 _G_ZERO_VERIFY_SAMPLES = 3
 _G_OPEN_SOFT_LIMIT = -4.9
