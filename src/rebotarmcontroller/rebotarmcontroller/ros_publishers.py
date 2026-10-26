@@ -20,6 +20,7 @@ import threading
 import time
 
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from builtin_interfaces.msg import Time
 from rebotarm_msgs.msg import ArmStatus, JointMotorState
 from sensor_msgs.msg import JointState
 
@@ -46,6 +47,8 @@ class JointStatePublisher:
         # 同一批次被重复发布时沿用旧时间戳，避免"数据没变但时间在走"。
         self._last_feedback_identity = None
         self._last_feedback_stamp = None
+        self._last_gripper_identity = None
+        self._last_gripper_stamp = Time()
         # 非阻塞发布锁：重入回调组下定时器与外部调用可能并发进入 publish。
         self._publish_lock = threading.Lock()
         self._status_lock = threading.Lock()
@@ -113,18 +116,20 @@ class JointStatePublisher:
             # 写入者，它自己执行同样限速的 50 Hz 批量刷新。
             self._hardware.refresh_feedback_if_due()
             # 一次原子读取拿到"最近一批已校验反馈"及其接收序号，两者必须配套使用。
-            pos, vel, effort, status_codes, identity = self._hardware.get_cached_joint_sample()
+            pos, vel, effort, status_codes, sequences, observed_at = self._hardware.get_cached_joint_sample()
+            identity = (sequences, observed_at)
         except Exception as exc:
             self._node.get_logger().warn(f"joint state read failed: {exc}")
             # 不把陈旧的关节位置重新打时间戳当作当前值，但仍刷新锁存状态，让 Web UI
             # 报告通信故障，而不是看起来停在健康的最后一帧。
+            self._publish_gripper_feedback()
             self.publish_status(force=False)
             return
 
         msg = JointState()
         if identity != self._last_feedback_identity:
             self._last_feedback_identity = identity
-            self._last_feedback_stamp = self._node.get_clock().now().to_msg()
+            self._last_feedback_stamp = self._feedback_stamp(observed_at)
         # 同一批已校验反馈被重复发布时，不应看起来像一份新样本。
         msg.header.stamp = self._last_feedback_stamp
         msg.name = self._hardware.joint_names
@@ -144,22 +149,36 @@ class JointStatePublisher:
             motor_msg.status_code = int(status_codes[i])
             self._joint_state_publishers[name].publish(motor_msg)
 
-        if self._gripper_state_publisher is not None:
-            g_pos, g_vel, g_torque, g_status = self._hardware.get_gripper_state()
-            gripper_msg = JointMotorState()
-            gripper_msg.header = msg.header
-            gripper_msg.joint_name = "gripper"
-            # 位置字段单独取 gripper_position_m()（米制开合距离，坐标校验失败时为 NaN），
-            # 而不是直接用上面的电机角度 g_pos。
-            gripper_msg.position = float(self._hardware.gripper_position_m())
-            gripper_msg.velocity = float(g_vel)
-            gripper_msg.torque = float(g_torque)
-            gripper_msg.status_code = int(g_status)
-            self._gripper_state_publisher.publish(gripper_msg)
+        self._publish_gripper_feedback()
 
         # 失败和成功路径都检查状态变化：恢复时立即覆盖锁存的 255/stale，
         # 稳定时只发低频心跳，不随 joint_states 以 100 Hz 重复发相同状态。
         self.publish_status(force=False)
+
+    def _feedback_stamp(self, observed_at: float) -> Time:
+        """把缓存的单调时钟年龄映射到 ROS 时间，保留首次发布前的等待时间。"""
+        stamp = self._node.get_clock().now().to_msg()
+        age_ns = int(max(time.monotonic() - observed_at, 0.0) * 1_000_000_000)
+        stamp_ns = max(stamp.sec * 1_000_000_000 + stamp.nanosec - age_ns, 0)
+        return Time(sec=stamp_ns // 1_000_000_000, nanosec=stamp_ns % 1_000_000_000)
+
+    def _publish_gripper_feedback(self) -> None:
+        # 夹爪有独立的样本与健康范围；六轴失效时仍发布其自身诊断状态。
+        if self._gripper_state_publisher is None:
+            return
+        position, velocity, torque, status, sequence, observed_at = self._hardware.get_cached_gripper_sample()
+        identity = (sequence, observed_at)
+        if identity != self._last_gripper_identity:
+            self._last_gripper_identity = identity
+            self._last_gripper_stamp = Time() if observed_at is None else self._feedback_stamp(observed_at)
+        msg = JointMotorState()
+        msg.header.stamp = self._last_gripper_stamp
+        msg.joint_name = "gripper"
+        msg.position = float(position)
+        msg.velocity = float(velocity)
+        msg.torque = float(torque)
+        msg.status_code = int(status)
+        self._gripper_state_publisher.publish(msg)
 
     def publish_status(self, *, force: bool = True) -> None:
         """发布锁存的机械臂运行状态（模式、使能位、控制环占用、状态机、错误码）。
@@ -175,8 +194,9 @@ class JointStatePublisher:
             msg.control_loop_active = self._hardware.control_loop_active
             msg.state_machine = self._hardware.state_machine
             msg.joint_names = list(self._hardware.joint_names)
-            msg.per_joint_status_code = self._hardware.get_joint_status_codes()
-            msg.error_codes = list(self._hardware.error_codes)
+            statuses, errors = self._hardware.get_feedback_status()
+            msg.per_joint_status_code = statuses
+            msg.error_codes = errors
             identity = (
                 msg.mode,
                 msg.enabled,

@@ -20,7 +20,6 @@ from rebotarmcontroller.hardware_manager import (
     _G_MAX_DIST_M,
     _G_POSITION_MAX_SPEED_RAD_S,
     _G_TAU_MAX,
-    _G_VERIFIED_OPEN_LIMIT_M,
 )
 
 
@@ -173,16 +172,15 @@ def make_manager(
     manager._feedback_request_deadline_by_label = {}
     manager._feedback_error_by_label = {}
     manager._arm_feedback_updated_monotonic = None
-    manager._arm_feedback_error = "arm feedback not received"
+    manager._arm_feedback_error = None
     manager._grasp_hold_timeout_sec = 30.0
     manager._gripper_hold_deadline = None
     manager._gripper_hold_release_reason = None
     manager._gripper_target_timeout_sec = 0.0
     manager._gripper_target_deadline_monotonic = None
     manager._gripper_last_tick_monotonic = None
-    manager._gripper_status_code = 255
     manager._gripper_feedback_updated_monotonic = None
-    manager._gripper_feedback_error = "gripper feedback not received"
+    manager._gripper_feedback_error = None
     manager._gripper_zero_error = None
     manager._gripper_command_error = None
     manager._gripper_position_result = "idle"
@@ -491,10 +489,11 @@ def test_cached_joint_sample_exposes_verified_identity_without_serial_reads() ->
     manager._enabled = True
     before = seed_verified_feedback(manager, arm_status=1)
     forbid_raw_feedback_reads(manager)
-    positions, velocities, torques, statuses, identity = manager.get_cached_joint_sample()
+    positions, velocities, torques, statuses, identity, observed_at = manager.get_cached_joint_sample()
     assert len(positions) == len(velocities) == len(torques) == 6
     assert statuses == [1] * 6
     assert identity == tuple(manager._verified_feedback_sample(name).sequence for name in JOINT_NAMES)
+    assert observed_at == min(sample.observed_at for sample in before.values())
     assert_verified_feedback_unchanged(manager, before)
 
 
@@ -735,7 +734,6 @@ def test_gripper_tick_does_not_copy_unhealthy_sample_before_neutral(
         manager._gripper_pos,
         manager._gripper_vel,
         manager._gripper_torque,
-        manager._gripper_status_code,
     )
     with manager._feedback_lock:
         previous = manager._verified_feedback_by_label["gripper"]
@@ -759,7 +757,6 @@ def test_gripper_tick_does_not_copy_unhealthy_sample_before_neutral(
         manager._gripper_pos,
         manager._gripper_vel,
         manager._gripper_torque,
-        manager._gripper_status_code,
     ) == original
     assert commands == [(-0.5, 0.0, 0.0, 0.0, 0.0)]
 
@@ -2145,7 +2142,8 @@ def test_get_gripper_state_reports_unknown_status_after_shared_refresh_error() -
 
     assert (position, velocity, torque) == (-1.0, 0.0, 0.0)
     assert status == 255
-    assert manager.gripper_feedback_error == "shared feedback batch failed: serial timeout"
+    assert "[READ_FAILED] shared feedback batch failed: serial timeout" in manager.gripper_feedback_error
+    assert manager._gripper_feedback_error == "shared feedback batch failed: serial timeout"
     assert_verified_feedback_unchanged(manager, before)
 
 
@@ -2173,9 +2171,245 @@ def test_feedback_failures_are_exposed_in_arm_status_error_codes() -> None:
     manager._gripper_feedback_error = "shared feedback batch failed: serial timeout"
 
     assert manager.error_codes == [
-        "ARM_FEEDBACK: arm feedback unavailable: shared feedback batch failed: serial timeout",
-        "GRIPPER_FEEDBACK: gripper feedback unavailable: shared feedback batch failed: serial timeout",
+        "ARM_FEEDBACK: arm feedback unavailable: [READ_FAILED] shared feedback batch failed: serial timeout",
+        "GRIPPER_FEEDBACK: gripper feedback unavailable: [READ_FAILED] shared feedback batch failed: serial timeout",
     ]
+
+
+@pytest.mark.parametrize("status", [0, 1, 8, 9, 10, 11, 12, 13, 14])
+def test_arm_and_gripper_report_original_status_from_verified_cache(status) -> None:
+    manager = make_manager()
+    manager._gripper_mot = FakeMotor(position=-1.0)
+    manager._gripper_mot.state.status_code = status
+    before = seed_verified_feedback(
+        manager, arm_status=status, gripper_state=manager._gripper_mot.state,
+    )
+    forbid_raw_feedback_reads(manager)
+
+    assert manager.get_joint_status_codes() == [status] * 6
+    assert manager.get_gripper_state() == (-1.0, 0.0, 0.0, status)
+    assert manager.gripper_feedback_error is None
+    assert manager.error_codes == []  # 电机故障原码与反馈不可用分别表达。
+    assert_verified_feedback_unchanged(manager, before)
+
+
+def test_first_frame_wait_is_derived_and_recovers_without_status_initialization() -> None:
+    manager = make_manager()
+    gripper = FakeMotor(position=-1.0)
+    manager._gripper_mot = gripper
+    manager._gripper_ctrl = FakeController([gripper])
+
+    for _ in range(3):
+        assert manager.get_joint_status_codes() == [255] * 6
+        assert manager.get_gripper_state()[3] == 255
+        assert "[WAITING_FIRST_FRAME]" in manager.gripper_feedback_error
+        assert all("[WAITING_FIRST_FRAME]" in error for error in manager.error_codes)
+    assert manager._verified_feedback_by_label == {}
+    assert manager._gripper_feedback_error is None
+    assert manager._arm_feedback_error is None
+    assert gripper.request_feedback_calls == 0
+
+    manager.refresh_feedback_if_due(force=True)
+
+    assert manager.get_joint_status_codes() == [0] * 6
+    assert manager.get_gripper_state() == (-1.0, 0.0, 0.0, 0)
+    assert manager.gripper_feedback_error is None
+    assert manager.error_codes == []
+    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+
+
+@pytest.mark.parametrize(
+    "fault,code",
+    [("read", "READ_FAILED"), ("sequence", "READ_FAILED"), ("stale", "STALE"),
+     ("coordinate", "INVALID_COORDINATE"), ("values", "INVALID_VALUES")],
+)
+def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fault, code) -> None:
+    manager = make_manager()
+    gripper = FakeMotor(position=-1.0)
+    manager._gripper_mot = gripper
+    manager._gripper_ctrl = FakeController([gripper])
+    clock = [100.0]
+    monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: clock[0])
+    manager.refresh_feedback_if_due(force=True)
+    previous = manager._verified_feedback_by_label["gripper"]
+    original_getter = gripper.get_state_with_sequence
+
+    def fail_read():
+        raise RuntimeError("injected serial read failure")
+
+    if fault == "read":
+        gripper.get_state_with_sequence = fail_read
+    elif fault == "sequence":
+        gripper.advance_feedback_on_poll = False
+    elif fault == "stale":
+        clock[0] += 1.0
+    else:
+        gripper.state = SimpleNamespace(
+            pos=2 * np.pi if fault == "coordinate" else float("nan"),
+            vel=0.0, torq=0.0, status_code=0,
+        )
+    if fault in ("read", "sequence", "values"):
+        with pytest.raises(RuntimeError):
+            manager.refresh_feedback_if_due(force=True)
+        assert manager._verified_feedback_by_label["gripper"] is previous
+    elif fault == "coordinate":
+        manager.refresh_feedback_if_due(force=True)
+        assert manager.get_gripper_state()[0] == pytest.approx(2 * np.pi)
+
+    before = dict(manager._verified_feedback_by_label)
+    errors = dict(manager._feedback_error_by_label)
+    gripper_error = manager._gripper_feedback_error
+    updated = manager._gripper_feedback_updated_monotonic
+    with monkeypatch.context() as reads:
+        reads.setattr(manager, "refresh_feedback_if_due", fail_read)
+        for motor in [*manager.arm._motor_map.values(), gripper]:
+            reads.setattr(motor, "get_state", fail_read)
+            reads.setattr(motor, "get_state_with_sequence", fail_read)
+        for _ in range(3):
+            assert manager.get_gripper_state()[3] == 255
+            assert f"[{code}]" in manager.gripper_feedback_error
+            assert any(f"[{code}]" in reason for reason in manager.error_codes)
+        assert_verified_feedback_unchanged(manager, before)
+        assert manager._feedback_error_by_label == errors
+        assert manager._gripper_feedback_error == gripper_error
+        assert manager._gripper_feedback_updated_monotonic == updated
+
+    manager._connected = manager._enabled = True
+    manager.arm.control_loop_active = True
+    with pytest.raises(RuntimeError):
+        manager.set_gripper_target(0.01)
+    assert manager._gripper_active is False
+    manager.arm.control_loop_active = False
+
+    gripper.get_state_with_sequence = original_getter
+    gripper.advance_feedback_on_poll = True
+    gripper.state = SimpleNamespace(pos=-0.5, vel=0.0, torq=0.0, status_code=0)
+    clock[0] += 0.02
+    manager.refresh_feedback_if_due(force=True)
+
+    assert manager.get_gripper_state() == (-0.5, 0.0, 0.0, 0)
+    assert manager.gripper_feedback_error is None
+    assert manager.error_codes == []
+    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+
+
+def test_gripper_motor_fault_is_reported_and_rejected_by_command_gate() -> None:
+    manager = make_manager()
+    manager._connected = manager._enabled = True
+    manager.arm.control_loop_active = True
+    gripper = FakeMotor(position=-1.0)
+    gripper.state.status_code = 11
+    manager._gripper_mot = gripper
+    seed_verified_feedback(manager, arm_status=1, gripper_state=gripper.state)
+
+    assert manager.get_joint_status_codes() == [1] * 6
+    assert manager.get_gripper_state()[3] == 11
+    with pytest.raises(RuntimeError, match="status_code=11, expected 1"):
+        manager.set_gripper_target(0.01)
+    assert manager.gripper_active is False
+
+
+@pytest.mark.parametrize("query_count", [0, 7])
+@pytest.mark.parametrize("fault,code", [
+    ("read", "READ_FAILED"), ("sequence", "READ_FAILED"),
+    ("stale", "STALE"), ("coordinate", "INVALID_COORDINATE"),
+    ("values", "INVALID_VALUES"),
+])
+def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
+    monkeypatch, query_count, fault, code,
+) -> None:
+    manager = make_manager()
+    gripper = FakeMotor(position=-1.0)
+    manager._gripper_mot = gripper
+    manager._gripper_ctrl = FakeController([gripper])
+    clock = [100.0]
+    monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: clock[0])
+    manager.refresh_feedback_if_due(force=True)
+    motor = manager.arm._motor_map["joint3"]
+    old_sample = manager._verified_feedback_sample("joint3")
+    getter = motor.get_state_with_sequence
+
+    def failed_read():
+        raise RuntimeError("injected joint3 serial error")
+
+    if fault == "read":
+        motor.get_state_with_sequence = failed_read
+    elif fault == "sequence":
+        motor.advance_feedback_on_poll = False
+    elif fault == "stale":
+        clock[0] += 1.0
+        # 夹爪新鲜度独立于六轴整体健康状态。
+        with manager._feedback_lock:
+            manager._record_verified_feedback("gripper", gripper.state, 10, clock[0])
+    else:
+        motor.state = SimpleNamespace(
+            pos=0.5 if fault == "coordinate" else float("inf"),
+            vel=0.0, torq=0.0, status_code=0,
+        )
+    if fault != "stale":
+        with pytest.raises(RuntimeError):
+            manager.refresh_feedback_if_due(force=True)
+    assert manager._verified_feedback_sample("joint3") is old_sample
+    before = dict(manager._verified_feedback_by_label)
+    errors = dict(manager._feedback_error_by_label)
+    health = (manager._arm_feedback_error, manager._arm_feedback_updated_monotonic)
+    polls = manager.arm._ctrl_map["fake"].poll_feedback_calls
+    for _ in range(query_count):
+        assert manager.get_joint_status_codes() == [255] * 6
+        assert manager.get_gripper_state()[3] == 0
+        assert any(f"[{code}]" in error for error in manager.error_codes)
+        assert manager.gripper_feedback_error is None
+        with pytest.raises(RuntimeError):
+            manager.get_cached_joint_sample()
+    assert_verified_feedback_unchanged(manager, before)
+    assert manager._feedback_error_by_label == errors
+    assert (manager._arm_feedback_error, manager._arm_feedback_updated_monotonic) == health
+    assert manager.arm._ctrl_map["fake"].poll_feedback_calls == polls
+
+    manager._connected = manager._enabled = True
+    with pytest.raises(RuntimeError):
+        manager.send_joint_motor_cmd("joint3", SimpleNamespace())
+    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+
+    motor.get_state_with_sequence = getter
+    motor.advance_feedback_on_poll = True
+    motor.state = SimpleNamespace(pos=-0.5, vel=0.1, torq=0.2, status_code=1)
+    clock[0] += 0.02
+    manager.refresh_feedback_if_due(force=True)
+    assert manager.get_joint_status_codes() == [0, 0, 1, 0, 0, 0]
+    assert manager.get_feedback_status()[1] == []
+    assert manager.get_cached_joint_sample()[0][2] == -0.5
+
+
+def test_gripper_publication_uses_sample_values_and_time_not_control_mirrors() -> None:
+    manager = make_manager()
+    manager._gripper_mot = FakeMotor(position=-1.0)
+    before = seed_verified_feedback(manager, gripper_state=manager._gripper_mot.state)
+    sample = before["gripper"]
+    manager._gripper_pos = -4.0
+    manager._gripper_vel = 4.0
+    manager._gripper_torque = 5.0
+    manager._gripper_feedback_updated_monotonic = 0.0
+    forbid_raw_feedback_reads(manager)
+
+    position, velocity, torque, status, sequence, observed_at = manager.get_cached_gripper_sample()
+
+    assert (position, velocity, torque, status) == (0.018, 0.0, 0.0, 0)
+    assert (sequence, observed_at) == (sample.sequence, sample.observed_at)
+    assert_verified_feedback_unchanged(manager, before)
+
+
+def test_arm_publication_preserves_motor_fault_but_motion_still_rejects_it() -> None:
+    manager = make_manager()
+    manager._connected = manager._enabled = True
+    manager.arm.control_loop_active = True
+    seed_verified_feedback(manager, arm_status=11)
+    forbid_raw_feedback_reads(manager)
+
+    assert manager.get_cached_joint_sample()[3] == [11] * 6
+    assert manager.get_joint_status_codes() == [11] * 6
+    with pytest.raises(RuntimeError, match="status_code=11, expected 1"):
+        manager.get_joint_state()
 
 
 def test_wait_gripper_target_rejects_stale_arrival(monkeypatch) -> None:
@@ -2350,7 +2584,16 @@ def test_grasp_modes_are_not_released_by_position_neutralization() -> None:
             assert command[:4] == expected
 
 
-def test_gripper_position_target_cannot_exceed_verified_85mm_limit() -> None:
+@pytest.mark.parametrize(("requested_m", "expected_angle"), [
+    (0.085, -85.0 / 18.0),
+    (0.0882, -4.9),
+    (0.09, -5.0),
+    (0.10, -5.0),
+    (-0.01, 0.0),
+])
+def test_gripper_position_target_uses_full_90mm_range(
+    requested_m: float, expected_angle: float,
+) -> None:
     manager = make_manager()
     manager._connected = True
     manager._enabled = True
@@ -2368,11 +2611,43 @@ def test_gripper_position_target_cannot_exceed_verified_85mm_limit() -> None:
         gripper_state=SimpleNamespace(pos=0.0, vel=0.0, torq=0.0, status_code=1),
     )
 
-    manager.set_gripper_target(0.09, max_effort=0.15)
+    manager.set_gripper_target(requested_m, max_effort=0.15)
 
-    assert manager._gripper_goal_angle == pytest.approx(
-        (_G_VERIFIED_OPEN_LIMIT_M / _G_MAX_DIST_M) * _G_ANGLE_OPEN
-    )
+    assert manager._gripper_goal_angle == pytest.approx(expected_angle)
+
+
+def test_gripper_full_open_command_reaches_motor_without_extra_open_margin(monkeypatch) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: clock[0])
+    manager = make_manager(gripper_feedback_stale_timeout_sec=2.0)
+    commands = _configure_gripper_position_move(manager, position=-4.8, goal=-4.8)
+    manager._connected = manager._enabled = True
+    manager.arm.control_loop_active = True
+
+    manager.set_gripper_target(0.09, max_effort=0.15)
+    clock[0] += 1.0
+    manager._gripper_tick()
+
+    assert len(commands) == 1
+    assert commands[0][0] == -5.0
+    # Removing the angular margin must retain the total torque cap.
+    position, _velocity, kp, kd, tau_ff = commands[0]
+    total_torque = kp * (position - manager._gripper_pos) - kd * manager._gripper_vel + tau_ff
+    assert abs(total_torque) <= 0.15 + 1e-12
+
+
+@pytest.mark.parametrize(("requested_angle", "expected_angle"), [
+    (-5.2, -5.0),
+    (-5.0, -5.0),
+    (0.2, 0.0),
+])
+def test_gripper_mit_keeps_nominal_position_range(requested_angle, expected_angle) -> None:
+    manager = make_manager()
+    commands = _configure_gripper_position_move(manager, position=-4.8)
+
+    manager._gripper_safe_mit(requested_angle, 0.0, 5.0, 1.0, tau_limit=0.15)
+
+    assert commands[0][0] == expected_angle
 
 
 def test_hardware_soft_limits_match_moveit_urdf() -> None:
@@ -2579,6 +2854,7 @@ def test_zero_rejects_old_zero_cache_and_retains_failure_until_verified() -> Non
     manager.refresh_feedback_if_due(force=True)
     assert np.isnan(manager.gripper_position_m())  # acquisition alone is not calibration
     assert manager.get_gripper_state()[3] == 255
+    assert "[ZERO_INVALID]" in manager.gripper_feedback_error
     gripper.set_zero_position = lambda: None
     assert manager.set_zero("gripper") is True
     assert manager.gripper_position_m() == 0.0
@@ -2650,6 +2926,8 @@ def test_invalid_coordinate_publishes_unknown_without_losing_arm_feedback() -> N
     output._last_status_published_at = None
     output._status_heartbeat_sec = 0.2
     output._last_feedback_identity = None
+    output._last_gripper_identity = None
+    output._last_gripper_stamp = Time()
     output._node = node
     output._hardware = manager
     output._publisher = publisher("joints")

@@ -47,6 +47,15 @@ from .gravity_control import (GravitySettings, LoopTiming, bounded_mit_command,
 class GravityCommandError(RuntimeError):
     """Motor command transport failed; holding torque cannot be trusted."""
 
+
+class _FeedbackValidationError(RuntimeError):
+    """反馈合法性失败，保留分类供采集路径登记诊断。"""
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+
+
 _LOG = logging.getLogger(__name__)
 
 _G_MAX_DIST_M = 0.09
@@ -61,7 +70,6 @@ _G_COORDINATE_TOL_RAD = 2.0 * 25.0 / 65535.0
 _G_CLOSED_FEEDBACK_TOL_RAD = 0.010 * abs(_G_ANGLE_OPEN) / _G_MAX_DIST_M
 _G_ZERO_VERIFY_TIMEOUT_SEC = 0.5
 _G_ZERO_VERIFY_SAMPLES = 3
-_G_OPEN_SOFT_LIMIT = -4.9
 _G_ARRIVE_TOL = 0.12
 _G_TAU_MAX = 1.5
 # 常规位置移动使用有界的位置斜坡命令。默认 0.5 rad/s 与既有 Web/键盘遥操作
@@ -173,6 +181,20 @@ class _VerifiedFeedbackSample:
     state: object
     sequence: int
     observed_at: float
+
+
+@dataclass(frozen=True)
+class _CachedMotorFeedback:
+    """一次缓存查询结果；数值、状态码和不可用原因来自同一快照。"""
+
+    values: tuple[float, float, float] | None
+    raw_status_code: int | None
+    failure_reason: str | None
+    sample: _VerifiedFeedbackSample | None
+
+    @property
+    def status_code(self) -> int:
+        return 255 if self.failure_reason is not None or self.raw_status_code is None else self.raw_status_code
 
 
 def apply_gravity_compensation_tau_scale(tau: np.ndarray) -> np.ndarray:
@@ -307,10 +329,8 @@ class HardwareManager:
         self._gripper_pos = 0.0
         self._gripper_vel = 0.0
         self._gripper_torque = 0.0
-        # 255 是"状态未知/无效"的哨兵值，不是电机上报的状态码。
-        self._gripper_status_code = 255
         self._gripper_feedback_updated_monotonic: float | None = None
-        self._gripper_feedback_error: str | None = "gripper feedback not received"
+        self._gripper_feedback_error: str | None = None
         self._gripper_zero_error: str | None = None
         self._gripper_command_error: str | None = None
         self._gripper_position_result = "idle"
@@ -336,7 +356,7 @@ class HardwareManager:
         # 内不要发布中间态的 "pending" 错误。
         self._feedback_force_refresh_active = False
         self._arm_feedback_updated_monotonic: float | None = None
-        self._arm_feedback_error: str | None = "arm feedback not received"
+        self._arm_feedback_error: str | None = None
         self._motor_lifecycle_lock = threading.RLock()
 
         self._endpos_ctrl = ArmEndPos(self._arm)
@@ -492,18 +512,27 @@ class HardwareManager:
         反馈类错误是在读取时按最新时效性实时派生的，不会写入 ``_error_codes``；
         这样"反馈恢复"后无需清理历史即可自动消失。
         """
-        codes = list(self._error_codes)
-        arm_feedback_failure = self._arm_feedback_failure_reason()
-        if arm_feedback_failure is not None:
-            codes.append(f"ARM_FEEDBACK: {arm_feedback_failure}")
-        if self._gripper_mot is not None:
-            with self._gripper_lock:
-                gripper_feedback_failure = (
-                    self._gripper_feedback_failure_reason_locked()
-                )
-            if gripper_feedback_failure is not None:
-                codes.append(f"GRIPPER_FEEDBACK: {gripper_feedback_failure}")
-        return codes
+        return self.get_feedback_status()[1]
+
+    def get_feedback_status(self) -> tuple[list[int], list[str]]:
+        """一次只读快照生成 ArmStatus 的状态码与诊断，避免恢复帧混用旧错误。"""
+        with self._feedback_lock, self._gripper_lock:
+            now = time.monotonic()
+            codes = list(self._error_codes)
+            failure = self._arm_feedback_failure_reason(now=now)
+            statuses = [
+                self._cached_motor_feedback_locked(
+                    name, failure_reason=failure, now=now,
+                ).status_code
+                for name in self.joint_names
+            ]
+            if failure is not None:
+                codes.append(f"ARM_FEEDBACK: {failure}")
+            if self._gripper_mot is not None:
+                failure = self._cached_gripper_feedback(now=now).failure_reason
+                if failure is not None:
+                    codes.append(f"GRIPPER_FEEDBACK: {failure}")
+            return statuses, codes
 
     def set_state_machine(self, state: str) -> None:
         """设置对外可见的子系统状态机，并在必要时同步生命周期状态。
@@ -643,6 +672,66 @@ class HardwareManager:
             _FEEDBACK_RETRY_INTERVAL_SEC * _FEEDBACK_REFRESH_RETRIES,
         )
 
+    @staticmethod
+    def _classified_feedback_error(reason: str, code: str = "READ_FAILED") -> str:
+        message = str(reason)
+        return message if message.startswith("[") else f"[{code}] {message}"
+
+    def _feedback_failure_reason(
+        self,
+        label: str,
+        *,
+        error: str | None,
+        updated: float | None,
+        now: float | None = None,
+    ) -> str | None:
+        """机械臂与夹爪共用的只读可用性判定，不登记错误或刷新采样时间。"""
+        if error is not None:
+            return f"{label} feedback unavailable: {self._classified_feedback_error(error)}"
+        if updated is None:
+            return (
+                f"{label} feedback unavailable: [WAITING_FIRST_FRAME] "
+                f"{label} verified feedback unavailable; feedback not received"
+            )
+        current = time.monotonic() if now is None else float(now)
+        age = max(current - updated, 0.0)
+        if age > self._gripper_feedback_stale_timeout_sec:
+            return (
+                f"{label} feedback stale: [STALE] age={age:.3f}s "
+                f"limit={self._gripper_feedback_stale_timeout_sec:.3f}s"
+            )
+        return None
+
+    def _cached_motor_feedback_locked(
+        self,
+        label: str,
+        *,
+        failure_reason: str | None = None,
+        now: float | None = None,
+    ) -> _CachedMotorFeedback:
+        """统一解析已验证缓存；调用方持有反馈锁，不访问 SDK 或修改健康状态。"""
+        sample = self._verified_feedback_by_label.get(label)
+        reason = failure_reason or self._feedback_failure_reason(
+            label,
+            error=self._feedback_error_by_label.get(label),
+            updated=sample.observed_at if sample is not None else None,
+            now=now,
+        )
+        if sample is None:
+            return _CachedMotorFeedback(None, None, reason, None)
+        try:
+            self._validate_feedback_sample(label, sample.state)
+            values = (float(sample.state.pos), float(sample.state.vel), float(sample.state.torq))
+            status = int(sample.state.status_code)
+        except Exception as exc:
+            detail = self._classified_feedback_error(
+                str(exc), getattr(exc, "code", "READ_FAILED")
+            )
+            return _CachedMotorFeedback(
+                None, None, reason or f"{label} feedback unavailable: {detail}", sample,
+            )
+        return _CachedMotorFeedback(values, status, reason, sample)
+
     def _validate_feedback_sample(self, label: str, state) -> None:
         """校验单条反馈的合法性：有限数值 + 位于该关节硬件软限位内。
 
@@ -656,19 +745,24 @@ class HardwareManager:
             raise RuntimeError(f"{label} feedback unavailable")
         values = (float(state.pos), float(state.vel), float(state.torq))
         if not all(np.isfinite(value) for value in values):
-            raise RuntimeError(f"{label} feedback contains non-finite values")
+            raise _FeedbackValidationError(
+                "INVALID_VALUES", f"{label} feedback contains non-finite values"
+            )
         limits = _JOINT_POSITION_LIMITS_RAD.get(label)
         if limits is None:
             raise RuntimeError(f"no hardware soft limit configured for {label}")
         lower, upper = limits
         if values[0] < lower or values[0] > upper:
-            raise RuntimeError(
+            raise _FeedbackValidationError(
+                "INVALID_COORDINATE",
                 f"{label} position {values[0]:.6f} rad outside "
                 f"hardware soft limit [{lower:.6f}, {upper:.6f}]"
             )
 
-    def _record_feedback_label_error(self, label: str, reason: str) -> None:
-        self._feedback_error_by_label[label] = str(reason)
+    def _record_feedback_label_error(
+        self, label: str, reason: str, *, code: str = "READ_FAILED"
+    ) -> None:
+        self._feedback_error_by_label[label] = self._classified_feedback_error(reason, code)
 
     def _record_verified_feedback(
         self,
@@ -706,10 +800,11 @@ class HardwareManager:
         ]
         if arm_errors:
             self._record_arm_feedback_error("; ".join(arm_errors))
-        elif missing_arm and not getattr(self, "_feedback_force_refresh_active", False):
-            self._record_arm_feedback_error(
-                "verified feedback pending: " + ",".join(missing_arm)
-            )
+        elif missing_arm:
+            if not getattr(self, "_feedback_force_refresh_active", False):
+                self._record_arm_feedback_error(
+                    "[WAITING_FIRST_FRAME] verified feedback pending: " + ",".join(missing_arm)
+                )
         else:
             # 机械臂新鲜度取所有关节中"最旧"的观测时刻，即短板决定整体时效。
             self._record_arm_feedback_success(
@@ -725,7 +820,7 @@ class HardwareManager:
         if gripper_error is not None:
             self._record_gripper_feedback_error(gripper_error)
         elif "gripper" not in self._verified_feedback_by_label:
-            self._record_gripper_feedback_error("gripper feedback not received")
+            self._record_gripper_feedback_error("[WAITING_FIRST_FRAME] gripper feedback not received")
 
     def _inspect_pending_feedback(
         self,
@@ -753,7 +848,10 @@ class HardwareManager:
                         observed_at,
                     )
                 except Exception as exc:
-                    self._record_feedback_label_error(label, f"{label} feedback invalid: {exc}")
+                    self._record_feedback_label_error(
+                        label, f"{label} feedback invalid: {exc}",
+                        code=getattr(exc, "code", "READ_FAILED"),
+                    )
                 self._feedback_request_baseline_by_label.pop(label, None)
                 self._feedback_request_deadline_by_label.pop(label, None)
                 continue
@@ -809,18 +907,11 @@ class HardwareManager:
         先看是否有显式错误；否则用单调时钟计算反馈年龄，超过
         ``_gripper_feedback_stale_timeout_sec`` 即判定为过期（运动命令必须被拒绝）。
         """
-        if self._arm_feedback_error is not None:
-            return f"arm feedback unavailable: {self._arm_feedback_error}"
-        updated = self._arm_feedback_updated_monotonic
-        current = time.monotonic() if now is None else float(now)
-        age = float("inf") if updated is None else max(current - updated, 0.0)
-        if age > self._gripper_feedback_stale_timeout_sec:
-            return (
-                "arm feedback stale: "
-                f"age={age:.3f}s "
-                f"limit={self._gripper_feedback_stale_timeout_sec:.3f}s"
+        with self._feedback_lock:
+            return self._feedback_failure_reason(
+                "arm", error=self._arm_feedback_error,
+                updated=self._arm_feedback_updated_monotonic, now=now,
             )
-        return None
 
     def _refresh_feedback_batch(
         self,
@@ -1063,7 +1154,9 @@ class HardwareManager:
         velocity = float(state.vel)
         torque = float(state.torq)
         if not all(np.isfinite(value) for value in (position, velocity, torque)):
-            raise RuntimeError("gripper feedback contains non-finite values")
+            raise _FeedbackValidationError(
+                "INVALID_VALUES", "gripper feedback contains non-finite values"
+            )
         return position, velocity, torque, int(state.status_code)
 
     def _record_gripper_feedback(self, state, *, observed_at: float | None = None) -> None:
@@ -1074,8 +1167,14 @@ class HardwareManager:
             self._gripper_pos = position
             self._gripper_vel = velocity
             self._gripper_torque = torque
-            self._gripper_status_code = status
             self._gripper_feedback_updated_monotonic = timestamp
+            # 有限的原始坐标仍保留供显式置零使用，健康判定和控制入口必须拒绝越限。
+            coordinate_error = self._gripper_coordinate_failure_reason_locked(
+                position=position, check_zero=False,
+            )
+            if coordinate_error is not None:
+                self._record_gripper_feedback_error(coordinate_error)
+                return
             self._gripper_feedback_error = None
         if recovered:
             _LOG.info(
@@ -1109,32 +1208,30 @@ class HardwareManager:
 
         依次检查：显式错误 -> 数据过期 -> 坐标合法性（置零错误或原始角越界）。
         """
-        if self._gripper_feedback_error is not None:
-            return f"gripper feedback unavailable: {self._gripper_feedback_error}"
-        age = self._gripper_feedback_age_sec(now=now)
-        if age > self._gripper_feedback_stale_timeout_sec:
-            return (
-                "gripper feedback stale: "
-                f"age={age:.3f}s limit={self._gripper_feedback_stale_timeout_sec:.3f}s"
-            )
-        return self._gripper_coordinate_failure_reason_locked()
+        return self._feedback_failure_reason(
+            "gripper", error=self._gripper_feedback_error,
+            updated=self._gripper_feedback_updated_monotonic, now=now,
+        ) or self._gripper_coordinate_failure_reason_locked()
 
-    def _gripper_coordinate_failure_reason_locked(self) -> str | None:
+    def _gripper_coordinate_failure_reason_locked(
+        self, *, position: float | None = None, check_zero: bool = True
+    ) -> str | None:
         """夹爪原始角度坐标的合法性检查（调用方需持有 ``_gripper_lock``）。
 
         有效区间是 [_G_ANGLE_OPEN - 量化容差, _G_CLOSED_FEEDBACK_TOL_RAD]，
         即"从全开到闭合零点附近"。越界说明零点未标定或编码器异常，必须拒绝
         使用该反馈（例如合拢方向越界会让力矩变成前馈而持续顶紧）。
         """
-        if self._gripper_zero_error is not None:
-            return self._gripper_zero_error
-        position = self._gripper_pos
+        if check_zero and self._gripper_zero_error is not None:
+            return f"[ZERO_INVALID] {self._gripper_zero_error}"
+        if position is None:
+            position = self._gripper_pos
         if not np.isfinite(position) or not (
             _G_ANGLE_OPEN - _G_COORDINATE_TOL_RAD
             <= position <= _G_CLOSED_FEEDBACK_TOL_RAD
         ):
             return (
-                f"gripper coordinate invalid: raw={position:.6f} rad outside "
+                f"[INVALID_COORDINATE] gripper coordinate invalid: raw={position:.6f} rad outside "
                 f"[{_G_ANGLE_OPEN:.6f}, 0.000000] rad "
                 f"(open_tolerance={_G_COORDINATE_TOL_RAD:.6f}, "
                 f"closed_tolerance={_G_CLOSED_FEEDBACK_TOL_RAD:.6f}); verify closed zero"
@@ -1346,16 +1443,29 @@ class HardwareManager:
             return positions, velocities, torques
 
     def get_cached_joint_sample(self):
-        """在一次原子读取中同时返回校验后的数值与其接收标识。"""
+        """返回同一快照的数值、原始状态码、接收序号及最旧反馈观测时间。
+
+        发布允许保留真实电机故障码；动作入口仍通过 expected_status 拒绝故障。
+        """
         with self._motor_lifecycle_lock, self._feedback_lock:
-            values = self._validated_joint_feedback(
-                expected_status=1 if self._enabled else 0, refresh=False,
+            now = time.monotonic()
+            failure = self._arm_feedback_failure_reason(now=now)
+            if failure is not None:
+                raise RuntimeError(failure)
+            feedback = [self._cached_motor_feedback_locked(name, now=now) for name in self.joint_names]
+            for item in feedback:
+                if item.failure_reason is not None:
+                    raise RuntimeError(item.failure_reason)
+            positions, velocities, torques = (
+                np.array([item.values[index] for item in feedback], dtype=np.float64)
+                for index in range(3)
             )
-            # 序号用于上层判断两个样本是否来自同一批反馈（避免混用新旧帧）。
-            sequences = tuple(
-                sample.sequence for sample in self._verified_feedback_samples(self.joint_names)
+            return (
+                positions, velocities, torques,
+                [item.status_code for item in feedback],
+                tuple(item.sample.sequence for item in feedback),
+                min(item.sample.observed_at for item in feedback),
             )
-            return (*values, sequences)
 
     def hold_current_position(self) -> np.ndarray:
         """把当前关节角写成保持目标，使机械臂停在原地。"""
@@ -2015,16 +2125,15 @@ class HardwareManager:
 
     def get_joint_status_codes(self) -> list[int]:
         """返回各关节状态码；反馈整体失效时统一返回 255（未知）。"""
-        if self._arm_feedback_failure_reason() is not None:
-            return [255] * len(self.joint_names)
-        codes: list[int] = []
-        for name in self.joint_names:
-            try:
-                st = self._verified_feedback_sample(name).state
-                codes.append(int(st.status_code) if st is not None else 255)
-            except Exception:
-                codes.append(255)
-        return codes
+        with self._feedback_lock:
+            now = time.monotonic()
+            failure = self._arm_feedback_failure_reason(now=now)
+            return [
+                self._cached_motor_feedback_locked(
+                    name, failure_reason=failure, now=now,
+                ).status_code
+                for name in self.joint_names
+            ]
 
     def init_gripper(self, cfg_path: str) -> None:
         """按配置初始化夹爪电机，并挂到机械臂同一控制器/总线上。
@@ -2086,8 +2195,8 @@ class HardwareManager:
         if status != 1:
             raise RuntimeError(f"gripper status_code={status}, expected 1 before position command")
         distance = float(np.clip(position_m, 0.0, _G_VERIFIED_OPEN_LIMIT_M))
-        # 线性映射：距离 -> 电机角；再取软限位，避免贴死机械端点。
-        target = max((distance / _G_MAX_DIST_M) * _G_ANGLE_OPEN, _G_OPEN_SOFT_LIMIT)
+        # 使用完整标称行程：90 mm 对应 -5 rad，不再额外裁到 -4.9 rad。
+        target = (distance / _G_MAX_DIST_M) * _G_ANGLE_OPEN
         effort = _G_DEFAULT_FORCE if max_effort <= 0.0 else float(max_effort)
         now = time.monotonic()
         target_timeout_sec = (
@@ -2143,8 +2252,8 @@ class HardwareManager:
 
     @property
     def gripper_feedback_error(self) -> str | None:
-        with self._gripper_lock:
-            return self._gripper_feedback_error
+        """当前反馈不可用原因；查询不写入或锁存派生错误。"""
+        return self._cached_gripper_feedback().failure_reason
 
     def wait_gripper_target(self, timeout: float | None = None) -> bool:
         """阻塞等待当前位置命令完成；返回是否到位。
@@ -2322,41 +2431,61 @@ class HardwareManager:
             "grasp close timeout before stall detected",
         )
 
-    def get_gripper_state(self) -> tuple[float, float, float, int]:
-        """返回夹爪 (位置 rad, 速度 rad/s, 力矩 N.m, 状态码)。
+    def _cached_gripper_feedback(self, *, now: float | None = None) -> _CachedMotorFeedback:
+        # 采集路径使用反馈锁 -> 夹爪锁；查询保持相同顺序，避免与控制循环互锁。
+        with self._feedback_lock, self._gripper_lock:
+            now = time.monotonic() if now is None else now
+            sample = self._verified_feedback_by_label.get("gripper")
+            failure = self._feedback_failure_reason(
+                "gripper", error=self._gripper_feedback_error,
+                updated=sample.observed_at if sample is not None else None, now=now,
+            )
+            feedback = self._cached_motor_feedback_locked(
+                "gripper", failure_reason=failure, now=now,
+            )
+            if feedback.failure_reason is not None or feedback.values is None:
+                return feedback
+            coordinate_failure = self._gripper_coordinate_failure_reason_locked(
+                position=feedback.values[0],
+            )
+            if coordinate_failure is not None:
+                return _CachedMotorFeedback(
+                    feedback.values, feedback.raw_status_code, coordinate_failure, feedback.sample,
+                )
+            return feedback
 
-        状态码 255 表示"未知/不可用"：反馈缺失、过期、坐标非法或读取异常时都会
-        返回 255，调用方据此判定夹爪不可信。
+    def get_cached_gripper_sample(self):
+        """返回夹爪同一快照的米制开口、速度、力矩、状态、序号与观测时间。
+
+        不可用时开口为 NaN；保留旧样本身份和时间，不把错误查询当作新反馈。
         """
-        with self._gripper_lock:
-            position = self._gripper_pos
-            velocity = self._gripper_vel
-            torque = self._gripper_torque
-        status = 255
-        if self._gripper_mot is not None:
-            try:
-                st = self._verified_feedback_sample("gripper").state
-                position, velocity, torque, status = self._validated_gripper_feedback_values(st)
+        with self._feedback_lock, self._gripper_lock:
+            feedback = self._cached_gripper_feedback()
+            values = feedback.values or (self._gripper_pos, self._gripper_vel, self._gripper_torque)
+            distance = float("nan") if feedback.failure_reason is not None else float(
+                np.clip(values[0] / _G_ANGLE_OPEN * _G_MAX_DIST_M, 0.0, _G_MAX_DIST_M)
+            )
+            sample = feedback.sample
+            return (
+                distance, values[1], values[2], feedback.status_code,
+                sample.sequence if sample is not None else None,
+                sample.observed_at if sample is not None else None,
+            )
+
+    def get_gripper_state(self) -> tuple[float, float, float, int]:
+        """返回同一缓存快照的 (位置 rad, 速度 rad/s, 力矩 N.m, 状态码)。
+
+        与关节共用可用性判定；可信反馈返回电机原码，否则派生 255。
+        读取不刷新总线、不登记错误、不改变反馈时间。无样本时沿用最后缓存数值，
+        这些回退数值必须结合 255 解读，不能视为当前有效反馈。
+        """
+        with self._feedback_lock:
+            feedback = self._cached_gripper_feedback()
+            values = feedback.values
+            if values is None:
                 with self._gripper_lock:
-                    feedback_error = self._gripper_feedback_error
-                if feedback_error is not None:
-                    status = 255
-                else:
-                    age = self._gripper_feedback_age_sec()
-                    if age > self._gripper_feedback_stale_timeout_sec:
-                        self._record_gripper_feedback_error(
-                            "gripper feedback stale: "
-                            f"age={age:.3f}s "
-                            f"limit={self._gripper_feedback_stale_timeout_sec:.3f}s"
-                        )
-                        status = 255
-            except Exception as exc:
-                self._record_gripper_feedback_error(str(exc))
-                status = 255
-        with self._gripper_lock:
-            if self._gripper_coordinate_failure_reason_locked() is not None:
-                status = 255
-        return position, velocity, torque, status
+                    values = (self._gripper_pos, self._gripper_vel, self._gripper_torque)
+            return (*values, feedback.status_code)
 
     def gripper_position_m(self) -> float:
         """把夹爪原始角度换算为开口距离（m，0 表示闭合）。"""
@@ -2648,13 +2777,13 @@ class HardwareManager:
     ) -> None:
         """下发夹爪 MIT 命令，并保证总力矩不超限。
 
-        位置命令先夹到 [_G_OPEN_SOFT_LIMIT, 0]（不允许命令超过张开软限位或越过
+        位置命令先夹到 [_G_ANGLE_OPEN, 0]（不允许命令超过标称全开或越过
         闭合零点）。力矩处理是"先算位置项，再把总力矩夹到 +/-limit，最后反解出
         等效前馈"：这样即使 tau_ff 很大，实际输出也不会超过 limit。
         """
         if self._gripper_mot is None or self._gripper_ctrl is None:
             return
-        pos_cmd = float(np.clip(pos, _G_OPEN_SOFT_LIMIT, 0.0))
+        pos_cmd = float(np.clip(pos, _G_ANGLE_OPEN, 0.0))
         # 本地计算的 PD 位置项，用于后面的饱和反解。
         pos_term = kp * (pos_cmd - self._gripper_pos) + kd * (-self._gripper_vel)
         limit = float(np.clip(abs(tau_limit), 0.05, _G_TAU_MAX))
@@ -2888,7 +3017,6 @@ class HardwareManager:
                 self._gripper_pos = position
                 self._gripper_vel = velocity
                 self._gripper_torque = torque
-                self._gripper_status_code = status
                 if status != 1:
                     self._fail_active_gripper_command_locked(
                         f"gripper status_code={status}, expected 1 during command"
