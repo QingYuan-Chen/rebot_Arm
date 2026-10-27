@@ -1,9 +1,9 @@
-"""点到点（Pose）运动执行节点。
+"""点到点(Pose)运动执行节点。
 
 职责与位置
 ----------
 本模块位于运动层，是"位姿目标 -> 关节轨迹 -> 控制器动作"的唯一执行入口，
-不直接访问电机 SDK（硬件访问一律留在控制器包内）。流程为：
+不直接访问电机 SDK(硬件访问一律留在控制器包内)。流程为：
 
 1. 收到 ExecutePose 请求后交给规划适配器 `MoveItMotionPlanner`，由它调用
    MoveIt 的规划服务求出关节空间轨迹；
@@ -15,10 +15,10 @@
 对外接口
 --------
 服务（都在 `/<arm_namespace>/motion_execution/` 下）：
-- `execute_pose`（ExecutePose）：规划并在需要时执行一个末端位姿目标；
-- `publish_trajectory_preview`（PublishTrajectoryPreview）：把多段已规划轨迹作为一个
+- `execute_pose`(ExecutePose):规划并在需要时执行一个末端位姿目标;
+- `publish_trajectory_preview`(PublishTrajectoryPreview):把多段已规划轨迹作为一个
   RViz 显示序列发布，不会下发控制器动作；
-- `stop`（Trigger）：取消当前动作目标，并请求控制器的 trajectory_stop。
+- `stop`(Trigger):取消当前动作目标,并请求控制器的 trajectory_stop。
 
 动作客户端：`/<arm_namespace>/follow_joint_trajectory`。
 
@@ -26,7 +26,7 @@
 --------
 - 本节点不做使能/失能操作，也不做碰撞或限位校验；它假定控制器侧已处于使能
   状态并由上层（视觉抓取执行器等）决定何时下发；
-- 速度/加速度缩放参数默认很小（0.10 / 0.08），请求中给 0.0 时回落到这些默认
+- 速度/加速度缩放参数默认很小(0.10 / 0.08)，请求中给 0.0 时回落到这些默认
   值，避免上位随手传 0 导致按满速执行；
 - `stop` 成功要求旧请求退出、动作终态、控制器停止成功及新鲜关节反馈持续静止；
   真机还要求新鲜且无故障的 IDLE 状态。确认失败时阻止后续执行，可再次 stop 重新检查。
@@ -60,7 +60,7 @@ class PoseExecutionNode(Node):
     """位姿执行节点：规划 + 下发轨迹 + 提供停止入口。
 
     生命周期：由 `main()` 创建后交给 4 线程的多线程执行器自旋，直到进程收到
-    中断。执行请求独占运动入口；stop 增加代次、阻止旧规划下发，并跟踪延迟的
+    中断。执行请求独占运动入口;stop 增加代次、阻止旧规划下发，并跟踪延迟的
     动作接受与终态。停止尚未确认时拒绝新执行。
 
     线程模型：所有服务、动作客户端与规划器共用同一个可重入回调组，允许执行中
@@ -105,8 +105,9 @@ class PoseExecutionNode(Node):
         self.declare_parameter("stop_confirmation_timeout_sec", 8.0)
 
         self._arm_namespace = str(self.get_parameter("arm_namespace").value).strip("/")
-        # 正在执行的动作目标句柄，仅用于 stop 时发起取消；执行结束后置回 None。
+        # 当前请求的动作句柄保留到下一次请求准入时重置，供停止流程补发取消并核对终态。
         self._active_goal_handle = None
+        # 可重入回调会并行修改运动状态；运动锁保护共享字段，停止锁只允许一轮停止确认。
         self._motion_lock = threading.RLock()
         self._stop_lock = threading.Lock()
         self._request_active = False
@@ -177,6 +178,7 @@ class PoseExecutionNode(Node):
         )
 
     def _on_stop_feedback(self, msg):
+        # 单调时钟记录本地接收时间，ROS 时钟用于校验消息源时间戳的新鲜度。
         self._stop_feedback.update(msg, time.monotonic(), self.get_clock().now().nanoseconds)
 
     def _on_arm_status(self, msg):
@@ -184,12 +186,14 @@ class PoseExecutionNode(Node):
             self._arm_status = (time.monotonic(), msg)
 
     def _execute_pose(self, request, response):
+        """串行接纳位姿请求，并在异常后要求重新确认停止。"""
         with self._motion_lock:
             if self._request_active or self._stopping:
                 response.success = False
                 response.message = "motion busy or stop not confirmed"
                 return response
             self._request_active = True
+            # 记住本次请求的代次；停止会递增全局代次，使旧请求失去继续下发的资格。
             self._run_generation = self._generation
             self._send_future = self._result_future = self._active_goal_handle = None
         try:
@@ -202,9 +206,11 @@ class PoseExecutionNode(Node):
             return response
         finally:
             with self._motion_lock:
+                # 请求退出只释放请求占用；动作是否结束仍由停止流程单独核对。
                 self._request_active = False
 
     def _interrupted(self):
+        """判断本次请求是否已被停止标记或代次变化中断；调用方须持有运动锁。"""
         return self._stopping or self._run_generation != self._generation
 
     def _execute_pose_impl(self, request: ExecutePose.Request, response: ExecutePose.Response):
@@ -272,6 +278,7 @@ class PoseExecutionNode(Node):
 
         response.stage = "execution"
         with self._motion_lock:
+            # 规划等待期间可能收到停止请求，规划成功后仍需重新检查执行资格。
             if self._interrupted():
                 response.success = False
                 response.message = "stopped during planning"
@@ -285,6 +292,7 @@ class PoseExecutionNode(Node):
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = plan.trajectory
         with self._motion_lock:
+            # 服务器就绪等待期间也可能发生停止；检查与发送在同一把锁内完成。
             if self._interrupted():
                 response.success = False
                 response.message = "stopped before trajectory dispatch"
@@ -293,6 +301,7 @@ class PoseExecutionNode(Node):
             self._send_future = send_future
         self._wait_future(send_future, max(float(request.timeout_sec), 1.0))
         if not send_future.done():
+            # 接收响应超时不能证明控制器未接纳目标。保持停止门控，并取消晚到的目标。
             with self._motion_lock:
                 self._stopping = True
             send_future.add_done_callback(self._cancel_late_goal)
@@ -305,7 +314,7 @@ class PoseExecutionNode(Node):
             response.message = "trajectory goal rejected"
             return response
 
-        # stop 也跟踪 send_future，接受响应晚到时仍会取消并等待终态。
+        # 停止流程也跟踪目标接收请求，响应晚到时仍能取得句柄、取消并等待终态。
         with self._motion_lock:
             self._active_goal_handle = goal_handle
             result_future = goal_handle.get_result_async()
@@ -315,6 +324,7 @@ class PoseExecutionNode(Node):
         # 结果等待窗口至少 30 s：轨迹本身可能远长于规划超时，必须给它跑完的机会。
         self._wait_future(result_future, max(float(request.timeout_sec), 30.0))
         if not result_future.done():
+            # 取消请求发出不等于机械臂已停稳；后续请求仍需等待停止确认。
             with self._motion_lock:
                 self._stopping = True
             goal_handle.cancel_goal_async()
@@ -323,12 +333,12 @@ class PoseExecutionNode(Node):
             return response
 
         wrapped = result_future.result()
-        # status 为动作终态（4 = STATUS_SUCCEEDED），error_code 为控制器返回的执行结果码。
+        # 动作状态码 4 表示成功终态，error_code 为控制器返回的执行结果码。
         status = int(getattr(wrapped, "status", 0))
         result = getattr(wrapped, "result", None)
         error_string = str(getattr(result, "error_string", "") or "")
         error_code = int(getattr(result, "error_code", 0) or 0)
-        # 两个条件都满足才算执行成功：动作被取消/中止时 status 不会是 4。
+        # 动作成功终态和控制器成功结果码必须同时满足，取消或中止均不能算执行成功。
         if status != 4 or error_code != int(FollowJointTrajectory.Result.SUCCESSFUL):
             response.success = False
             response.message = (
@@ -345,12 +355,12 @@ class PoseExecutionNode(Node):
         request: PublishTrajectoryPreview.Request,
         response: PublishTrajectoryPreview.Response,
     ):
-        """把多段轨迹放进同一条 DisplayTrajectory，供 RViz 连续播放。
+        """把多段轨迹放进同一条显示消息，供 RViz 连续播放。
 
         `DisplayTrajectory.trajectory` 本身就是有序轨迹数组：第一段从
         `trajectory_start` 开始，后续段从前一段终点继续。这里严格检查关节顺序、
         点维度与相邻端点连续性；任何异常都会整组拒绝，避免显示一条拼接错误的路径。
-        本函数只调用 RViz publisher，不接触 FollowJointTrajectory 动作客户端。
+        本函数只通过 RViz 发布器发送显示消息，不调用轨迹执行动作客户端。
         """
 
         if self._preview_publisher is None:
@@ -373,6 +383,7 @@ class PoseExecutionNode(Node):
         display = DisplayTrajectory()
         display.model_id = "reBot-DevArm_fixend"
         for index, trajectory in enumerate(trajectories):
+            # 各段必须采用相同的关节顺序，每个位置向量须完整且数值有限。
             points = list(trajectory.points)
             if list(trajectory.joint_names) != expected_names or not points:
                 response.success = False
@@ -387,6 +398,7 @@ class PoseExecutionNode(Node):
                     response.message = f"preview trajectory {index} has invalid positions"
                     return response
             start = list(points[0].positions)
+            # 相邻段在关节空间的端点偏差不得超过 1e-4 rad，避免预览拼接时发生跳变。
             if previous_end is not None and any(
                 abs(current - previous) > 1e-4
                 for current, previous in zip(start, previous_end)
@@ -401,6 +413,7 @@ class PoseExecutionNode(Node):
 
         from .gripper_preview import with_gripper_preview
         try:
+            # 按阶段加入夹爪显示动画；事件无效时整组拒绝，不发布部分预览。
             trajectories = with_gripper_preview(
                 trajectories, request.gripper_before_trajectory, request.gripper_openings_m
             )
@@ -416,6 +429,7 @@ class PoseExecutionNode(Node):
             display.trajectory.append(robot_trajectory)
         expected_names = list(trajectories[0].joint_names)
         first_point = trajectories[0].points[0]
+        # 动画可能新增手指关节，显示初态应从扩展后的第一段提取。
         display.trajectory_start.joint_state.name = expected_names
         display.trajectory_start.joint_state.position = list(first_point.positions)
         self._preview_publisher.publish(display)
@@ -424,36 +438,43 @@ class PoseExecutionNode(Node):
         return response
 
     def _cancel_late_goal(self, future):
+        """取消接收响应超时后才获知已接纳的目标，并保留其结果供停止确认。"""
         try:
             handle = future.result()
             if handle is not None and handle.accepted:
                 with self._motion_lock:
                     self._active_goal_handle = handle
                     self._result_future = handle.get_result_async()
+                # 此处只发起取消；是否终止仍由结果响应和停止确认流程判断。
                 handle.cancel_goal_async()
         except Exception as exc:
             self.get_logger().error(f"late goal cancellation failed: {exc}")
 
     def _action_terminal(self):
-        """Caller holds motion lock. Unknown/late acceptance is never idle."""
+        """检查动作是否终结；调用方须持有运动锁，接收状态不明时不视为空闲。"""
         if self._send_future is None:
             return True
         if not self._send_future.done() or self._send_future.cancelled():
+            # 本地异步对象被取消并不证明服务器拒绝了目标，仍按状态不明处理。
             return False
         handle = self._send_future.result()
         if handle is None:
             return False
         if not handle.accepted:
+            # 明确拒绝的目标不会执行，无需再等待动作结果。
             return True
         if self._result_future is None:
+            # 接纳响应可能先于执行回调被停止线程观察到，此处补建结果跟踪并请求取消。
             self._active_goal_handle = handle
             self._result_future = handle.get_result_async()
             handle.cancel_goal_async()
         future = self._result_future
+        # 4、5、6 分别为成功、已取消、已中止；三者仅表示动作终结，不代表反馈已静止。
         return (future.done() and not future.cancelled()
                 and int(future.result().status) in (4, 5, 6))
 
     def _hardware_idle(self, now):
+        """真机需有新鲜、无故障的控制器空闲状态；仿真由动作和关节反馈确认停止。"""
         if not bool(self.get_parameter("use_hardware").value):
             return True
         if self._arm_status is None:
@@ -461,19 +482,26 @@ class PoseExecutionNode(Node):
         received, status = self._arm_status
         stamp = status.header.stamp.sec * 1_000_000_000 + status.header.stamp.nanosec
         age = (self.get_clock().now().nanoseconds-stamp)/1e9
+        # 同时检查本地接收年龄和消息源时间戳；状态码 0/1 均可接受，不要求失能。
         return (now-received <= 2.0 and stamp > 0 and -.25 <= age <= 2.0
                 and not status.error_codes and status.state_machine == "IDLE"
                 and len(status.per_joint_status_code) >= 6
                 and all(code in (0, 1) for code in status.per_joint_status_code))
 
     def _stop(self, _request, response):
-        """Acknowledge only after cancellation, terminal action and fresh quiet feedback."""
+        """旧请求退出、动作终结、控制器停止成功且新鲜反馈持续静止后，才确认停止。
+
+        确认成功仅解除本节点的停止门控，不执行使能或失能；超时和异常保留门控，
+        待问题解决后可再次调用停止服务重新检查。
+        """
+        # 同时只允许一轮停止确认，避免多个调用相互重置代次或静止观察窗口。
         if not self._stop_lock.acquire(blocking=False):
             response.success = False
             response.message = "stop confirmation already in progress"
             return response
         try:
             with self._motion_lock:
+                # 先阻断新请求并使旧规划失效，再向动作和控制器发送停止请求。
                 self._stopping = True
                 self._generation += 1
                 handle = self._active_goal_handle
@@ -483,6 +511,7 @@ class PoseExecutionNode(Node):
             deadline = time.monotonic() + timeout
             if not self._trajectory_stop_client.wait_for_service(timeout_sec=min(timeout, .5)):
                 raise RuntimeError("trajectory_stop unavailable")
+            # 动作取消与控制器停止分别确认；只收到其中一个响应不足以判定停稳。
             stop_future = self._trajectory_stop_client.call_async(Trigger.Request())
             quiet_since = None
             while rclpy.ok() and time.monotonic() < deadline:
@@ -491,12 +520,15 @@ class PoseExecutionNode(Node):
                     terminal = self._action_terminal()
                     stopped = (stop_future.done() and not stop_future.cancelled()
                                and stop_future.result() is not None and stop_future.result().success)
+                    # 旧请求必须退出，防止其规划结果或晚到的目标接收响应重新触发运动。
                     idle = stopped and terminal and not self._request_active and self._hardware_idle(now)
                     if not idle:
+                        # 任一前提失效都重新开始观察，不能沿用此前累计的静止证据。
                         quiet_since = None
                     elif quiet_since is None:
                         quiet_since = now
                     elif self._stop_feedback.stationary(quiet_since, now, self.get_clock().now().nanoseconds):
+                        # 只接受观察起点之后的新鲜静止样本，确认成功后才解除停止门控。
                         self._stopping = False
                         response.success = True
                         response.message = "motion stop confirmed; holding current position"
@@ -508,15 +540,14 @@ class PoseExecutionNode(Node):
             response.message = str(exc)
             return response
         finally:
-            # Failure intentionally keeps _stopping set; another stop can
-            # recheck evidence after the underlying problem is resolved.
+            # 无论成功与否都释放停止锁；失败时保留停止标记，允许后续重新检查。
             self._stop_lock.release()
 
     def _wait_future(self, future, timeout_sec: float) -> None:
-        """在 4 线程执行器中同步等待一个 future 完成。
+        """在四线程执行器中同步等待异步结果完成。
 
-        采用短周期轮询而不是 future.add_done_callback + 事件，是为了让回调语义
-        保持"串行阻塞"这一简单模型；超时下限 0.1 s 避免调用方传 0 时直接空转返回。
+        当前回调短周期休眠，结果响应和停止请求由其他线程处理，本函数不自行自旋。
+        超时下限为 0.1 秒；返回后由调用方检查是否完成，超时不会自动取消请求。
         """
         deadline = time.monotonic() + max(float(timeout_sec), 0.1)
         while rclpy.ok() and not future.done() and time.monotonic() < deadline:

@@ -1627,7 +1627,7 @@ class HardwareManager:
         """使能失败后的回滚：停循环、失能、并验证状态码确为 0。
 
         返回 None 表示已确认失能；返回字符串表示回滚未完成——此时保持
-        _enabled=True（宁可以为仍在使能，也不要误判为已失能），追加
+        _enabled=True(宁可以为仍在使能,也不要误判为已失能),追加
         ENABLE_ROLLBACK_FAILED 并把生命周期置为 DISABLING。
         """
         rollback_errors: list[str] = []
@@ -1663,7 +1663,7 @@ class HardwareManager:
     def disable(self) -> None:
         """失能：先标记未使能（阻止新的运动命令），再停循环并验证状态码为 0。
 
-        验证失败时恢复 _enabled 原值并追加 DISABLE_VERIFICATION_FAILED，让上层
+        验证失败时恢复 _enabled 原值并追加 DISABLE_VERIFICATION_FAILED,让上层
         知道"可能仍在使能"，而不是假装已经安全停下。
         """
         with self._motor_lifecycle_lock:
@@ -2116,7 +2116,7 @@ class HardwareManager:
                     payload_com_xyz_m=list(settings.payload_com_xyz_m) if settings else None)
 
     def current_pose(self):
-        """用厂商正运动学把当前关节角换算成 Pose（供状态发布使用）。"""
+        """用厂商正运动学把当前关节角换算成 Pose(供状态发布使用)。"""
         from reBotArm_control_py.kinematics import compute_fk
 
         q, _, _ = self.get_joint_state()
@@ -2124,7 +2124,7 @@ class HardwareManager:
         return fk_to_pose(position, rotation)
 
     def get_joint_status_codes(self) -> list[int]:
-        """返回各关节状态码；反馈整体失效时统一返回 255（未知）。"""
+        """返回各关节状态码；反馈整体失效时统一返回 255(未知)。"""
         with self._feedback_lock:
             now = time.monotonic()
             failure = self._arm_feedback_failure_reason(now=now)
@@ -2457,7 +2457,7 @@ class HardwareManager:
     def get_cached_gripper_sample(self):
         """返回夹爪同一快照的米制开口、速度、力矩、状态、序号与观测时间。
 
-        不可用时开口为 NaN；保留旧样本身份和时间，不把错误查询当作新反馈。
+        不可用时开口为 NaN;保留旧样本身份和时间,不把错误查询当作新反馈。
         """
         with self._feedback_lock, self._gripper_lock:
             feedback = self._cached_gripper_feedback()
@@ -2488,7 +2488,7 @@ class HardwareManager:
             return (*values, feedback.status_code)
 
     def gripper_position_m(self) -> float:
-        """把夹爪原始角度换算为开口距离（m，0 表示闭合）。"""
+        """把夹爪原始角度换算为开口距离(m,0 表示闭合）。"""
         with self._gripper_lock:
             if self._gripper_coordinate_failure_reason_locked() is not None:
                 # 坐标非法时返回 NaN，让上层无法把无效值当距离使用。

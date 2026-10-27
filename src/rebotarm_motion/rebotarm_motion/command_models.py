@@ -8,8 +8,8 @@
   允许下发」；
 - 求解器协议：把「按位姿反解关节角」抽象成接口，便于用真实求解器或测试替身注入。
 
-约定：所有关节角单位为弧度（rad），关节名称顺序由调用方给出的元组确定；位姿为
-基坐标系下的位置（m）+ 固定轴 RPY 姿态（rad）。本模块只描述数据，不负责校验，
+约定:所有关节角单位为弧度(rad)，关节名称顺序由调用方给出的元组确定；位姿为
+基坐标系下的位置(m)+ 固定轴 RPY 姿态(rad)。本模块只描述数据，不负责校验，
 真正的关节限位与安全判定在预览管理器、协调器及上层运动守卫中完成。
 """
 
@@ -65,7 +65,7 @@ class PreviewSolveResult:
     """一次逆解预览的结果。
 
     失败时 ``joint_positions`` 仍填当前（种子）关节角，调用方可直接沿用而不必处理
-    ``None``；``message`` 为失败原因，会原样透传到预览命令与状态面板。
+    ``None``;``message`` 为失败原因，会原样透传到预览命令与状态面板。
     """
 
     success: bool
@@ -77,7 +77,7 @@ class PoseSolverProtocol:
     """位姿求解器协议：实现者按目标位姿反解关节角。
 
     只要求实现 :meth:`solve_pose`；预览管理器通过该协议解耦，真实实现可基于外部
-    运动学 SDK，测试可用替身。
+    运动学 SDK,测试可用替身。
     """
 
     def solve_pose(
@@ -100,7 +100,7 @@ class PoseSolverProtocol:
 class PreviewCommand:
     """一次预览命令及其可达性结论。
 
-    - ``command_type``：``"joint"`` 表示关节空间预览，``"pose"`` 表示位姿预览；
+    - ``command_type``:``"joint"`` 表示关节空间预览，``"pose"`` 表示位姿预览；
     - ``reachable``：目标是否可执行；为 ``False`` 时 ``joint_positions`` 保持当前
       关节角，避免调用方误用无效解；
     - ``message``：可读结论（如关节限位超限、未知关节名、逆解不可达）；
@@ -121,7 +121,7 @@ class ExecutionRequest:
 
     由协调器在预览校验通过后构造，是下发给控制器/执行节点的唯一凭证。
 
-    - ``duration``：目标轨迹的总时长（秒），需大于 0；
+    - ``duration``：目标轨迹的总时长（秒），需大于 0;
     - ``preview_only``：为 ``True`` 时只做预览/仿真，不得驱动真实硬件（仿真模式下
       由协调器置位）；
     - ``preview_command``：产生本次请求的原始预览命令，供执行侧复核可达性与关节
@@ -140,7 +140,7 @@ class ExecutionRequest:
 class ExecutionDecision:
     """执行受理结论。
 
-    ``accepted`` 为 ``False`` 时 ``request`` 必为 ``None``，``message`` 说明拒绝原因
+    ``accepted`` 为 ``False`` 时 ``request`` 必为 ``None``,``message`` 说明拒绝原因
     （如「已有执行在进行中」「没有可用预览」「目标不可达」）；为 ``True`` 时
     ``request`` 一定非空，调用方可安全下发。
     """
