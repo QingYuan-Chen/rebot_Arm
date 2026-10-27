@@ -1,8 +1,18 @@
-"""基于 MotorBridge 不透明句柄接口的项目内达妙驱动。
+"""基于 MotorBridge 句柄接口的达妙设备驱动。
 
-构造时不打开设备；一个 Controller 持有七个电机句柄。命令操作与
-总线事务分别串行化，使反馈能在模式稳定等待期间继续采集。完整
-运行时请求队列留到批次 6；此处不依赖旧 RobotArm 内部结构。
+``SdkMotorDriver`` 对外提供连接、设备句柄查询、反馈分组、使能/失能、
+模式切换、位置与 MIT 批量发送、置零和资源释放。``MotorPort`` 与
+``BusPort`` 把单次句柄调用限制在共享总线锁内；反馈状态在读出时复制为
+``MotorFeedback``，批量发送失败通过 ``CommandTransportError.receipt``
+保留已发送、失败及未尝试的电机。
+
+构造时不打开设备；连接后一个 Controller 管理六轴与夹爪七个句柄。
+驱动不负责 ROS 准入、控制线程生命周期或完整安全策略；调用方须先完成
+现场检查、新鲜反馈和显式使能等上层条件。驱动使能/失能确认覆盖六轴，
+夹爪状态由管理器另行验证；置零的上层前置检查也由管理器负责。
+
+命令操作与总线事务分别串行化，稳定等待期间允许反馈访问总线；模式或
+批量发送的部分失败不会自动重发。完整运行时请求仲裁留到批次 6。
 """
 from __future__ import annotations
 import threading
@@ -12,6 +22,7 @@ from .controller_contracts import CommandReceipt, MotorFeedback
 from .gravity_control import vector, POSITION_LIMITS
 
 class CommandTransportError(RuntimeError):
+    """携带实际发送回执的设备命令错误。"""
     def __init__(self, receipt):
         self.receipt = receipt
         super().__init__(f"{receipt.failed}: {receipt.detail}; sent={receipt.sent}; not_attempted={receipt.not_attempted}")
@@ -57,6 +68,7 @@ class MotorPort:
                 self._closed = True
 
 class BusPort:
+    """共享控制器句柄的受锁访问入口；关闭后拒绝操作。"""
     def __init__(self, handle, lock):
         self._handle, self.bus_lock = handle, lock
         self._closed = False
@@ -78,6 +90,7 @@ class BusPort:
                 self._closed = True
 
 class SdkMotorDriver:
+    """持有唯一总线及电机句柄；构造可注入工厂和等待函数用于离线验证。"""
     def __init__(self, config, *, controller_factory=None, sleep=time.sleep):
         self.config = config
         self._factory = controller_factory
@@ -102,6 +115,7 @@ class SdkMotorDriver:
     def connected(self): return self._bus is not None
 
     def connect(self):
+        """打开总线并注册七个电机；注册中途失败时释放已取得的资源。"""
         with self._command_lock, self.bus_lock:
             if self.connected: return
             factory = self._factory or self._open_controller
@@ -121,6 +135,7 @@ class SdkMotorDriver:
 
     def controllers(self): return () if self._bus is None else (self._bus,)
     def feedback_groups(self):
+        """返回共享控制器上的六轴反馈组；夹爪由管理器单独加入采集组。"""
         if not self.connected: raise RuntimeError('hardware is not connected')
         return [(self._bus, [(j.name, self.motor(j.name)) for j in self.config.joints])]
 
@@ -137,6 +152,7 @@ class SdkMotorDriver:
                 self._bus.poll_feedback_once()
                 for name in tuple(pending):
                     state, seq = self.motor(name).get_state_with_sequence()
+                    # 按无符号 64 位序号差判断前进，允许计数器回绕。
                     advanced = 0 < ((seq-baseline[name]) & ((1 << 64)-1)) < (1 << 63)
                     if state is not None and advanced and state.status_code == expected:
                         pending.remove(name)
@@ -158,10 +174,12 @@ class SdkMotorDriver:
     def disable(self): self._set_enabled(False)
 
     def set_mode(self, mode):
+        """逐轴设置模式，任一轴失败时停止并保留部分操作回执。"""
         from motorbridge import Mode
         modes = dict(mit=Mode.MIT, pos_vel=Mode.POS_VEL, vel=Mode.VEL)
         if mode not in modes: raise ValueError(f'unsupported mode: {mode}')
         with self._command_lock:
+            # 未完成整组六轴切换前，不能对外声称已进入目标模式。
             self.mode = 'unknown'
             sent = []
             for index,cfg in enumerate(self.config.joints):
@@ -184,6 +202,7 @@ class SdkMotorDriver:
             return True
 
     def send_positions(self, command):
+        """验证六轴位置和速度上限后发送；成功仅表示设备写入成功。"""
         q = vector(command.positions, 6, 'position command')
         vlim = vector(command.velocity_limits, 6, 'velocity limits')
         bounds = np.asarray(POSITION_LIMITS)
@@ -206,6 +225,7 @@ class SdkMotorDriver:
                 try:
                     getattr(self.motor(name),method)(*(float(value[index]) for value in values))
                 except Exception as exc:
+                    # 已发送的电机可能已响应；记录回执并立即终止，不重发整批。
                     self.last_receipt = CommandReceipt(tuple(sent),name,names[index+1:],str(exc))
                     raise CommandTransportError(self.last_receipt) from exc
                 sent.append(name)
@@ -213,6 +233,7 @@ class SdkMotorDriver:
         return self.last_receipt
 
     def set_zero(self, names=None):
+        """失能并逐轴确认新状态后写零；调用前仍须经过管理器安全门。"""
         names = tuple(j.name for j in self.config.joints) if names is None else tuple(names)
         if any(name not in {j.name for j in self.config.joints} for name in names):
             raise KeyError(f'unknown zero target: {names}')
@@ -226,6 +247,7 @@ class SdkMotorDriver:
         return True
 
     def close(self):
+        """尝试释放所有句柄和总线，并汇总清理错误。"""
         errors = []
         with self._command_lock, self.bus_lock:
             if self._bus is None: return
@@ -244,6 +266,7 @@ class SdkMotorDriver:
         if errors: raise RuntimeError('; '.join(errors))
 
     def disconnect(self):
+        """执行驱动级失能和释放；不负责停止控制线程或验证安全基线。"""
         with self._command_lock:
             errors = []
             if not self.connected: return

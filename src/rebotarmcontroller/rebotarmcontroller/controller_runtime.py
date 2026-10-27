@@ -1,4 +1,16 @@
-"""有界停止、协作运行的周期写入线程；完整请求仲裁留到批次 6。"""
+"""控制器最小周期运行时及过渡期设备门面。
+
+``ControllerRuntime`` 装配设备驱动、六轴目标执行器和位置命令生成器，
+提供连接、目标/取消、轨迹进度、模式和设备操作的转发入口。
+``start_control_loop`` 使用调用方提供的周期回调启动唯一写入线程；
+``stop_control_loop`` 请求停止并有界等待线程退出。``position_tick``
+采样目标、发送位置命令，成功后确认轨迹游标。
+
+当前反馈、夹爪及生命周期保护仍由 ``HardwareManager`` 协调；这些设备
+调用尚未全部进入统一请求队列，完整仲裁留到批次 6。启动线程不等于使能，
+使能前的现场检查、新鲜反馈与显式服务调用由上层负责。旧位姿入口暂经
+``legacy_backend`` 计算，后续逆运动学和路径生成归 motion。
+"""
 from __future__ import annotations
 import math
 import threading
@@ -8,6 +20,7 @@ from .arm_execution import ArmExecution
 from .arm_position_control import ArmPositionControl
 
 class ControllerRuntime:
+    """管理唯一周期线程和六轴执行状态；可注入驱动以进行离线验证。"""
     def __init__(self,config,kinematics,*,driver=None):
         self.config = config
         self.driver = SdkMotorDriver(config) if driver is None else driver
@@ -80,6 +93,7 @@ class ControllerRuntime:
     def current_pose_values(self,q): return self.kinematics.pose(q)
 
     def position_tick(self,_runtime,dt):
+        """执行一次六轴位置发送；失败时不确认轨迹游标。"""
         # 取消或更新目标要等待正在发送的批次，并使旧代次失效；
         # 取消返回后不会再发送旧快照。
         with self.execution.lock:
@@ -89,12 +103,14 @@ class ControllerRuntime:
             self.execution.acknowledge(target)
 
     def request_loop_stop(self):
+        """发出停止请求并取消当前轨迹；此方法不等待线程退出。"""
         self._stop.set()
         with self.execution.lock:
             self.execution.running = False
             self.execution.cancel()
 
     def stop_control_loop(self):
+        """请求停止并等待其他线程退出；超时则报错，不能启动替代线程。"""
         self._stop.set()
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
@@ -103,6 +119,7 @@ class ControllerRuntime:
         self.request_loop_stop()
 
     def start_control_loop(self,callback,rate=None):
+        """以指定频率启动回调；异常会停止循环并交给保护回调处理。"""
         # 更换写入线程前先在调用方校验频率。
         requested_rate = self.rate if rate is None else float(rate)
         if not math.isfinite(requested_rate) or requested_rate <= 0:
@@ -123,6 +140,7 @@ class ControllerRuntime:
                         callback(self,period)
                         deadline += period
                         self._stop.wait(max(0.,deadline-time.monotonic()))
+                        # 超过一个周期时重设基准，避免连续补跑积压周期。
                         if deadline < time.monotonic()-period: deadline = time.monotonic()
                 except Exception as exc:
                     self.last_error = str(exc)
@@ -138,6 +156,7 @@ class ControllerRuntime:
             self._thread.start()
 
     def move_to_pose_ik(self,*pose):
+        """使用临时计算桥求目标；求解期间被取消则不接纳旧结果。"""
         if not self.execution.running: return False
         from .legacy_backend import solve_pose_ik
         generation = self.execution.generation
@@ -150,6 +169,7 @@ class ControllerRuntime:
         return True
 
     def move_to_pose_path(self,*args):
+        """计算并尝试提交旧位姿路径；返回值表示接纳，不表示执行完成。"""
         if not self.execution.running: return False
         from .legacy_backend import plan_pose_path
         generation = self.execution.generation

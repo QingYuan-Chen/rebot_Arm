@@ -1,7 +1,13 @@
-"""控制器配置及校验；解析配置不会打开设备。
+"""解析并校验控制器配置；加载过程不打开设备。
 
-安全增益和时序沿用项目基线，修改须经过评审和单独实机检查；
-MIT 默认值不等同于重力补偿控制器的增益。
+``load_configuration`` 读取机械臂和夹爪 YAML，返回不可变的
+``ControllerConfig`` 和逐电机 ``MotorConfig``；``HardwareSettings`` 校验
+反馈与夹爪运行参数，``ProtocolTiming`` 保存设备握手和线程停止时序。
+``default_config`` 定位包内安装资源，调用方可显式覆盖配置路径与通道。
+
+约束：只支持达妙电机，六轴顺序固定，机械臂和夹爪共用同一通道且各自
+电机 ID、反馈 ID 不重复；通道覆盖仅在内存中生效。安全增益及时序沿用
+项目基线，修改须经过评审和单独实机检查；MIT 默认值不是重力补偿增益。
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -14,6 +20,7 @@ JOINT_NAMES = tuple(f"joint{i}" for i in range(1, 7))
 
 @dataclass(frozen=True)
 class ProtocolTiming:
+    """设备命令等待、状态确认和线程停止的基线时序。"""
     serial_baud: int = 921600
     command_motor_delay: float = .05
     status_retries: int = 10
@@ -34,6 +41,7 @@ class ProtocolTiming:
 
 @dataclass(frozen=True)
 class HardwareSettings:
+    """运行时反馈与夹爪参数；构造时检查数值范围。"""
     hardware_feedback_rate_hz: float = 50.
     gripper_position_torque_cap_nm: float = 1.
     gripper_position_max_speed_rad_s: float = .5
@@ -56,6 +64,7 @@ class HardwareSettings:
 
 @dataclass(frozen=True)
 class MotorConfig:
+    """单电机的标识、型号和两种控制模式参数。"""
     name: str
     motor_id: int
     feedback_id: int
@@ -76,6 +85,7 @@ class MotorConfig:
 
 @dataclass(frozen=True)
 class ControllerConfig:
+    """共享通道、六轴、夹爪与设备时序的完整配置。"""
     name: str
     channel: str
     rate: float
@@ -125,6 +135,7 @@ def _motor(item, *, gripper=False):
     return MotorConfig(name,*ids,model,vendor,**values)
 
 def load_configuration(arm_path=None,gripper_path=None,channel='') -> ControllerConfig:
+    """解析两份配置并校验设备归属；显式通道覆盖不会改写 YAML。"""
     arm=_mapping(arm_path or default_config('arm'))
     grip=_mapping(gripper_path or default_config('gripper'))
     joints=tuple(_motor(item) for item in arm.get('joints',[]))
@@ -135,6 +146,7 @@ def load_configuration(arm_path=None,gripper_path=None,channel='') -> Controller
     gripper=_motor(items[0],gripper=True)
     if gripper.name!='gripper': raise ValueError('gripper name must be gripper')
     all_motors=(*joints,gripper)
+    # 两类 ID 分别在七台电机内唯一，避免同一总线上的设备或反馈混淆。
     for key in ('motor_id','feedback_id'):
         if len({getattr(j,key) for j in all_motors})!=len(all_motors):
             raise ValueError(f"duplicate {key} on shared bus")
