@@ -20,7 +20,8 @@
 `arm_position_control.py` 生成位置命令，`controller_kinematics.py` 以规范模型计算 FK。
 ROS 通过 manager 的目标、取消和进度接口交互。临时 `legacy_backend.py` 只桥接
 SDK 纯 IK/路径计算，没有设备或发送线程；最终计算归 motion，接口经 FJT 执行。
-反馈、夹爪与生命周期保护暂留 manager，完整运行时请求队列尚未接入；后续归属见
+`feedback_acquisition.py` 拥有反馈采集、验证缓存及只读健康判断；manager 通过
+窄回调提供设备分组与夹爪反馈协调。夹爪与生命周期保护暂留 manager，完整运行时请求队列尚未接入；后续归属见
 [拆分规划](../design/controller_refactor_plan.md)。
 
 负责：

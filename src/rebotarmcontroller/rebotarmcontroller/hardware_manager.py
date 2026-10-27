@@ -1,12 +1,12 @@
 """硬件管理核心：真实电机的唯一访问点与最后一道执行安全。
 
 本模块属于硬件包，向上层（服务/动作/话题适配层）暴露一个
-``HardwareManager``；它独占厂商控制库的机械臂实例、串口/总线通道与
-唯一的配置频率硬件控制循环，是整条链路中唯一真正向电机写命令的地方。
+``HardwareManager``；它协调本地驱动、串口/总线通道与唯一的硬件控制循环，
+向上提供设备生命周期和执行接口。
 
 主要职责：
 - 连接/断开、使能/失能（真机默认失能，必须显式 enable 才能运动）；
-- 反馈采集与校验：位置/速度/力矩、状态码、软限位、时效性、接收序号；
+- 协调反馈组件采集与校验位置、速度、力矩、状态码、时效性及接收序号；
 - 位置-速度（pos_vel）轨迹跟踪、safe_home、trajectory_stop 的落地点；
 - 夹爪的位置移动、抓取闭合与有界保持；
 - 重力补偿（MIT 模式 + 广义重力前馈）与低层 JointMotorCmd 直通；
@@ -37,7 +37,8 @@ from typing import Optional, Sequence
 import numpy as np
 
 from .configuration import HardwareSettings, default_config, load_configuration
-from .controller_contracts import (MotorFeedback, VerifiedFeedbackSample as _VerifiedFeedbackSample,
+from .feedback_acquisition import FeedbackAcquisition, _FeedbackValidationError, _JOINT_POSITION_LIMITS_RAD
+from .controller_contracts import (VerifiedFeedbackSample as _VerifiedFeedbackSample,
                                CachedMotorFeedback as _CachedMotorFeedback)
 from .controller_kinematics import ArmKinematics
 from .controller_runtime import ControllerRuntime
@@ -49,14 +50,6 @@ from .gravity_control import (GravitySettings, LoopTiming, bounded_mit_command,
 
 class GravityCommandError(RuntimeError):
     """Motor command transport failed; holding torque cannot be trusted."""
-
-
-class _FeedbackValidationError(RuntimeError):
-    """反馈合法性失败，保留分类供采集路径登记诊断。"""
-
-    def __init__(self, code: str, detail: str) -> None:
-        super().__init__(detail)
-        self.code = code
 
 
 _LOG = logging.getLogger(__name__)
@@ -123,26 +116,9 @@ _GC_EE_FRAME = "end_link"
 _GC_KP = 7.0
 _GC_KD = 0.8
 _GC_TAU_SCALE = np.ones(6, dtype=np.float64)
-_FEEDBACK_REFRESH_RETRIES = 3
 # DM 串口桥可能分多个轮询周期才把六帧电机反馈取回。5 ms 短于实测的帧节拍，
 # 会把首帧晚于 joint1/joint2 到达的健康关节误判为失败。
 _FEEDBACK_RETRY_INTERVAL_SEC = 0.05
-_UINT64_MAX = (1 << 64) - 1
-_UINT64_HALF_RANGE = 1 << 63
-
-# 各关节硬件软限位（rad）。这是"接受反馈"的合法性区间，同时用于 safe_home 目标
-# 校验；超出即视为反馈异常并触发保护逻辑，而不是放宽到 URDF 的完整量程。
-_JOINT_POSITION_LIMITS_RAD = {
-    "joint1": (-2.8, 2.8),
-    # joint2 的标称上端点即已确认的机械零点。这里保留很小的正向软件余量以吸收
-    # 编码器量化/回差，并不是额外的可命令工作空间。
-    "joint2": (-3.14, 0.02),
-    # 操作员批准的 J3 上余量，与 J2 相同；不施加任何编码器偏置。
-    "joint3": (-3.14, 0.02),
-    "joint4": (-1.87, 1.57),
-    "joint5": (-1.57, 1.57),
-    "joint6": (-3.14, 3.14),
-}
 
 # 厂商 ArmEndPos.safe_home 会把每个关节都驱到 0 rad。对本机械臂而言那是"折叠"
 # 姿态而非张开姿态：joint3 原点在 x 方向为 -0.264 m，joint4 为 +0.2426 m，
@@ -268,7 +244,7 @@ class HardwareManager:
         self._gripper_neutral_pending: tuple[float, str, bool] | None = None
         self._gripper_target_timeout_sec = 0.0
         self._gripper_target_deadline_monotonic: float | None = None
-        # 机械臂与夹爪命令共用厂商的同一个硬件循环。以下兼容字段只保留可观测性
+        # 机械臂与夹爪命令共用同一个本地硬件循环。以下兼容字段只保留可观测性
         # 用于诊断，不会创建独立的夹爪线程。
         self._gripper_loop_thread: None = None
         self._gripper_loop_running = False
@@ -457,548 +433,129 @@ class HardwareManager:
             raise RuntimeError("hardware feedback controller map unavailable")
         return groups
 
-    @staticmethod
-    def _feedback_state_with_sequence(label: str, motor) -> tuple[object, int]:
-        """读取 (状态, 接收序号)；依赖打过补丁的 MotorBridge 提供序号接口。
-
-        没有 ``get_state_with_sequence`` 就无法证明反馈是"新帧"，因此在采集路径
-        上直接报错，而不是退化为读缓存。
-        """
-        getter = getattr(motor, "get_state_with_sequence", None)
-        if not callable(getter):
-            raise RuntimeError(
-                f"{label} feedback requires patched MotorBridge "
-                "get_state_with_sequence()"
+    @property
+    def _feedback_component(self):
+        # 正常构造时在启动任何线程之前由反馈字段初始化触发；惰性创建也兼容
+        # 使用 __new__ 构造的旧夹具。以下转发字段不保存第二份反馈状态。
+        component = self.__dict__.get("_feedback_owner")
+        if component is None:
+            component = FeedbackAcquisition(
+                groups=self._feedback_controller_groups, joint_names=lambda: self.joint_names,
+                gripper_motor=lambda: self._gripper_mot,
+                gripper_values=self._validated_gripper_feedback_values,
+                gripper_sample=self._record_gripper_feedback,
+                gripper_error=self._record_gripper_feedback_error,
+                period=lambda: self._hardware_feedback_period_sec,
+                stale_timeout=lambda: self._gripper_feedback_stale_timeout_sec,
+                backend=lambda: self._backend, loop_active=lambda: self.control_loop_active,
             )
-        state, sequence_value = getter()
-        sequence = int(sequence_value)
-        if not 0 <= sequence <= _UINT64_MAX:
-            raise RuntimeError(f"{label} feedback sequence outside uint64 range")
-        return state, sequence
+            self.__dict__["_feedback_owner"] = component
+        return component
 
-    @staticmethod
-    def _feedback_sequence_advanced(sequence: int, baseline: int) -> bool:
-        """判断接收序号是否相对基线"向前"推进，可容忍 uint64 回绕。
+    @property
+    def _feedback_lock(self): return self._feedback_component._feedback_lock
+    @_feedback_lock.setter
+    def _feedback_lock(self, value): self._feedback_component._feedback_lock = value
 
-        采用模 2^64 差值：差值落在 (0, 2^63) 视为推进，落在 (2^63, 2^64) 视为
-        落后（回绕的另一半）。序号从 0 且基线非 0 时判为未推进——那是计数器
-        复位，不能当作新帧。
-        """
-        current = int(sequence)
-        previous = int(baseline)
-        if not 0 <= current <= _UINT64_MAX or not 0 <= previous <= _UINT64_MAX:
-            raise RuntimeError("feedback sequence outside uint64 range")
-        if current == 0 and previous != 0:
-            return False
-        delta = (current - previous) & _UINT64_MAX
-        return 0 < delta < _UINT64_HALF_RANGE
+    @property
+    def _feedback_next_refresh_monotonic(self): return self._feedback_component._feedback_next_refresh_monotonic
+    @_feedback_next_refresh_monotonic.setter
+    def _feedback_next_refresh_monotonic(self, value): self._feedback_component._feedback_next_refresh_monotonic = value
 
-    def _verified_feedback_sample(self, label: str) -> _VerifiedFeedbackSample:
-        """返回一条不可变的、由控制循环写入的已验证反馈快照。
+    @property
+    def _verified_feedback_by_label(self): return self._feedback_component._verified_feedback_by_label
+    @_verified_feedback_by_label.setter
+    def _verified_feedback_by_label(self, value): self._feedback_component._verified_feedback_by_label = value
 
-        读 MotorBridge 缓存只属于采集路径。消费者在 ``_feedback_lock`` 下取用
-        已经验证过的样本；读取它不得改变其接收序号或观测时间。
-        """
-        with self._feedback_lock:
-            sample = self._verified_feedback_by_label.get(label)
-        if sample is None:
-            raise RuntimeError(f"{label} verified feedback unavailable")
-        return sample
+    @property
+    def _feedback_request_baseline_by_label(self): return self._feedback_component._feedback_request_baseline_by_label
+    @_feedback_request_baseline_by_label.setter
+    def _feedback_request_baseline_by_label(self, value): self._feedback_component._feedback_request_baseline_by_label = value
 
-    def _verified_feedback_samples(
-        self,
-        labels: Sequence[str],
-    ) -> tuple[_VerifiedFeedbackSample, ...]:
-        # 一次性原子读取多个标签，避免同一控制周期内取到不同批次的数据；
-        # 任一标签缺失即整体失败（多关节命令不能基于部分反馈执行）。
-        with self._feedback_lock:
-            samples = tuple(
-                self._verified_feedback_by_label.get(label) for label in labels
-            )
-        for label, sample in zip(labels, samples):
-            if sample is None:
-                raise RuntimeError(f"{label} verified feedback unavailable")
-        return samples  # type: ignore[return-value]
+    @property
+    def _feedback_request_deadline_by_label(self): return self._feedback_component._feedback_request_deadline_by_label
+    @_feedback_request_deadline_by_label.setter
+    def _feedback_request_deadline_by_label(self, value): self._feedback_component._feedback_request_deadline_by_label = value
 
-    def _feedback_response_window_sec(self) -> float:
-        """一次反馈请求允许的响应窗口：取两种节拍假设与重试次数的较大者。"""
-        return max(
-            self._hardware_feedback_period_sec * _FEEDBACK_REFRESH_RETRIES,
-            _FEEDBACK_RETRY_INTERVAL_SEC * _FEEDBACK_REFRESH_RETRIES,
-        )
+    @property
+    def _feedback_error_by_label(self): return self._feedback_component._feedback_error_by_label
+    @_feedback_error_by_label.setter
+    def _feedback_error_by_label(self, value): self._feedback_component._feedback_error_by_label = value
 
-    @staticmethod
-    def _classified_feedback_error(reason: str, code: str = "READ_FAILED") -> str:
-        message = str(reason)
-        return message if message.startswith("[") else f"[{code}] {message}"
+    @property
+    def _feedback_force_refresh_active(self): return self._feedback_component._feedback_force_refresh_active
+    @_feedback_force_refresh_active.setter
+    def _feedback_force_refresh_active(self, value): self._feedback_component._feedback_force_refresh_active = value
 
-    def _feedback_failure_reason(
-        self,
-        label: str,
-        *,
-        error: str | None,
-        updated: float | None,
-        now: float | None = None,
-    ) -> str | None:
-        """机械臂与夹爪共用的只读可用性判定，不登记错误或刷新采样时间。"""
-        if error is not None:
-            return f"{label} feedback unavailable: {self._classified_feedback_error(error)}"
-        if updated is None:
-            return (
-                f"{label} feedback unavailable: [WAITING_FIRST_FRAME] "
-                f"{label} verified feedback unavailable; feedback not received"
-            )
-        current = time.monotonic() if now is None else float(now)
-        age = max(current - updated, 0.0)
-        if age > self._gripper_feedback_stale_timeout_sec:
-            return (
-                f"{label} feedback stale: [STALE] age={age:.3f}s "
-                f"limit={self._gripper_feedback_stale_timeout_sec:.3f}s"
-            )
-        return None
+    @property
+    def _arm_feedback_updated_monotonic(self): return self._feedback_component._arm_feedback_updated_monotonic
+    @_arm_feedback_updated_monotonic.setter
+    def _arm_feedback_updated_monotonic(self, value): self._feedback_component._arm_feedback_updated_monotonic = value
 
-    def _cached_motor_feedback_locked(
-        self,
-        label: str,
-        *,
-        failure_reason: str | None = None,
-        now: float | None = None,
-    ) -> _CachedMotorFeedback:
-        """统一解析已验证缓存；调用方持有反馈锁，不访问 SDK 或修改健康状态。"""
-        sample = self._verified_feedback_by_label.get(label)
-        reason = failure_reason or self._feedback_failure_reason(
-            label,
-            error=self._feedback_error_by_label.get(label),
-            updated=sample.observed_at if sample is not None else None,
-            now=now,
-        )
-        if sample is None:
-            return _CachedMotorFeedback(None, None, reason, None)
-        try:
-            self._validate_feedback_sample(label, sample.state)
-            values = (float(sample.state.pos), float(sample.state.vel), float(sample.state.torq))
-            status = int(sample.state.status_code)
-        except Exception as exc:
-            detail = self._classified_feedback_error(
-                str(exc), getattr(exc, "code", "READ_FAILED")
-            )
-            return _CachedMotorFeedback(
-                None, None, reason or f"{label} feedback unavailable: {detail}", sample,
-            )
-        return _CachedMotorFeedback(values, status, reason, sample)
+    @property
+    def _arm_feedback_error(self): return self._feedback_component._arm_feedback_error
+    @_arm_feedback_error.setter
+    def _arm_feedback_error(self, value): self._feedback_component._arm_feedback_error = value
 
-    def _validate_feedback_sample(self, label: str, state) -> None:
-        """校验单条反馈的合法性：有限数值 + 位于该关节硬件软限位内。
+    _feedback_state_with_sequence = staticmethod(FeedbackAcquisition._feedback_state_with_sequence)
 
-        关节越限或非有限值都说明编码器/通信异常，必须报错，绝不能当作有效
-        位置参与运动命令。
-        """
-        if label == "gripper":
-            self._validated_gripper_feedback_values(state)
-            return
-        if state is None:
-            raise RuntimeError(f"{label} feedback unavailable")
-        values = (float(state.pos), float(state.vel), float(state.torq))
-        if not all(np.isfinite(value) for value in values):
-            raise _FeedbackValidationError(
-                "INVALID_VALUES", f"{label} feedback contains non-finite values"
-            )
-        limits = _JOINT_POSITION_LIMITS_RAD.get(label)
-        if limits is None:
-            raise RuntimeError(f"no hardware soft limit configured for {label}")
-        lower, upper = limits
-        if values[0] < lower or values[0] > upper:
-            raise _FeedbackValidationError(
-                "INVALID_COORDINATE",
-                f"{label} position {values[0]:.6f} rad outside "
-                f"hardware soft limit [{lower:.6f}, {upper:.6f}]"
-            )
+    _feedback_sequence_advanced = staticmethod(FeedbackAcquisition._feedback_sequence_advanced)
 
-    def _record_feedback_label_error(
-        self, label: str, reason: str, *, code: str = "READ_FAILED"
-    ) -> None:
-        self._feedback_error_by_label[label] = self._classified_feedback_error(reason, code)
+    def _verified_feedback_sample(self, *args, **kwargs):
+        return self._feedback_component._verified_feedback_sample(*args, **kwargs)
 
-    def _record_verified_feedback(
-        self,
-        label: str,
-        state,
-        sequence: int,
-        observed_at: float,
-    ) -> None:
-        """校验通过后登记为"已验证反馈"，并清除该标签的错误标记。"""
-        self._validate_feedback_sample(label, state)
-        sample = _VerifiedFeedbackSample(
-            state=MotorFeedback.copy_from(state),
-            sequence=int(sequence),
-            observed_at=float(observed_at),
-        )
-        self._verified_feedback_by_label[label] = sample
-        self._feedback_error_by_label.pop(label, None)
-        if label == "gripper":
-            self._record_gripper_feedback(state, observed_at=observed_at)
+    def _verified_feedback_samples(self, *args, **kwargs):
+        return self._feedback_component._verified_feedback_samples(*args, **kwargs)
 
-    def _sync_feedback_health(self) -> None:
-        """把逐标签的反馈状态汇总为机械臂/夹爪级健康状态。
+    def _feedback_response_window_sec(self, *args, **kwargs):
+        return self._feedback_component._feedback_response_window_sec(*args, **kwargs)
 
-        机械臂侧只要任一关节有错误就报错；缺少样本且不在强制刷新窗口内时标为
-        "verified feedback pending"。夹爪只在自己的标签有错误或样本缺失时报错。
-        """
-        arm_labels = list(self.joint_names)
-        arm_errors = [
-            self._feedback_error_by_label[label]
-            for label in arm_labels
-            if label in self._feedback_error_by_label
-        ]
-        missing_arm = [
-            label for label in arm_labels if label not in self._verified_feedback_by_label
-        ]
-        if arm_errors:
-            self._record_arm_feedback_error("; ".join(arm_errors))
-        elif missing_arm:
-            if not getattr(self, "_feedback_force_refresh_active", False):
-                self._record_arm_feedback_error(
-                    "[WAITING_FIRST_FRAME] verified feedback pending: " + ",".join(missing_arm)
-                )
-        else:
-            # 机械臂新鲜度取所有关节中"最旧"的观测时刻，即短板决定整体时效。
-            self._record_arm_feedback_success(
-                min(
-                    self._verified_feedback_by_label[label].observed_at
-                    for label in arm_labels
-                )
-            )
+    _classified_feedback_error = staticmethod(FeedbackAcquisition._classified_feedback_error)
 
-        if self._gripper_mot is None:
-            return
-        gripper_error = self._feedback_error_by_label.get("gripper")
-        if gripper_error is not None:
-            self._record_gripper_feedback_error(gripper_error)
-        elif "gripper" not in self._verified_feedback_by_label:
-            self._record_gripper_feedback_error("[WAITING_FIRST_FRAME] gripper feedback not received")
+    def _feedback_failure_reason(self, *args, **kwargs):
+        return self._feedback_component._feedback_failure_reason(*args, **kwargs)
 
-    def _inspect_pending_feedback(
-        self,
-        observations: dict[str, tuple[object, int]],
-        *,
-        observed_at: float,
-    ) -> None:
-        """结算所有未完成的反馈请求：序号前进则登记样本，超时则记录错误。
+    def _cached_motor_feedback_locked(self, *args, **kwargs):
+        return self._feedback_component._cached_motor_feedback_locked(*args, **kwargs)
 
-        每个待决请求只结算一次；无论成功还是超时都会清掉 baseline/deadline，
-        避免过期的截止时间影响下一条命令。
-        """
-        for label, baseline in list(
-            self._feedback_request_baseline_by_label.items()
-        ):
-            if label not in observations:
-                continue
-            state, sequence = observations[label]
-            if self._feedback_sequence_advanced(sequence, baseline):
-                try:
-                    self._record_verified_feedback(
-                        label,
-                        state,
-                        sequence,
-                        observed_at,
-                    )
-                except Exception as exc:
-                    self._record_feedback_label_error(
-                        label, f"{label} feedback invalid: {exc}",
-                        code=getattr(exc, "code", "READ_FAILED"),
-                    )
-                self._feedback_request_baseline_by_label.pop(label, None)
-                self._feedback_request_deadline_by_label.pop(label, None)
-                continue
-            deadline = self._feedback_request_deadline_by_label[label]
-            if observed_at >= deadline:
-                self._record_feedback_label_error(
-                    label,
-                    f"{label} feedback deadline expired: sequence did not advance "
-                    f"beyond baseline={baseline}",
-                )
-                self._feedback_request_baseline_by_label.pop(label, None)
-                self._feedback_request_deadline_by_label.pop(label, None)
+    def _validate_feedback_sample(self, *args, **kwargs):
+        return self._feedback_component._validate_feedback_sample(*args, **kwargs)
 
-    def _read_feedback_observations(
-        self,
-        groups,
-    ) -> dict[str, tuple[object, int]]:
-        observations: dict[str, tuple[object, int]] = {}
-        for _ctrl, entries in groups:
-            for label, motor in entries:
-                observations[label] = self._feedback_state_with_sequence(label, motor)
-        return observations
+    def _record_feedback_label_error(self, *args, **kwargs):
+        return self._feedback_component._record_feedback_label_error(*args, **kwargs)
 
-    @staticmethod
-    def _require_feedback_sequence_api(groups) -> None:
-        """确认全部电机都支持带序号的反馈读取，否则反馈无法被证明为"新帧"。"""
-        for _ctrl, entries in groups:
-            for label, motor in entries:
-                if not callable(getattr(motor, "get_state_with_sequence", None)):
-                    raise RuntimeError(
-                        f"{label} feedback requires patched MotorBridge "
-                        "get_state_with_sequence()"
-                    )
+    def _record_verified_feedback(self, *args, **kwargs):
+        return self._feedback_component._record_verified_feedback(*args, **kwargs)
 
-    def _record_arm_feedback_success(self, observed_at: float) -> None:
-        recovered = self._arm_feedback_error is not None
-        self._arm_feedback_updated_monotonic = float(observed_at)
-        self._arm_feedback_error = None
-        if recovered:
-            _LOG.info("arm feedback recovered updated=%.6f", observed_at)
+    def _sync_feedback_health(self, *args, **kwargs):
+        return self._feedback_component._sync_feedback_health(*args, **kwargs)
 
-    def _record_arm_feedback_error(self, reason: str) -> None:
-        # 只在错误内容变化时打日志，避免硬件回路上刷屏。
-        message = str(reason)
-        changed = message != self._arm_feedback_error
-        self._arm_feedback_error = message
-        if changed:
-            _LOG.error("arm feedback error: %s", message)
+    def _inspect_pending_feedback(self, *args, **kwargs):
+        return self._feedback_component._inspect_pending_feedback(*args, **kwargs)
 
-    def _arm_feedback_failure_reason(self, *, now: float | None = None) -> str | None:
-        """机械臂反馈的失效原因；健康时返回 None。
+    def _read_feedback_observations(self, *args, **kwargs):
+        return self._feedback_component._read_feedback_observations(*args, **kwargs)
 
-        先看是否有显式错误；否则用单调时钟计算反馈年龄，超过
-        ``_gripper_feedback_stale_timeout_sec`` 即判定为过期（运动命令必须被拒绝）。
-        """
-        with self._feedback_lock:
-            return self._feedback_failure_reason(
-                "arm", error=self._arm_feedback_error,
-                updated=self._arm_feedback_updated_monotonic, now=now,
-            )
+    _require_feedback_sequence_api = staticmethod(FeedbackAcquisition._require_feedback_sequence_api)
 
-    def _refresh_feedback_batch(
-        self,
-        *,
-        observed_at: float,
-        inspect_after_poll: bool = False,
-    ) -> None:
-        """执行一轮共享总线反馈事务：先结算旧请求，再请求新帧。
+    def _record_arm_feedback_success(self, *args, **kwargs):
+        return self._feedback_component._record_arm_feedback_success(*args, **kwargs)
 
-        流程：按控制器分组读一次缓存观测 -> 结算上一轮待决请求 -> 为尚无基线
-        的标签建立 baseline/deadline -> 持总线锁执行 request_feedback +
-        poll_feedback_once。``inspect_after_poll`` 为真时在轮询结束后立即再读一次
-        并结算（用于强制刷新），否则只结算轮询前的观测。任一控制器组失败都会
-        记录该组电机错误，并在最后以异常抛出，绝不静默继续。
-        """
-        groups = self._feedback_controller_groups()
-        self._require_feedback_sequence_api(groups)
-        observations: dict[str, tuple[object, int]] = {}
-        group_errors: list[str] = []
-        readable_groups = []
-        for ctrl, entries in groups:
-            try:
-                for label, motor in entries:
-                    observations[label] = self._feedback_state_with_sequence(label, motor)
-                readable_groups.append((ctrl, entries))
-            except Exception as exc:
-                labels = ",".join(label for label, _motor in entries)
-                message = f"controller={type(ctrl).__name__} motors={labels}: {exc}"
-                group_errors.append(message)
-                for label, _motor in entries:
-                    self._record_feedback_label_error(
-                        label, f"shared feedback batch failed before request: {message}"
-                    )
+    def _record_arm_feedback_error(self, *args, **kwargs):
+        return self._feedback_component._record_arm_feedback_error(*args, **kwargs)
 
-        self._inspect_pending_feedback(observations, observed_at=observed_at)
-        response_window = self._feedback_response_window_sec()
-        for _ctrl, entries in readable_groups:
-            for label, _motor in entries:
-                if label not in self._feedback_request_baseline_by_label:
-                    _state, sequence = observations[label]
-                    self._feedback_request_baseline_by_label[label] = sequence
-                    self._feedback_request_deadline_by_label[label] = (
-                        observed_at + response_window
-                    )
+    def _arm_feedback_failure_reason(self, *args, **kwargs):
+        return self._feedback_component._arm_feedback_failure_reason(*args, **kwargs)
 
-        successful_groups = []
-        for ctrl, entries in readable_groups:
-            lock = getattr(ctrl, "bus_lock", None)
+    def _refresh_feedback_batch(self, *args, **kwargs):
+        return self._feedback_component._refresh_feedback_batch(*args, **kwargs)
 
-            def transaction() -> None:
-                # 同一控制器上的"请求 + 轮询"必须在一次持锁事务内完成，
-                # 否则别的线程可能在两者之间插入自己的帧，导致错配。
-                for _label, motor in entries:
-                    motor.request_feedback()
-                ctrl.poll_feedback_once()
+    def _force_feedback_refresh(self, *args, **kwargs):
+        return self._feedback_component._force_feedback_refresh(*args, **kwargs)
 
-            try:
-                if lock is None:
-                    transaction()
-                else:
-                    with lock:
-                        transaction()
-                successful_groups.append((ctrl, entries))
-            except Exception as exc:
-                labels = ",".join(label for label, _motor in entries)
-                message = (
-                    f"controller={type(ctrl).__name__} motors={labels}: {exc}"
-                )
-                group_errors.append(message)
-                for label, _motor in entries:
-                    self._record_feedback_label_error(
-                        label,
-                        f"shared feedback batch failed: {message}",
-                    )
-                    self._feedback_request_baseline_by_label.pop(label, None)
-                    self._feedback_request_deadline_by_label.pop(label, None)
+    def refresh_feedback_if_due(self, *args, **kwargs):
+        return self._feedback_component.refresh_feedback_if_due(*args, **kwargs)
 
-        if inspect_after_poll:
-            completed_at = time.monotonic()
-            observations = {}
-            for ctrl, entries in successful_groups:
-                try:
-                    for label, motor in entries:
-                        observations[label] = self._feedback_state_with_sequence(label, motor)
-                except Exception as exc:
-                    labels = ",".join(label for label, _motor in entries)
-                    message = f"controller={type(ctrl).__name__} motors={labels}: {exc}"
-                    group_errors.append(message)
-                    for label, _motor in entries:
-                        self._record_feedback_label_error(label, message)
-            self._inspect_pending_feedback(
-                observations,
-                observed_at=completed_at,
-            )
-        self._sync_feedback_health()
-        if group_errors:
-            raise RuntimeError("shared feedback batch failed: " + "; ".join(group_errors))
-
-    def _force_feedback_refresh(self) -> None:
-        """同步强制刷新：必须拿到"请求之后新到"的反馈，否则报错。
-
-        用于使能、置零、夹爪命令等需要当下真实状态的场合。先记录每个标签的
-        基线序号与上一份样本，再最多重试 ``_FEEDBACK_REFRESH_RETRIES`` 次，
-        直到样本对象被替换且序号相对基线前进；全部失败时抛出最后一个错误或
-        汇总缺失原因。
-        """
-        groups = self._feedback_controller_groups()
-        self._require_feedback_sequence_api(groups)
-        initial: dict[str, tuple[object, int]] = {}
-        initial_errors: list[str] = []
-        for ctrl, entries in groups:
-            try:
-                for label, motor in entries:
-                    initial[label] = self._feedback_state_with_sequence(label, motor)
-            except Exception as exc:
-                labels = ",".join(label for label, _motor in entries)
-                message = f"controller={type(ctrl).__name__} motors={labels}: {exc}"
-                initial_errors.append(message)
-                for label, _motor in entries:
-                    self._record_feedback_label_error(label, message)
-        if initial_errors:
-            self._sync_feedback_health()
-            raise RuntimeError(
-                "forced feedback baseline failed before request: "
-                + "; ".join(initial_errors)
-            )
-        required_baselines = {
-            label: sequence
-            for label, (_state, sequence) in initial.items()
-        }
-        # 记住旧样本对象：即使序号相同，样本对象未变也说明没收到新帧。
-        prior_samples = {
-            label: self._verified_feedback_by_label.get(label)
-            for label in required_baselines
-        }
-
-        def forced_sample_satisfies(label: str, baseline: int) -> bool:
-            sample = self._verified_feedback_by_label.get(label)
-            return (
-                label not in self._feedback_error_by_label
-                and sample is not None
-                and sample is not prior_samples[label]
-                and self._feedback_sequence_advanced(sample.sequence, baseline)
-            )
-
-        for label in required_baselines:
-            self._feedback_request_baseline_by_label.pop(label, None)
-            self._feedback_request_deadline_by_label.pop(label, None)
-
-        last_error: Exception | None = None
-        self._feedback_force_refresh_active = True
-        try:
-            for attempt in range(_FEEDBACK_REFRESH_RETRIES):
-                attempt_error: Exception | None = None
-                try:
-                    self._refresh_feedback_batch(
-                        observed_at=time.monotonic(),
-                        inspect_after_poll=True,
-                    )
-                except Exception as exc:
-                    last_error = exc
-                    attempt_error = exc
-                if attempt_error is None and all(
-                    forced_sample_satisfies(label, baseline)
-                    for label, baseline in required_baselines.items()
-                ):
-                    return
-                if attempt + 1 < _FEEDBACK_REFRESH_RETRIES:
-                    time.sleep(_FEEDBACK_RETRY_INTERVAL_SEC)
-        finally:
-            self._feedback_force_refresh_active = False
-
-        missing = []
-        for label, baseline in required_baselines.items():
-            if not forced_sample_satisfies(label, baseline):
-                reason = self._feedback_error_by_label.get(label)
-                if reason is None:
-                    reason = (
-                        f"{label} feedback timeout: sequence did not advance "
-                        f"beyond baseline={baseline}"
-                    )
-                self._record_feedback_label_error(label, reason)
-                missing.append(reason)
-            self._feedback_request_baseline_by_label.pop(label, None)
-            self._feedback_request_deadline_by_label.pop(label, None)
-        self._sync_feedback_health()
-        if last_error is not None:
-            raise last_error
-        raise RuntimeError("shared feedback batch failed: " + "; ".join(missing))
-
-    def refresh_feedback_if_due(
-        self,
-        *,
-        force: bool = False,
-        now: float | None = None,
-    ) -> bool:
-        """按配置频率最多执行一轮共享总线反馈批次。
-
-        厂商命令循环运行时，只有该循环可以在总线上发起事务。ROS 定时器也会
-        调用本方法，但在命令循环停止前它们被降级为"只读缓存"：``force=True``
-        时直接抛出 RuntimeError，否则返回 False。
-        """
-        observed_at = time.monotonic() if now is None else float(now)
-        control_thread = self._backend.control_thread
-        if (
-            self.control_loop_active
-            and control_thread is not None
-            and threading.current_thread() is not control_thread
-        ):
-            if force:
-                raise RuntimeError(
-                    "synchronous feedback refresh rejected while hardware loop owns bus"
-                )
-            return False
-        with self._feedback_lock:
-            due = self._feedback_next_refresh_monotonic
-            # 1e-12 的容差用于抵消浮点加法误差，避免恰好到期的周期被推迟。
-            if not force and due is not None and observed_at + 1e-12 < due:
-                return False
-            self._feedback_next_refresh_monotonic = (
-                observed_at + self._hardware_feedback_period_sec
-            )
-            try:
-                if force:
-                    self._force_feedback_refresh()
-                else:
-                    self._refresh_feedback_batch(observed_at=observed_at)
-                return True
-            except Exception:
-                if force:
-                    raise
-                return False
 
     @staticmethod
     def _validated_gripper_feedback_values(state) -> tuple[float, float, float, int]:

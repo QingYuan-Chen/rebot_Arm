@@ -1,0 +1,17 @@
+{
+  "sequence_cases": [
+    {"baseline": 10, "sequence": 10, "advanced": false},
+    {"baseline": 10, "sequence": 11, "advanced": true},
+    {"baseline": 10, "sequence": 9, "advanced": false},
+    {"baseline": 18446744073709551615, "sequence": 1, "advanced": true},
+    {"baseline": 18446744073709551615, "sequence": 0, "advanced": false},
+    {"baseline": 0, "sequence": 9223372036854775808, "advanced": false}
+  ],
+  "health_cases": [
+    {"label": "arm", "error": null, "updated": null, "now": 10.0, "code": "WAITING_FIRST_FRAME"},
+    {"label": "arm", "error": null, "updated": 10.0, "now": 10.1, "code": null},
+    {"label": "arm", "error": null, "updated": 10.0, "now": 10.2, "code": "STALE"},
+    {"label": "gripper", "error": "serial error", "updated": 10.0, "now": 10.1, "code": "READ_FAILED"},
+    {"label": "gripper", "error": "[INVALID_VALUES] bad frame", "updated": 10.0, "now": 10.1, "code": "INVALID_VALUES"}
+  ]
+}
