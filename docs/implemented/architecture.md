@@ -14,6 +14,10 @@
 
 `rebotarmcontroller` 负责真实硬件通信和最后一道安全防线。
 
+包内 `configuration.py` 拥有配置解析与校验，`contracts/models.py` 只含复制后的不可变数值。
+临时 `compat/legacy_backend.py` 收口旧 SDK 设备/执行私有访问；ROS 通过 manager 的目标、取消和进度接口交互。
+反馈与两类机构保护暂保留在 manager，后续归属见[拆分规划](../design/controller_refactor_plan.md)。
+
 负责：
 
 - 电机 SDK / 串口通道访问

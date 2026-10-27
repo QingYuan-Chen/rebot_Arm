@@ -114,8 +114,7 @@ class ArmActions:
         这里只打断底层轨迹发送线程；状态机复位与位置保持交给 execute 循环在
         检测到 ``is_cancel_requested`` 后统一处理，避免两处并发改状态。
         """
-        self._hardware.endpos_ctrl._stop_send.set()
-        self._hardware.endpos_ctrl._moving = False
+        self._hardware.cancel_arm_trajectory()
         return CancelResponse.ACCEPT
 
     def cancel_follow_joint_trajectory(self, _goal_handle):
@@ -166,7 +165,7 @@ class ArmActions:
             self._hardware.ensure_pos_vel_control()
             # 位置单位为米，姿态由四元数转 RPY（弧度）：底层规划接口只接受 RPY。
             x, y, z, roll, pitch, yaw = pose_to_xyz_rpy(goal.target_pose)
-            ok = self._hardware.endpos_ctrl.move_to_traj(
+            ok = self._hardware.move_to_pose_path(
                 x,
                 y,
                 z,
@@ -199,11 +198,10 @@ class ArmActions:
         requested_duration = float(goal.duration)
         feedback = MoveToPose.Feedback()
         # 底层发送线程走完轨迹后会把 ``_moving`` 置假，此循环据此判定结束。
-        while bool(getattr(self._hardware.endpos_ctrl, "_moving", False)):
+        while self._hardware.trajectory_moving:
             if goal_handle.is_cancel_requested:
                 # 取消：停止下发并复位状态机，结果按 canceled 语义返回。
-                self._hardware.endpos_ctrl._stop_send.set()
-                self._hardware.endpos_ctrl._moving = False
+                self._hardware.cancel_arm_trajectory()
                 self._hardware.set_state_machine("IDLE")
                 self._node.publish_arm_status()
                 goal_handle.canceled()
@@ -227,12 +225,7 @@ class ArmActions:
             if requested_duration > 0.0:
                 feedback.progress = max(0.0, min(1.0, elapsed / requested_duration))
             else:
-                traj = getattr(self._hardware.endpos_ctrl, "_traj", [])
-                if traj:
-                    idx = float(getattr(self._hardware.endpos_ctrl, "_traj_idx", 0))
-                    feedback.progress = max(0.0, min(1.0, idx / float(len(traj))))
-                else:
-                    feedback.progress = 1.0
+                feedback.progress = self._hardware.trajectory_progress
             feedback.time_elapsed = elapsed
             goal_handle.publish_feedback(feedback)
             # 20 Hz 反馈节流：兼顾上层观测实时性与总线/CPU 开销。
@@ -378,7 +371,7 @@ class ArmActions:
             [by_name[name] for name in self._hardware.joint_names],
             dtype=np.float64,
         )
-        self._hardware.endpos_ctrl._q_target[:] = ordered
+        self._hardware.set_joint_target(ordered)
 
     def _trajectory_stopped(self, goal_handle, result) -> bool:
         """检查轨迹是否需要提前终止；返回 True 表示终止语义已处理完毕。

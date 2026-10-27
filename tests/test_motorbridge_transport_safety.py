@@ -115,3 +115,39 @@ def test_zero_requires_new_requested_disabled_status(status):
         payloads = [bytes(transmitted[i + 21:i + 29]) for i in range(0, len(transmitted), 30)]
         assert payloads.count(bytes.fromhex("fffffffffffffffe")) == int(status == 0)
         assert all(p == bytes.fromhex("0700cc0000000000") or p == bytes.fromhex("fffffffffffffffe") for p in payloads)
+
+
+def test_c_abi_handle_ownership_errors_and_reconnect():
+    """Opaque ABI handles map directly to the local driver's used operations."""
+    import ctypes
+    import pty
+    from motorbridge.abi import CState, get_abi
+    lib=get_abi().lib
+    master,slave=pty.openpty()
+    try:
+        for _ in range(2):
+            ctrl=lib.motor_controller_new_dm_serial(os.ttyname(slave).encode(),921600)
+            assert ctrl
+            motor=lib.motor_controller_add_damiao_motor(ctrl,7,0x17,b'4310')
+            assert motor
+            try:
+                state,seq=CState(),ctypes.c_uint64()
+                assert lib.motor_handle_get_state_with_sequence(motor,ctypes.byref(state),ctypes.byref(seq))==0
+                assert state.has_value==0 and seq.value==0
+                os.write(master,packet())
+                deadline=time.monotonic()+.5
+                while not state.has_value and time.monotonic()<deadline:
+                    assert lib.motor_controller_poll_feedback_once(ctrl)==0
+                    assert lib.motor_handle_get_state_with_sequence(motor,ctypes.byref(state),ctypes.byref(seq))==0
+                    time.sleep(.001)
+                assert state.has_value and seq.value==1
+                assert lib.motor_handle_send_pos_vel(motor,0.,.3)==0
+                # Invalid mode returns an error rather than silently accepting it.
+                assert lib.motor_handle_ensure_mode(motor,255,1)!=0
+                assert lib.motor_last_error_message()
+            finally:
+                lib.motor_handle_free(motor)
+                assert lib.motor_controller_close_bus(ctrl)==0
+                lib.motor_controller_free(ctrl)
+    finally:
+        os.close(slave);os.close(master)

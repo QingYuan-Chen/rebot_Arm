@@ -112,4 +112,4 @@ def test_controller_defaults_web_safe_home_to_the_recorded_operator_pose():
 
 def test_safe_home_never_exceeds_the_vendor_homing_speed():
     hardware = _read("src/rebotarmcontroller/rebotarmcontroller/hardware_manager.py")
-    assert "if not 0.0 < speed <= ctrl._home_vel:" in hardware
+    assert "if not 0.0 < speed <= ctrl.home_velocity:" in hardware

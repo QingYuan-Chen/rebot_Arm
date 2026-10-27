@@ -285,13 +285,12 @@ class ArmServices:
             self._hardware.stop_gravity_compensation()
             self._hardware.ensure_pos_vel_control()
             x, y, z, roll, pitch, yaw = pose_to_xyz_rpy(request.target_pose)
-            ok = self._hardware.endpos_ctrl.move_to_ik(x, y, z, roll, pitch, yaw)
+            ok = self._hardware.move_to_pose_ik(x, y, z, roll, pitch, yaw)
             response.success = bool(ok)
             response.message = "IK target accepted" if ok else "IK failed"
-            # 回显控制器内部的 IK 目标关节角（弧度）。读取私有属性 _q_target 是既有约定，
-            # 它正是位置环下发的目标，改动这里会改变对外可见的解算结果。
+            # 门面返回目标副本，ROS 不持有可写控制目标或 SDK 对象。
             response.q_solution = [
-                float(v) for v in self._hardware.endpos_ctrl._q_target.copy()
+                float(v) for v in self._hardware.joint_target()
             ]
         except Exception as exc:
             response.success = False

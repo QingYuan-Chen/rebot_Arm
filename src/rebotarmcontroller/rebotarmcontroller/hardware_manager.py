@@ -28,17 +28,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 import threading
 import time
-import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
 import numpy as np
-import yaml
 
+from .configuration import HardwareSettings, default_config, load_configuration
+from .contracts.models import (MotorFeedback, VerifiedFeedbackSample as _VerifiedFeedbackSample,
+                               CachedMotorFeedback as _CachedMotorFeedback)
+from .compat.legacy_backend import LegacyBackend, ensure_sdk
 from .conversions import fk_to_pose
 from .gravity_control import (GravitySettings, LoopTiming, bounded_mit_command,
                               load_gravity_model, package_file, vector)
@@ -169,34 +170,6 @@ _LIFECYCLE_STATES = {
 }
 
 
-@dataclass(frozen=True)
-class _VerifiedFeedbackSample:
-    """一条已验证的电机反馈快照（不可变）。
-
-    ``state`` 是厂商 SDK 的状态对象（pos/vel/torq/status_code），``sequence``
-    是该电机反馈帧的接收序号（uint64），``observed_at`` 是本地单调时钟的观测
-    时刻。序号用于证明"这是一帧新反馈"而非缓存旧值；时间戳用于时效性判断。
-    """
-
-    state: object
-    sequence: int
-    observed_at: float
-
-
-@dataclass(frozen=True)
-class _CachedMotorFeedback:
-    """一次缓存查询结果；数值、状态码和不可用原因来自同一快照。"""
-
-    values: tuple[float, float, float] | None
-    raw_status_code: int | None
-    failure_reason: str | None
-    sample: _VerifiedFeedbackSample | None
-
-    @property
-    def status_code(self) -> int:
-        return 255 if self.failure_reason is not None or self.raw_status_code is None else self.raw_status_code
-
-
 def apply_gravity_compensation_tau_scale(tau: np.ndarray) -> np.ndarray:
     """对广义重力力矩逐关节施加补偿增益。
 
@@ -210,14 +183,14 @@ def apply_gravity_compensation_tau_scale(tau: np.ndarray) -> np.ndarray:
 
 
 class HardwareManager:
-    """持有 ROS 驱动所用的唯一 RobotArm 实例。
+    """ROS 硬件门面，旧设备与执行对象由临时后端独占。
 
     生命周期：``connect()`` -> ``enable()`` -> 运动/夹爪命令 -> ``disable()``
-    -> ``shutdown()``。构造阶段只解析配置与参数上下限、把厂商 SDK 加入模块
-    搜索路径，并给控制器/电机打上总线锁；真正的串口打开发生在 ``connect()``。
+    -> ``shutdown()``。配置解析本身无设备副作用；当前过渡后端仍在构造时打开串口，
+    批次 2 的本地驱动将设备打开放到 ``connect()``。
 
-    并发的回调模型：使能与运动都跑在厂商的唯一控制线程（``start_control_loop``
-    启动）里，该线程是总线上唯一的写入者；ROS 定时器线程只允许读取已缓存的
+    并发的回调模型：普通运动写入跑在厂商的唯一控制线程（``start_control_loop``
+    启动）里，生命周期和透传仍以共享总线锁串行访问；ROS 定时器线程只允许读取已缓存的
     已验证反馈（``refresh_feedback_if_due`` 会拒绝在循环运行期间做同步刷新）。
     因此任何跨线程状态都由 ``_motor_lifecycle_lock`` / ``_gripper_lock`` /
     ``_feedback_lock`` 保护。
@@ -236,59 +209,13 @@ class HardwareManager:
         grasp_hold_timeout_sec: float = _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC,
         gravity_config: Optional[str] = None,
     ) -> None:
-        requested_feedback_rate = float(hardware_feedback_rate_hz)
-        if not (
-            _HARDWARE_FEEDBACK_RATE_MIN_HZ
-            <= requested_feedback_rate
-            <= _HARDWARE_FEEDBACK_RATE_MAX_HZ
-        ):
-            raise ValueError(
-                "hardware_feedback_rate_hz must be within "
-                f"[{_HARDWARE_FEEDBACK_RATE_MIN_HZ:g}, "
-                f"{_HARDWARE_FEEDBACK_RATE_MAX_HZ:g}] Hz"
-            )
-        self._hardware_feedback_rate_hz = requested_feedback_rate
-        self._hardware_feedback_period_sec = 1.0 / requested_feedback_rate
-        requested_cap = float(gripper_position_torque_cap_nm)
-        if not 0.05 <= requested_cap <= _G_LARGE_MOVE_MAX_TAU_CAP_NM:
-            raise ValueError(
-                "gripper_position_torque_cap_nm must be within "
-                f"[0.05, {_G_LARGE_MOVE_MAX_TAU_CAP_NM:g}] N.m"
-            )
-        self._gripper_position_torque_cap_nm = requested_cap
-        requested_speed = float(gripper_position_max_speed_rad_s)
-        if not _G_POSITION_MAX_SPEED_MIN_RAD_S <= requested_speed <= _G_POSITION_MAX_SPEED_MAX_RAD_S:
-            raise ValueError(
-                "gripper_position_max_speed_rad_s must be within "
-                f"[{_G_POSITION_MAX_SPEED_MIN_RAD_S:g}, "
-                f"{_G_POSITION_MAX_SPEED_MAX_RAD_S:g}] rad/s"
-            )
-        self._gripper_position_max_speed_rad_s = requested_speed
-        requested_timeout_margin = float(gripper_position_timeout_margin_sec)
-        if not 0.1 <= requested_timeout_margin <= _G_POSITION_TIMEOUT_MARGIN_MAX_SEC:
-            raise ValueError(
-                "gripper_position_timeout_margin_sec must be within "
-                f"[0.1, {_G_POSITION_TIMEOUT_MARGIN_MAX_SEC:g}] s"
-            )
-        self._gripper_position_timeout_margin_sec = requested_timeout_margin
-        requested_stale_timeout = float(gripper_feedback_stale_timeout_sec)
-        if not 0.05 <= requested_stale_timeout <= _G_FEEDBACK_STALE_TIMEOUT_MAX_SEC:
-            raise ValueError(
-                "gripper_feedback_stale_timeout_sec must be within "
-                f"[0.05, {_G_FEEDBACK_STALE_TIMEOUT_MAX_SEC:g}] s"
-            )
-        self._gripper_feedback_stale_timeout_sec = requested_stale_timeout
-        requested_hold_timeout = float(grasp_hold_timeout_sec)
-        if not 0.1 <= requested_hold_timeout <= _G_GRASP_HOLD_TIMEOUT_MAX_SEC:
-            raise ValueError(
-                "grasp_hold_timeout_sec must be within "
-                f"[0.1, {_G_GRASP_HOLD_TIMEOUT_MAX_SEC:g}] s"
-            )
-        self._grasp_hold_timeout_sec = requested_hold_timeout
-        self._sdk_root = self._ensure_rebot_sdk_in_syspath()
-
-        from reBotArm_control_py.actuator import RobotArm
-        from reBotArm_control_py.controllers import ArmEndPos
+        settings = HardwareSettings(hardware_feedback_rate_hz,gripper_position_torque_cap_nm,
+                                    gripper_position_max_speed_rad_s,gripper_position_timeout_margin_sec,
+                                    gripper_feedback_stale_timeout_sec,grasp_hold_timeout_sec)
+        for name in settings.__dataclass_fields__:
+            setattr(self,'_'+name,getattr(settings,name))
+        self._hardware_feedback_period_sec=1. / settings.hardware_feedback_rate_hz
+        self._configuration=load_configuration(arm_cfg,gripper_cfg,channel)
         import pinocchio as pin
 
         settings_path = (Path(gravity_config).expanduser() if gravity_config else
@@ -297,9 +224,7 @@ class HardwareManager:
         self._gravity_model = load_gravity_model(
             package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'), self._gc_settings)
         self._gc_torque_limits = self._gravity_model.effort
-        cfg_path = Path(arm_cfg).expanduser() if arm_cfg else self.default_arm_cfg()
-        cfg_path = self._arm_cfg_with_channel(cfg_path, channel)
-        self._arm = RobotArm(cfg_path=str(cfg_path))
+        self._backend = LegacyBackend.create(self._configuration)
         # 重力补偿用的动力学模型：pinocchio 模型 + 数据缓冲 + 末端帧 id，
         # 计算函数和数据缓冲来自同一个权威模型，不再使用 SDK 的另一份 URDF。
         self._gc_model = self._gravity_model.model
@@ -359,7 +284,6 @@ class HardwareManager:
         self._arm_feedback_error: str | None = None
         self._motor_lifecycle_lock = threading.RLock()
 
-        self._endpos_ctrl = ArmEndPos(self._arm)
         self._connected = False
         self._enabled = False
         self._lifecycle_state = "DISCONNECTED"
@@ -378,88 +302,22 @@ class HardwareManager:
         self._gravity_feedback_metrics = {}
         self._gravity_next_log = 0.
 
-        self._patch_arm_bus_lock()
 
     def default_arm_cfg(self) -> Path:
-        return self._sdk_root / "config" / "arm.yaml"
+        return default_config('arm')
 
     def default_gripper_cfg(self) -> Path:
-        return self._sdk_root / "config" / "gripper.yaml"
+        return default_config('gripper')
 
-    @staticmethod
-    def _workspace_root() -> Path:
-        # 本文件位于 <workspace>/src/rebotarmcontroller/rebotarmcontroller/，
-        # 因此 parents[3] 即工作空间根目录。
-        return Path(__file__).resolve().parents[3]
-
-    @classmethod
-    def _sdk_candidates(cls) -> list[Path]:
-        """厂商 SDK 的候选根目录（按优先级排列，含开发机历史路径）。"""
-        workspace = cls._workspace_root()
-        return [
-            workspace / "third_party" / "reBotArm_control_py",
-            workspace / "sdk" / "reBotArm_control_py",
-            Path.cwd() / "third_party" / "reBotArm_control_py",
-            Path.cwd() / "sdk" / "reBotArm_control_py",
-            Path.home() / "robotarm_ros2" / "third_party" / "reBotArm_control_py",
-            Path.home() / "robotarm_ros2" / "sdk" / "reBotArm_control_py",
-            Path.home() / "seeed" / "cameraws" / "sdk" / "reBotArm_control_py",
-        ]
-
-    @classmethod
-    def _ensure_rebot_sdk_in_syspath(cls) -> Path:
-        """把厂商 SDK 根目录插入 sys.path 并返回该目录。
-
-        插入位置为 0，确保本地 SDK 优先于任何同名安装包；找不到时抛出
-        FileNotFoundError 并列出全部候选路径，便于现场排查。
-        """
-        for root in cls._sdk_candidates():
-            if (root / "reBotArm_control_py").is_dir():
-                root_str = str(root)
-                if root_str not in sys.path:
-                    sys.path.insert(0, root_str)
-                return root
-        candidates = "\n".join(f"  - {path}" for path in cls._sdk_candidates())
-        raise FileNotFoundError(
-            "Cannot find reBotArm_control_py. Clone it into one of:\n"
-            f"{candidates}"
-        )
-
-    @staticmethod
-    def _arm_cfg_with_channel(cfg_path: Path, channel: str) -> Path:
-        """按需把串口通道写进机械臂配置，返回实际使用的配置文件路径。
-
-        ``channel`` 为空或为 "auto" 时原样返回原配置（由厂商自动选择）；否则把
-        ``channel`` 键覆盖后写到 /tmp 下的临时 YAML，避免改动仓库内的配置。
-        """
-        normalized_channel = str(channel or "").strip()
-        if not normalized_channel or normalized_channel.lower() == "auto":
-            return cfg_path
-        with open(cfg_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        data["channel"] = normalized_channel
-        tmp_dir = Path("/tmp") / "rebotarm_ros2"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = tmp_dir / "arm_channel_override.yaml"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, sort_keys=False)
-        return tmp_path
-
-    @property
-    def arm(self):
-        return self._arm
-
-    @property
-    def endpos_ctrl(self):
-        return self._endpos_ctrl
+    _ensure_rebot_sdk_in_syspath = staticmethod(ensure_sdk)
 
     @property
     def joint_names(self) -> list[str]:
-        return list(self._arm.joint_names)
+        return list(self._backend.joint_names)
 
     @property
     def mode(self) -> str:
-        return str(self._arm.mode)
+        return str(self._backend.mode)
 
     @property
     def enabled(self) -> bool:
@@ -471,7 +329,7 @@ class HardwareManager:
 
     @property
     def control_loop_active(self) -> bool:
-        return bool(self._arm.control_loop_active)
+        return bool(self._backend.control_loop_active)
 
     @property
     def has_gripper(self) -> bool:
@@ -584,16 +442,8 @@ class HardwareManager:
                     return
             groups.append((ctrl, [(label, motor)]))
 
-        ctrl_map = getattr(self._arm, "_ctrl_map", {})
-        motor_map = getattr(self._arm, "_motor_map", {})
-        for joint in getattr(self._arm, "_joints", []):
-            ctrl = ctrl_map.get(getattr(joint, "vendor", None))
-            motor = motor_map.get(joint.name)
-            if motor is None:
-                raise RuntimeError(f"{joint.name} feedback motor unavailable")
-            if ctrl is None:
-                raise RuntimeError(f"{joint.name} feedback controller unavailable")
-            add(ctrl, joint.name, motor)
+        for ctrl, entries in self._backend.feedback_groups():
+            for label,motor in entries: add(ctrl,label,motor)
         if self._gripper_mot is not None and self._gripper_ctrl is None:
             raise RuntimeError("gripper feedback controller unavailable")
         if self._gripper_mot is not None:
@@ -774,7 +624,7 @@ class HardwareManager:
         """校验通过后登记为"已验证反馈"，并清除该标签的错误标记。"""
         self._validate_feedback_sample(label, state)
         sample = _VerifiedFeedbackSample(
-            state=state,
+            state=MotorFeedback.copy_from(state),
             sequence=int(sequence),
             observed_at=float(observed_at),
         )
@@ -1115,7 +965,7 @@ class HardwareManager:
         时直接抛出 RuntimeError，否则返回 False。
         """
         observed_at = time.monotonic() if now is None else float(now)
-        control_thread = getattr(self._arm, "_ctrl_thread", None)
+        control_thread = self._backend.control_thread
         if (
             self.control_loop_active
             and control_thread is not None
@@ -1323,7 +1173,7 @@ class HardwareManager:
         """失能机械臂与夹爪；逐个收集错误后统一抛出，保证两边都尝试过。"""
         errors: list[str] = []
         try:
-            self._arm.disable()
+            self._backend.disable()
         except Exception as exc:
             errors.append(f"arm disable: {exc}")
         if self._gripper_mot is not None:
@@ -1345,7 +1195,7 @@ class HardwareManager:
         if self._connected:
             return
         try:
-            self._arm.connect()
+            self._backend.connect()
             self._connected = True
             self.init_gripper(str(self._gripper_cfg_path))
             _positions, _velocities, _torques, statuses = (
@@ -1380,7 +1230,7 @@ class HardwareManager:
         except Exception:
             pass
         try:
-            self._arm.disconnect()
+            self._backend.disconnect()
         except Exception:
             pass
         self._connected = False
@@ -1407,8 +1257,8 @@ class HardwareManager:
             # 失能，因此该调用根本无法移动机械臂——它只会白白轮询满 30 s 超时，
             # 并把 _q_target 留成零，影响下一次使能。故直接把该控制器标记为已停止；
             # 有意的 safe_home 属于驱动的关闭钩子，那一步更早、且仍处于使能态。
-            self._endpos_ctrl._running = False
-            self._arm.disconnect()
+            self._backend.set_execution_running(False)
+            self._backend.disconnect()
         finally:
             self._connected = False
             self._enabled = False
@@ -1422,7 +1272,7 @@ class HardwareManager:
         """
         with self._motor_lifecycle_lock:
             if not self._connected:
-                return self._arm.get_state()
+                return self._backend.get_state()
             expected_status = 1 if self._enabled else 0
             positions, velocities, torques, _statuses = self._validated_joint_feedback(
                 expected_status=expected_status,
@@ -1434,7 +1284,7 @@ class HardwareManager:
         """与 ``get_joint_state`` 相同，但不触发新的总线事务（只读缓存）。"""
         with self._motor_lifecycle_lock:
             if not self._connected:
-                return self._arm.get_state()
+                return self._backend.get_state()
             expected_status = 1 if self._enabled else 0
             positions, velocities, torques, _statuses = self._validated_joint_feedback(
                 expected_status=expected_status,
@@ -1471,17 +1321,39 @@ class HardwareManager:
         """把当前关节角写成保持目标，使机械臂停在原地。"""
         q, _, _ = self.get_joint_state()
         current = np.array(q, dtype=np.float64, copy=True)
-        self._endpos_ctrl._q_target[:] = current
+        self._backend.set_target(current)
         return current
 
     def stop_active_motion(self) -> None:
         """立即停止正在下发的轨迹：置停止标志、取消移动、保持当前位置。"""
         with self._motor_lifecycle_lock:
-            self._endpos_ctrl._stop_send.set()
-            self._endpos_ctrl._moving = False
+            self._backend.cancel_trajectory()
             if self._enabled:
                 self.hold_current_position()
             self.set_state_machine("IDLE")
+
+    def set_joint_target(self, positions) -> None:
+        self._backend.set_target(positions)
+
+    def joint_target(self):
+        return self._backend.target()
+
+    def cancel_arm_trajectory(self) -> None:
+        self._backend.cancel_trajectory()
+
+    @property
+    def trajectory_moving(self):
+        return self._backend.trajectory_moving
+
+    @property
+    def trajectory_progress(self):
+        return self._backend.trajectory_progress
+
+    def move_to_pose_path(self, *args):
+        return self._backend.move_to_pose_path(*args)
+
+    def move_to_pose_ik(self, *args):
+        return self._backend.move_to_pose_ik(*args)
 
     def safe_home_target(self) -> np.ndarray:
         return np.array(_SAFE_HOME_JOINT_POSITIONS, dtype=np.float64)
@@ -1526,28 +1398,25 @@ class HardwareManager:
         回零速度。结束时无论成功失败都清掉速度覆盖、保持当前位置并回到 IDLE。
         """
         goal = self._validated_safe_home_target(target)
-        ctrl = self._endpos_ctrl
+        ctrl = self._backend
         with self._motor_lifecycle_lock:
             self._require_enabled()
-            if not ctrl._running:
+            if not ctrl.execution_running:
                 raise RuntimeError(
                     "control loop is inactive; safe_home needs position-velocity control"
                 )
-            speed = ctrl._home_vel if vlim is None else float(vlim)
-            if not 0.0 < speed <= ctrl._home_vel:
+            speed = ctrl.home_velocity if vlim is None else float(vlim)
+            if not 0.0 < speed <= ctrl.home_velocity:
                 raise ValueError(
-                    f"safe_home vlim must be within (0, {ctrl._home_vel:g}] rad/s"
+                    f"safe_home vlim must be within (0, {ctrl.home_velocity:g}] rad/s"
                 )
-            ctrl._vlim_override = np.full(ctrl._n, speed, dtype=np.float64)
-            ctrl._q_target[:] = goal
-            ctrl._stop_send.set()
-            ctrl._moving = False
-            send_thread = ctrl._send_thread
+            ctrl.set_speed_override(np.full(len(self.joint_names), speed, dtype=np.float64))
+            ctrl.set_target(goal)
+            ctrl.cancel_trajectory()
             self.set_state_machine("TRAJ_RUNNING")
         try:
             # 先等在途的发送线程收尾，再开始轮询到位情况。
-            if send_thread is not None:
-                send_thread.join()
+            ctrl.join_sender()
             deadline = time.monotonic() + (
                 _SAFE_HOME_TIMEOUT_SEC if timeout_sec is None else float(timeout_sec)
             )
@@ -1562,9 +1431,9 @@ class HardwareManager:
                         f"safe_home did not reach {goal.tolist()} within "
                         f"{_SAFE_HOME_ARRIVE_TOL_RAD} rad; worst joint error {worst:.4f} rad"
                     )
-                time.sleep(ctrl._dt)
+                time.sleep(ctrl.arrival_poll_period)
         finally:
-            ctrl._vlim_override = None
+            ctrl.set_speed_override(None)
             with self._motor_lifecycle_lock:
                 if self._enabled:
                     self.hold_current_position()
@@ -1600,12 +1469,12 @@ class HardwareManager:
                     if coordinate_failure is not None:
                         raise RuntimeError(coordinate_failure)
                 # 先把目标设为当前角度，使能瞬间不会产生位置阶跃。
-                self._endpos_ctrl._q_target[:] = positions
-                if self._arm.mode_pos_vel() is False:
+                self._backend.set_target(positions)
+                if self._backend.mode_pos_vel() is False:
                     raise RuntimeError("failed to enter position-velocity control mode")
                 if self._gripper_mot is not None:
                     self._gripper_mot.ensure_mode(Mode.MIT, 1000)
-                self._arm.enable()
+                self._backend.enable()
                 if self._gripper_mot is not None:
                     self._gripper_mot.enable()
                 self._validated_joint_feedback(expected_status=1)
@@ -1710,13 +1579,13 @@ class HardwareManager:
 
         self._stop_control_loop()
         if mode == "mit":
-            ok = self._arm.mode_mit()
+            ok = self._backend.mode_mit()
         elif mode == "pos_vel":
-            ok = self._arm.mode_pos_vel()
+            ok = self._backend.mode_pos_vel()
             if self._enabled:
                 self._start_pos_vel_loop()
         else:
-            ok = self._arm.mode_vel()
+            ok = self._backend.mode_vel()
         self.set_state_machine("IDLE")
         return bool(ok)
 
@@ -1737,9 +1606,9 @@ class HardwareManager:
             if joint_name == "gripper":
                 return self._set_gripper_zero()
             if joint_name:
-                ok = self._arm.set_zero_single(joint_name)
+                ok = self._backend.set_zero_single(joint_name)
             else:
-                self._arm.set_zero()
+                self._backend.set_zero()
                 ok = True
             self._enabled = False
             self.set_state_machine("IDLE")
@@ -1807,7 +1676,7 @@ class HardwareManager:
         self._require_enabled()
         if self.mode != "pos_vel":
             self._stop_control_loop()
-            self._arm.mode_pos_vel()
+            self._backend.mode_pos_vel()
         if not self.control_loop_active:
             self._start_pos_vel_loop()
         else:
@@ -1821,11 +1690,11 @@ class HardwareManager:
         mode：0 = MIT，1 = 位置-速度，2 = 速度（需电机支持 send_vel）。
         """
         self._require_enabled()
-        if joint_name not in self._arm._motor_map:
+        if joint_name not in self.joint_names:
             raise KeyError(f"unknown joint: {joint_name}")
 
-        mot = self._arm._motor_map[joint_name]
-        jc = next(j for j in self._arm._joints if j.name == joint_name)
+        mot = self._backend.joint_device(joint_name)
+        jc = self._backend.joint_configuration(joint_name)
         feedback_failure = self._arm_feedback_failure_reason()
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
@@ -1863,11 +1732,10 @@ class HardwareManager:
         停止时再回到位置-速度保持。
         """
         self._require_enabled()
-        timing = LoopTiming(float(self._arm._rate))
+        timing = LoopTiming(float(self._backend.rate))
         self.stop_gravity_compensation()
         self._stop_control_loop()
-        self._endpos_ctrl._stop_send.set()
-        self._endpos_ctrl._moving = False
+        self._backend.cancel_trajectory()
         try:
             self._refresh_arm_feedback()
             self._gravity_comp_q_target = self._read_gravity_comp_positions()
@@ -1889,7 +1757,7 @@ class HardwareManager:
         self._gravity_comp_integral = np.zeros_like(self._gravity_comp_q_target)
         self._gravity_comp_lock_counter = 0
         try:
-            if not self._arm.mode_mit(
+            if not self._backend.mode_mit(
                 kp=np.full(6, self._gc_settings.kp), kd=np.full(6, self._gc_settings.kd)
             ):
                 raise RuntimeError('MIT mode switch did not succeed on all joints')
@@ -1901,7 +1769,7 @@ class HardwareManager:
                 [float(s.state.torq) for s in samples],
                 -self._gc_torque_limits, self._gc_torque_limits)
             self._gravity_comp_active = True
-            self._gravity_comp_tick(self._arm, 1. / float(self._arm._rate))
+            self._gravity_comp_tick(self._backend, 1. / float(self._backend.rate))
         except Exception:
             self._gravity_comp_active = False
             # Restore healthy hardware to verified current-position hold.
@@ -1909,7 +1777,7 @@ class HardwareManager:
             try:
                 self._refresh_arm_feedback()
                 target = self._read_gravity_comp_positions()
-                if not self._arm.mode_pos_vel():
+                if not self._backend.mode_pos_vel():
                     raise GravityCommandError('POS_VEL restore failed')
                 self._start_pos_vel_loop(target=target)
                 self.set_state_machine('IDLE')
@@ -1919,7 +1787,7 @@ class HardwareManager:
         self._gravity_timing = timing
         self._gravity_feedback_metrics = {}
         self._gravity_next_log = 0.
-        self._arm.start_control_loop(self._gravity_hardware_tick, rate=self._arm._rate)
+        self._backend.start_control_loop(self._gravity_hardware_tick, rate=self._backend.rate)
         self.set_state_machine("GRAVITY_COMP")
 
     def stop_gravity_compensation(self) -> None:
@@ -1940,7 +1808,7 @@ class HardwareManager:
             try:
                 self._refresh_arm_feedback()
                 hold_target = self._read_gravity_comp_positions()
-                if not self._arm.mode_pos_vel():
+                if not self._backend.mode_pos_vel():
                     raise GravityCommandError('gravity POS_VEL restore failed')
                 self._start_pos_vel_loop(target=hold_target)
             except Exception as exc:
@@ -2085,7 +1953,7 @@ class HardwareManager:
         # bus-locked motor wrappers here so partial/failed sends reach the guard.
         for index, name in enumerate(self.joint_names):
             try:
-                self._arm._motor_map[name].send_mit(
+                self._backend.joint_device(name).send_mit(
                     float(pos[index]), float(vel[index]), float(kp[index]),
                     float(kd[index]), float(tau[index]))
             except Exception as exc:
@@ -2117,10 +1985,8 @@ class HardwareManager:
 
     def current_pose(self):
         """用厂商正运动学把当前关节角换算成 Pose(供状态发布使用)。"""
-        from reBotArm_control_py.kinematics import compute_fk
-
         q, _, _ = self.get_joint_state()
-        position, rotation, _ = compute_fk(self._endpos_ctrl._model, q)
+        position, rotation = self._backend.current_pose_values(q)
         return fk_to_pose(position, rotation)
 
     def get_joint_status_codes(self) -> list[int]:
@@ -2142,34 +2008,9 @@ class HardwareManager:
         事务的原子性。初始化阶段保持单线程：首次新鲜反馈校验由本方法同步完成，
         位置/抓取入口再按需启动统一控制循环。
         """
-        from reBotArm_control_py.actuator.gripper import load_cfg as load_gripper_cfg
-
-        gcfg = load_gripper_cfg(cfg_path)
-        gc = gcfg["gripper"]
-        self._gripper_cfg = gc
-
-        vendor = gc.vendor
-        if vendor not in self._arm._ctrl_map:
-            raise RuntimeError(
-                f"gripper vendor={vendor!r} cannot share the arm Controller"
-            )
-        ctrl = self._arm._ctrl_map[vendor]
-
-        if vendor == "damiao":
-            self._gripper_mot = ctrl.add_damiao_motor(gc.motor_id, gc.feedback_id, gc.model)
-        elif vendor == "myactuator":
-            self._gripper_mot = ctrl.add_myactuator_motor(gc.motor_id, gc.feedback_id, gc.model)
-        elif vendor == "robstride":
-            self._gripper_mot = ctrl.add_robstride_motor(gc.motor_id, gc.feedback_id, gc.model)
-        else:
-            raise ValueError(f"unsupported gripper vendor: {vendor!r}")
-
-        self._gripper_ctrl = ctrl
-
-        self._patch_controller_bus(ctrl)
-        self._wrap_motor_bus(self._gripper_mot, ctrl._bus_lock)
-        # 机械臂与夹爪在共享串口上完成首次新鲜反馈校验期间，保持初始化单线程。
-        # 位置/抓取入口会按需启动该循环。
+        gc=self._configuration.gripper
+        self._gripper_cfg=gc
+        self._gripper_mot,self._gripper_ctrl=self._backend.add_gripper(gc)
 
     def set_gripper_target(self, position_m: float, max_effort: float = 0.0) -> None:
         """下发夹爪位置目标（异步）：只登记目标，实际下发由 统一硬件循环完成。
@@ -2546,74 +2387,8 @@ class HardwareManager:
             self._gripper_active = False
             self._gripper_mode = "idle"
 
-    def _patch_arm_bus_lock(self) -> None:
-        """给机械臂（含夹爪）控制器与电机方法统一加上总线互斥。
-
-        只打一次补丁：``_bus_lock_patched`` 防止重复包装导致锁嵌套。
-        """
-        for ctrl in self._arm._ctrl_map.values():
-            self._patch_controller_bus(ctrl)
-
-        if not hasattr(self._arm, "_bus_lock_patched"):
-            for jc in self._arm._joints:
-                mot = self._arm._motor_map[jc.name]
-                ctrl = self._arm._ctrl_map[jc.vendor]
-                self._wrap_motor_bus(mot, ctrl._bus_lock)
-            self._arm._bus_lock_patched = True
-
-    @staticmethod
-    def _patch_controller_bus(ctrl) -> None:
-        """给控制器的 poll_feedback_once/enable_all/disable_all 包上可重入锁。
-
-        这几个方法内部会做多次总线读写，必须在同一把锁内完成，否则与其他线程
-        的电机命令交错会串帧。重复调用是幂等的。
-        """
-        if not hasattr(ctrl, "_bus_lock"):
-            ctrl._bus_lock = threading.RLock()
-        if hasattr(ctrl, "_bus_lock_patched"):
-            return
-        lock = ctrl._bus_lock
-
-        def _wrap(fn, _lock=lock):
-            def _locked(*args, **kwargs):
-                with _lock:
-                    return fn(*args, **kwargs)
-
-            return _locked
-
-        for attr in ("poll_feedback_once", "enable_all", "disable_all"):
-            if hasattr(ctrl, attr):
-                wrapped = _wrap(getattr(ctrl, attr))
-                # 标记位用于 _wrap_motor_bus 判定是否已包装，避免重复加锁。
-                wrapped._rebotarm_locked = True
-                setattr(ctrl, attr, wrapped)
-        ctrl._bus_lock_patched = True
-
-    @staticmethod
-    def _wrap_motor_bus(mot, lock) -> None:
-        """把单个电机的总线类方法包上同一把锁（幂等，已包装的跳过）。"""
-        def _wrap(fn, _lock=lock):
-            def _locked(*args, **kwargs):
-                with _lock:
-                    return fn(*args, **kwargs)
-
-            return _locked
-
-        for attr in (
-            "send_pos_vel",
-            "send_mit",
-            "send_vel",
-            "request_feedback",
-            "enable",
-            "disable",
-            "ensure_mode",
-            "write_register_f32",
-            "set_zero_position",
-        ):
-            if hasattr(mot, attr) and not hasattr(getattr(mot, attr), "_rebotarm_locked"):
-                wrapped = _wrap(getattr(mot, attr))
-                wrapped._rebotarm_locked = True
-                setattr(mot, attr, wrapped)
+    _patch_controller_bus = staticmethod(LegacyBackend._patch_controller_bus)
+    _wrap_motor_bus = staticmethod(LegacyBackend._wrap_motor_bus)
 
     def _start_pos_vel_loop(self, target: np.ndarray | None = None) -> None:
         """启动统一硬件控制循环（位置-速度跟踪），并把控制器标记为运行中。
@@ -2625,17 +2400,17 @@ class HardwareManager:
         if target is None:
             self.hold_current_position()
         else:
-            self._endpos_ctrl._q_target[:] = np.array(target, dtype=np.float64)
-        self._arm.start_control_loop(self._endpos_hardware_tick)
-        self._endpos_ctrl._running = True
+            self._backend.set_target(target)
+        self._backend.start_control_loop(self._endpos_hardware_tick)
+        self._backend.set_execution_running(True)
 
     def _endpos_hardware_tick(self, arm, dt: float) -> None:
-        self._hardware_control_tick(arm, dt, self._endpos_ctrl._loop_cb)
+        self._hardware_control_tick(arm, dt, self._backend.position_tick)
 
     def _gravity_hardware_tick(self, arm, dt: float) -> None:
         timing = getattr(self, '_gravity_timing', None)
         if timing is None:
-            timing = self._gravity_timing = LoopTiming(float(arm._rate))
+            timing = self._gravity_timing = LoopTiming(float(self._backend.rate))
         started = time.monotonic()
         actual_dt = timing.begin(started)
         try:
@@ -2690,10 +2465,9 @@ class HardwareManager:
 
         # RobotArm.disable()/stop_control_loop() 会 join ``_ctrl_thread``，绝不能被
         # 该线程自己调用。本回调返回后，厂商循环读到 False 自然释放线程所有权。
-        self._arm._running = False
-        self._endpos_ctrl._running = False
-        self._endpos_ctrl._stop_send.set()
-        self._endpos_ctrl._moving = False
+        self._backend.request_loop_stop()
+        self._backend.set_execution_running(False)
+        self._backend.cancel_trajectory()
         self._gravity_comp_active = False
         self._gravity_comp_q_target = None
         self._gravity_comp_integral = None
@@ -2704,7 +2478,7 @@ class HardwareManager:
             self._error_codes.append(code)
 
         controllers: list[object] = []
-        for controller in getattr(self._arm, "_ctrl_map", {}).values():
+        for controller in self._backend.controllers():
             if all(controller is not existing for existing in controllers):
                 controllers.append(controller)
         if self._gripper_ctrl is not None and all(
@@ -2760,11 +2534,11 @@ class HardwareManager:
         self._gripper_tick()
 
     def _stop_control_loop(self) -> None:
-        self._arm.stop_control_loop()
-        thread = getattr(self._arm, '_ctrl_thread', None)
+        self._backend.stop_control_loop()
+        thread = self._backend.control_thread
         if thread is not None and thread.is_alive():
             raise RuntimeError('hardware writer did not stop; refusing a second writer')
-        self._endpos_ctrl._running = False
+        self._backend.set_execution_running(False)
 
     def _gripper_safe_mit(
         self,

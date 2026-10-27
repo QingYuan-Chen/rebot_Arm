@@ -91,8 +91,7 @@ class MotorPassthrough:
                     f"preempting trajectory for /joints/{joint_name}/cmd"
                 )
                 # 抢占：置位底层位置控制器的停止事件并清掉 moving 标志，让轨迹发送循环退出
-                self._hardware.endpos_ctrl._stop_send.set()
-                self._hardware.endpos_ctrl._moving = False
+                self._hardware.cancel_arm_trajectory()
 
             try:
                 self._hardware.send_joint_motor_cmd(joint_name, msg)

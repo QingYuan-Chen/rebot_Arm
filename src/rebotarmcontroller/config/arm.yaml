@@ -1,0 +1,88 @@
+# Reviewed controller defaults; bringup may explicitly override these.
+channel: /dev/ttyACM0
+rate: 500
+joints:
+- name: joint1
+  motor_id: 1
+  feedback_id: 17
+  model: 4340P
+  vendor: damiao
+  MIT:
+    kp: 120.0
+    kd: 8.0
+  POS_VEL:
+    vel_kp: 0.0125
+    vel_ki: 0.004
+    pos_kp: 150.0
+    pos_ki: 0.5
+    vlim: 5.0
+- name: joint2
+  motor_id: 2
+  feedback_id: 18
+  model: 4340P
+  vendor: damiao
+  MIT:
+    kp: 120.0
+    kd: 8.0
+  POS_VEL:
+    vel_kp: 0.0125
+    vel_ki: 0.004
+    pos_kp: 150.0
+    pos_ki: 0.5
+    vlim: 5.0
+- name: joint3
+  motor_id: 3
+  feedback_id: 19
+  model: 4340P
+  vendor: damiao
+  MIT:
+    kp: 120.0
+    kd: 8.0
+  POS_VEL:
+    vel_kp: 0.0125
+    vel_ki: 0.004
+    pos_kp: 150.0
+    pos_ki: 0.5
+    vlim: 5.0
+- name: joint4
+  motor_id: 4
+  feedback_id: 20
+  model: '4310'
+  vendor: damiao
+  MIT:
+    kp: 18.0
+    kd: 2.0
+  POS_VEL:
+    vel_kp: 0.0008
+    vel_ki: 0.002
+    pos_kp: 50.0
+    pos_ki: 1.0
+    vlim: 3.0
+- name: joint5
+  motor_id: 5
+  feedback_id: 21
+  model: '4310'
+  vendor: damiao
+  MIT:
+    kp: 18.0
+    kd: 2.0
+  POS_VEL:
+    vel_kp: 0.0008
+    vel_ki: 0.002
+    pos_kp: 50.0
+    pos_ki: 1.0
+    vlim: 3.0
+- name: joint6
+  motor_id: 6
+  feedback_id: 22
+  model: '4310'
+  vendor: damiao
+  MIT:
+    kp: 18.0
+    kd: 2.0
+  POS_VEL:
+    vel_kp: 0.0008
+    vel_ki: 0.002
+    pos_kp: 50.0
+    pos_ki: 1.0
+    vlim: 3.0

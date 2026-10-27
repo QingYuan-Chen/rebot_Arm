@@ -10,6 +10,8 @@ import numpy as np
 import pytest
 
 import rebotarmcontroller.hardware_manager as hardware_manager_module
+from rebotarmcontroller.compat.legacy_backend import LegacyBackend
+from rebotarmcontroller.configuration import load_configuration
 from rebotarmcontroller.hardware_manager import (
     HardwareManager,
     _JOINT_POSITION_LIMITS_RAD,
@@ -83,6 +85,7 @@ class FakeArm:
         ]
         self._motor_map = {name: FakeMotor() for name in self.joint_names}
         self._ctrl_map = {"fake": FakeController(self._motor_map.values())}
+        self._rate = 500.0
         self.mode = "mit"
         self.control_loop_active = False
         self.connect_calls = 0
@@ -185,14 +188,16 @@ def make_manager(
     manager._gripper_command_error = None
     manager._gripper_position_result = "idle"
     manager._gripper_neutral_pending = None
-    manager._arm = FakeArm(fail_enable_joint=fail_enable_joint)
-    manager._endpos_ctrl = SimpleNamespace(
+    manager.test_arm = FakeArm(fail_enable_joint=fail_enable_joint)
+    manager.test_endpos = SimpleNamespace(
         _q_target=np.full(6, 99.0, dtype=np.float64),
         _running=False,
         _moving=False,
         _stop_send=SimpleNamespace(set=lambda: None),
         _loop_cb=lambda _arm, _dt: None,
     )
+    manager._backend = LegacyBackend(manager.test_arm, manager.test_endpos)
+    manager._configuration = load_configuration()
     manager._connected = False
     manager._enabled = False
     manager._lifecycle_state = "DISCONNECTED"
@@ -232,7 +237,7 @@ def seed_verified_feedback(
     timestamp = time.monotonic() if observed_at is None else float(observed_at)
     with manager._feedback_lock:
         for sequence, name in enumerate(JOINT_NAMES, start=11):
-            motor_state = manager.arm._motor_map[name].state
+            motor_state = manager.test_arm._motor_map[name].state
             motor_state.status_code = int(arm_status)
             manager._record_verified_feedback(
                 name,
@@ -255,7 +260,7 @@ def forbid_raw_feedback_reads(manager: HardwareManager) -> None:
     def fail() -> None:
         raise AssertionError("connected consumer performed a raw feedback read")
 
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.get_state = fail
         motor.get_state_with_sequence = fail
     if manager._gripper_mot is not None:
@@ -285,7 +290,7 @@ def configure_gravity_compensation_test(
     manager._connected = True
     manager._enabled = True
     for name, position, velocity in zip(JOINT_NAMES, positions, velocities):
-        state = manager.arm._motor_map[name].state
+        state = manager.test_arm._motor_map[name].state
         state.pos = float(position)
         state.vel = float(velocity)
         state.status_code = 1
@@ -294,12 +299,12 @@ def configure_gravity_compensation_test(
     def forbidden_sdk_getter(*_args, **_kwargs):
         raise AssertionError("gravity compensation used an SDK aggregate getter")
 
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.get_state = forbidden_sdk_getter
-    manager.arm.get_positions = forbidden_sdk_getter
-    manager.arm.get_velocities = forbidden_sdk_getter
-    manager.arm._rate = 500.0
-    manager.arm.mode_mit = lambda **_kwargs: True
+    manager.test_arm.get_positions = forbidden_sdk_getter
+    manager.test_arm.get_velocities = forbidden_sdk_getter
+    manager.test_arm._rate = 500.0
+    manager.test_arm.mode_mit = lambda **_kwargs: True
     mit_commands: list[dict[str, object]] = []
     manager._send_gravity_mit = lambda **kwargs: mit_commands.append(dict(kwargs))
     from rebotarmcontroller.gravity_control import GravitySettings
@@ -343,7 +348,7 @@ def test_gravity_integral_has_same_effect_at_different_control_rates():
         manager._gravity_comp_q_target = q + .01
         manager._gravity_comp_integral = np.zeros(6)
         for _ in range(round(.1 / dt)):
-            manager._gravity_comp_tick(manager.arm, dt)
+            manager._gravity_comp_tick(manager.test_arm, dt)
         return manager._gravity_comp_integral
     np.testing.assert_allclose(integrate(.01), integrate(.002), atol=1e-12)
     np.testing.assert_allclose(integrate(.01), .001, atol=1e-12)
@@ -353,23 +358,23 @@ def test_gravity_mode_failure_rolls_back_to_verified_position_hold():
     manager = make_manager()
     q = np.array([.2, -.3, -.4, .1, .2, -.1])
     commands = configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
-    manager.arm.mode_mit = lambda **kwargs: False
+    manager.test_arm.mode_mit = lambda **kwargs: False
     with pytest.raises(RuntimeError, match='MIT mode'):
         manager.start_gravity_compensation()
     assert commands == []
     assert not manager.gravity_compensation_active()
     assert manager.enabled
-    assert manager.arm.mode_pos_vel_calls == 1
-    np.testing.assert_allclose(manager._endpos_ctrl._q_target, q)
+    assert manager.test_arm.mode_pos_vel_calls == 1
+    np.testing.assert_allclose(manager.test_endpos._q_target, q)
 
 
 def test_gravity_sender_does_not_swallow_motor_send_failure():
     manager = make_manager()
     configure_gravity_compensation_test(manager, positions=np.zeros(6), velocities=np.zeros(6))
     del manager._send_gravity_mit
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.send_mit = lambda *args: None
-    manager.arm._motor_map['joint3'].send_mit = lambda *args: (_ for _ in ()).throw(
+    manager.test_arm._motor_map['joint3'].send_mit = lambda *args: (_ for _ in ()).throw(
         RuntimeError('serial write failed'))
     with pytest.raises(RuntimeError, match='joint3.*serial write failed'):
         manager._send_gravity_mit(pos=np.zeros(6), vel=np.zeros(6), kp=np.ones(6),
@@ -384,11 +389,11 @@ def test_gravity_model_exception_keeps_healthy_arm_enabled_in_guarded_hold(monke
     manager._gc_compute_generalized_gravity = lambda **kwargs: (_ for _ in ()).throw(
         RuntimeError('invalid model output'))
     monkeypatch.setattr(manager, 'refresh_feedback_if_due', lambda **kwargs: False)
-    manager._gravity_hardware_tick(manager.arm, .002)
+    manager._gravity_hardware_tick(manager.test_arm, .002)
     assert manager.enabled and manager.gravity_compensation_active()
     assert manager._gravity_comp_fault is not None
     np.testing.assert_allclose(commands[-1]['pos'], q)
-    assert manager.arm.disable_calls == 0
+    assert manager.test_arm.disable_calls == 0
 
 
 def test_gravity_preflight_model_failure_leaves_position_hold_running():
@@ -398,9 +403,9 @@ def test_gravity_preflight_model_failure_leaves_position_hold_running():
     manager._gc_compute_generalized_gravity = lambda **kwargs: np.full(6, np.nan)
     with pytest.raises(ValueError, match='finite'):
         manager.start_gravity_compensation()
-    assert manager.arm.control_loop_active and manager.enabled
+    assert manager.test_arm.control_loop_active and manager.enabled
     assert not manager.gravity_compensation_active()
-    np.testing.assert_allclose(manager._endpos_ctrl._q_target, q)
+    np.testing.assert_allclose(manager.test_endpos._q_target, q)
 
 
 def test_gravity_deadline_fault_keeps_healthy_arm_enabled(monkeypatch):
@@ -415,9 +420,9 @@ def test_gravity_deadline_fault_keeps_healthy_arm_enabled(monkeypatch):
         now = 10. + i * .02
         monkeypatch.setattr(hardware_manager_module.time, 'monotonic', lambda: now)
         seed_verified_feedback(manager, observed_at=now, arm_status=1)
-        manager._gravity_hardware_tick(manager.arm, .01)
+        manager._gravity_hardware_tick(manager.test_arm, .01)
     assert manager._gravity_comp_fault == 'three consecutive control deadline misses'
-    assert manager.enabled and manager.arm.disable_calls == 0
+    assert manager.enabled and manager.test_arm.disable_calls == 0
 
 
 def test_gravity_send_failure_requests_protective_disable(monkeypatch):
@@ -430,8 +435,8 @@ def test_gravity_send_failure_requests_protective_disable(monkeypatch):
         GravityCommandError('serial write failed'))
     monkeypatch.setattr(manager, 'refresh_feedback_if_due', lambda **kwargs: False)
     disables = []
-    manager.arm._ctrl_map['fake'].disable_all = lambda: disables.append(True)
-    manager._gravity_hardware_tick(manager.arm, .002)
+    manager.test_arm._ctrl_map['fake'].disable_all = lambda: disables.append(True)
+    manager._gravity_hardware_tick(manager.test_arm, .002)
     assert disables == [True]
     assert not manager.gravity_compensation_active()
     assert 'GRAVITY_COMMAND_PROTECTIVE_DISABLE' in manager.error_codes
@@ -457,7 +462,7 @@ def test_validated_joint_feedback_uses_verified_cache_only() -> None:
     manager._enabled = True
     expected = np.array([0.1, -0.2, -0.3, 0.4, 0.5, -0.6])
     for name, position in zip(JOINT_NAMES, expected):
-        manager.arm._motor_map[name].state.pos = float(position)
+        manager.test_arm._motor_map[name].state.pos = float(position)
     before = seed_verified_feedback(manager, arm_status=1)
     forbid_raw_feedback_reads(manager)
 
@@ -539,7 +544,7 @@ def test_gripper_target_start_uses_verified_cache_only() -> None:
     manager = make_manager()
     manager._connected = True
     manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     manager._gripper_mot = FakeMotor(position=gripper_state.pos)
     manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
@@ -561,12 +566,12 @@ def test_joint_motor_command_defaults_use_verified_cache_only() -> None:
     manager = make_manager()
     manager._connected = True
     manager._enabled = True
-    state = manager.arm._motor_map["joint1"].state
+    state = manager.test_arm._motor_map["joint1"].state
     state.pos = 0.25
     state.vel = -0.5
     state.status_code = 1
     commands: list[tuple[float, ...]] = []
-    manager.arm._motor_map["joint1"].send_mit = (
+    manager.test_arm._motor_map["joint1"].send_mit = (
         lambda *values: commands.append(tuple(float(value) for value in values))
     )
     before = seed_verified_feedback(manager, arm_status=1)
@@ -676,7 +681,7 @@ def test_gravity_start_and_tick_use_one_verified_joint_snapshot() -> None:
     assert np.allclose(mit_commands[0]["pos"], positions)
 
     mit_commands.clear()
-    manager._gravity_comp_tick(manager.arm, 1.0 / 500.0)
+    manager._gravity_comp_tick(manager.test_arm, 1.0 / 500.0)
 
     assert len(mit_commands) == 1
     assert np.allclose(mit_commands[0]["pos"], positions)
@@ -713,7 +718,7 @@ def test_gravity_tick_rejects_unhealthy_verified_feedback_before_torque(
         monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: 11.0)
 
     with pytest.raises(RuntimeError, match=expected_error):
-        manager._gravity_comp_tick(manager.arm, 1.0 / 500.0)
+        manager._gravity_comp_tick(manager.test_arm, 1.0 / 500.0)
 
     assert mit_commands == []
 
@@ -783,12 +788,12 @@ def test_outer_hardware_tick_protects_on_arm_feedback_loss(
     manager._gravity_comp_q_target = positions.copy()
     manager._gravity_comp_integral = np.zeros(6, dtype=np.float64)
     manager._lifecycle_state = "ENABLED_HOLD"
-    manager.arm._running = True
-    manager._endpos_ctrl._stop_send = threading.Event()
-    manager._endpos_ctrl._moving = True
+    manager.test_arm._running = True
+    manager.test_endpos._stop_send = threading.Event()
+    manager.test_endpos._moving = True
     disable_calls: list[str] = []
-    shared_controller = manager.arm._ctrl_map["fake"]
-    manager.arm._ctrl_map["duplicate"] = shared_controller
+    shared_controller = manager.test_arm._ctrl_map["fake"]
+    manager.test_arm._ctrl_map["duplicate"] = shared_controller
     manager._gripper_ctrl = shared_controller
     shared_controller.disable_all = lambda: disable_calls.append("arm")
     monkeypatch.setattr(manager, "refresh_feedback_if_due", lambda **_kwargs: False)
@@ -804,16 +809,16 @@ def test_outer_hardware_tick_protects_on_arm_feedback_loss(
                 marks_success=False,
             )
 
-    manager._gravity_hardware_tick(manager.arm, 1.0 / 500.0)
+    manager._gravity_hardware_tick(manager.test_arm, 1.0 / 500.0)
 
     assert mit_commands == []
     assert gripper_commands == [(-0.5, 0.0, 0.0, 0.0, 0.0)]
     assert manager._gripper_neutral_pending is None
     assert manager.gripper_active is False
     assert disable_calls == ["arm"]
-    assert manager.arm._running is False
-    assert manager._endpos_ctrl._stop_send.is_set() is True
-    assert manager._endpos_ctrl._moving is False
+    assert manager.test_arm._running is False
+    assert manager.test_endpos._stop_send.is_set() is True
+    assert manager.test_endpos._moving is False
     assert manager.lifecycle_state == "DISABLING"
     assert manager.enabled is True
     assert manager.gravity_compensation_active() is False
@@ -833,21 +838,21 @@ def test_outer_hardware_tick_records_neutral_and_disable_failures(
     _configure_gripper_position_move(manager, position=-0.5, goal=-4.0)
     manager._gravity_comp_active = True
     manager._gravity_comp_q_target = positions.copy()
-    manager.arm._running = True
+    manager.test_arm._running = True
     manager._arm_feedback_error = "serial feedback timeout"
     manager._gripper_mot.send_mit = lambda *_args: (_ for _ in ()).throw(
         RuntimeError("neutral write failed")
     )
-    controller = manager.arm._ctrl_map["fake"]
+    controller = manager.test_arm._ctrl_map["fake"]
     manager._gripper_ctrl = controller
     controller.disable_all = lambda: (_ for _ in ()).throw(
         RuntimeError("disable write failed")
     )
     monkeypatch.setattr(manager, "refresh_feedback_if_due", lambda **_kwargs: False)
 
-    manager._gravity_hardware_tick(manager.arm, 1.0 / 500.0)
+    manager._gravity_hardware_tick(manager.test_arm, 1.0 / 500.0)
 
-    assert manager.arm._running is False
+    assert manager.test_arm._running is False
     assert manager.enabled is True
     assert manager.lifecycle_state == "DISABLING"
     assert any("NEUTRAL_FAILED" in code for code in manager.error_codes)
@@ -860,7 +865,7 @@ def test_outer_hardware_tick_protects_when_scheduler_raises_feedback_error(
     manager = make_manager()
     manager._connected = True
     manager._enabled = True
-    manager.arm._running = True
+    manager.test_arm._running = True
     manager._arm_feedback_error = None
 
     def fail_feedback_refresh(**_kwargs) -> None:
@@ -868,19 +873,19 @@ def test_outer_hardware_tick_protects_when_scheduler_raises_feedback_error(
         raise RuntimeError("scheduler transaction failed")
 
     disable_calls: list[int] = []
-    manager.arm._ctrl_map["fake"].disable_all = lambda: disable_calls.append(1)
+    manager.test_arm._ctrl_map["fake"].disable_all = lambda: disable_calls.append(1)
     monkeypatch.setattr(manager, "refresh_feedback_if_due", fail_feedback_refresh)
     callback_calls: list[int] = []
 
     manager._hardware_control_tick(
-        manager.arm,
+        manager.test_arm,
         1.0 / 500.0,
         lambda _arm, _dt: callback_calls.append(1),
     )
 
     assert callback_calls == []
     assert disable_calls == [1]
-    assert manager.arm._running is False
+    assert manager.test_arm._running is False
     assert manager.lifecycle_state == "DISABLING"
 
 
@@ -895,7 +900,7 @@ def test_outer_hardware_tick_reraises_non_feedback_callback_failure(
 
     with pytest.raises(RuntimeError, match="controller bug"):
         manager._hardware_control_tick(
-            manager.arm,
+            manager.test_arm,
             1.0 / 500.0,
             lambda _arm, _dt: (_ for _ in ()).throw(RuntimeError("controller bug")),
         )
@@ -910,7 +915,7 @@ def test_outer_hardware_tick_reraises_non_feedback_callback_failure(
     )
     with pytest.raises(RuntimeError, match="scheduler bug"):
         manager._hardware_control_tick(
-            manager.arm,
+            manager.test_arm,
             1.0 / 500.0,
             lambda _arm, _dt: None,
         )
@@ -934,7 +939,7 @@ def test_outer_hardware_tick_orders_feedback_before_arm_and_gripper(
     monkeypatch.setattr(manager, "_gripper_tick", lambda: events.append("gripper"))
 
     manager._hardware_control_tick(
-        manager.arm,
+        manager.test_arm,
         1.0 / 500.0,
         lambda _arm, _dt: events.append("arm"),
     )
@@ -950,44 +955,44 @@ def test_connect_keeps_all_motors_disabled_and_does_not_start_control() -> None:
     assert manager.connected is True
     assert manager.enabled is False
     assert manager.lifecycle_state == "CONNECTED_DISABLED"
-    assert manager.arm.connect_calls == 1
-    assert manager.arm.enable_calls == 0
-    assert manager.arm.disable_calls == 0
-    assert manager.arm.mode_pos_vel_calls == 0
-    assert manager.arm.start_control_loop_calls == 0
+    assert manager.test_arm.connect_calls == 1
+    assert manager.test_arm.enable_calls == 0
+    assert manager.test_arm.disable_calls == 0
+    assert manager.test_arm.mode_pos_vel_calls == 0
+    assert manager.test_arm.start_control_loop_calls == 0
     assert manager.get_joint_status_codes() == [0] * 6
 
 
 def test_disabled_joint_state_reads_request_fresh_feedback() -> None:
     manager = make_manager()
     manager.connect()
-    requests_before = manager.arm._motor_map["joint1"].request_feedback_calls
+    requests_before = manager.test_arm._motor_map["joint1"].request_feedback_calls
 
     manager.get_joint_state()
 
-    assert manager.arm._motor_map["joint1"].request_feedback_calls == requests_before + 1
+    assert manager.test_arm._motor_map["joint1"].request_feedback_calls == requests_before + 1
 
 
 def test_enabled_joint_state_reads_use_control_loop_cache() -> None:
     manager = make_manager()
     manager.connect()
     manager.enable()
-    requests_before = manager.arm._motor_map["joint1"].request_feedback_calls
+    requests_before = manager.test_arm._motor_map["joint1"].request_feedback_calls
 
     manager.get_joint_state()
 
-    assert manager.arm._motor_map["joint1"].request_feedback_calls == requests_before
+    assert manager.test_arm._motor_map["joint1"].request_feedback_calls == requests_before
 
 
 def test_connect_forces_unexpected_enabled_motors_back_to_disabled() -> None:
     manager = make_manager()
-    manager.arm._motor_map["joint3"].state.status_code = 1
+    manager.test_arm._motor_map["joint3"].state.status_code = 1
 
     manager.connect()
 
     assert manager.enabled is False
     assert manager.lifecycle_state == "CONNECTED_DISABLED"
-    assert manager.arm.disable_calls == 1
+    assert manager.test_arm.disable_calls == 1
     assert manager.get_joint_status_codes() == [0] * 6
 
 
@@ -995,17 +1000,17 @@ def test_enable_holds_current_position_before_starting_control_loop() -> None:
     manager = make_manager()
     current = np.array([0.2, -0.4, -0.3, 0.1, 0.0, 0.3])
     for name, position in zip(JOINT_NAMES, current):
-        manager.arm._motor_map[name].state.pos = float(position)
+        manager.test_arm._motor_map[name].state.pos = float(position)
     manager.connect()
 
     manager.enable()
 
     assert manager.enabled is True
     assert manager.lifecycle_state == "ENABLED_HOLD"
-    assert manager.arm.enable_calls == 1
-    assert manager.arm.mode_pos_vel_calls == 1
-    assert manager.arm.start_control_loop_calls == 1
-    assert np.allclose(manager.endpos_ctrl._q_target, current)
+    assert manager.test_arm.enable_calls == 1
+    assert manager.test_arm.mode_pos_vel_calls == 1
+    assert manager.test_arm.start_control_loop_calls == 1
+    assert np.allclose(manager.test_endpos._q_target, current)
     assert manager.get_joint_status_codes() == [1] * 6
     assert manager.ready_for_motion is True
 
@@ -1013,15 +1018,15 @@ def test_enable_holds_current_position_before_starting_control_loop() -> None:
 def test_enable_failure_disables_every_motor_and_returns_to_disabled_state() -> None:
     manager = make_manager(fail_enable_joint="joint4")
     manager.connect()
-    disable_calls_before_enable = manager.arm.disable_calls
+    disable_calls_before_enable = manager.test_arm.disable_calls
 
     with pytest.raises(RuntimeError, match="joint4"):
         manager.enable()
 
     assert manager.enabled is False
     assert manager.lifecycle_state == "CONNECTED_DISABLED"
-    assert manager.arm.disable_calls > disable_calls_before_enable
-    assert manager.arm.control_loop_active is False
+    assert manager.test_arm.disable_calls > disable_calls_before_enable
+    assert manager.test_arm.control_loop_active is False
     assert manager.get_joint_status_codes() == [0] * 6
 
 
@@ -1034,7 +1039,7 @@ def test_motion_entrypoints_do_not_implicitly_enable() -> None:
     with pytest.raises(RuntimeError, match="explicit /rebotarm/enable"):
         manager.start_gravity_compensation()
 
-    assert manager.arm.enable_calls == 0
+    assert manager.test_arm.enable_calls == 0
     assert manager.ready_for_motion is False
 
 
@@ -1142,16 +1147,16 @@ def test_action_goal_callback_rejects_motion_until_explicit_enable() -> None:
 
 def test_connect_rejects_missing_or_out_of_limit_feedback_and_disconnects() -> None:
     manager = make_manager()
-    manager.arm._motor_map["joint2"].state = None
+    manager.test_arm._motor_map["joint2"].state = None
 
     with pytest.raises(RuntimeError, match="joint2 feedback unavailable"):
         manager.connect()
     assert manager.connected is False
     assert manager.lifecycle_state == "DISCONNECTED"
-    assert manager.arm.disconnect_calls == 1
+    assert manager.test_arm.disconnect_calls == 1
 
     manager = make_manager()
-    manager.arm._motor_map["joint5"].state.pos = 2.0
+    manager.test_arm._motor_map["joint5"].state.pos = 2.0
     with pytest.raises(RuntimeError, match="joint5 position"):
         manager.connect()
     assert manager.connected is False
@@ -1162,7 +1167,7 @@ def test_connect_rejects_missing_or_out_of_limit_feedback_and_disconnects() -> N
 @pytest.mark.parametrize("position", [0.000478, 0.019, 0.02])
 def test_zero_margin_accepts_feedback_but_rejects_larger_positive_feedback(joint_name, position) -> None:
     manager = make_manager()
-    manager.arm._motor_map[joint_name].state.pos = position
+    manager.test_arm._motor_map[joint_name].state.pos = position
 
     manager.connect()
 
@@ -1170,7 +1175,7 @@ def test_zero_margin_accepts_feedback_but_rejects_larger_positive_feedback(joint
     manager.shutdown()
 
     manager = make_manager()
-    manager.arm._motor_map[joint_name].state.pos = 0.020001
+    manager.test_arm._motor_map[joint_name].state.pos = 0.020001
 
     with pytest.raises(RuntimeError, match=f"{joint_name} position"):
         manager.connect()
@@ -1182,21 +1187,21 @@ def test_zero_margin_accepts_feedback_but_rejects_larger_positive_feedback(joint
 def test_connect_does_not_swallow_active_feedback_refresh_failure() -> None:
     manager = make_manager()
     controller = SimpleNamespace(poll_feedback_once=lambda: None)
-    manager.arm._ctrl_map = {"fake": controller}
-    for joint in manager.arm._joints:
+    manager.test_arm._ctrl_map = {"fake": controller}
+    for joint in manager.test_arm._joints:
         joint.vendor = "fake"
 
     def fail_request() -> None:
         raise RuntimeError("feedback timeout")
 
-    manager.arm._motor_map["joint3"].request_feedback = fail_request
+    manager.test_arm._motor_map["joint3"].request_feedback = fail_request
 
     with pytest.raises(RuntimeError, match="shared feedback batch failed"):
         manager.connect()
 
     assert manager.connected is False
     assert manager.lifecycle_state == "DISCONNECTED"
-    assert manager.arm.disconnect_calls == 1
+    assert manager.test_arm.disconnect_calls == 1
 
 
 def test_feedback_refresh_batches_requests_before_one_controller_poll() -> None:
@@ -1205,10 +1210,10 @@ def test_feedback_refresh_batches_requests_before_one_controller_poll() -> None:
     controller = SimpleNamespace(
         poll_feedback_once=lambda: events.append("poll"),
     )
-    manager.arm._ctrl_map = {"fake": controller}
-    for joint in manager.arm._joints:
+    manager.test_arm._ctrl_map = {"fake": controller}
+    for joint in manager.test_arm._joints:
         joint.vendor = "fake"
-        motor = manager.arm._motor_map[joint.name]
+        motor = manager.test_arm._motor_map[joint.name]
         original_request = motor.request_feedback
         motor.request_feedback = (
             lambda name=joint.name, request=original_request: (
@@ -1218,7 +1223,7 @@ def test_feedback_refresh_batches_requests_before_one_controller_poll() -> None:
     original_poll = controller.poll_feedback_once
     controller.poll_feedback_once = lambda: (
         original_poll(),
-        [motor.deliver_requested_feedback() for motor in manager.arm._motor_map.values()],
+        [motor.deliver_requested_feedback() for motor in manager.test_arm._motor_map.values()],
     )[0]
 
     manager._refresh_arm_feedback()
@@ -1241,10 +1246,10 @@ def test_feedback_refresh_holds_controller_lock_for_full_transaction() -> None:
         _bus_lock=RecordingLock(),
         poll_feedback_once=lambda: events.append("poll"),
     )
-    manager.arm._ctrl_map = {"fake": controller}
-    for joint in manager.arm._joints:
+    manager.test_arm._ctrl_map = {"fake": controller}
+    for joint in manager.test_arm._joints:
         joint.vendor = "fake"
-        motor = manager.arm._motor_map[joint.name]
+        motor = manager.test_arm._motor_map[joint.name]
         original_request = motor.request_feedback
         motor.request_feedback = (
             lambda name=joint.name, request=original_request: (
@@ -1254,7 +1259,7 @@ def test_feedback_refresh_holds_controller_lock_for_full_transaction() -> None:
     original_poll = controller.poll_feedback_once
     controller.poll_feedback_once = lambda: (
         original_poll(),
-        [motor.deliver_requested_feedback() for motor in manager.arm._motor_map.values()],
+        [motor.deliver_requested_feedback() for motor in manager.test_arm._motor_map.values()],
     )[0]
 
     manager._refresh_arm_feedback()
@@ -1332,13 +1337,13 @@ def test_gripper_mode_is_set_before_explicit_gripper_enable() -> None:
     manager._gripper_ctrl = SimpleNamespace(
         poll_feedback_once=lambda: sequence.update(value=sequence["value"] + 1)
     )
-    original_arm_enable = manager.arm.enable
+    original_arm_enable = manager.test_arm.enable
 
     def arm_enable() -> None:
         events.append("arm_enable")
         original_arm_enable()
 
-    manager.arm.enable = arm_enable
+    manager.test_arm.enable = arm_enable
     manager._start_gripper_loop = lambda: events.append("gripper_loop")
     manager.connect()
 
@@ -1358,7 +1363,7 @@ def test_gripper_target_does_not_create_an_independent_control_thread(
     manager = make_manager()
     manager._connected = True
     manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     manager._gripper_loop_running = False
     manager._gripper_loop_thread = None
     del manager._start_gripper_loop
@@ -1388,7 +1393,7 @@ def test_arm_control_callback_also_emits_active_gripper_command() -> None:
     """The installed arm loop must be the sole arm-and-gripper command writer."""
     manager = make_manager()
     arm_events: list[str] = []
-    manager._endpos_ctrl._loop_cb = lambda _arm, _dt: arm_events.append("arm")
+    manager.test_endpos._loop_cb = lambda _arm, _dt: arm_events.append("arm")
     commands = _configure_gripper_position_move(
         manager,
         position=-1.0,
@@ -1400,8 +1405,8 @@ def test_arm_control_callback_also_emits_active_gripper_command() -> None:
     seed_verified_feedback(manager, arm_status=1)
 
     manager._start_pos_vel_loop(target=np.zeros(6))
-    assert manager.arm.control_callback is not None
-    manager.arm.control_callback(manager.arm, 1.0 / 500.0)
+    assert manager.test_arm.control_callback is not None
+    manager.test_arm.control_callback(manager.test_arm, 1.0 / 500.0)
 
     assert arm_events == ["arm"]
     assert len(commands) == 1
@@ -1414,7 +1419,7 @@ def test_shared_feedback_scheduler_batches_all_seven_motors_at_50hz() -> None:
     controller = SimpleNamespace(
         poll_feedback_once=lambda: poll_calls.append(1),
     )
-    manager.arm._ctrl_map = {"fake": controller}
+    manager.test_arm._ctrl_map = {"fake": controller}
     manager._gripper_mot = FakeMotor(position=-1.0)
     manager._gripper_mot.state.status_code = 1
     manager._gripper_ctrl = controller
@@ -1422,7 +1427,7 @@ def test_shared_feedback_scheduler_batches_all_seven_motors_at_50hz() -> None:
     for tick in range(500):
         manager.refresh_feedback_if_due(now=tick / 500.0)
 
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         assert motor.request_feedback_calls == 50
     assert manager._gripper_mot.request_feedback_calls == 50
     assert len(poll_calls) == 50
@@ -1430,10 +1435,10 @@ def test_shared_feedback_scheduler_batches_all_seven_motors_at_50hz() -> None:
 
 def test_unchanged_feedback_sequence_does_not_advance_timestamp() -> None:
     manager = make_manager()
-    controller = manager.arm._ctrl_map["fake"]
+    controller = manager.test_arm._ctrl_map["fake"]
 
     assert manager.refresh_feedback_if_due(now=10.0) is True
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.advance_feedback_on_poll = False
     assert manager.refresh_feedback_if_due(now=10.02) is True
     accepted_at = manager._arm_feedback_updated_monotonic
@@ -1447,7 +1452,7 @@ def test_unchanged_feedback_sequence_does_not_advance_timestamp() -> None:
 def test_identical_numeric_feedback_with_advanced_sequence_is_accepted() -> None:
     manager = make_manager()
     expected_positions = {
-        name: motor.state.pos for name, motor in manager.arm._motor_map.items()
+        name: motor.state.pos for name, motor in manager.test_arm._motor_map.items()
     }
 
     assert manager.refresh_feedback_if_due(now=20.0) is True
@@ -1469,7 +1474,7 @@ def test_arm_feedback_can_recover_while_gripper_sequence_stays_unchanged() -> No
     manager = make_manager()
     gripper = FakeMotor(position=-1.0)
     gripper.advance_feedback_on_poll = False
-    controller = manager.arm._ctrl_map["fake"]
+    controller = manager.test_arm._ctrl_map["fake"]
     controller._motors.append(gripper)
     manager._gripper_mot = gripper
     manager._gripper_ctrl = controller
@@ -1486,13 +1491,13 @@ def test_arm_feedback_can_recover_while_gripper_sequence_stays_unchanged() -> No
 
 def test_delayed_sequence_within_pending_window_is_accepted_later() -> None:
     manager = make_manager()
-    controller = manager.arm._ctrl_map["fake"]
-    for motor in manager.arm._motor_map.values():
+    controller = manager.test_arm._ctrl_map["fake"]
+    for motor in manager.test_arm._motor_map.values():
         motor.advance_feedback_on_poll = False
 
     assert manager.refresh_feedback_if_due(now=40.0) is True
     assert manager._arm_feedback_updated_monotonic is None
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.feedback_sequence = 1
 
     assert manager.refresh_feedback_if_due(now=40.02) is True
@@ -1505,7 +1510,7 @@ def test_delayed_sequence_within_pending_window_is_accepted_later() -> None:
 def test_feedback_deadline_expiry_retains_diagnostic_sample_and_reports_unknown() -> None:
     manager = make_manager()
     gripper = FakeMotor(position=-1.0)
-    controller = manager.arm._ctrl_map["fake"]
+    controller = manager.test_arm._ctrl_map["fake"]
     controller._motors.append(gripper)
     manager._gripper_mot = gripper
     manager._gripper_ctrl = controller
@@ -1540,7 +1545,7 @@ def test_runtime_sequence_read_failure_is_scoped_and_recovers() -> None:
     gripper_controller = FakeController([gripper])
     manager._gripper_mot = gripper
     manager._gripper_ctrl = gripper_controller
-    joint1 = manager.arm._motor_map["joint1"]
+    joint1 = manager.test_arm._motor_map["joint1"]
     real_getter = joint1.get_state_with_sequence
     fail = {"active": True}
 
@@ -1565,12 +1570,12 @@ def test_runtime_sequence_read_failure_is_scoped_and_recovers() -> None:
 
 def test_active_feedback_accepts_uint64_max_wrap_to_one() -> None:
     manager = make_manager()
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.feedback_sequence = UINT64_MAX
         motor.advance_feedback_on_poll = False
 
     assert manager.refresh_feedback_if_due(now=70.0) is True
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.feedback_sequence = 1
     assert manager.refresh_feedback_if_due(now=70.02) is True
 
@@ -1580,7 +1585,7 @@ def test_active_feedback_accepts_uint64_max_wrap_to_one() -> None:
 
 def test_forced_feedback_accepts_uint64_max_wrap_to_one() -> None:
     manager = make_manager()
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.feedback_sequence = UINT64_MAX
 
     manager._refresh_all_feedback()
@@ -1607,7 +1612,7 @@ def test_forced_refresh_rejects_old_sample_after_raw_sequence_reset() -> None:
     manager._refresh_all_feedback()
     old_samples = dict(manager._verified_feedback_by_label)
     old_updated = manager._arm_feedback_updated_monotonic
-    for motor in manager.arm._motor_map.values():
+    for motor in manager.test_arm._motor_map.values():
         motor.feedback_sequence = 0
         motor.advance_feedback_on_poll = False
 
@@ -1620,14 +1625,14 @@ def test_forced_refresh_rejects_old_sample_after_raw_sequence_reset() -> None:
 
 def test_forced_refresh_rejects_poll_that_delivers_then_raises() -> None:
     manager = make_manager()
-    motors = list(manager.arm._motor_map.values())
+    motors = list(manager.test_arm._motor_map.values())
 
     def poll() -> None:
         for motor in motors:
             motor.deliver_requested_feedback()
         raise RuntimeError("recv failed after frames")
 
-    manager.arm._ctrl_map["fake"] = SimpleNamespace(
+    manager.test_arm._ctrl_map["fake"] = SimpleNamespace(
         _bus_lock=threading.RLock(), poll_feedback_once=poll
     )
 
@@ -1640,7 +1645,7 @@ def test_forced_refresh_rejects_poll_that_delivers_then_raises() -> None:
 
 def test_forced_refresh_requires_success_after_latest_group_failure() -> None:
     manager = make_manager()
-    arm_motors = list(manager.arm._motor_map.values())
+    arm_motors = list(manager.test_arm._motor_map.values())
     gripper = FakeMotor(position=-1.0)
     manager._gripper_mot = gripper
     arm_attempts = 0
@@ -1662,7 +1667,7 @@ def test_forced_refresh_requires_success_after_latest_group_failure() -> None:
             raise RuntimeError("gripper transient bus error")
         gripper.deliver_requested_feedback()
 
-    manager.arm._ctrl_map["fake"] = SimpleNamespace(
+    manager.test_arm._ctrl_map["fake"] = SimpleNamespace(
         _bus_lock=threading.RLock(), poll_feedback_once=poll_arm
     )
     manager._gripper_ctrl = SimpleNamespace(
@@ -1685,7 +1690,7 @@ def test_forced_refresh_requires_success_after_latest_group_failure() -> None:
         for motor in arm_motors:
             motor.deliver_requested_feedback()
 
-    manager.arm._ctrl_map["fake"].poll_feedback_once = poll_arm_with_fresh_frame
+    manager.test_arm._ctrl_map["fake"].poll_feedback_once = poll_arm_with_fresh_frame
 
     manager._refresh_all_feedback()
 
@@ -1696,7 +1701,7 @@ def test_forced_refresh_requires_success_after_latest_group_failure() -> None:
 def test_forced_refresh_accepts_staggered_motor_feedback() -> None:
     """Startup must tolerate a serial bridge returning motor frames in batches."""
     manager = make_manager()
-    motors = list(manager.arm._motor_map.values())
+    motors = list(manager.test_arm._motor_map.values())
     polls = 0
 
     def poll_staggered() -> None:
@@ -1705,7 +1710,7 @@ def test_forced_refresh_accepts_staggered_motor_feedback() -> None:
         for motor in motors[:2] if polls == 1 else motors:
             motor.deliver_requested_feedback()
 
-    manager.arm._ctrl_map["fake"].poll_feedback_once = poll_staggered
+    manager.test_arm._ctrl_map["fake"].poll_feedback_once = poll_staggered
 
     manager._refresh_all_feedback()
 
@@ -1719,9 +1724,9 @@ def test_forced_initial_getter_failure_records_group_before_any_request() -> Non
     manager._refresh_all_feedback()
     requests_before = {
         name: motor.request_feedback_calls
-        for name, motor in manager.arm._motor_map.items()
+        for name, motor in manager.test_arm._motor_map.items()
     }
-    joint1 = manager.arm._motor_map["joint1"]
+    joint1 = manager.test_arm._motor_map["joint1"]
     joint1.get_state_with_sequence = lambda: (_ for _ in ()).throw(
         RuntimeError("initial baseline read failed")
     )
@@ -1732,21 +1737,21 @@ def test_forced_initial_getter_failure_records_group_before_any_request() -> Non
     assert "initial baseline read failed" in manager._arm_feedback_error
     assert {
         name: motor.request_feedback_calls
-        for name, motor in manager.arm._motor_map.items()
+        for name, motor in manager.test_arm._motor_map.items()
     } == requests_before
 
 
 def test_ros_thread_cannot_refresh_bus_while_hardware_loop_is_active() -> None:
     manager = make_manager()
     controller = SimpleNamespace(poll_feedback_once=lambda: None)
-    manager.arm._ctrl_map = {"fake": controller}
-    manager.arm.control_loop_active = True
-    manager.arm._ctrl_thread = object()
+    manager.test_arm._ctrl_map = {"fake": controller}
+    manager.test_arm.control_loop_active = True
+    manager.test_arm._ctrl_thread = object()
 
     assert manager.refresh_feedback_if_due(now=1.0) is False
     assert all(
         motor.request_feedback_calls == 0
-        for motor in manager.arm._motor_map.values()
+        for motor in manager.test_arm._motor_map.values()
     )
 
 
@@ -1763,7 +1768,7 @@ def test_failed_feedback_batch_stops_gripper_before_next_target() -> None:
             RuntimeError("serial feedback timeout")
         )
     )
-    manager.arm._ctrl_map = {"fake": controller}
+    manager.test_arm._ctrl_map = {"fake": controller}
     manager._gripper_ctrl = controller
 
     assert manager.refresh_feedback_if_due(now=1.0) is False
@@ -1872,7 +1877,7 @@ def test_waiter_queues_release_but_only_hardware_loop_emits_neutral() -> None:
     """A ROS service/action waiter must never become a second bus writer."""
     manager = make_manager()
     commands = _configure_arrived_gripper_position_move(manager)
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     manager._gripper_neutral_pending = None
 
     assert manager.wait_gripper_target(timeout=0.01) is False
@@ -1939,7 +1944,7 @@ def test_gripper_position_target_advances_by_configured_speed_ramp(monkeypatch) 
     manager = make_manager(gripper_position_torque_cap_nm=1.0)
     manager._connected = True
     manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     commands = _configure_gripper_position_move(
         manager,
         position=-1.0,
@@ -1966,7 +1971,7 @@ def test_gripper_position_timeout_scales_with_command_distance() -> None:
     manager = make_manager(gripper_position_max_speed_rad_s=0.5)
     manager._connected = True
     manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     _configure_gripper_position_move(manager, position=-1.0, goal=-1.0)
     manager._start_gripper_loop = lambda: None
 
@@ -1982,7 +1987,7 @@ def test_gripper_position_command_logs_command_feedback_and_timing(monkeypatch) 
     manager = make_manager(gripper_position_torque_cap_nm=1.0)
     manager._connected = True
     manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     _configure_gripper_position_move(manager, position=-1.0, goal=-1.0)
     manager._start_gripper_loop = lambda: None
 
@@ -2082,7 +2087,7 @@ def test_grasp_rejects_stale_feedback_before_sending_close_command() -> None:
     manager = make_manager()
     manager._connected = True
     manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     commands = _configure_gripper_position_move(
         manager,
         position=-1.0,
@@ -2215,7 +2220,7 @@ def test_first_frame_wait_is_derived_and_recovers_without_status_initialization(
     assert manager.get_gripper_state() == (-1.0, 0.0, 0.0, 0)
     assert manager.gripper_feedback_error is None
     assert manager.error_codes == []
-    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+    assert manager.test_arm.enable_calls == manager.test_arm.disable_calls == 0
 
 
 @pytest.mark.parametrize(
@@ -2262,7 +2267,7 @@ def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fau
     updated = manager._gripper_feedback_updated_monotonic
     with monkeypatch.context() as reads:
         reads.setattr(manager, "refresh_feedback_if_due", fail_read)
-        for motor in [*manager.arm._motor_map.values(), gripper]:
+        for motor in [*manager.test_arm._motor_map.values(), gripper]:
             reads.setattr(motor, "get_state", fail_read)
             reads.setattr(motor, "get_state_with_sequence", fail_read)
         for _ in range(3):
@@ -2275,11 +2280,11 @@ def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fau
         assert manager._gripper_feedback_updated_monotonic == updated
 
     manager._connected = manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     with pytest.raises(RuntimeError):
         manager.set_gripper_target(0.01)
     assert manager._gripper_active is False
-    manager.arm.control_loop_active = False
+    manager.test_arm.control_loop_active = False
 
     gripper.get_state_with_sequence = original_getter
     gripper.advance_feedback_on_poll = True
@@ -2290,13 +2295,13 @@ def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fau
     assert manager.get_gripper_state() == (-0.5, 0.0, 0.0, 0)
     assert manager.gripper_feedback_error is None
     assert manager.error_codes == []
-    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+    assert manager.test_arm.enable_calls == manager.test_arm.disable_calls == 0
 
 
 def test_gripper_motor_fault_is_reported_and_rejected_by_command_gate() -> None:
     manager = make_manager()
     manager._connected = manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     gripper = FakeMotor(position=-1.0)
     gripper.state.status_code = 11
     manager._gripper_mot = gripper
@@ -2325,7 +2330,7 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
     clock = [100.0]
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: clock[0])
     manager.refresh_feedback_if_due(force=True)
-    motor = manager.arm._motor_map["joint3"]
+    motor = manager.test_arm._motor_map["joint3"]
     old_sample = manager._verified_feedback_sample("joint3")
     getter = motor.get_state_with_sequence
 
@@ -2353,7 +2358,7 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
     before = dict(manager._verified_feedback_by_label)
     errors = dict(manager._feedback_error_by_label)
     health = (manager._arm_feedback_error, manager._arm_feedback_updated_monotonic)
-    polls = manager.arm._ctrl_map["fake"].poll_feedback_calls
+    polls = manager.test_arm._ctrl_map["fake"].poll_feedback_calls
     for _ in range(query_count):
         assert manager.get_joint_status_codes() == [255] * 6
         assert manager.get_gripper_state()[3] == 0
@@ -2364,12 +2369,12 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
     assert_verified_feedback_unchanged(manager, before)
     assert manager._feedback_error_by_label == errors
     assert (manager._arm_feedback_error, manager._arm_feedback_updated_monotonic) == health
-    assert manager.arm._ctrl_map["fake"].poll_feedback_calls == polls
+    assert manager.test_arm._ctrl_map["fake"].poll_feedback_calls == polls
 
     manager._connected = manager._enabled = True
     with pytest.raises(RuntimeError):
         manager.send_joint_motor_cmd("joint3", SimpleNamespace())
-    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+    assert manager.test_arm.enable_calls == manager.test_arm.disable_calls == 0
 
     motor.get_state_with_sequence = getter
     motor.advance_feedback_on_poll = True
@@ -2402,7 +2407,7 @@ def test_gripper_publication_uses_sample_values_and_time_not_control_mirrors() -
 def test_arm_publication_preserves_motor_fault_but_motion_still_rejects_it() -> None:
     manager = make_manager()
     manager._connected = manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     seed_verified_feedback(manager, arm_status=11)
     forbid_raw_feedback_reads(manager)
 
@@ -2597,7 +2602,7 @@ def test_gripper_position_target_uses_full_90mm_range(
     manager = make_manager()
     manager._connected = True
     manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
     manager._gripper_pos = 0.0
     manager._gripper_mot = SimpleNamespace(
         get_state=lambda: SimpleNamespace(pos=0.0, vel=0.0, torq=0.0, status_code=1),
@@ -2622,7 +2627,7 @@ def test_gripper_full_open_command_reaches_motor_without_extra_open_margin(monke
     manager = make_manager(gripper_feedback_stale_timeout_sec=2.0)
     commands = _configure_gripper_position_move(manager, position=-4.8, goal=-4.8)
     manager._connected = manager._enabled = True
-    manager.arm.control_loop_active = True
+    manager.test_arm.control_loop_active = True
 
     manager.set_gripper_target(0.09, max_effort=0.15)
     clock[0] += 1.0
@@ -2670,9 +2675,6 @@ def test_hardware_soft_limits_match_moveit_urdf() -> None:
 def test_gripper_initialization_defers_background_loop_until_first_command(
     monkeypatch,
 ) -> None:
-    HardwareManager._ensure_rebot_sdk_in_syspath()
-    from reBotArm_control_py.actuator import gripper as gripper_module
-
     manager = make_manager()
     del manager.init_gripper
     gripper_motor = FakeMotor()
@@ -2680,19 +2682,7 @@ def test_gripper_initialization_defers_background_loop_until_first_command(
         add_damiao_motor=lambda _motor_id, _feedback_id, _model: gripper_motor,
         poll_feedback_once=lambda: None,
     )
-    manager.arm._ctrl_map["damiao"] = controller
-    monkeypatch.setattr(
-        gripper_module,
-        "load_cfg",
-        lambda _path: {
-            "gripper": SimpleNamespace(
-                vendor="damiao",
-                motor_id=0x07,
-                feedback_id=0x17,
-                model="4310",
-            )
-        },
-    )
+    manager.test_arm._ctrl_map["damiao"] = controller
     manager._gripper_loop_running = False
     manager._start_gripper_loop = lambda: setattr(
         manager, "_gripper_loop_running", True
@@ -2715,7 +2705,7 @@ def test_set_zero_gripper_only_calibrates_disabled_gripper_motor() -> None:
     assert gripper.set_zero_position_calls == 1
     assert manager.enabled is False
     assert manager.lifecycle_state == "CONNECTED_DISABLED"
-    assert manager.arm.disable_calls == 0
+    assert manager.test_arm.disable_calls == 0
 
 
 def test_set_zero_gripper_rejects_enabled_arm() -> None:
@@ -2741,12 +2731,12 @@ def test_invalid_gripper_coordinate_preserves_raw_but_reports_unknown(position) 
     assert manager.get_gripper_state()[3] == 255
     assert np.isnan(manager.gripper_position_m())
     assert any("coordinate invalid" in reason for reason in manager.error_codes)
-    assert manager.arm.disable_calls == 0
+    assert manager.test_arm.disable_calls == 0
     assert gripper.set_zero_position_calls == 0
     with pytest.raises(RuntimeError, match="coordinate invalid"):
         manager.enable()
-    assert manager.arm.enable_calls == 0
-    assert manager.arm.mode_pos_vel_calls == 0
+    assert manager.test_arm.enable_calls == 0
+    assert manager.test_arm.mode_pos_vel_calls == 0
 
 
 @pytest.mark.parametrize(
@@ -2778,7 +2768,7 @@ def test_closed_tolerance_keeps_feedback_valid_without_rezeroing(equivalent_widt
     assert manager.gripper_position_m() == 0.0
     assert manager.error_codes == []
     assert gripper.set_zero_position_calls == 0
-    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+    assert manager.test_arm.enable_calls == manager.test_arm.disable_calls == 0
 
 
 @pytest.mark.parametrize("mode", ["position", "grasp_closing", "grasp_holding"])
@@ -2793,12 +2783,12 @@ def test_coordinate_jump_stops_gripper_without_disabling_healthy_arm(mode) -> No
     arm_ticks = []
     manager._gripper_cfg = SimpleNamespace()
 
-    manager._hardware_control_tick(manager.arm, 0.002, lambda *_: arm_ticks.append(True))
+    manager._hardware_control_tick(manager.test_arm, 0.002, lambda *_: arm_ticks.append(True))
 
     assert arm_ticks == [True]
     assert manager.enabled is True
     assert manager.control_loop_active is True
-    assert manager.arm.disable_calls == 0
+    assert manager.test_arm.disable_calls == 0
     assert manager.gripper_active is False
     assert manager.gripper_mode == "idle"
     assert manager.gripper_reached_target() is False
@@ -2835,7 +2825,7 @@ def test_zero_verifies_new_frames_and_repairs_invalid_coordinate() -> None:
     assert gripper.feedback_sequence >= before + 4  # preflight plus three post-zero frames
     assert manager.get_gripper_state()[3] == 0
     assert manager.gripper_position_m() == pytest.approx(0.00000343323)
-    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+    assert manager.test_arm.enable_calls == manager.test_arm.disable_calls == 0
 
 
 def test_zero_rejects_old_zero_cache_and_retains_failure_until_verified() -> None:
@@ -2881,7 +2871,7 @@ def test_zero_failure_never_returns_success_or_retries_write(result, monkeypatch
         manager.set_zero("gripper")
     assert gripper.set_zero_position_calls == 1
     assert np.isnan(manager.gripper_position_m())
-    assert manager.arm.enable_calls == manager.arm.disable_calls == 0
+    assert manager.test_arm.enable_calls == manager.test_arm.disable_calls == 0
 
 
 def test_zero_requires_consecutive_near_zero_samples(monkeypatch) -> None:
