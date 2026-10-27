@@ -159,6 +159,110 @@ def test_register_failure_aborts_mode_and_enable_path(monkeypatch):
     manager.shutdown()
 
 
+@pytest.mark.parametrize("mode", ["mit", "vel", "pos_vel"])
+def test_disabled_mode_settle_allows_new_verified_feedback(monkeypatch, mode):
+    """A slow mode operation must not starve the shared feedback cache."""
+    manager, _ = make_local_manager(monkeypatch)
+    manager.connect()
+    driver = manager._backend.driver
+    workers = []
+    failures = []
+    previous = dict(manager._verified_feedback_by_label)
+
+    def settle(_duration):
+        refreshed = threading.Event()
+
+        def acquire_feedback():
+            try:
+                manager.refresh_feedback_if_due(force=True)
+                # The ROS publisher reads this snapshot before releasing its
+                # publication lock; blocking here also prevents future refresh.
+                assert manager.get_cached_joint_sample()[3] == [0] * 6
+                assert manager.get_cached_gripper_sample()[3] == 0
+                assert manager.get_feedback_status() == ([0] * 6, [])
+            except Exception as exc:
+                failures.append(exc)
+            finally:
+                refreshed.set()
+
+        worker = threading.Thread(target=acquire_feedback)
+        workers.append(worker)
+        worker.start()
+        assert refreshed.wait(.5), "mode settle blocked feedback on the bus lock"
+        assert not failures
+        for label, sample in manager._verified_feedback_by_label.items():
+            assert sample.sequence > previous[label].sequence
+            assert sample.observed_at > previous[label].observed_at
+        previous.update(manager._verified_feedback_by_label)
+        assert manager.get_feedback_status() == ([0] * 6, [])
+        assert manager.get_cached_gripper_sample()[3] == 0
+        assert not manager.enabled and not manager.control_loop_active
+
+    driver._sleep = settle
+    try:
+        assert manager.set_mode(mode)
+        assert manager.mode == mode
+        assert workers, "mode transition did not exercise a settling delay"
+    finally:
+        driver._sleep = lambda _: None
+        for worker in workers:
+            worker.join(timeout=1.)
+        manager.shutdown()
+
+
+def test_mode_settle_allows_feedback_but_serializes_command_batches():
+    driver, bus, _ = make_driver()
+    driver.connect()
+    settling, release, attempted, sent, refreshed = (
+        threading.Event() for _ in range(5)
+    )
+    failures = []
+
+    def settle(_duration):
+        settling.set()
+        if not release.wait(2.):
+            raise RuntimeError("test did not release mode settle")
+
+    def change_mode():
+        try:
+            driver.set_mode("mit")
+        except Exception as exc:
+            failures.append(exc)
+
+    def send():
+        attempted.set()
+        driver.send_positions(PositionCommand((0.,) * 6, (.3,) * 6, 0))
+        sent.set()
+
+    def feedback():
+        driver.motor("joint1").request_feedback()
+        driver.controllers()[0].poll_feedback_once()
+        assert driver.motor("joint1").get_state_with_sequence()[1] > 0
+        refreshed.set()
+
+    driver._sleep = settle
+    mode_worker = threading.Thread(target=change_mode)
+    sender = threading.Thread(target=send)
+    reader = threading.Thread(target=feedback)
+    try:
+        mode_worker.start()
+        assert settling.wait(1.)
+        sender.start()
+        assert attempted.wait(1.)
+        reader.start()
+        assert refreshed.wait(.5), "feedback blocked for entire mode transition"
+        assert not sent.is_set()
+        assert not any(method == "position" for _, method, _ in bus.events)
+    finally:
+        release.set()
+        for worker in (mode_worker, sender, reader):
+            if worker.ident is not None:
+                worker.join(timeout=2.)
+        driver._sleep = lambda _: None
+        driver.close()
+    assert not failures and sent.is_set()
+
+
 def test_driver_disable_does_not_stop_runtime_and_demands_new_status():
     driver,bus,_=make_driver();driver.connect();driver.enable()
     before=bus.motors[0].sequence

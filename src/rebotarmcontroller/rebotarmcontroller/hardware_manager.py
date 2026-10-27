@@ -1320,8 +1320,10 @@ class HardwareManager:
         """返回同一快照的数值、原始状态码、接收序号及最旧反馈观测时间。
 
         发布允许保留真实电机故障码；动作入口仍通过 expected_status 拒绝故障。
+        这里只读已验证缓存，不依赖生命周期锁；否则发布回调会在慢模式切换
+        中阻塞，并因占有发布锁而阻止下一轮反馈刷新。
         """
-        with self._motor_lifecycle_lock, self._feedback_lock:
+        with self._feedback_lock:
             now = time.monotonic()
             failure = self._arm_feedback_failure_reason(now=now)
             if failure is not None:

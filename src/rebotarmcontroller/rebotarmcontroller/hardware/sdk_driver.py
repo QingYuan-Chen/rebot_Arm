@@ -1,8 +1,9 @@
 """Project-owned damiao adapter over MotorBridge's opaque handle API.
 
-Construction is pure. One Controller owns all seven Motor handles; a shared
-reentrant lock serializes compound transactions and individual calls. This is
-not the final runtime request queue (batch 6). No legacy RobotArm structures.
+Construction is pure. One Controller owns all seven Motor handles. Command
+operations serialize separately from bus transactions, so feedback can proceed
+during mode settling. This is not the final runtime request queue (batch 6).
+No legacy RobotArm structures.
 """
 from __future__ import annotations
 import threading
@@ -82,6 +83,9 @@ class SdkMotorDriver:
         self.config = config
         self._factory = controller_factory
         self._sleep = sleep
+        # Always acquire command ownership before the bus. Feedback uses only
+        # the bus lock and must remain available during long settling delays.
+        self._command_lock = threading.RLock()
         self.bus_lock = threading.RLock()
         self._bus = None
         self._motors = {}
@@ -99,7 +103,7 @@ class SdkMotorDriver:
     def connected(self): return self._bus is not None
 
     def connect(self):
-        with self.bus_lock:
+        with self._command_lock, self.bus_lock:
             if self.connected: return
             factory = self._factory or self._open_controller
             self._bus = BusPort(factory(self.config.channel, self.config.timing.serial_baud), self.bus_lock)
@@ -142,7 +146,7 @@ class SdkMotorDriver:
 
     def _set_enabled(self, enabled):
         # Driver disable never stops or joins a control thread.
-        with self.bus_lock:
+        with self._command_lock, self.bus_lock:
             if not self.connected: raise RuntimeError('hardware is not connected')
             (self._bus.enable_all if enabled else self._bus.disable_all)()
             self._sleep(self.config.timing.command_motor_delay)
@@ -155,15 +159,16 @@ class SdkMotorDriver:
         from motorbridge import Mode
         modes = dict(mit=Mode.MIT, pos_vel=Mode.POS_VEL, vel=Mode.VEL)
         if mode not in modes: raise ValueError(f'unsupported mode: {mode}')
-        with self.bus_lock:
+        with self._command_lock:
             self.mode = 'unknown'
             sent = []
             for index,cfg in enumerate(self.config.joints):
                 try:
                     motor = self.motor(cfg.name)
                     if mode == 'pos_vel':
-                        for address, field in ((25,'vel_kp'), (26,'vel_ki'), (27,'pos_kp'), (28,'pos_ki')):
-                            motor.write_register_f32(address, getattr(cfg,field))
+                        with self.bus_lock:
+                            for address, field in ((25,'vel_kp'), (26,'vel_ki'), (27,'pos_kp'), (28,'pos_ki')):
+                                motor.write_register_f32(address, getattr(cfg,field))
                         self._sleep(self.config.timing.register_settle)
                     motor.ensure_mode(modes[mode], self.config.timing.mode_timeout_ms)
                     self._sleep(self.config.timing.mode_motor_settle)
@@ -194,7 +199,7 @@ class SdkMotorDriver:
     def _send_joint_batch(self, method, *values):
         sent = []
         names = tuple(j.name for j in self.config.joints)
-        with self.bus_lock:
+        with self._command_lock, self.bus_lock:
             for index, name in enumerate(names):
                 try:
                     getattr(self.motor(name),method)(*(float(value[index]) for value in values))
@@ -209,7 +214,7 @@ class SdkMotorDriver:
         names = tuple(j.name for j in self.config.joints) if names is None else tuple(names)
         if any(name not in {j.name for j in self.config.joints} for name in names):
             raise KeyError(f'unknown zero target: {names}')
-        with self.bus_lock:
+        with self._command_lock, self.bus_lock:
             self.disable()
             self._sleep(self.config.timing.zero_disable_settle)
             for name in names:
@@ -220,7 +225,7 @@ class SdkMotorDriver:
 
     def close(self):
         errors = []
-        with self.bus_lock:
+        with self._command_lock, self.bus_lock:
             if self._bus is None: return
             # Every Motor is freed before the Controller. Attempt all release paths.
             for name,motor in tuple(self._motors.items()):
@@ -237,11 +242,12 @@ class SdkMotorDriver:
         if errors: raise RuntimeError('; '.join(errors))
 
     def disconnect(self):
-        errors = []
-        if not self.connected: return
-        try: self.disable()
-        except Exception as exc: errors.append(f'disable: {exc}')
-        self._sleep(self.config.timing.disconnect_settle)
-        try: self.close()
-        except Exception as exc: errors.append(str(exc))
-        if errors: raise RuntimeError('; '.join(errors))
+        with self._command_lock:
+            errors = []
+            if not self.connected: return
+            try: self.disable()
+            except Exception as exc: errors.append(f'disable: {exc}')
+            self._sleep(self.config.timing.disconnect_settle)
+            try: self.close()
+            except Exception as exc: errors.append(str(exc))
+            if errors: raise RuntimeError('; '.join(errors))
