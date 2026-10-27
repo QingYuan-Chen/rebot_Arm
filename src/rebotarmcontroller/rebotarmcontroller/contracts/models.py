@@ -28,3 +28,21 @@ class CachedMotorFeedback:
     @property
     def status_code(self):
         return 255 if self.failure_reason is not None or self.raw_status_code is None else self.raw_status_code
+
+
+@dataclass(frozen=True)
+class CommandReceipt:
+    sent: tuple[str, ...]
+    failed: str | None = None
+    not_attempted: tuple[str, ...] = ()
+    detail: str | None = None
+
+    @property
+    def success(self):
+        return self.failed is None
+
+@dataclass(frozen=True)
+class PositionCommand:
+    positions: tuple[float, ...]
+    velocity_limits: tuple[float, ...]
+    generation: int

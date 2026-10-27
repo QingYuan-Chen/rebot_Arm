@@ -17,13 +17,17 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 | 参数域 | 权威文件/入口 | 所有者 |
 |---|---|---|
 | URDF/SRDF、关节限位、规划器 | `src/rebotarm_moveit_config/config/` | `rebotarm_moveit_config` |
-| 真机反馈、夹爪和控制器 | `hardware_controller.launch.py`、`rebotarmcontroller` 参数 | `rebotarmcontroller` |
+| 真机设备配置、安全增益和时序 | `rebotarmcontroller/config/arm.yaml`、`gripper.yaml`、`configuration.ProtocolTiming`；bringup 显式覆盖 `rebotarm_bringup/config/` 的配置 | `rebotarmcontroller` |
+| 真机反馈和夹爪运行参数 | `hardware_controller.launch.py`、`rebotarmcontroller` 参数 | `rebotarmcontroller` |
 | 轨迹安全、视觉运动规划与停止确认 | `src/rebotarm_motion/config/` | `rebotarm_motion` |
 | 视觉节点组合和后端选择 | `src/rebotarm_bringup/launch/includes/`、`src/rebotarm_bringup/config/visual_backend_profile.yaml` | `rebotarm_bringup` |
 | Gemini 2、YOLO、GraspNet | `src/rebotarm_vision/config/` | `rebotarm_vision` |
 | 视觉抓取跨节点接口 | `src/rebotarm_bringup/config/visual_grasp_interfaces.yaml` | `rebotarm_bringup` |
 | MuJoCo 模型、动力学和 CPU RL | `src/rebotarm_simulation/config/`、`docs/setup/dependencies/mujoco.md`、`docs/setup/dependencies/rl.md` | `rebotarm_simulation` |
 | 标定会话和手眼输入 | `src/rebotarm_vision/config/handeye.yaml`、标定 launch 参数 | `rebotarm_calibration` |
+
+直接构造控制器的默认周期为 500 Hz，bringup 配置为 100 Hz。内存 channel 覆盖
+同时作用于共享机械臂/夹爪总线，原配置中两者 channel 不一致时会在设备打开前拒绝。
 
 ## 视觉抓取入口层级
 

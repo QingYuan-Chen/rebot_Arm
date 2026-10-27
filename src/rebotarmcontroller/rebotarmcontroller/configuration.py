@@ -98,8 +98,10 @@ def _mapping(path):
 
 def _motor(item, *, gripper=False):
     if not isinstance(item,dict): raise ValueError('motor configuration must be a mapping')
-    defaults = dict(kp=8. if gripper else 0.,kd=1. if gripper else 0.,
-                    vel_kp=0.,vel_ki=0.,pos_kp=0.,pos_ki=0.,vlim=3. if gripper else 2.)
+    defaults = dict(kp=18. if gripper else 0.,kd=2. if gripper else 0.,
+                    vel_kp=.0008 if gripper else 0.,vel_ki=.002 if gripper else 0.,
+                    pos_kp=50. if gripper else 0.,pos_ki=1. if gripper else 0.,
+                    vlim=3. if gripper else 2.)
     name=str(item['name']); vendor=str(item.get('vendor','damiao')).lower()
     if vendor != 'damiao': raise ValueError(f"{name}: only damiao is supported")
     model=str(item.get('model','4310' if gripper else '4340P'))

@@ -8,7 +8,6 @@ import yaml
 
 from rebotarmcontroller.configuration import HardwareSettings, load_configuration, default_config
 from rebotarmcontroller.contracts.models import MotorFeedback
-from rebotarmcontroller.compat.legacy_backend import LegacyBackend
 
 # Identical inputs for legacy/canonical FK comparison when switching in batch 2.
 FK_SAMPLES = ((0.,0.,0.,0.,0.,0.), (0.,0.,-.017453292519943295,0.,0.,0.),
@@ -62,21 +61,11 @@ def test_manager_and_ros_have_no_legacy_private_access():
         assert '.endpos_ctrl.' not in source
 
 
-def test_legacy_config_bridge_is_per_instance_and_removed(monkeypatch):
-    # Factories are replaced before create(): no SDK device is constructed.
-    from rebotarmcontroller.compat import legacy_backend
-    legacy_backend.ensure_sdk()
-    from reBotArm_control_py import actuator, controllers
-    files=[]
-    arm=SimpleNamespace(disconnect=lambda: None)
-    def factory(cfg_path):
-        path=Path(cfg_path)
-        assert path.is_file()
-        assert yaml.safe_load(path.read_text())['channel']=='can23'
-        files.append(path)
-        return arm
-    monkeypatch.setattr(actuator,'RobotArm',factory)
-    monkeypatch.setattr(controllers,'ArmEndPos',lambda _: object())
-    monkeypatch.setattr(LegacyBackend,'patch_bus',lambda _: None)
-    for _ in range(2): LegacyBackend.create(load_configuration(channel='can23'))
-    assert files[0]!=files[1] and all(not file.exists() for file in files)
+def test_omitted_gripper_gains_keep_legacy_loader_defaults(tmp_path):
+    # The installed full YAML overrides MIT to 8/1; omission keeps the old 18/2 fallback.
+    grip=yaml.safe_load(default_config('gripper').read_text())
+    grip['gripper'][0].pop('MIT')
+    grip['gripper'][0].pop('POS_VEL')
+    path=tmp_path/'gripper.yaml';path.write_text(yaml.safe_dump(grip))
+    cfg=load_configuration(gripper_path=path).gripper
+    assert (cfg.kp,cfg.kd,cfg.vel_kp,cfg.vel_ki,cfg.pos_kp,cfg.pos_ki,cfg.vlim)==(18.,2.,.0008,.002,50.,1.,3.)

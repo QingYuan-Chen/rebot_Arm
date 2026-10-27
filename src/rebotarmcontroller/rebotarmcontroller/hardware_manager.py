@@ -14,7 +14,7 @@
 
 并发的关键约定：
 - 电机命令与反馈读写共享同一条总线，因此所有写操作都通过
-  ``_patch_controller_bus`` / ``_wrap_motor_bus`` 打上的总线重入锁串行化；
+  驱动提供的共享总线重入锁串行化；
 - ``_motor_lifecycle_lock`` 保护连接/使能/失能/置零等生命周期迁移，
   与运动命令互斥；
 - ``_gripper_lock`` 保护夹爪状态机；``_feedback_lock`` 保护已验证反馈样本。
@@ -39,7 +39,9 @@ import numpy as np
 from .configuration import HardwareSettings, default_config, load_configuration
 from .contracts.models import (MotorFeedback, VerifiedFeedbackSample as _VerifiedFeedbackSample,
                                CachedMotorFeedback as _CachedMotorFeedback)
-from .compat.legacy_backend import LegacyBackend, ensure_sdk
+from .models.kinematics import ArmKinematics
+from .runtime.controller_runtime import ControllerRuntime
+from .hardware.sdk_driver import CommandTransportError
 from .conversions import fk_to_pose
 from .gravity_control import (GravitySettings, LoopTiming, bounded_mit_command,
                               load_gravity_model, package_file, vector)
@@ -183,13 +185,13 @@ def apply_gravity_compensation_tau_scale(tau: np.ndarray) -> np.ndarray:
 
 
 class HardwareManager:
-    """ROS 硬件门面，旧设备与执行对象由临时后端独占。
+    """ROS 硬件门面，本地驱动和运行时持有唯一总线与周期线程。
 
     生命周期：``connect()`` -> ``enable()`` -> 运动/夹爪命令 -> ``disable()``
-    -> ``shutdown()``。配置解析本身无设备副作用；当前过渡后端仍在构造时打开串口，
-    批次 2 的本地驱动将设备打开放到 ``connect()``。
+    -> ``shutdown()``。构造仅加载配置和规范模型；设备打开发生在 ``connect()``，
+    连接后默认失能，运动必须显式 enable。
 
-    并发的回调模型：普通运动写入跑在厂商的唯一控制线程（``start_control_loop``
+    并发的回调模型：普通运动写入跑在本地唯一控制线程（``ControllerRuntime``
     启动）里，生命周期和透传仍以共享总线锁串行访问；ROS 定时器线程只允许读取已缓存的
     已验证反馈（``refresh_feedback_if_due`` 会拒绝在循环运行期间做同步刷新）。
     因此任何跨线程状态都由 ``_motor_lifecycle_lock`` / ``_gripper_lock`` /
@@ -224,7 +226,9 @@ class HardwareManager:
         self._gravity_model = load_gravity_model(
             package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'), self._gc_settings)
         self._gc_torque_limits = self._gravity_model.effort
-        self._backend = LegacyBackend.create(self._configuration)
+        self._backend = ControllerRuntime(self._configuration, ArmKinematics(self._gravity_model.model))
+        self._backend.feedback_reader = self.get_joint_state
+        self._backend.on_error = lambda exc: self._protective_disable_from_hardware_loop(str(exc),category="CONTROLLER")
         # 重力补偿用的动力学模型：pinocchio 模型 + 数据缓冲 + 末端帧 id，
         # 计算函数和数据缓冲来自同一个权威模型，不再使用 SDK 的另一份 URDF。
         self._gc_model = self._gravity_model.model
@@ -258,6 +262,7 @@ class HardwareManager:
         self._gripper_feedback_error: str | None = None
         self._gripper_zero_error: str | None = None
         self._gripper_command_error: str | None = None
+        self._gripper_transport_error: str | None = None
         self._gripper_position_result = "idle"
         # 待发送的中性命令：(角度, 原因, 是否标记成功)，由硬件循环消费。
         self._gripper_neutral_pending: tuple[float, str, bool] | None = None
@@ -308,8 +313,6 @@ class HardwareManager:
 
     def default_gripper_cfg(self) -> Path:
         return default_config('gripper')
-
-    _ensure_rebot_sdk_in_syspath = staticmethod(ensure_sdk)
 
     @property
     def joint_names(self) -> list[str]:
@@ -401,9 +404,9 @@ class HardwareManager:
         if state not in ("IDLE", "TRAJ_RUNNING", "LOWLEVEL_STREAMING", "GRAVITY_COMP"):
             raise ValueError(f"unsupported state machine value: {state}")
         self._state_machine = state
-        if state == "TRAJ_RUNNING" and self._enabled:
+        if state == "TRAJ_RUNNING" and self._enabled and self._lifecycle_state != "DISABLING":
             self._set_lifecycle_state("TRAJECTORY_RUNNING")
-        elif state == "IDLE" and self._enabled:
+        elif state == "IDLE" and self._enabled and self._lifecycle_state != "DISABLING":
             self._set_lifecycle_state("ENABLED_HOLD")
 
     def _set_lifecycle_state(self, state: str) -> None:
@@ -418,6 +421,8 @@ class HardwareManager:
     def _require_enabled(self) -> None:
         """运动类命令的统一安全门：未连接或未显式使能一律拒绝。"""
         self._require_connected()
+        if self._lifecycle_state == "DISABLING":
+            raise RuntimeError("hardware state is unconfirmed; verify disable before enabling again")
         if not self._enabled:
             raise RuntimeError(
                 "hardware is disabled; call explicit /rebotarm/enable first"
@@ -809,7 +814,7 @@ class HardwareManager:
 
         successful_groups = []
         for ctrl, entries in readable_groups:
-            lock = getattr(ctrl, "_bus_lock", None)
+            lock = getattr(ctrl, "bus_lock", None)
 
             def transaction() -> None:
                 # 同一控制器上的"请求 + 轮询"必须在一次持锁事务内完成，
@@ -1196,6 +1201,23 @@ class HardwareManager:
             return
         try:
             self._backend.connect()
+            with self._feedback_lock:
+                self._verified_feedback_by_label.clear()
+                self._feedback_request_baseline_by_label.clear()
+                self._feedback_request_deadline_by_label.clear()
+                self._feedback_error_by_label.clear()
+                self._feedback_next_refresh_monotonic = None
+                self._arm_feedback_updated_monotonic = None
+                self._arm_feedback_error = None
+                self._gripper_feedback_updated_monotonic = None
+                self._gripper_feedback_error = None
+            with self._gripper_lock:
+                self._gripper_active = False
+                self._gripper_mode = "idle"
+                self._gripper_neutral_pending = None
+                self._gripper_hold_deadline = None
+                self._gripper_target_deadline_monotonic = None
+                self._gripper_transport_error = None
             self._connected = True
             self.init_gripper(str(self._gripper_cfg_path))
             _positions, _velocities, _torques, statuses = (
@@ -1238,34 +1260,36 @@ class HardwareManager:
         self._set_lifecycle_state("DISCONNECTED")
 
     def shutdown(self) -> None:
-        """关闭流程：停循环、失能、断开，并绕开厂商的归零式收尾。
-
-        顺序很关键——先停夹爪/重力补偿/控制循环，再失能，最后断开。
-        """
+        """Stop the writer before releasing handles; report unconfirmed motor state."""
         if not self._connected:
             return
-        try:
+        with self._motor_lifecycle_lock:
             self._stop_gripper_loop()
             self.stop_gravity_compensation()
+            # If join times out, keep ownership and refuse to close under a live writer.
             self._stop_control_loop()
+            errors = []
+            disabled_confirmed = False
             try:
                 self._disable_all_motors()
-            except Exception:
-                pass
-            # ArmEndPos.end() 会在断开前执行厂商 safe_home()，而它指向全零折叠
-            # 姿态（见 _SAFE_HOME_JOINT_POSITIONS）。此处控制循环已停止、电机已
-            # 失能，因此该调用根本无法移动机械臂——它只会白白轮询满 30 s 超时，
-            # 并把 _q_target 留成零，影响下一次使能。故直接把该控制器标记为已停止；
-            # 有意的 safe_home 属于驱动的关闭钩子，那一步更早、且仍处于使能态。
-            self._backend.set_execution_running(False)
-            self._backend.disconnect()
-        finally:
+                self._validated_joint_feedback(expected_status=0)
+                self._validated_gripper_status(expected_status=0)
+                disabled_confirmed = True
+            except Exception as exc:
+                errors.append(f"shutdown disable verification: {exc}")
+            try:
+                self._backend.disconnect()
+            except Exception as exc:
+                errors.append(f"shutdown disconnect: {exc}")
             self._connected = False
-            self._enabled = False
-            self._set_lifecycle_state("DISCONNECTED")
+            self._enabled = not disabled_confirmed
+            self._set_lifecycle_state("DISCONNECTED" if disabled_confirmed else "DISABLING")
+            if errors:
+                self._error_codes.append("SHUTDOWN_STATE_UNCONFIRMED: " + "; ".join(errors))
+                raise RuntimeError("; ".join(errors))
 
     def get_joint_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """返回 (位置, 速度, 力矩)；未连接时退回厂商原始状态读取。
+        """返回 (位置, 速度, 力矩)；未连接时拒绝伪造首帧。
 
         已连接时要求状态码与使能状态一致（使能 -> 1，失能 -> 0），并在控制循环
         未运行时顺带刷新反馈。
@@ -1333,6 +1357,7 @@ class HardwareManager:
             self.set_state_machine("IDLE")
 
     def set_joint_target(self, positions) -> None:
+        self._require_enabled()
         self._backend.set_target(positions)
 
     def joint_target(self):
@@ -1350,9 +1375,11 @@ class HardwareManager:
         return self._backend.trajectory_progress
 
     def move_to_pose_path(self, *args):
+        self._require_enabled()
         return self._backend.move_to_pose_path(*args)
 
     def move_to_pose_ik(self, *args):
+        self._require_enabled()
         return self._backend.move_to_pose_ik(*args)
 
     def safe_home_target(self) -> np.ndarray:
@@ -1453,6 +1480,8 @@ class HardwareManager:
         with self._motor_lifecycle_lock:
             self._require_connected()
             if self._enabled:
+                if self._lifecycle_state == "DISABLING":
+                    raise RuntimeError("verify disable before enabling again")
                 self.hold_current_position()
                 self._set_lifecycle_state("ENABLED_HOLD")
                 return
@@ -1480,9 +1509,10 @@ class HardwareManager:
                 self._validated_joint_feedback(expected_status=1)
                 self._validated_gripper_status(expected_status=1)
                 self._enabled = True
-                self._start_pos_vel_loop(target=positions)
+                self._gripper_transport_error = None
                 self.set_state_machine("IDLE")
                 self._set_lifecycle_state("ENABLED_HOLD")
+                self._start_pos_vel_loop(target=positions)
             except Exception as exc:
                 rollback_error = self._rollback_failed_enable()
                 if rollback_error is not None:
@@ -1562,32 +1592,39 @@ class HardwareManager:
         切模式前必须先停循环并退出重力补偿；若目标模式与当前模式相同，仅在
         pos_vel 且已使能时确保控制循环在跑（或保持当前位置）。
         """
-        self._require_connected()
-        mode = mode.strip().lower()
-        if mode not in ("mit", "pos_vel", "vel"):
-            raise ValueError(f"unsupported mode: {mode}")
-        self.stop_gravity_compensation()
+        with self._motor_lifecycle_lock:
+            self._require_connected()
+            if self._lifecycle_state == "DISABLING":
+                raise RuntimeError("verify disable before changing mode")
+            mode = mode.strip().lower()
+            if mode not in ("mit", "pos_vel", "vel"):
+                raise ValueError(f"unsupported mode: {mode}")
+            self.stop_gravity_compensation()
 
-        if mode == self.mode:
-            if mode == "pos_vel" and self._enabled:
-                if self.control_loop_active:
-                    self.hold_current_position()
+            if mode == self.mode:
+                if mode == "pos_vel" and self._enabled:
+                    if self.control_loop_active:
+                        self.hold_current_position()
+                    else:
+                        self._start_pos_vel_loop()
+                self.set_state_machine("IDLE")
+                return True
+
+            try:
+                self._stop_control_loop()
+                if mode == "mit":
+                    ok = self._backend.mode_mit()
+                elif mode == "pos_vel":
+                    ok = self._backend.mode_pos_vel()
+                    if self._enabled:
+                        self._start_pos_vel_loop()
                 else:
-                    self._start_pos_vel_loop()
+                    ok = self._backend.mode_vel()
+            except CommandTransportError as exc:
+                self._protective_disable_from_hardware_loop(str(exc),category="MODE")
+                raise
             self.set_state_machine("IDLE")
-            return True
-
-        self._stop_control_loop()
-        if mode == "mit":
-            ok = self._backend.mode_mit()
-        elif mode == "pos_vel":
-            ok = self._backend.mode_pos_vel()
-            if self._enabled:
-                self._start_pos_vel_loop()
-        else:
-            ok = self._backend.mode_vel()
-        self.set_state_machine("IDLE")
-        return bool(ok)
+            return bool(ok)
 
     def set_zero(self, joint_name: str = "") -> bool:
         """标定零点。空字符串表示全部关节，``"gripper"`` 表示夹爪。
@@ -1673,14 +1710,15 @@ class HardwareManager:
 
     def ensure_pos_vel_control(self) -> None:
         """确保处于位置-速度模式且统一控制循环在运行（否则保持当前位置）。"""
-        self._require_enabled()
-        if self.mode != "pos_vel":
-            self._stop_control_loop()
-            self._backend.mode_pos_vel()
-        if not self.control_loop_active:
-            self._start_pos_vel_loop()
-        else:
-            self.hold_current_position()
+        with self._motor_lifecycle_lock:
+            self._require_enabled()
+            if self.mode != "pos_vel":
+                self._stop_control_loop()
+                self.set_mode("pos_vel")
+            if not self.control_loop_active:
+                self._start_pos_vel_loop()
+            else:
+                self.hold_current_position()
 
     def send_joint_motor_cmd(self, joint_name: str, cmd) -> None:
         """低层单关节直通命令（JointMotorCmd）。
@@ -1689,35 +1727,40 @@ class HardwareManager:
         送入后状态机切到 LOWLEVEL_STREAMING，提示上层这不是轨迹跟踪。
         mode：0 = MIT，1 = 位置-速度，2 = 速度（需电机支持 send_vel）。
         """
-        self._require_enabled()
-        if joint_name not in self.joint_names:
-            raise KeyError(f"unknown joint: {joint_name}")
+        with self._motor_lifecycle_lock:
+            self._require_enabled()
+            if joint_name not in self.joint_names:
+                raise KeyError(f"unknown joint: {joint_name}")
 
-        mot = self._backend.joint_device(joint_name)
-        jc = self._backend.joint_configuration(joint_name)
-        feedback_failure = self._arm_feedback_failure_reason()
-        if feedback_failure is not None:
-            raise RuntimeError(feedback_failure)
-        state = self._verified_feedback_sample(joint_name).state
+            mot = self._backend.joint_device(joint_name)
+            jc = self._backend.joint_configuration(joint_name)
+            feedback_failure = self._arm_feedback_failure_reason()
+            if feedback_failure is not None:
+                raise RuntimeError(feedback_failure)
+            state = self._verified_feedback_sample(joint_name).state
 
-        pos = float(cmd.pos) if cmd.use_pos else float(state.pos if state is not None else 0.0)
-        vel = float(cmd.vel) if cmd.use_vel else float(state.vel if state is not None else 0.0)
-        kp = float(cmd.kp) if cmd.use_kp else float(jc.kp)
-        kd = float(cmd.kd) if cmd.use_kd else float(jc.kd)
-        tau = float(cmd.tau) if cmd.use_tau else 0.0
-        vlim = float(cmd.vlim) if cmd.use_vlim else float(jc.vlim)
+            pos = float(cmd.pos) if cmd.use_pos else float(state.pos if state is not None else 0.0)
+            vel = float(cmd.vel) if cmd.use_vel else float(state.vel if state is not None else 0.0)
+            kp = float(cmd.kp) if cmd.use_kp else float(jc.kp)
+            kd = float(cmd.kd) if cmd.use_kd else float(jc.kd)
+            tau = float(cmd.tau) if cmd.use_tau else 0.0
+            vlim = float(cmd.vlim) if cmd.use_vlim else float(jc.vlim)
 
-        if int(cmd.mode) == 0:
-            mot.send_mit(pos, vel, kp, kd, tau)
-        elif int(cmd.mode) == 1:
-            mot.send_pos_vel(pos, vlim)
-        elif int(cmd.mode) == 2:
-            if not hasattr(mot, "send_vel"):
-                raise RuntimeError(f"{joint_name} does not support send_vel")
-            mot.send_vel(vel)
-        else:
-            raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
-        self.set_state_machine("LOWLEVEL_STREAMING")
+            try:
+                if int(cmd.mode) == 0:
+                    mot.send_mit(pos, vel, kp, kd, tau)
+                elif int(cmd.mode) == 1:
+                    mot.send_pos_vel(pos, vlim)
+                elif int(cmd.mode) == 2:
+                    if not hasattr(mot, "send_vel"):
+                        raise RuntimeError(f"{joint_name} does not support send_vel")
+                    mot.send_vel(vel)
+                else:
+                    raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
+            except CommandTransportError as exc:
+                self._protective_disable_from_hardware_loop(str(exc),category="COMMAND")
+                raise
+            self.set_state_machine("LOWLEVEL_STREAMING")
 
     def start_gravity_compensation(self) -> None:
         with self._motor_lifecycle_lock:
@@ -1770,6 +1813,10 @@ class HardwareManager:
                 -self._gc_torque_limits, self._gc_torque_limits)
             self._gravity_comp_active = True
             self._gravity_comp_tick(self._backend, 1. / float(self._backend.rate))
+        except (GravityCommandError, CommandTransportError) as exc:
+            self._gravity_comp_active = False
+            self._protective_disable_from_hardware_loop(str(exc),category="GRAVITY_COMMAND")
+            raise
         except Exception:
             self._gravity_comp_active = False
             # Restore healthy hardware to verified current-position hold.
@@ -1787,8 +1834,8 @@ class HardwareManager:
         self._gravity_timing = timing
         self._gravity_feedback_metrics = {}
         self._gravity_next_log = 0.
-        self._backend.start_control_loop(self._gravity_hardware_tick, rate=self._backend.rate)
         self.set_state_machine("GRAVITY_COMP")
+        self._backend.start_control_loop(self._gravity_hardware_tick, rate=self._backend.rate)
 
     def stop_gravity_compensation(self) -> None:
         with self._motor_lifecycle_lock:
@@ -1949,15 +1996,10 @@ class HardwareManager:
         self._gravity_comp_last_total = total
 
     def _send_gravity_mit(self, *, pos, vel, kp, kd, tau):
-        # SDK arm.mit catches CallError and continues. Send through the already
-        # bus-locked motor wrappers here so partial/failed sends reach the guard.
-        for index, name in enumerate(self.joint_names):
-            try:
-                self._backend.joint_device(name).send_mit(
-                    float(pos[index]), float(vel[index]), float(kp[index]),
-                    float(kd[index]), float(tau[index]))
-            except Exception as exc:
-                raise GravityCommandError(f'{name} MIT send failed: {exc}') from exc
+        try:
+            self._backend.send_mit_batch(pos=pos,vel=vel,kp=kp,kd=kd,tau=tau)
+        except Exception as exc:
+            raise GravityCommandError(f'MIT batch failed: {exc}') from exc
 
     def _gravity_fault_hold(self, reason):
         q, _ = self._read_gravity_comp_feedback()
@@ -1984,7 +2026,7 @@ class HardwareManager:
                     payload_com_xyz_m=list(settings.payload_com_xyz_m) if settings else None)
 
     def current_pose(self):
-        """用厂商正运动学把当前关节角换算成 Pose(供状态发布使用)。"""
+        """用规范模型的纯数值 FK 换算成 ROS Pose(供状态发布使用)。"""
         q, _, _ = self.get_joint_state()
         position, rotation = self._backend.current_pose_values(q)
         return fk_to_pose(position, rotation)
@@ -2387,9 +2429,6 @@ class HardwareManager:
             self._gripper_active = False
             self._gripper_mode = "idle"
 
-    _patch_controller_bus = staticmethod(LegacyBackend._patch_controller_bus)
-    _wrap_motor_bus = staticmethod(LegacyBackend._wrap_motor_bus)
-
     def _start_pos_vel_loop(self, target: np.ndarray | None = None) -> None:
         """启动统一硬件控制循环（位置-速度跟踪），并把控制器标记为运行中。
 
@@ -2401,8 +2440,12 @@ class HardwareManager:
             self.hold_current_position()
         else:
             self._backend.set_target(target)
-        self._backend.start_control_loop(self._endpos_hardware_tick)
         self._backend.set_execution_running(True)
+        try:
+            self._backend.start_control_loop(self._endpos_hardware_tick)
+        except Exception:
+            self._backend.set_execution_running(False)
+            raise
 
     def _endpos_hardware_tick(self, arm, dt: float) -> None:
         self._hardware_control_tick(arm, dt, self._backend.position_tick)
@@ -2463,8 +2506,7 @@ class HardwareManager:
                         "FEEDBACK_PROTECTIVE_NEUTRAL_FAILED"
                     )
 
-        # RobotArm.disable()/stop_control_loop() 会 join ``_ctrl_thread``，绝不能被
-        # 该线程自己调用。本回调返回后，厂商循环读到 False 自然释放线程所有权。
+        # 只请求协作退出；失能属于设备操作，不携带 join 或另开写入线程。
         self._backend.request_loop_stop()
         self._backend.set_execution_running(False)
         self._backend.cancel_trajectory()
@@ -2508,7 +2550,7 @@ class HardwareManager:
 
         每周期顺序：刷新反馈 -> 检查反馈健康 -> 执行模式回调（位置跟踪或重力
         补偿）-> 推进夹爪状态机。若反馈刷新或回调因反馈类错误失败，则执行保护性
-        失能并结束本次 tick；非反馈类异常继续向上抛出（由厂商循环处理），
+        失能并结束本次 tick；命令发送错误立即保护，其余异常交本地运行时登记和保护，
         以免把编程错误当成"反馈故障"而静默失能。
         """
         try:
@@ -2525,6 +2567,9 @@ class HardwareManager:
             return
         try:
             arm_callback(arm, dt)
+        except CommandTransportError as exc:
+            self._protective_disable_from_hardware_loop(str(exc), category="COMMAND")
+            return
         except Exception:
             feedback_failure = self._arm_feedback_failure_reason()
             if feedback_failure is None:
@@ -2532,6 +2577,8 @@ class HardwareManager:
             self._protective_disable_from_hardware_loop(feedback_failure)
             return
         self._gripper_tick()
+        if getattr(self,"_gripper_transport_error",None) is not None:
+            self._protective_disable_from_hardware_loop(self._gripper_transport_error,category="COMMAND")
 
     def _stop_control_loop(self) -> None:
         self._backend.stop_control_loop()
@@ -2562,7 +2609,7 @@ class HardwareManager:
         pos_term = kp * (pos_cmd - self._gripper_pos) + kd * (-self._gripper_vel)
         limit = float(np.clip(abs(tau_limit), 0.05, _G_TAU_MAX))
         tau_safe = float(np.clip(pos_term + tau_ff, -limit, limit)) - pos_term
-        lock = getattr(self._gripper_ctrl, "_bus_lock", None)
+        lock = getattr(self._gripper_ctrl, "bus_lock", None)
         try:
             if lock:
                 with lock:
@@ -2570,6 +2617,8 @@ class HardwareManager:
             else:
                 self._gripper_mot.send_mit(pos_cmd, vel, kp, kd, tau_safe)
         except Exception as exc:
+            if isinstance(exc,CommandTransportError):
+                self._gripper_transport_error = str(exc)
             raise RuntimeError(f"gripper MIT command failed: {exc}") from exc
 
     def _fail_active_gripper_command_locked(self, reason: str) -> None:

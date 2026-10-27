@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 import rebotarmcontroller.hardware_manager as hardware_manager_module
-from rebotarmcontroller.compat.legacy_backend import LegacyBackend
+from controller_fake_backend import FakeBackend
 from rebotarmcontroller.configuration import load_configuration
 from rebotarmcontroller.hardware_manager import (
     HardwareManager,
@@ -67,7 +67,7 @@ class FakeMotor:
 class FakeController:
     def __init__(self, motors) -> None:
         self._motors = list(motors)
-        self._bus_lock = threading.RLock()
+        self.bus_lock = threading.RLock()
         self.poll_feedback_calls = 0
 
     def poll_feedback_once(self) -> None:
@@ -196,7 +196,7 @@ def make_manager(
         _stop_send=SimpleNamespace(set=lambda: None),
         _loop_cb=lambda _arm, _dt: None,
     )
-    manager._backend = LegacyBackend(manager.test_arm, manager.test_endpos)
+    manager._backend = FakeBackend(manager.test_arm, manager.test_endpos)
     manager._configuration = load_configuration()
     manager._connected = False
     manager._enabled = False
@@ -1243,7 +1243,7 @@ def test_feedback_refresh_holds_controller_lock_for_full_transaction() -> None:
             events.append("lock:exit")
 
     controller = SimpleNamespace(
-        _bus_lock=RecordingLock(),
+        bus_lock=RecordingLock(),
         poll_feedback_once=lambda: events.append("poll"),
     )
     manager.test_arm._ctrl_map = {"fake": controller}
@@ -1633,7 +1633,7 @@ def test_forced_refresh_rejects_poll_that_delivers_then_raises() -> None:
         raise RuntimeError("recv failed after frames")
 
     manager.test_arm._ctrl_map["fake"] = SimpleNamespace(
-        _bus_lock=threading.RLock(), poll_feedback_once=poll
+        bus_lock=threading.RLock(), poll_feedback_once=poll
     )
 
     with pytest.raises(RuntimeError, match="recv failed after frames"):
@@ -1668,10 +1668,10 @@ def test_forced_refresh_requires_success_after_latest_group_failure() -> None:
         gripper.deliver_requested_feedback()
 
     manager.test_arm._ctrl_map["fake"] = SimpleNamespace(
-        _bus_lock=threading.RLock(), poll_feedback_once=poll_arm
+        bus_lock=threading.RLock(), poll_feedback_once=poll_arm
     )
     manager._gripper_ctrl = SimpleNamespace(
-        _bus_lock=threading.RLock(), poll_feedback_once=poll_gripper
+        bus_lock=threading.RLock(), poll_feedback_once=poll_gripper
     )
 
     with pytest.raises(RuntimeError, match="arm transient bus error"):

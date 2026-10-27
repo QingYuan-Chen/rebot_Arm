@@ -111,7 +111,7 @@ class ArmActions:
     def cancel_move_to_pose(self, _goal_handle):
         """响应 move_to_pose 的取消请求：置位停止事件并清 ``_moving`` 标志。
 
-        这里只打断底层轨迹发送线程；状态机复位与位置保持交给 execute 循环在
+        这里只取消本地轨迹游标；状态机复位与位置保持交给 execute 循环在
         检测到 ``is_cancel_requested`` 后统一处理，避免两处并发改状态。
         """
         self._hardware.cancel_arm_trajectory()
@@ -140,7 +140,7 @@ class ArmActions:
 
         流程：状态机置为 TRAJ_RUNNING 并广播状态 → 确保电机处于位置/速度控制
         模式 → 把目标位姿转成位置加欧拉角交给末端控制器规划 → 以 50 ms 周期
-        轮询 ``_moving`` 直到整条轨迹下发完毕。
+        轮询门面的移动状态直到整条轨迹下发完毕。
 
         参数：``goal.target_pose`` 为目标位姿（位置单位米，姿态四元数）；
         ``goal.duration`` 为期望运动时长（秒），``<= 0`` 时由底层按末端移动
@@ -181,7 +181,7 @@ class ArmActions:
             goal_handle.abort()
             result.success = False
             result.message = str(exc)
-            result.final_pose = self._hardware.current_pose()
+            self._set_final_pose(result)
             return result
 
         if not ok:
@@ -191,13 +191,13 @@ class ArmActions:
             goal_handle.abort()
             result.success = False
             result.message = "trajectory planning failed"
-            result.final_pose = self._hardware.current_pose()
+            self._set_final_pose(result)
             return result
 
         start = time.monotonic()
         requested_duration = float(goal.duration)
         feedback = MoveToPose.Feedback()
-        # 底层发送线程走完轨迹后会把 ``_moving`` 置假，此循环据此判定结束。
+        # 本地周期游标送完轨迹后 moving 变假，此循环据此判定结束。
         while self._hardware.trajectory_moving:
             if goal_handle.is_cancel_requested:
                 # 取消：停止下发并复位状态机，结果按 canceled 语义返回。
@@ -207,7 +207,7 @@ class ArmActions:
                 goal_handle.canceled()
                 result.success = False
                 result.message = "canceled"
-                result.final_pose = self._hardware.current_pose()
+                self._set_final_pose(result)
                 return result
 
             if self._hardware.state_machine != "TRAJ_RUNNING":
@@ -215,7 +215,7 @@ class ArmActions:
                 goal_handle.abort()
                 result.success = False
                 result.message = "preempted"
-                result.final_pose = self._hardware.current_pose()
+                self._set_final_pose(result)
                 return result
 
             feedback.current_pose = self._hardware.current_pose()
@@ -231,13 +231,40 @@ class ArmActions:
             # 20 Hz 反馈节流：兼顾上层观测实时性与总线/CPU 开销。
             time.sleep(0.05)
 
+        if goal_handle.is_cancel_requested:
+            self._hardware.stop_active_motion()
+            goal_handle.canceled()
+            result.success = False
+            result.message = "canceled"
+            self._set_final_pose(result)
+            self._node.publish_arm_status()
+            return result
+        if not self._hardware.ready_for_motion or self._hardware.state_machine != "TRAJ_RUNNING":
+            goal_handle.abort()
+            result.success = False
+            result.message = "hardware execution stopped or preempted"
+            self._set_final_pose(result)
+            self._node.publish_arm_status()
+            return result
         result.success = True
         result.message = "move_to_pose complete"
-        result.final_pose = self._hardware.current_pose()
+        if not self._set_final_pose(result):
+            result.success = False
+            goal_handle.abort()
+            self._node.publish_arm_status()
+            return result
         self._hardware.set_state_machine("IDLE")
         self._node.publish_arm_status()
         goal_handle.succeed()
         return result
+
+    def _set_final_pose(self, result) -> bool:
+        try:
+            result.final_pose = self._hardware.current_pose()
+            return True
+        except Exception as exc:
+            result.message += f"; final pose unavailable: {exc}"
+            return False
 
     def execute_follow_joint_trajectory(self, goal_handle):
         """执行标准关节轨迹：按时间轴逐点下发关节目标并做终点收敛检查。
@@ -362,7 +389,7 @@ class ArmActions:
 
         轨迹里的关节顺序允许与硬件顺序不同，这里按名字重排；集合必须完全一致，
         否则抛 ValueError——缺失关节会让对应电机继续跟踪旧目标，属于危险状态。
-        切片赋值 ``[:]`` 用于原地更新控制循环持有的同一个数组对象。
+        通过门面提交独立数值副本，控制循环持有自己的目标。
         """
         if set(joint_names) != set(self._hardware.joint_names):
             raise ValueError(f"trajectory joints must match {self._hardware.joint_names}")
