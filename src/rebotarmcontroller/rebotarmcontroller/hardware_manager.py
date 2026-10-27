@@ -38,6 +38,7 @@ import numpy as np
 
 from .configuration import HardwareSettings, default_config, load_configuration
 from .feedback_acquisition import FeedbackAcquisition, _FeedbackValidationError, _JOINT_POSITION_LIMITS_RAD
+from .gripper_execution import GripperExecution
 from .controller_contracts import (VerifiedFeedbackSample as _VerifiedFeedbackSample,
                                CachedMotorFeedback as _CachedMotorFeedback)
 from .controller_kinematics import ArmKinematics
@@ -54,62 +55,46 @@ class GravityCommandError(RuntimeError):
 
 _LOG = logging.getLogger(__name__)
 
-_G_MAX_DIST_M = 0.09
-# 结构设计/软件标称行程为 90 mm，根据结构映射到电机角度的线性关系，闭合端点对应的电机原始角度（rad，正方向为闭合）。
-_G_VERIFIED_OPEN_LIMIT_M = 0.09
-# 全开位置对应的电机原始角度（rad，负方向为张开）。位置-角度线性映射的另一端。
-_G_ANGLE_OPEN = -5.0
-# DM4310 的 16 位反馈覆盖 +/-12.5 rad。这里给张开端点与置零验证留两个量化步长，
-# 它是"反馈有效性"容差，不是运动到位容差。
-_G_COORDINATE_TOL_RAD = 2.0 * 25.0 / 65535.0
-# 操作员批准的 10 mm 双指总开口等效闭合反馈容差，不改变命令限位或置零验证精度。
-_G_CLOSED_FEEDBACK_TOL_RAD = 0.010 * abs(_G_ANGLE_OPEN) / _G_MAX_DIST_M
-_G_ZERO_VERIFY_TIMEOUT_SEC = 0.5
-_G_ZERO_VERIFY_SAMPLES = 3
-_G_ARRIVE_TOL = 0.12
-_G_TAU_MAX = 1.5
-# 常规位置移动使用有界的位置斜坡命令。默认 0.5 rad/s 与既有 Web/键盘遥操作
-# 速度基线一致；它仍是独立的夹爪参数，以便两条机构分别整定。
-_G_POSITION_MAX_SPEED_RAD_S = 0.5
-_G_POSITION_MAX_SPEED_MIN_RAD_S = 0.05
-_G_POSITION_MAX_SPEED_MAX_RAD_S = 3.0
-_G_POSITION_TIMEOUT_MARGIN_SEC = 1.5
-_G_POSITION_TIMEOUT_MARGIN_MAX_SEC = 10.0
-_G_FEEDBACK_STALE_TIMEOUT_SEC = 0.15
-_G_FEEDBACK_STALE_TIMEOUT_MAX_SEC = 2.0
-_HARDWARE_FEEDBACK_RATE_HZ = 50.0
-_HARDWARE_FEEDBACK_RATE_MIN_HZ = 20.0
-_HARDWARE_FEEDBACK_RATE_MAX_HZ = 100.0
-# 下面两个是 MOVE 阶段专用的电机侧力矩上限；到位后防止继续顶住机械限位的，
-# 是 _release_gripper_position_target 里的"中性 + 空闲"释放。
-# 2026-09-04 操作员决定：采用 Web 遥操作已验证可用的默认值 1.0 N.m，仅把
-# 1.5 N.m 保留为可配置上限，并用上面的 0.5 rad/s 斜坡限制运动速度。
-_G_LARGE_MOVE_MAX_TAU_NM = 1.0
-_G_LARGE_MOVE_MAX_TAU_CAP_NM = 1.5
-_G_KP_MOVE = 5.0
-_G_KD_MOVE = 1.0
-_G_DEFAULT_FORCE = 0.40
-_G_GRASP_CLOSE_KP = 0.0
-_G_GRASP_CLOSE_KD = 0.5
-_G_GRASP_HOLD_KP = 5.0
-_G_GRASP_HOLD_KD = 1.0
-# 关于夹持力的说明：grasp_holding 下发的是
-#   kp*(hold_angle - pos) + kd*(-vel) + hold_force
-# 其中 hold_angle 冻结在堵转位置，因此位置项占主导，hold_force 只是前馈叠加。
-# 实际夹持力取决于闭合阶段 close_force 把夹爪推到多深才堵转，而不是 hold_force。
-_G_GRASP_CLOSE_FORCE_DEFAULT = 0.40
-_G_GRASP_CLOSE_FORCE_MAX = 1.0
-_G_GRASP_HOLD_FORCE_DEFAULT = 0.40
-# grasp_holding 会在控制循环中持续加载电机。上游从不退出该状态，因此一次成功
-# 抓取会把力矩一直顶到下一条命令或控制器关闭——这正是 2026-08-12 Joint4 过温
-# 所涉及的持续加载机理。故保持必须有时限，且总以中性释放收尾。
-_G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC = 30.0
-_G_GRASP_HOLD_TIMEOUT_MAX_SEC = 120.0
-_G_GRASP_VEL_THRESHOLD = 0.04
-_G_GRASP_MIN_CLOSE_TIME = 0.08
-_G_GRASP_MIN_CLOSURE_M = 0.006
-_G_GRASP_TIMEOUT = 2.0
-_G_CTRL_RATE = 500.0
+from .gripper_control import (GripperControl,
+    _G_MAX_DIST_M,
+    _G_VERIFIED_OPEN_LIMIT_M,
+    _G_ANGLE_OPEN,
+    _G_COORDINATE_TOL_RAD,
+    _G_CLOSED_FEEDBACK_TOL_RAD,
+    _G_ZERO_VERIFY_TIMEOUT_SEC,
+    _G_ZERO_VERIFY_SAMPLES,
+    _G_ARRIVE_TOL,
+    _G_TAU_MAX,
+    _G_POSITION_MAX_SPEED_RAD_S,
+    _G_POSITION_MAX_SPEED_MIN_RAD_S,
+    _G_POSITION_MAX_SPEED_MAX_RAD_S,
+    _G_POSITION_TIMEOUT_MARGIN_SEC,
+    _G_POSITION_TIMEOUT_MARGIN_MAX_SEC,
+    _G_FEEDBACK_STALE_TIMEOUT_SEC,
+    _G_FEEDBACK_STALE_TIMEOUT_MAX_SEC,
+    _HARDWARE_FEEDBACK_RATE_HZ,
+    _HARDWARE_FEEDBACK_RATE_MIN_HZ,
+    _HARDWARE_FEEDBACK_RATE_MAX_HZ,
+    _G_LARGE_MOVE_MAX_TAU_NM,
+    _G_LARGE_MOVE_MAX_TAU_CAP_NM,
+    _G_KP_MOVE,
+    _G_KD_MOVE,
+    _G_DEFAULT_FORCE,
+    _G_GRASP_CLOSE_KP,
+    _G_GRASP_CLOSE_KD,
+    _G_GRASP_HOLD_KP,
+    _G_GRASP_HOLD_KD,
+    _G_GRASP_CLOSE_FORCE_DEFAULT,
+    _G_GRASP_CLOSE_FORCE_MAX,
+    _G_GRASP_HOLD_FORCE_DEFAULT,
+    _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC,
+    _G_GRASP_HOLD_TIMEOUT_MAX_SEC,
+    _G_GRASP_VEL_THRESHOLD,
+    _G_GRASP_MIN_CLOSE_TIME,
+    _G_GRASP_MIN_CLOSURE_M,
+    _G_GRASP_TIMEOUT,
+    _G_CTRL_RATE)
+
 _GC_VEL_THRESHOLD = 0.04
 _GC_W_VEL_THRESHOLD = 0.08
 _GC_EE_FRAME = "end_link"
@@ -432,6 +417,185 @@ class HardwareManager:
         if not groups:
             raise RuntimeError("hardware feedback controller map unavailable")
         return groups
+
+    @property
+    def _gripper_execution(self):
+        # 正常构造在启动线程之前创建；旧测试夹具通过 __new__ 创建时也可惰性初始化。
+        component = self.__dict__.get('_gripper_execution_owner')
+        if component is None:
+            component = GripperExecution(
+                motor=lambda: self._gripper_mot,
+                verified=lambda: self._verified_feedback_sample('gripper').state,
+                feedback_failure=lambda: self._gripper_feedback_failure_reason_locked(),
+                record_feedback_error=lambda message: self._record_gripper_feedback_error(message),
+                validate=lambda state: self._validated_gripper_feedback_values(state),
+                feedback_age=lambda: self._gripper_feedback_age_sec(),
+                feedback_updated=lambda: self._gripper_feedback_updated_monotonic,
+                speed=lambda: self._gripper_position_max_speed_rad_s,
+                send=lambda *args, **kwargs: self._gripper_safe_mit(*args, **kwargs),
+            )
+            self.__dict__['_gripper_execution_owner'] = component
+        return component
+
+    @property
+    def _gripper_target_angle(self):
+        return self._gripper_execution._gripper_target_angle
+
+    @_gripper_target_angle.setter
+    def _gripper_target_angle(self, value):
+        self._gripper_execution._gripper_target_angle = value
+
+    @property
+    def _gripper_goal_angle(self):
+        return self._gripper_execution._gripper_goal_angle
+
+    @_gripper_goal_angle.setter
+    def _gripper_goal_angle(self, value):
+        self._gripper_execution._gripper_goal_angle = value
+
+    @property
+    def _gripper_target_effort(self):
+        return self._gripper_execution._gripper_target_effort
+
+    @_gripper_target_effort.setter
+    def _gripper_target_effort(self, value):
+        self._gripper_execution._gripper_target_effort = value
+
+    @property
+    def _gripper_close_force(self):
+        return self._gripper_execution._gripper_close_force
+
+    @_gripper_close_force.setter
+    def _gripper_close_force(self, value):
+        self._gripper_execution._gripper_close_force = value
+
+    @property
+    def _gripper_hold_force(self):
+        return self._gripper_execution._gripper_hold_force
+
+    @_gripper_hold_force.setter
+    def _gripper_hold_force(self, value):
+        self._gripper_execution._gripper_hold_force = value
+
+    @property
+    def _gripper_hold_angle(self):
+        return self._gripper_execution._gripper_hold_angle
+
+    @_gripper_hold_angle.setter
+    def _gripper_hold_angle(self, value):
+        self._gripper_execution._gripper_hold_angle = value
+
+    @property
+    def _gripper_hold_deadline(self):
+        return self._gripper_execution._gripper_hold_deadline
+
+    @_gripper_hold_deadline.setter
+    def _gripper_hold_deadline(self, value):
+        self._gripper_execution._gripper_hold_deadline = value
+
+    @property
+    def _gripper_hold_release_reason(self):
+        return self._gripper_execution._gripper_hold_release_reason
+
+    @_gripper_hold_release_reason.setter
+    def _gripper_hold_release_reason(self, value):
+        self._gripper_execution._gripper_hold_release_reason = value
+
+    @property
+    def _gripper_mode(self):
+        return self._gripper_execution._gripper_mode
+
+    @_gripper_mode.setter
+    def _gripper_mode(self, value):
+        self._gripper_execution._gripper_mode = value
+
+    @property
+    def _gripper_active(self):
+        return self._gripper_execution._gripper_active
+
+    @_gripper_active.setter
+    def _gripper_active(self, value):
+        self._gripper_execution._gripper_active = value
+
+    @property
+    def _gripper_pos(self):
+        return self._gripper_execution._gripper_pos
+
+    @_gripper_pos.setter
+    def _gripper_pos(self, value):
+        self._gripper_execution._gripper_pos = value
+
+    @property
+    def _gripper_vel(self):
+        return self._gripper_execution._gripper_vel
+
+    @_gripper_vel.setter
+    def _gripper_vel(self, value):
+        self._gripper_execution._gripper_vel = value
+
+    @property
+    def _gripper_torque(self):
+        return self._gripper_execution._gripper_torque
+
+    @_gripper_torque.setter
+    def _gripper_torque(self, value):
+        self._gripper_execution._gripper_torque = value
+
+    @property
+    def _gripper_command_error(self):
+        return self._gripper_execution._gripper_command_error
+
+    @_gripper_command_error.setter
+    def _gripper_command_error(self, value):
+        self._gripper_execution._gripper_command_error = value
+
+    @property
+    def _gripper_position_result(self):
+        return self._gripper_execution._gripper_position_result
+
+    @_gripper_position_result.setter
+    def _gripper_position_result(self, value):
+        self._gripper_execution._gripper_position_result = value
+
+    @property
+    def _gripper_neutral_pending(self):
+        return self._gripper_execution._gripper_neutral_pending
+
+    @_gripper_neutral_pending.setter
+    def _gripper_neutral_pending(self, value):
+        self._gripper_execution._gripper_neutral_pending = value
+
+    @property
+    def _gripper_target_timeout_sec(self):
+        return self._gripper_execution._gripper_target_timeout_sec
+
+    @_gripper_target_timeout_sec.setter
+    def _gripper_target_timeout_sec(self, value):
+        self._gripper_execution._gripper_target_timeout_sec = value
+
+    @property
+    def _gripper_target_deadline_monotonic(self):
+        return self._gripper_execution._gripper_target_deadline_monotonic
+
+    @_gripper_target_deadline_monotonic.setter
+    def _gripper_target_deadline_monotonic(self, value):
+        self._gripper_execution._gripper_target_deadline_monotonic = value
+
+    @property
+    def _gripper_last_tick_monotonic(self):
+        return self._gripper_execution._gripper_last_tick_monotonic
+
+    @_gripper_last_tick_monotonic.setter
+    def _gripper_last_tick_monotonic(self, value):
+        self._gripper_execution._gripper_last_tick_monotonic = value
+
+    @property
+    def _gripper_lock(self):
+        return self._gripper_execution._gripper_lock
+
+    @_gripper_lock.setter
+    def _gripper_lock(self, value):
+        self._gripper_execution._gripper_lock = value
 
     @property
     def _feedback_component(self):
@@ -769,6 +933,7 @@ class HardwareManager:
                 self._gripper_feedback_updated_monotonic = None
                 self._gripper_feedback_error = None
             with self._gripper_lock:
+                self._gripper_execution.supersede_locked()
                 self._gripper_active = False
                 self._gripper_mode = "idle"
                 self._gripper_neutral_pending = None
@@ -1646,6 +1811,7 @@ class HardwareManager:
             + self._gripper_position_timeout_margin_sec
         )
         with self._gripper_lock:
+            self._gripper_execution.supersede_locked()
             self._gripper_target_angle = start_angle
             self._gripper_goal_angle = target
             self._gripper_target_effort = float(
@@ -1700,8 +1866,8 @@ class HardwareManager:
     def wait_gripper_target(self, timeout: float | None = None) -> bool:
         """阻塞等待当前位置命令完成；返回是否到位。
 
-        只等待"自己那一次"的命令：先记住目标角，若期间出现更新的命令（目标角
-        变化）立即返回 False，避免旧等待者误判或误释放新命令。到位后必须调用
+        只等待"自己那一次"的命令：先记住目标代次，若期间出现更新的命令就
+        立即返回 False，避免旧等待者误判或误释放新命令。到位后必须调用
         ``_release_gripper_position_target`` 解除 MIT 位置命令（完成一次定位移动
         不等于抓取保持，不能继续顶住目标）。
         超时同样结束本次命令的所有权并取消位置命令，不留残余力矩。
@@ -1710,7 +1876,12 @@ class HardwareManager:
         # 期间新下发的命令。
         with self._gripper_lock:
             owned_goal = self._gripper_goal_angle
+            owned_generation = self._gripper_execution._generation
             deadline = self._gripper_target_deadline_monotonic
+            if self._gripper_position_result == "succeeded":
+                return True
+            if self._gripper_position_result == "failed":
+                return False
         now = time.monotonic()
         explicit_deadline = (
             None if timeout is None else now + max(float(timeout), 0.0)
@@ -1721,7 +1892,7 @@ class HardwareManager:
             deadline = min(deadline, explicit_deadline)
         while time.monotonic() < deadline:
             with self._gripper_lock:
-                if self._gripper_goal_angle != owned_goal:
+                if self._gripper_execution._generation != owned_generation:
                     return False
                 if not self._gripper_active:
                     if self._gripper_position_result == "succeeded":
@@ -1739,7 +1910,9 @@ class HardwareManager:
             if arrived:
                 # 一次定位移动完成并不等于抓取保持。在确认成功之前先释放 MIT
                 # 位置命令，使得本函数返回后电机不会继续朝目标推进。
-                self._release_gripper_position_target(owned_goal)
+                self._release_gripper_position_target(
+                    owned_goal, expected_generation=owned_generation,
+                )
                 time.sleep(1.0 / _G_CTRL_RATE)
                 continue
             time.sleep(0.02)
@@ -1747,7 +1920,8 @@ class HardwareManager:
         # 位置保持命令。
         self.cancel_gripper_position_command(
             "gripper target timeout: "
-            f"goal={owned_goal:.6f}rad feedback={self._gripper_pos:.6f}rad"
+            f"goal={owned_goal:.6f}rad feedback={self._gripper_pos:.6f}rad",
+            expected_generation=owned_generation,
         )
         return False
 
@@ -1805,73 +1979,17 @@ class HardwareManager:
         min_closure = max(float(min_closure_distance_m), 0.0)
         start_position_m = self.gripper_position_m()
         start = time.monotonic()
-
-        with self._gripper_lock:
-            self._gripper_close_force = close_effort
-            self._gripper_hold_force = hold_effort
-            self._gripper_hold_deadline = None
-            self._gripper_hold_release_reason = None
-            self._gripper_mode = "grasp_closing"
-            self._gripper_active = True
-        self._start_gripper_loop()
-
-        while time.monotonic() - start < timeout:
-            elapsed = time.monotonic() - start
-            with self._gripper_lock:
-                feedback_failure = self._gripper_feedback_failure_reason_locked()
-                command_failure = self._gripper_command_error
-                if feedback_failure is not None and self._gripper_active:
-                    self._fail_active_gripper_command_locked(feedback_failure)
-                    command_failure = self._gripper_command_error
-            if command_failure is not None:
-                reached_position_m = self.gripper_position_m()
-                return (
-                    False,
-                    False,
-                    0.0,
-                    reached_position_m,
-                    hold_effort,
-                    command_failure,
-                )
-            reached_position_m = self.gripper_position_m()
-            closure_m = max(start_position_m - reached_position_m, 0.0)
-            if (
-                elapsed >= min_time
-                and closure_m >= min_closure
-                and abs(float(self._gripper_vel)) <= velocity_limit
-            ):
-                with self._gripper_lock:
-                    # 冻结当前角度作为保持目标：位置项因此把夹爪按在堵转点。
-                    self._gripper_hold_angle = float(self._gripper_pos)
-                    self._gripper_hold_force = hold_effort
-                    self._gripper_hold_deadline = time.monotonic() + hold_timeout
-                    self._gripper_mode = "grasp_holding"
-                    self._gripper_active = True
-                contact_position_m = self.gripper_position_m()
-                return (
-                    True,
-                    True,
-                    contact_position_m,
-                    contact_position_m,
-                    hold_effort,
-                    # 没有力传感器：这里是"闭合行程 + 速度堵转"，即堵转检测，
-                    # 不是实测接触力。
-                    "closing stalled; holding "
-                    f"(bounded to {hold_timeout:g} s)",
-                )
-            time.sleep(0.01)
-
-        # 上游此处在切到 idle 时没有做中性化，导致最后一次闭合力矩一直被施加。
-        with self._gripper_lock:
-            self._release_grasp_hold_locked("close timeout before stall")
-        return (
-            False,
-            False,
-            0.0,
-            self.gripper_position_m(),
-            hold_effort,
-            "grasp close timeout before stall detected",
+        request = self._gripper_execution.start_grasp(
+            close_force=close_effort, hold_force=hold_effort, timeout=timeout,
+            min_time=min_time, velocity_limit=velocity_limit, min_closure=min_closure,
+            hold_timeout=hold_timeout, start_position=start_position_m, now=start,
         )
+        self._start_gripper_loop()
+        # 同步接口只等待周期线程的事件；它不判断堵转，也不直接向总线写入。
+        while not request['event'].wait(0.01):
+            if time.monotonic() >= start + timeout or not self.control_loop_active:
+                self._gripper_execution.expire_grasp(request)
+        return request['result']
 
     def _cached_gripper_feedback(self, *, now: float | None = None) -> _CachedMotorFeedback:
         # 采集路径使用反馈锁 -> 夹爪锁；查询保持相同顺序，避免与控制循环互锁。
@@ -1940,7 +2058,7 @@ class HardwareManager:
         return float(np.clip(distance, 0.0, _G_MAX_DIST_M))
 
     def gripper_reached_target(self) -> bool:
-        """查询当前位置命令是否到位（不会推进状态机）。"""
+        """查询位置命令是否已到位且中性释放发送成功。"""
         with self._gripper_lock:
             if self._gripper_position_result == "succeeded":
                 return True
@@ -1950,8 +2068,7 @@ class HardwareManager:
             if feedback_failure is not None:
                 self._fail_active_gripper_command_locked(feedback_failure)
                 return False
-            goal = self._gripper_goal_angle
-            return abs(self._gripper_pos - goal) < _G_ARRIVE_TOL
+            return False
 
     def send_gripper_motor_cmd(self, cmd) -> None:
         """低层夹爪直通命令（JointMotorCmd）：未给出的字段回落到反馈或配置增益。
@@ -1974,19 +2091,25 @@ class HardwareManager:
         tau = float(cmd.tau) if cmd.use_tau else 0.0
         vlim = float(cmd.vlim) if cmd.use_vlim else float(self._gripper_cfg.vlim)
 
-        if int(cmd.mode) == 0:
-            self._gripper_mot.send_mit(pos, vel, kp, kd, tau)
-        elif int(cmd.mode) == 1:
-            self._gripper_mot.send_pos_vel(pos, vlim)
-        elif int(cmd.mode) == 2:
-            if not hasattr(self._gripper_mot, "send_vel"):
-                raise RuntimeError("gripper does not support send_vel")
-            self._gripper_mot.send_vel(vel)
-        else:
+        mode = int(cmd.mode)
+        if mode not in (0, 1, 2):
             raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
+        if mode == 2 and not hasattr(self._gripper_mot, "send_vel"):
+            raise RuntimeError("gripper does not support send_vel")
         with self._gripper_lock:
+            # 过渡阶段透传仍由调用线程发送，但与周期输出在同一把锁下交接。
+            # 先使旧等待者失效并清除旧中性命令，避免接替后再次覆盖透传。
+            self._gripper_execution.supersede_locked()
             self._gripper_active = False
             self._gripper_mode = "idle"
+            self._gripper_position_result = "failed"
+            self._gripper_neutral_pending = None
+            if mode == 0:
+                self._gripper_mot.send_mit(pos, vel, kp, kd, tau)
+            elif mode == 1:
+                self._gripper_mot.send_pos_vel(pos, vlim)
+            else:
+                self._gripper_mot.send_vel(vel)
 
     def _start_pos_vel_loop(self, target: np.ndarray | None = None) -> None:
         """启动统一硬件控制循环（位置-速度跟踪），并把控制器标记为运行中。
@@ -2162,12 +2285,10 @@ class HardwareManager:
         等效前馈"：这样即使 tau_ff 很大，实际输出也不会超过 limit。
         """
         if self._gripper_mot is None or self._gripper_ctrl is None:
-            return
-        pos_cmd = float(np.clip(pos, _G_ANGLE_OPEN, 0.0))
-        # 本地计算的 PD 位置项，用于后面的饱和反解。
-        pos_term = kp * (pos_cmd - self._gripper_pos) + kd * (-self._gripper_vel)
-        limit = float(np.clip(abs(tau_limit), 0.05, _G_TAU_MAX))
-        tau_safe = float(np.clip(pos_term + tau_ff, -limit, limit)) - pos_term
+            raise RuntimeError("gripper motor or controller unavailable")
+        pos_cmd, vel, kp, kd, tau_safe = GripperControl.bounded_mit(
+            pos, vel, kp, kd, tau_ff, tau_limit, self._gripper_pos, self._gripper_vel,
+        )
         lock = getattr(self._gripper_ctrl, "bus_lock", None)
         try:
             if lock:
@@ -2180,291 +2301,39 @@ class HardwareManager:
                 self._gripper_transport_error = str(exc)
             raise RuntimeError(f"gripper MIT command failed: {exc}") from exc
 
-    def _fail_active_gripper_command_locked(self, reason: str) -> None:
-        """把当前夹爪命令标记为失败并排队一次中性释放（调用方需持锁）。"""
-        message = str(reason)
-        self._gripper_command_error = message
-        self._gripper_position_result = "failed"
-        self._gripper_active = False
-        self._gripper_mode = "idle"
-        self._gripper_target_deadline_monotonic = None
-        _LOG.error(
-            "gripper command failed reason=%s goal=%.6frad command=%.6frad "
-            "feedback=%.6frad updated=%s age=%.6fs",
-            message,
-            self._gripper_goal_angle,
-            self._gripper_target_angle,
-            self._gripper_pos,
-            self._gripper_feedback_updated_monotonic,
-            self._gripper_feedback_age_sec(),
-        )
-        self._queue_gripper_neutral_locked(message, marks_success=False)
+    def _fail_active_gripper_command_locked(self, *args, **kwargs):
+        return self._gripper_execution._fail_active_gripper_command_locked(*args, **kwargs)
 
-    def _queue_gripper_neutral_locked(
-        self,
-        reason: str,
-        *,
-        marks_success: bool,
-    ) -> None:
-        """排队一条中性 MIT 命令（零刚度/阻尼/前馈），由硬件循环在下一拍发出。
+    def _queue_gripper_neutral_locked(self, *args, **kwargs):
+        return self._gripper_execution._queue_gripper_neutral_locked(*args, **kwargs)
 
-        只排队不直接发送，保证总线上只有一个写入者。``marks_success`` 决定该
-        中性命令发送成功后是否把本次位置命令标记为成功。
-        """
-        self._gripper_neutral_pending = (
-            float(self._gripper_pos),
-            str(reason),
-            bool(marks_success),
-        )
+    def _emit_pending_gripper_neutral_locked(self, *args, **kwargs):
+        return self._gripper_execution._emit_pending_gripper_neutral_locked(*args, **kwargs)
 
-    def _emit_pending_gripper_neutral_locked(self) -> bool:
-        """发送已排队的中性命令；返回是否成功（调用方需持 ``_gripper_lock``）。"""
-        pending = self._gripper_neutral_pending
-        if pending is None:
-            return False
-        angle, reason, marks_success = pending
-        self._gripper_neutral_pending = None
-        try:
-            self._gripper_safe_mit(
-                angle,
-                0.0,
-                0.0,
-                0.0,
-                tau_limit=0.05,
-            )
-        except Exception as exc:
-            self._gripper_position_result = "failed"
-            self._gripper_command_error = (
-                f"gripper neutral command failed after {reason}: {exc}"
-            )
-            _LOG.error("%s", self._gripper_command_error)
-            return False
-        if marks_success:
-            self._gripper_position_result = "succeeded"
-            self._gripper_command_error = None
-        return True
+    def cancel_gripper_position_command(self, *args, **kwargs):
+        return self._gripper_execution.cancel_gripper_position_command(*args, **kwargs)
 
-    def cancel_gripper_position_command(self, reason: str = "position command canceled") -> bool:
-        """取消进行中的位置命令；仅在确实处于 position 模式时生效。"""
-        with self._gripper_lock:
-            if not self._gripper_active or self._gripper_mode != "position":
-                return False
-            self._fail_active_gripper_command_locked(reason)
-            return True
+    def _release_gripper_position_target(self, *args, **kwargs):
+        return self._gripper_execution._release_gripper_position_target(*args, **kwargs)
 
-    def _release_gripper_position_target(
-        self,
-        expected_goal: float,
-        *,
-        require_arrived: bool = True,
-    ) -> bool:
-        """结束一次常规位置移动，并让夹爪回到空闲。
+    def _release_gripper_position_target_locked(self, *args, **kwargs):
+        return self._gripper_execution._release_gripper_position_target_locked(*args, **kwargs)
 
-        上游 ``wait_gripper_target`` 只返回成功而不改 ``_gripper_active``/
-        ``_gripper_mode``，于是统一硬件循环在服务已经应答之后仍在继续下发 MIT
-        位置命令。这里改为原子地切到空闲，并在确认成功之前为唯一的硬件循环写入者
-        排队一条中性 MIT 命令（零刚度、零阻尼、零前馈）。
+    def _grasp_hold_expired_locked(self, *args, **kwargs):
+        return self._gripper_execution._grasp_hold_expired_locked(*args, **kwargs)
 
-        整个过程持有夹爪锁，避免过期的完成路径覆盖更新的目标。``grasp_closing``
-        与 ``grasp_holding`` 是显式请求的力操作，绝不在此释放。
-        """
-        with self._gripper_lock:
-            return self._release_gripper_position_target_locked(
-                expected_goal,
-                require_arrived=require_arrived,
-            )
+    def _release_grasp_hold_locked(self, *args, **kwargs):
+        return self._gripper_execution._release_grasp_hold_locked(*args, **kwargs)
 
-    def _release_gripper_position_target_locked(
-        self,
-        expected_goal: float,
-        *,
-        require_arrived: bool = True,
-    ) -> bool:
-        """``_release_gripper_position_target`` 的本体；调用方必须持有锁。
-
-        拆成两部分是为了让已经持有 ``_gripper_lock`` 的调用方也能复用同一份
-        所有权检查与中性化逻辑。
-        """
-        if not self._gripper_active or self._gripper_mode != "position":
-            return False
-        if self._gripper_goal_angle != expected_goal:
-            return False
-        arrived_angle = float(self._gripper_pos)
-        if require_arrived and abs(arrived_angle - expected_goal) >= _G_ARRIVE_TOL:
-            return False
-        # 在排队中性命令之前先清掉所有权。统一硬件循环先判断 _gripper_active，
-        # 因此它一旦为假就不会再产生任何位置命令，排队的中性命令即是最后一条。
-        self._gripper_target_angle = arrived_angle
-        self._gripper_active = False
-        self._gripper_mode = "idle"
-        self._gripper_target_deadline_monotonic = None
-        if require_arrived:
-            self._gripper_position_result = "releasing"
-        elif self._gripper_position_result != "failed":
-            self._gripper_position_result = "failed"
-        self._queue_gripper_neutral_locked(
-            "position target reached" if require_arrived else "position target canceled",
-            marks_success=require_arrived,
-        )
-        return True
-
-    def _grasp_hold_expired_locked(self) -> bool:
-        """有界抓取保持是否已到时。调用方需持锁。"""
-        deadline = self._gripper_hold_deadline
-        if deadline is None:
-            return False
-        return time.monotonic() >= deadline
-
-    def _release_grasp_hold_locked(self, reason: str) -> None:
-        """对抓取闭合/保持做中性化并回到空闲。调用方需持锁。
-
-        上游会让 ``grasp_holding`` 一直带电到下一条命令，其闭合超时路径也只是切
-        到 idle 而从不中性化最后一条力矩命令。两条路径现在都汇到这里。
-        """
-        self._gripper_hold_deadline = None
-        self._gripper_hold_release_reason = reason
-        self._gripper_active = False
-        self._gripper_mode = "idle"
-        self._queue_gripper_neutral_locked(
-            f"grasp release: {reason}",
-            marks_success=False,
-        )
-
-    def release_grasp_hold(self, reason: str = "external release") -> bool:
-        """释放进行中的抓取保持，且不下发新的位置命令。"""
-        with self._gripper_lock:
-            if not self._gripper_active:
-                return False
-            if self._gripper_mode not in ("grasp_closing", "grasp_holding"):
-                return False
-            self._release_grasp_hold_locked(reason)
-        return True
+    def release_grasp_hold(self, *args, **kwargs):
+        return self._gripper_execution.release_grasp_hold(*args, **kwargs)
 
     @property
-    def grasp_hold_release_reason(self) -> str | None:
-        with self._gripper_lock:
-            return self._gripper_hold_release_reason
+    def grasp_hold_release_reason(self):
+        return self._gripper_execution.grasp_hold_release_reason
 
-    def _gripper_tick(self) -> None:
-        """夹爪状态机的单周期推进（由统一控制循环调用）。
-
-        优先级：先发已排队的中性命令；无活动命令则直接返回。之后在持锁状态下
-        一次性完成"读状态 -> 判定 -> 生成命令"，保证到位判定与命令下发原子，
-        避免已经通过到位判定的 tick 在等待者释放后又多发一条带力矩的命令
-        （真机上曾观测到服务返回后仍多闭合约 1.2-1.33 mm）。向零位闭合是最敏感
-        方向，因为 abs(target) < 1e-6 时 effort 会变成前馈项。
-
-        位置模式使用按时间步长限速的斜坡（速度上限 = 参数 rad/s），抓取闭合/
-        保持模式使用固定的 kp/kd 与前馈力矩，且保持受时限约束。
-        """
-        with self._gripper_lock:
-            if self._gripper_neutral_pending is not None:
-                self._emit_pending_gripper_neutral_locked()
-                return
-            if not self._gripper_active or self._gripper_mot is None:
-                return
-        try:
-            st = self._verified_feedback_sample("gripper").state
-        except Exception as exc:
-            self._record_gripper_feedback_error(str(exc))
-            with self._gripper_lock:
-                if self._gripper_active:
-                    self._fail_active_gripper_command_locked(
-                        f"gripper feedback read failed: {exc}"
-                    )
-            return
-
-        # 到位判定与命令下发必须原子。先取状态、放开锁、再发送，会让已经通过
-        # 到位判定的 tick 在 wait_gripper_target 释放之后再发出一条带力矩的命令
-        # ——真机上表现为服务返回后又多闭合约 1.2-1.33 mm。向零位闭合是最暴露的
-        # 方向，因为 abs(target) < 1e-6 时 effort 会变成前馈项。
-        with self._gripper_lock:
-            mode = self._gripper_mode
-            if not self._gripper_active:
-                command = None
-            elif (feedback_failure := self._gripper_feedback_failure_reason_locked()) is not None:
-                self._fail_active_gripper_command_locked(feedback_failure)
-                command = None
-            else:
-                try:
-                    position, velocity, torque, status = (
-                        self._validated_gripper_feedback_values(st)
-                    )
-                except Exception as exc:
-                    self._record_gripper_feedback_error(str(exc))
-                    self._fail_active_gripper_command_locked(
-                        f"gripper feedback read failed: {exc}"
-                    )
-                    return
-                self._gripper_pos = position
-                self._gripper_vel = velocity
-                self._gripper_torque = torque
-                if status != 1:
-                    self._fail_active_gripper_command_locked(
-                        f"gripper status_code={status}, expected 1 during command"
-                    )
-                    return
-                command = None
-
-            if command is None and self._gripper_active and mode == "position":
-                goal = self._gripper_goal_angle
-                if abs(self._gripper_pos - goal) < _G_ARRIVE_TOL:
-                    # 无同步等待者时到达，或在等待者返回之后到达。
-                    self._release_gripper_position_target_locked(goal)
-                    command = None
-                else:
-                    now = time.monotonic()
-                    previous_tick = self._gripper_last_tick_monotonic
-                    elapsed = 0.0 if previous_tick is None else max(now - previous_tick, 0.0)
-                    # 本拍允许的最大角度增量 = 速度上限 * 实际经过时间。
-                    max_step = self._gripper_position_max_speed_rad_s * elapsed
-                    target = self._gripper_target_angle
-                    remaining = goal - target
-                    if abs(remaining) <= max_step:
-                        target = goal
-                    elif max_step > 0.0:
-                        target += float(np.copysign(max_step, remaining))
-                    self._gripper_target_angle = target
-                    self._gripper_last_tick_monotonic = now
-                    effort = self._gripper_target_effort
-                    # ``effort`` 约束整段移动而不只是闭合终点；若不显式传
-                    # tau_limit，命令力矩会回落到 _G_TAU_MAX。
-                    tau_ff = effort if abs(target) < 1e-6 else 0.0
-                    command = (target, 0.0, _G_KP_MOVE, _G_KD_MOVE, tau_ff, effort)
-            elif command is None and self._gripper_active and mode == "grasp_closing":
-                # 闭合：kp=0，仅靠阻尼 + 前馈力矩推进，撞到物体即自然堵转。
-                command = (
-                    0.0,
-                    0.0,
-                    _G_GRASP_CLOSE_KP,
-                    _G_GRASP_CLOSE_KD,
-                    self._gripper_close_force,
-                    _G_TAU_MAX,
-                )
-            elif command is None and self._gripper_active and mode == "grasp_holding":
-                if self._grasp_hold_expired_locked():
-                    self._release_grasp_hold_locked("hold timeout")
-                    command = None
-                else:
-                    # 保持：位置目标冻结在堵转角，位置项提供主夹持力。
-                    command = (
-                        self._gripper_hold_angle,
-                        0.0,
-                        _G_GRASP_HOLD_KP,
-                        _G_GRASP_HOLD_KD,
-                        self._gripper_hold_force,
-                        _G_TAU_MAX,
-                    )
-            if command is None:
-                if self._gripper_neutral_pending is not None:
-                    self._emit_pending_gripper_neutral_locked()
-                return
-
-            pos, vel, kp, kd, tau_ff, tau_limit = command
-            try:
-                self._gripper_safe_mit(pos, vel, kp, kd, tau_ff, tau_limit=tau_limit)
-            except Exception as exc:
-                self._fail_active_gripper_command_locked(str(exc))
+    def _gripper_tick(self, *args, **kwargs):
+        return self._gripper_execution._gripper_tick(*args, **kwargs)
 
     def _start_gripper_loop(self) -> None:
         """夹爪命令的入口校验：夹爪没有独立循环，必须依赖统一硬件循环。"""
@@ -2474,5 +2343,14 @@ class HardwareManager:
             )
 
     def _stop_gripper_loop(self) -> None:
-        # 仅复位兼容标志位；夹爪命令由统一硬件循环承载，没有独立线程需要 join。
-        self._gripper_loop_running = False
+        # 使能/连接会话结束时使旧目标和等待者失效，防止重启循环后续发旧命令。
+        # 此处不发送命令；调用方负责随后停止周期线程并执行生命周期设备操作。
+        with self._gripper_lock:
+            self._gripper_execution.supersede_locked()
+            self._gripper_active = False
+            self._gripper_mode = "idle"
+            self._gripper_position_result = "failed"
+            self._gripper_neutral_pending = None
+            self._gripper_hold_deadline = None
+            self._gripper_target_deadline_monotonic = None
+            self._gripper_loop_running = False
