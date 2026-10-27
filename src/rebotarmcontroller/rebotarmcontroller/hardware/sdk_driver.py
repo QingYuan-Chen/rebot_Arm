@@ -146,8 +146,10 @@ class SdkMotorDriver:
 
     def _set_enabled(self, enabled):
         # Driver disable never stops or joins a control thread.
-        with self._command_lock, self.bus_lock:
+        with self._command_lock:
             if not self.connected: raise RuntimeError('hardware is not connected')
+            # The port locks the actual write. Keep command ownership across
+            # confirmation, but leave the bus available between transactions.
             (self._bus.enable_all if enabled else self._bus.disable_all)()
             self._sleep(self.config.timing.command_motor_delay)
             self._confirm_status(tuple(j.name for j in self.config.joints), int(enabled))

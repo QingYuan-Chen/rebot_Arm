@@ -263,6 +263,106 @@ def test_mode_settle_allows_feedback_but_serializes_command_batches():
     assert not failures and sent.is_set()
 
 
+@pytest.mark.parametrize('enabled', [True, False])
+def test_transition_settle_allows_verified_feedback_refresh(monkeypatch, enabled):
+    manager, _ = make_local_manager(monkeypatch)
+    manager.connect()
+    driver = manager._backend.driver
+    if not enabled:
+        driver.enable()
+    previous = dict(manager._verified_feedback_by_label)
+    failures = []
+    workers = []
+
+    def settle(_duration):
+        done = threading.Event()
+
+        def refresh():
+            try:
+                manager.refresh_feedback_if_due(force=True)
+            except Exception as exc:
+                failures.append(exc)
+            finally:
+                done.set()
+
+        worker = threading.Thread(target=refresh)
+        workers.append(worker)
+        worker.start()
+        assert done.wait(.5), 'transition blocked verified feedback refresh'
+        assert not failures
+        for label, sample in manager._verified_feedback_by_label.items():
+            assert sample.sequence > previous[label].sequence
+            assert sample.observed_at > previous[label].observed_at
+        previous.update(manager._verified_feedback_by_label)
+
+    driver._sleep = settle
+    try:
+        (driver.enable if enabled else driver.disable)()
+        assert workers
+    finally:
+        driver._sleep = lambda _: None
+        for worker in workers:
+            worker.join(timeout=1.)
+        manager.shutdown()
+
+
+@pytest.mark.parametrize('enabled', [True, False])
+@pytest.mark.parametrize('delay', ['settle', 'retry'])
+def test_enable_transition_wait_allows_feedback_and_excludes_commands(enabled, delay):
+    driver, bus, _ = make_driver()
+    driver.connect()
+    if not enabled:
+        driver.enable()
+    bus.feedback = delay != 'retry'
+    waiting, release, refreshed, sent, attempted = (threading.Event() for _ in range(5))
+    errors = []
+
+    def sleep(duration):
+        if (delay == 'settle' and duration == driver.config.timing.command_motor_delay
+                or delay == 'retry' and duration == driver.config.timing.status_interval):
+            waiting.set()
+            if not release.wait(2.):
+                raise RuntimeError('wait was not released')
+            bus.feedback = True
+
+    def transition():
+        try:
+            (driver.enable if enabled else driver.disable)()
+        except Exception as exc:
+            errors.append(exc)
+
+    def feedback():
+        with driver.bus_lock:
+            driver.motor('joint1').request_feedback()
+            driver.controllers()[0].poll_feedback_once()
+        refreshed.set()
+
+    def command():
+        attempted.set()
+        driver.send_positions(PositionCommand((0.,) * 6, (.3,) * 6, 0))
+        sent.set()
+
+    driver._sleep = sleep
+    workers = [threading.Thread(target=transition), threading.Thread(target=feedback),
+               threading.Thread(target=command)]
+    try:
+        workers[0].start()
+        assert waiting.wait(1.)
+        workers[1].start()
+        workers[2].start()
+        assert attempted.wait(1.)
+        assert refreshed.wait(.5), 'transition wait held the feedback bus lock'
+        assert not sent.is_set()
+    finally:
+        release.set()
+        for worker in workers:
+            if worker.ident is not None:
+                worker.join(timeout=2.)
+        driver._sleep = lambda _: None
+        driver.close()
+    assert not errors and sent.is_set()
+
+
 def test_driver_disable_does_not_stop_runtime_and_demands_new_status():
     driver,bus,_=make_driver();driver.connect();driver.enable()
     before=bus.motors[0].sequence
