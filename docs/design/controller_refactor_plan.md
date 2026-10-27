@@ -31,38 +31,25 @@
 
 ### 先拆模块，保留一个硬件包
 
-第一轮保留包名 `rebotarmcontroller` 和唯一硬件进程，在包内建立职责边界。各目录不对应独立 ROS 节点；是否另拆可独立复用的库，在接口稳定后决定。
+保留包名 `rebotarmcontroller` 和唯一硬件进程，在包内按文件建立职责边界。后续控制器拆分直接使用包根目录下的模块，不再按职责创建子目录；组件职责、接口与独立状态仍须保持清晰。
 
 | 建议模块 | 拥有的职责和状态 | 边界 |
 | --- | --- | --- |
-| `contracts/` | 反馈、命令、故障、执行结果的数据类型与接口 | 不依赖 ROS 消息或 SDK 对象 |
-| `hardware/` | 总线连接、设备句柄、电机注册、反馈解码、模式与指令收发 | 不知道轨迹、抓取目标、回位目标和重力补偿策略 |
-| `runtime/` | 唯一总线所有者、周期调度、命令仲裁、反馈快照、控制模式交接 | ROS 回调不能直接操作设备；失能时也能按既定策略采集反馈 |
-| `safety/` | 反馈有效性、最终指令约束、生命周期准入、故障分类及执行保护决策 | 不负责路径规划与碰撞搜索；运动层保留自己的轨迹及运行时检查 |
-| `control/arm/` | 六轴关节位置跟踪、位置保持、重力补偿及各算法内部状态 | 输入六轴反馈与机械臂目标，输出六轴命令；不管理夹爪目标和接触状态 |
-| `control/end_effectors/gripper/` | 夹爪开口控制、接触判定、夹持保持、释放及其独立状态 | 输入夹爪反馈与目标，输出夹爪命令；不读写六轴算法内部状态 |
-| `execution/` | 按机械臂与末端执行器分开管理目标、资源占用、取消/抢占、超时和到位；机械臂分支承担轨迹与回位执行 | 执行已校验目标，不生成笛卡尔路径或重新做 IK |
-| `ros/` | Topic、Service、Action、参数、消息转换、反馈发布 | 提交请求与读取快照，不操作 SDK 私有成员，不用回调睡眠推进周期控制 |
+| 值契约模块 | 反馈、命令、故障、执行结果的数据类型与接口 | 不依赖 ROS 消息或 SDK 对象 |
+| 设备驱动模块 | 总线连接、设备句柄、电机注册、反馈解码、模式与指令收发 | 不知道轨迹、抓取目标、回位目标和重力补偿策略 |
+| 运行时模块 | 唯一总线所有者、周期调度、命令仲裁、反馈快照、控制模式交接 | ROS 回调不能直接操作设备；失能时也能按既定策略采集反馈 |
+| 安全检查模块 | 反馈有效性、最终指令约束、生命周期准入、故障分类及执行保护决策 | 不负责路径规划与碰撞搜索；运动层保留自己的轨迹及运行时检查 |
+| 六轴控制模块 | 六轴关节位置跟踪、位置保持、重力补偿及各算法内部状态 | 输入六轴反馈与机械臂目标，输出六轴命令；不管理夹爪目标和接触状态 |
+| 夹爪控制模块 | 夹爪开口控制、接触判定、夹持保持、释放及其独立状态 | 输入夹爪反馈与目标，输出夹爪命令；不读写六轴算法内部状态 |
+| 执行模块 | 按机械臂与末端执行器分开管理目标、资源占用、取消/抢占、超时和到位；机械臂分支承担轨迹与回位执行 | 执行已校验目标，不生成笛卡尔路径或重新做 IK |
+| ROS 适配模块 | Topic、Service、Action、参数、消息转换、反馈发布 | 提交请求与读取快照，不操作 SDK 私有成员，不用回调睡眠推进周期控制 |
 | 节点装配入口 | 创建组件、注入依赖、启动与关闭协调 | 不积累控制算法和业务判断 |
 
 `hardware_manager.py` 过渡期作为兼容入口转发现有调用；组件应持有各自状态，不能通过“把 manager 传给每个组件”继续共享全部内部变量。调用方迁移完后删除兼容层，或将其收敛为无控制细节的装配对象。
 
 ### 六轴机械臂与末端执行器分别控制
 
-建议目录体现两类控制对象，以下名称均为拟议模块：
-
-```text
-control/
-├── arm/
-│   ├── joint_position       # 六轴关节目标跟踪
-│   ├── hold                 # 六轴位置保持
-│   └── gravity_compensation # 六轴重力补偿
-└── end_effectors/
-    └── gripper/
-        ├── position         # 开口目标与电机角度映射
-        ├── grasp            # 接触判定与夹持过程
-        └── hold_release     # 夹持保持与释放
-```
+机械臂和夹爪分别使用根目录中的控制与执行模块；位置、保持和重力补偿按职责分工，不依靠目录区分状态。
 
 - **数据分别定义**：机械臂状态、目标与控制输出只包含六轴；夹爪拥有独立的开口、运动状态、接触判定和命令结果，不作为“第七轴”拼入六轴控制向量。设备层可以按电机标识统一编解码，控制层必须按资源类型分发。
 - **参数分别维护**：六轴增益、关节限位、重力模型与夹爪开口映射、限力参数、接触阈值、保持时限分开配置。夹爪电机力矩与指端夹持力分开表达，未标定时不能把两者等同。
@@ -71,7 +58,7 @@ control/
 - **保护范围明确**：分别记录机械臂、末端执行器和总线故障；单设备故障是否影响整机，依据共享总线、持物状态和已验证保护策略决定。算法分离既不意味着故障一律互不影响，也不能将普通任务取消统一处理为整机失能。
 - **保留物理耦合**：末端执行器作为负载，其质量、质心和已验证的持物负载仍影响六轴重力补偿与模型；控制算法分离不等于删除模型中的末端负载。
 
-后续替换其他末端工具时，在 `end_effectors/` 下提供对应控制分支和设备适配，避免修改六轴控制算法；首轮只实现现有夹爪，不预先构建通用插件框架。
+后续替换其他末端工具时，提供对应控制模块和设备适配，避免修改六轴控制算法；首轮只实现现有夹爪，不预先构建通用插件框架。
 
 ### 依赖和数据流
 
@@ -84,10 +71,10 @@ flowchart TD
     H --> F[已校验反馈快照]
     F --> T
     F --> P[ROS 状态发布]
-    T --> EA[execution/arm：推进机械臂目标]
-    T --> EE[execution/end_effectors：推进末端执行器目标]
-    EA --> CA[control/arm：六轴控制算法]
-    EE --> CE[control/end_effectors/gripper：夹爪控制算法]
+    T --> EA[机械臂执行：推进机械臂目标]
+    T --> EE[末端执行器执行：推进末端执行器目标]
+    EA --> CA[六轴控制：六轴控制算法]
+    EE --> CE[夹爪控制：夹爪控制算法]
     CA --> S[safety：按资源检查并汇总命令]
     CE --> S
     S --> H
@@ -150,19 +137,19 @@ flowchart TD
 | --- | --- | --- |
 | `actuator/arm.py` 的 `JointCfg/load_cfg`；`actuator/gripper.py` 的 `GripperCfg/load_cfg` | `rebotarmcontroller/configuration.py` | 保留数值、单位、六轴顺序及显式覆盖；仅接纳 damiao；内存覆盖 channel，校验夹爪共享通道；解析不导入 MotorBridge、不打开设备 |
 | SDK `config/arm.yaml`、`config/gripper.yaml` | `src/rebotarmcontroller/config/arm.yaml`、`gripper.yaml` | 纳入本包安装资源；默认路径从 SDK 目录改为本包 share，保留显式 YAML 路径和 channel 覆盖；迁入时核对数值，不同时调参 |
-| `RobotArm` 的控制器创建、设备注册、句柄及总线映射 | `rebotarmcontroller/hardware/sdk_driver.py` → `SdkMotorDriver` | 仅适配 damiao；直接使用带序号补丁的 MotorBridge，按物理 channel 管理唯一控制器；夹爪共享句柄所有者；不包装 `RobotArm` 或模仿其私有成员 |
-| `RobotArm` 的反馈请求/轮询、状态与 MIT/POS_VEL/VEL 设备操作 | 驱动提供原始操作；`runtime/feedback_acquisition.py`、`feedback_store.py` 接管采集和缓存；`safety/feedback.py` 接管可用性 | 保留本地序号验证、首帧、年龄、原因分类与新帧恢复；不迁入缺样本补零、吞掉发送异常等宽松语义 |
-| `RobotArm` 的模式、寄存器、使能/失能、置零及关闭 | 底层操作归 `hardware/sdk_driver.py`；流程与确认归 `runtime/lifecycle.py` | 纳入寄存器 25～28 的 POS_VEL 参数写入、模式确认、反馈验证与资源释放；逐电机返回结果，保留严格置零及使能回滚 |
-| `RobotArm.start_control_loop/stop_control_loop` 与循环存活状态 | `rebotarmcontroller/runtime/controller_runtime.py` | 批次 2 与驱动一起替换最小周期线程；有界停止并确认退出，不使用 `Thread._stop()`；完整队列与仲裁在批次 6 接入 |
-| `ArmEndPos._loop_cb`、位置目标和速度上限 | `rebotarmcontroller/control/arm/position.py` | 批次 2 接管最小位置输出，只生成 POS_VEL 命令，发送归驱动；不保留 SDK 控制对象或另一份公开可写目标 |
-| `ArmEndPos` 的轨迹列表、送点、停止与运行状态 | `rebotarmcontroller/execution/arm.py` 与运行时 | 批次 2 接管最小目标/轨迹游标，停止 SDK 送点线程；后续补全执行器。用窄接口替代 `_q_target/_moving/_stop_send/_traj/_traj_idx`，取消后旧目标失效 |
-| `ArmEndPos._home_vel/_dt/_n/_vlim_override` 及本地 `safe_home` | 静态参数归 `configuration.py`；任务覆盖归 `execution/arm.py`，位置算法消费有效上限 | 保留 0.3 rad/s 回位上限、20 ms 到位轮询与六轴维度；速度覆盖在任务结束/取消时清除，不与普通目标共享可变缓存；20 ms 不是硬件循环频率 |
-| `kinematics/robot_model.py` 的模型加载/末端帧；`forward_kinematics.py` 的 FK | 控制器薄适配 `models/kinematics.py`；运动包薄适配 `kinematics/model.py`、`forward.py` | 两处均直接调用 Pinocchio，读取同一规范 URDF，不互相导入实现或复制 IK 算法；模型与运行数据各自持有，输出普通数值 |
+| `RobotArm` 的控制器创建、设备注册、句柄及总线映射 | `rebotarmcontroller/sdk_driver.py` → `SdkMotorDriver` | 仅适配 damiao；直接使用带序号补丁的 MotorBridge，按物理 channel 管理唯一控制器；夹爪共享句柄所有者；不包装 `RobotArm` 或模仿其私有成员 |
+| `RobotArm` 的反馈请求/轮询、状态与 MIT/POS_VEL/VEL 设备操作 | 驱动提供原始操作；`feedback_acquisition.py`、`feedback_store.py` 接管采集和缓存；`feedback_safety.py` 接管可用性 | 保留本地序号验证、首帧、年龄、原因分类与新帧恢复；不迁入缺样本补零、吞掉发送异常等宽松语义 |
+| `RobotArm` 的模式、寄存器、使能/失能、置零及关闭 | 底层操作归 `sdk_driver.py`；流程与确认归 `lifecycle.py` | 纳入寄存器 25～28 的 POS_VEL 参数写入、模式确认、反馈验证与资源释放；逐电机返回结果，保留严格置零及使能回滚 |
+| `RobotArm.start_control_loop/stop_control_loop` 与循环存活状态 | `rebotarmcontroller/controller_runtime.py` | 批次 2 与驱动一起替换最小周期线程；有界停止并确认退出，不使用 `Thread._stop()`；完整队列与仲裁在批次 6 接入 |
+| `ArmEndPos._loop_cb`、位置目标和速度上限 | `rebotarmcontroller/arm_position_control.py` | 批次 2 接管最小位置输出，只生成 POS_VEL 命令，发送归驱动；不保留 SDK 控制对象或另一份公开可写目标 |
+| `ArmEndPos` 的轨迹列表、送点、停止与运行状态 | `rebotarmcontroller/arm_execution.py` 与运行时 | 批次 2 接管最小目标/轨迹游标，停止 SDK 送点线程；后续补全执行器。用窄接口替代 `_q_target/_moving/_stop_send/_traj/_traj_idx`，取消后旧目标失效 |
+| `ArmEndPos._home_vel/_dt/_n/_vlim_override` 及本地 `safe_home` | 静态参数归 `configuration.py`；任务覆盖归 `arm_execution.py`，位置算法消费有效上限 | 保留 0.3 rad/s 回位上限、20 ms 到位轮询与六轴维度；速度覆盖在任务结束/取消时清除，不与普通目标共享可变缓存；20 ms 不是硬件循环频率 |
+| `kinematics/robot_model.py` 的模型加载/末端帧；`forward_kinematics.py` 的 FK | 控制器薄适配 `controller_kinematics.py`；运动包薄适配 `kinematics/model.py`、`forward.py` | 两处均直接调用 Pinocchio，读取同一规范 URDF，不互相导入实现或复制 IK 算法；模型与运行数据各自持有，输出普通数值 |
 | `inverse_kinematics.py` 的 `pos_rot_to_se3/solve_ik/solve_ik_with_retry`、所需参数与结果类型 | `rebotarm_motion/kinematics/inverse.py`，接入现有 `pose_preview_solver.py` | 保留现用迭代、阻尼、回溯与重试策略的对照样本；测试可注入随机源；不可达不产生执行目标，求解成功仍需运动校验 |
 | `trajectory/sampler.py` 的现用 SE(3) 路径采样与最小 jerk 时间剖面；`clik_tracker.py` 的 CLIK 跟踪及内部限位辅助 | `rebotarm_motion/cartesian_trajectory.py` | 承接 `ArmEndPos.move_to_traj` 的纯计算部分，保留当前 20 ms 采样参数和逐点求解结果；未使用的线性/梯形剖面不作为迁入要求；输出经校验的关节轨迹，由控制器执行，不携带硬件句柄或发送线程 |
 | `ArmEndPos.move_to_ik/move_to_traj` 的入口协调 | 运动包 `pose_compat_node.py` | 保留旧服务/Action 名称与类型，经运动校验、重定时后走 FJT；明确下文成功、容差与取消语义变化；bringup 切换唯一服务端，控制器不反向导入运动实现 |
 
-控制器目标目录在既定结构上增加 `models/kinematics.py`，只承载反馈位姿查询需要的薄 FK 适配；其余模型/动力学继续复用现有 `gravity_control.py`，不导入 SDK 的 `dynamics/`。运动包增加如下纯计算边界：
+控制器的 `controller_kinematics.py` 只承载反馈位姿查询需要的薄 FK 适配；其余模型/动力学继续复用现有 `gravity_control.py`，不导入 SDK 的 `dynamics/`。运动包增加如下纯计算边界：
 
 ```text
 rebotarm_motion/
@@ -264,54 +251,44 @@ ABI 探测是批次 0～1 的必做项，用来确定 Python `SdkMotorDriver` �
 
 ### 文件与组件归属
 
-下面为文件与组件归属；新增路径尚未创建，省略 `__init__.py`。夹爪先以一个算法文件承载位置、闭合和保持计算，实际复杂度增加后再细分。
+下面按包根目录的文件列出组件归属。已存在和拟议模块一起列出；后续按职责增加文件，不建立控制器内部职责子目录。
 
 ```text
 rebotarmcontroller/
-├── hardware_manager.py                     # 现有 API 的兼容门面
-├── configuration.py                        # 参数、范围、资源路径与覆盖规则
-├── contracts/
-│   └── models.py                           # 值类型、请求、结果、故障与接口协议
-├── compat/
-│   └── legacy_backend.py                   # 临时集中旧 SDK 访问，批次 6 删除
-├── hardware/
-│   └── sdk_driver.py                       # 直接适配 MotorBridge 的电机/总线收发
-├── models/
-│   └── kinematics.py                       # 规范模型的 FK 薄适配，不含 IK/规划
-├── runtime/
-│   ├── feedback_acquisition.py             # 请求序号基线、应答窗口、刷新调度
-│   ├── feedback_store.py                   # 缓存样本与当前采集错误
-│   ├── lifecycle.py                        # 连接/使能/模式/置零的迁移状态
-│   └── controller_runtime.py               # 调度、请求仲裁、计算与实际写入协调
-├── safety/
-│   ├── feedback.py                        # 可用性、坐标及状态校验规则
-│   └── command_guard.py                   # 命令准入、最终约束与保护决策
-├── control/
-│   ├── arm/
-│   │   ├── position.py                    # 六轴位置跟踪与保持输出
-│   │   └── gravity_compensation.py        # 拖动跟随、积分与重力补偿输出
-│   └── end_effectors/gripper/
-│       └── control.py                     # 斜坡、堵转判定及 MIT 输出计算
-├── execution/
-│   ├── arm.py                             # 轨迹、停靠、停止保持与结果
-│   └── gripper.py                         # 位置/抓取/保持/释放与结果
-├── gravity_control.py                     # 复用现有纯计算与模型工具
-├── ros_actions.py                         # Action 协议映射，不推进执行循环
-├── ros_services.py                        # Service 适配；位姿入口迁出
-├── ros_publishers.py                      # 从不可变快照发布
-├── motor_passthrough.py                   # 命令转换与仲裁请求，不直接写电机
-├── conversions.py                         # ROS 与核心值类型转换
-└── rebotarm_controller.py                  # 创建组件、注入依赖、协调启停
+├── hardware_manager.py        # 现有 API 的兼容门面
+├── configuration.py           # 参数、范围与资源路径
+├── controller_contracts.py    # 值类型、请求、结果与故障
+├── legacy_backend.py          # 临时 SDK 纯计算桥，批次 6 删除
+├── sdk_driver.py              # MotorBridge 设备与总线收发
+├── controller_kinematics.py   # 规范模型的 FK 薄适配
+├── controller_runtime.py      # 调度及后续请求仲裁
+├── feedback_acquisition.py    # 拟议：反馈请求与采集调度
+├── feedback_store.py          # 拟议：反馈缓存与采集错误
+├── lifecycle.py               # 拟议：连接、使能与模式状态
+├── feedback_safety.py         # 拟议：反馈可用性检查
+├── command_guard.py           # 拟议：命令准入与保护决策
+├── arm_position_control.py    # 六轴位置命令
+├── arm_gravity_control.py     # 拟议：重力补偿控制与内部状态
+├── arm_execution.py           # 六轴目标与轨迹执行
+├── gripper_control.py         # 拟议：夹爪控制算法
+├── gripper_execution.py       # 拟议：夹爪执行状态
+├── gravity_control.py         # 重力补偿与模型工具
+├── ros_actions.py             # Action 协议映射
+├── ros_services.py            # Service 适配
+├── ros_publishers.py          # 状态发布
+├── motor_passthrough.py       # 低层透传与仲裁入口
+├── conversions.py             # 消息与核心值类型转换
+└── rebotarm_controller.py     # 装配及启停协调
 ```
 
-包级 `config/arm.yaml`、`gripper.yaml`、现有 `gravity_compensation.yaml` 随本包安装；`setup.py/package.xml` 同步声明子包、资源和实际依赖。目录结构服务于状态归属；不使用 mixin 继承切割大类，不给每个组件传入完整 manager，也不以共享字典代替明确接口。
+包级配置资源仍随本包安装；各组件独立持有状态，不使用 mixin 拆类，也不将完整 manager 或共享字典作为组件接口。
 
 | 当前方法或状态 | 拆分后的所有者 | 保留在门面的能力 |
 | --- | --- | --- |
 | `default_*_cfg`、SDK 路径查找、`_arm_cfg_with_channel`、构造参数校验 | `configuration.py` 负责配置；默认 YAML 迁入本包，以内存覆盖替代临时文件；完成迁移后删除 SDK 路径注入 | 接受现有构造参数，保留显式路径覆盖；不顺带统一不同入口的默认值 |
 | `init_gripper` 的设备注册、`_patch_*_bus*`、`_wrap_motor_bus`、实际 send/enable/disable/mode/zero 调用 | `SdkMotorDriver` | 提交设备操作；不向外返回可写的 SDK 对象 |
 | `_refresh_feedback_batch`、`_force_feedback_refresh`、`_inspect_pending_feedback`、接收序号基线与 deadline | `FeedbackAcquisition`，由运行时调用驱动 | `refresh_feedback_if_due()` 过渡转发，后续发布端只取快照 |
-| `_verified_feedback_by_label`、采集错误、观测时间、`get_cached_*`、`get_feedback_status` | `FeedbackStore` 持有数据；`safety/feedback.py` 提供只读判断 | 返回现有数值/状态/原因和一致快照 |
+| `_verified_feedback_by_label`、采集错误、观测时间、`get_cached_*`、`get_feedback_status` | `FeedbackStore` 持有数据；`feedback_safety.py` 提供只读判断 | 返回现有数值/状态/原因和一致快照 |
 | `connect/enable/disable/set_mode/set_zero/shutdown`、回滚、生命周期字段与置零失败标志 | `LifecycleController` 持有迁移及验证状态；运行时执行设备操作 | 保留公共方法及结果语义；同步等待发生在调用侧 |
 | `hold_current_position/stop_active_motion/safe_home`、速度覆盖及轨迹状态 | `ArmExecution`；回位参数和六轴维度归配置，保持输出归 `ArmPositionControl` | 委托六轴执行，停止结果以实际保持确认为准 |
 | `_gravity_comp_tick`、`_gravity_comp_*`、`_gc_*` | 模型与积分/跟随状态归 `ArmGravityControl`；模式交接归生命周期；时序诊断归运行时 | 启停、目标及诊断查询 |
@@ -340,7 +317,7 @@ rebotarmcontroller/
 
 ### 必须一并收口的现有调用
 
-- **批次 1 的过渡边界**：将 manager、ROS 适配和透传中的全部 `_arm._*`、`_endpos_ctrl._*` 访问收进 `compat/legacy_backend.py`，提供设备操作、目标/轨迹接纳、停止与快照等窄接口。适配器在旧路径阶段封装旧对象，不拥有第二份反馈/任务状态；批次 2 后转给本地组件，不给新驱动伪造 `_motor_map/_ctrl_map/_joints/_rate/_running/_ctrl_thread` 等 SDK 私有结构。
+- **批次 1 的过渡边界**：将 manager、ROS 适配和透传中的全部 `_arm._*`、`_endpos_ctrl._*` 访问收进 `legacy_backend.py`，提供设备操作、目标/轨迹接纳、停止与快照等窄接口。适配器在旧路径阶段封装旧对象，不拥有第二份反馈/任务状态；批次 2 后转给本地组件，不给新驱动伪造 `_motor_map/_ctrl_map/_joints/_rate/_running/_ctrl_thread` 等 SDK 私有结构。
 - `ros_actions.py`：用执行接口替代对 `_q_target/_moving/_stop_send/_traj/_traj_idx` 的读写。轨迹时间推进、超时及停止保持由 `ArmExecution` 负责；Action 回调负责目标接纳、反馈和终态映射。
 - `motor_passthrough.py`：将 reject/preempt 变成运行时的原子仲裁请求；停止旧目标并确认代次变化后才接纳透传。夹爪透传同样参与夹爪资源仲裁，不能绕过执行器继续写电机。
 - `ros_publishers.py`：读取成套快照及观测时间；发布回调最终不发起总线刷新。失能期间的采集由运行时承接，连接流程仍按现有模式处理，不能将此视为严格只读连接已经实现。
@@ -371,7 +348,7 @@ rebotarmcontroller/
 - 固定当前工作区差异、参数来源、公共接口与行为测试基线，记录待迁移的 SDK 访问和线程。
 - 完成 ABI 前置探测、许可核查及全部 SDK 私有访问的临时适配收口；没有接口映射的 ABI 缺口不得留到驱动已替换后再处理。
 - 在 `configuration.py` 提取现有参数及范围校验、SDK 已用配置类型和加载器、配置资源定位与路径覆盖；把 `arm.yaml/gripper.yaml` 安装到本包 share。设备装载与总线细节留待设备适配批次。
-- 在 `contracts/models.py` 定义并接入当前实际使用的反馈及错误值类型，边界只传递复制后的数值；目标、命令及执行结果随对应组件迁移时补齐。
+- 在 `controller_contracts.py` 定义并接入当前实际使用的反馈及错误值类型，边界只传递复制后的数值；目标、命令及执行结果随对应组件迁移时补齐。
 - `hardware_manager.py` 转用这些配置与类型并维持公共入口；新增子包随现有打包规则安装。通过既有反馈、安全及参数行为回归后，再推进设备和反馈组件提取。
 
 批次 2 起使用本地最小周期线程，不能再暂用挂在 `RobotArm` 上的 SDK 调度。批次 2～5 通过窄适配入口及现有串行锁协调尚未队列化的生命周期/透传调用，明确这仍不是最终单线程设备调度；不得另开控制器、送点线程或绕过统一驱动。批次 6 再把使能、模式、置零和透传全部纳入运行时请求通道，不能仅普通运动命令入队就宣称统一写入。

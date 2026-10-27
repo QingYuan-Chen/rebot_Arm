@@ -14,11 +14,11 @@
 
 `rebotarmcontroller` 负责真实硬件通信和最后一道安全防线。
 
-包内 `configuration.py` 拥有配置解析与校验，`contracts/models.py` 只含复制后的不可变数值。
-`hardware/sdk_driver.py` 直接通过 MotorBridge 管理唯一总线与七个电机句柄；
-`runtime/controller_runtime.py` 拥有最小周期线程，`execution/arm.py` 持有目标和轨迹游标，
-`control/arm/position.py` 生成位置命令，`models/kinematics.py` 以规范模型计算 FK。
-ROS 通过 manager 的目标、取消和进度接口交互。临时 `compat/legacy_backend.py` 只桥接
+包内 `configuration.py` 拥有配置解析与校验，`controller_contracts.py` 只含复制后的不可变数值。
+`sdk_driver.py` 直接通过 MotorBridge 管理唯一总线与七个电机句柄；
+`controller_runtime.py` 拥有最小周期线程，`arm_execution.py` 持有目标和轨迹游标，
+`arm_position_control.py` 生成位置命令，`controller_kinematics.py` 以规范模型计算 FK。
+ROS 通过 manager 的目标、取消和进度接口交互。临时 `legacy_backend.py` 只桥接
 SDK 纯 IK/路径计算，没有设备或发送线程；最终计算归 motion，接口经 FJT 执行。
 反馈、夹爪与生命周期保护暂留 manager，完整运行时请求队列尚未接入；后续归属见
 [拆分规划](../design/controller_refactor_plan.md)。

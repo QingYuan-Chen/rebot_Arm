@@ -1,11 +1,11 @@
-"""Minimal arm target and timed cursor; owns no device or sender thread."""
+"""机械臂目标与定时轨迹游标，不持有设备或发送线程。"""
 from __future__ import annotations
 from dataclasses import dataclass
 import math
 import threading
 import time
 import numpy as np
-from ..gravity_control import vector, POSITION_LIMITS
+from .gravity_control import vector, POSITION_LIMITS
 
 @dataclass(frozen=True)
 class ArmTarget:
@@ -55,6 +55,7 @@ class ArmExecution:
 
     def cancel(self):
         with self.lock:
+            # 代次变化使取消前产生的轨迹和待发送快照失效。
             self._generation += 1
             self._points = self._times = ()
             self._cursor = 0
@@ -86,6 +87,7 @@ class ArmExecution:
 
     def acknowledge(self, target):
         with self.lock:
+            # 只有当前代次的命令成功发送后才能推进游标。
             if target.generation!=self._generation: return
             self._cursor = target.cursor
             if self._points and self._cursor==len(self._points): self.moving = False

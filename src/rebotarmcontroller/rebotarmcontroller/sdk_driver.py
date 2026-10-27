@@ -1,16 +1,15 @@
-"""Project-owned damiao adapter over MotorBridge's opaque handle API.
+"""基于 MotorBridge 不透明句柄接口的项目内达妙驱动。
 
-Construction is pure. One Controller owns all seven Motor handles. Command
-operations serialize separately from bus transactions, so feedback can proceed
-during mode settling. This is not the final runtime request queue (batch 6).
-No legacy RobotArm structures.
+构造时不打开设备；一个 Controller 持有七个电机句柄。命令操作与
+总线事务分别串行化，使反馈能在模式稳定等待期间继续采集。完整
+运行时请求队列留到批次 6；此处不依赖旧 RobotArm 内部结构。
 """
 from __future__ import annotations
 import threading
 import time
 import numpy as np
-from ..contracts.models import CommandReceipt, MotorFeedback
-from ..gravity_control import vector, POSITION_LIMITS
+from .controller_contracts import CommandReceipt, MotorFeedback
+from .gravity_control import vector, POSITION_LIMITS
 
 class CommandTransportError(RuntimeError):
     def __init__(self, receipt):
@@ -18,7 +17,7 @@ class CommandTransportError(RuntimeError):
         super().__init__(f"{receipt.failed}: {receipt.detail}; sent={receipt.sent}; not_attempted={receipt.not_attempted}")
 
 class MotorPort:
-    """One owned motor handle. All methods fail after release."""
+    """一个受管理的电机句柄；释放后所有操作均失败。"""
     def __init__(self, name, handle, bus_lock):
         self.name, self._handle, self._lock = name, handle, bus_lock
         self._closed = False
@@ -83,8 +82,8 @@ class SdkMotorDriver:
         self.config = config
         self._factory = controller_factory
         self._sleep = sleep
-        # Always acquire command ownership before the bus. Feedback uses only
-        # the bus lock and must remain available during long settling delays.
+        # 始终先取得命令锁再取得总线锁。反馈只使用总线锁，
+        # 因此较长的稳定等待期间仍能采集反馈。
         self._command_lock = threading.RLock()
         self.bus_lock = threading.RLock()
         self._bus = None
@@ -126,6 +125,7 @@ class SdkMotorDriver:
         return [(self._bus, [(j.name, self.motor(j.name)) for j in self.config.joints])]
 
     def _confirm_status(self, names, expected, retries=None, interval=None):
+        # 状态码必须来自基线之后的新反馈，不能用旧缓存确认使能或失能。
         timing = self.config.timing
         retries = timing.status_retries if retries is None else retries
         interval = timing.status_interval if interval is None else interval
@@ -145,11 +145,11 @@ class SdkMotorDriver:
         raise RuntimeError(f'fresh status_code={expected} not confirmed: {sorted(pending)}')
 
     def _set_enabled(self, enabled):
-        # Driver disable never stops or joins a control thread.
+        # 驱动失能不负责停止或等待控制线程。
         with self._command_lock:
             if not self.connected: raise RuntimeError('hardware is not connected')
-            # The port locks the actual write. Keep command ownership across
-            # confirmation, but leave the bus available between transactions.
+            # 端口只在实际写入时持有总线锁；确认期间保留命令锁，
+            # 并在各次总线事务之间允许反馈采集。
             (self._bus.enable_all if enabled else self._bus.disable_all)()
             self._sleep(self.config.timing.command_motor_delay)
             self._confirm_status(tuple(j.name for j in self.config.joints), int(enabled))
@@ -229,7 +229,7 @@ class SdkMotorDriver:
         errors = []
         with self._command_lock, self.bus_lock:
             if self._bus is None: return
-            # Every Motor is freed before the Controller. Attempt all release paths.
+            # 先释放所有电机句柄再释放控制器；逐项尝试全部清理步骤。
             for name,motor in tuple(self._motors.items()):
                 try: motor.close()
                 except Exception as exc: errors.append(f'{name} free: {exc}')

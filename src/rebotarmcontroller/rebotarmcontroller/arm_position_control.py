@@ -1,5 +1,5 @@
-"""Pure position output; only the driver performs device I/O."""
-from ...contracts.models import PositionCommand
+"""生成位置命令；设备读写由驱动负责。"""
+from .controller_contracts import PositionCommand
 
 class ArmPositionControl:
     def __init__(self, velocity_limits):

@@ -1,6 +1,6 @@
-"""Canonical six-axis model adapter returning numeric FK values only."""
+"""规范六轴模型的正运动学适配，只返回数值。"""
 import numpy as np
-from ..gravity_control import JOINT_NAMES, vector
+from .gravity_control import JOINT_NAMES, vector
 
 class ArmKinematics:
     def __init__(self, model):

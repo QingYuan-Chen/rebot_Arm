@@ -1,4 +1,4 @@
-"""Component boundaries exercised without a ROS node or physical devices."""
+"""不启动 ROS 节点或连接设备，验证组件边界。"""
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,9 +7,9 @@ import pytest
 import yaml
 
 from rebotarmcontroller.configuration import HardwareSettings, load_configuration, default_config
-from rebotarmcontroller.contracts.models import MotorFeedback
+from rebotarmcontroller.controller_contracts import MotorFeedback
 
-# Identical inputs for legacy/canonical FK comparison when switching in batch 2.
+# 批次 2 切换时，用相同输入对照旧模型和规范模型的正运动学结果。
 FK_SAMPLES = ((0.,0.,0.,0.,0.,0.), (0.,0.,-.017453292519943295,0.,0.,0.),
               (.2,-.8,-1.1,.3,-.2,.4), (-.4,-1.4,-.5,-.5,.5,-.8))
 
@@ -62,7 +62,7 @@ def test_manager_and_ros_have_no_legacy_private_access():
 
 
 def test_omitted_gripper_gains_keep_legacy_loader_defaults(tmp_path):
-    # The installed full YAML overrides MIT to 8/1; omission keeps the old 18/2 fallback.
+    # 完整 YAML 将 MIT 参数覆盖为 8/1；缺省时保留旧的 18/2 回退值。
     grip=yaml.safe_load(default_config('gripper').read_text())
     grip['gripper'][0].pop('MIT')
     grip['gripper'][0].pop('POS_VEL')

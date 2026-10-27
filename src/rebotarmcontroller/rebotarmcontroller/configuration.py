@@ -1,7 +1,7 @@
-"""Validated controller configuration; parsing never opens a device.
+"""控制器配置及校验；解析配置不会打开设备。
 
-Safety gains and timing are project baselines. Changes require review and a
-separate hardware check; MIT defaults are not gravity-controller gains.
+安全增益和时序沿用项目基线，修改须经过评审和单独实机检查；
+MIT 默认值不等同于重力补偿控制器的增益。
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -121,7 +121,7 @@ def _motor(item, *, gripper=False):
             if not math.isfinite(value) or value<0 or (key=='vlim' and value==0):
                 raise ValueError(f"{name}: invalid safety parameter {key}")
             values[key]=value
-    # Preserve reviewed defaults (including J1..3 kd=8); gravity MIT has its own bounds.
+    # 保留已评审默认值（包括 J1～J3 的 kd=8）；重力补偿 MIT 有独立约束。
     return MotorConfig(name,*ids,model,vendor,**values)
 
 def load_configuration(arm_path=None,gripper_path=None,channel='') -> ControllerConfig:

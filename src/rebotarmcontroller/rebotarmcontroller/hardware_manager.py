@@ -37,11 +37,11 @@ from typing import Optional, Sequence
 import numpy as np
 
 from .configuration import HardwareSettings, default_config, load_configuration
-from .contracts.models import (MotorFeedback, VerifiedFeedbackSample as _VerifiedFeedbackSample,
+from .controller_contracts import (MotorFeedback, VerifiedFeedbackSample as _VerifiedFeedbackSample,
                                CachedMotorFeedback as _CachedMotorFeedback)
-from .models.kinematics import ArmKinematics
-from .runtime.controller_runtime import ControllerRuntime
-from .hardware.sdk_driver import CommandTransportError
+from .controller_kinematics import ArmKinematics
+from .controller_runtime import ControllerRuntime
+from .sdk_driver import CommandTransportError
 from .conversions import fk_to_pose
 from .gravity_control import (GravitySettings, LoopTiming, bounded_mit_command,
                               load_gravity_model, package_file, vector)

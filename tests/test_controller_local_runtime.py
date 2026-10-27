@@ -1,4 +1,4 @@
-"""Local driver/runtime acceptance with fake handles and POSIX virtual serial."""
+"""使用假句柄和 POSIX 虚拟串口验证本地驱动与运行时。"""
 from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
@@ -12,11 +12,11 @@ import numpy as np
 import pytest
 
 from rebotarmcontroller.configuration import load_configuration
-from rebotarmcontroller.contracts.models import PositionCommand
-from rebotarmcontroller.hardware.sdk_driver import SdkMotorDriver, CommandTransportError
-from rebotarmcontroller.execution.arm import ArmExecution
-from rebotarmcontroller.control.arm.position import ArmPositionControl
-from rebotarmcontroller.runtime.controller_runtime import ControllerRuntime
+from rebotarmcontroller.controller_contracts import PositionCommand
+from rebotarmcontroller.sdk_driver import SdkMotorDriver, CommandTransportError
+from rebotarmcontroller.arm_execution import ArmExecution
+from rebotarmcontroller.arm_position_control import ArmPositionControl
+from rebotarmcontroller.controller_runtime import ControllerRuntime
 from rebotarmcontroller.hardware_manager import HardwareManager
 
 
@@ -161,7 +161,7 @@ def test_register_failure_aborts_mode_and_enable_path(monkeypatch):
 
 @pytest.mark.parametrize("mode", ["mit", "vel", "pos_vel"])
 def test_disabled_mode_settle_allows_new_verified_feedback(monkeypatch, mode):
-    """A slow mode operation must not starve the shared feedback cache."""
+    """缓慢的模式操作不能阻塞共享反馈缓存。"""
     manager, _ = make_local_manager(monkeypatch)
     manager.connect()
     driver = manager._backend.driver
@@ -175,8 +175,7 @@ def test_disabled_mode_settle_allows_new_verified_feedback(monkeypatch, mode):
         def acquire_feedback():
             try:
                 manager.refresh_feedback_if_due(force=True)
-                # The ROS publisher reads this snapshot before releasing its
-                # publication lock; blocking here also prevents future refresh.
+                # ROS 发布器在释放发布锁前读取该快照；此处阻塞也会阻碍后续刷新。
                 assert manager.get_cached_joint_sample()[3] == [0] * 6
                 assert manager.get_cached_gripper_sample()[3] == 0
                 assert manager.get_feedback_status() == ([0] * 6, [])
@@ -568,7 +567,7 @@ def test_mode_failure_is_protective_and_motion_gate_stays_closed(monkeypatch):
 
 def test_pure_math_uses_canonical_model_and_cancelled_plan_cannot_submit(monkeypatch):
     import pinocchio as pin
-    from rebotarmcontroller.compat import legacy_backend
+    from rebotarmcontroller import legacy_backend
     manager,_=make_local_manager(monkeypatch);manager.connect()
     runtime=manager._backend
     q=np.array((.2,-.8,-1.1,.3,-.2,.4))
@@ -593,7 +592,7 @@ def test_pure_math_uses_canonical_model_and_cancelled_plan_cannot_submit(monkeyp
 def test_pose_action_does_not_report_success_after_writer_stops(monkeypatch,ready):
     from geometry_msgs.msg import Pose
     from rebotarmcontroller import ros_actions
-    # Keep this adapter unit independent of other tests' deliberately minimal ROS stubs.
+    # 此适配器测试不依赖其他测试刻意精简的 ROS 桩对象。
     monkeypatch.setattr(ros_actions,'MoveToPose',SimpleNamespace(
         Result=lambda:SimpleNamespace(success=False,message='',final_pose=Pose()),
         Feedback=lambda:SimpleNamespace(current_pose=Pose(),progress=0.,time_elapsed=0.)))

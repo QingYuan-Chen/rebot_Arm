@@ -83,12 +83,12 @@ ROS 发布使用原子快照：数值、状态码、接收序号和反馈观测�
 不可变数值，MotorBridge 状态对象后续改变不会修改已验证样本。重连清除旧连接的
 序号、请求和反馈缓存，并取消旧夹爪任务；必须重新收到可信首帧及显式使能。
 
-`hardware/sdk_driver.py` 直接接 MotorBridge；`connect()` 才打开唯一 Controller，
+`sdk_driver.py` 直接接 MotorBridge；`connect()` 才打开唯一 Controller，
 一起注册六轴与夹爪七个句柄，关闭时逐个释放 Motor，再释放 Controller。
-`runtime/controller_runtime.py` 以 Event 协作停止、有界 join 确认旧线程退出，
+`controller_runtime.py` 以 Event 协作停止、有界 join 确认旧线程退出，
 禁止 self-join 和第二写入者；不使用 `Thread._stop()`。低层 disable 本身不 join。
-目标、速度覆盖及轨迹游标由 `execution/arm.py` 持有，位置输出由
-`control/arm/position.py` 生成。没有 SDK 控制循环或额外送点线程。
+目标、速度覆盖及轨迹游标由 `arm_execution.py` 持有，位置输出由
+`arm_position_control.py` 生成。没有 SDK 控制循环或额外送点线程。
 生命周期入口仍由 manager 生命周期锁协调；驱动的命令操作锁串行化模式切换、
 六轴命令批次及设备启停/释放，夹爪及保护性失能直接使用总线锁。模式切换的寄存器稳定、
 逐电机稳定及最终稳定等待均不占总线锁，反馈可在等待期间继续请求和读取；
@@ -98,7 +98,7 @@ ROS 发布使用原子快照：数值、状态码、接收序号和反馈观测�
 这仍是同步调用的串行协调，完整请求队列/仲裁归批次 6。
 反馈、夹爪算法及重力保护暂留 manager，归后续批次分别提取。
 
-`compat/legacy_backend.py` 现在仅桥接 SDK 纯 IK/路径函数，接收规范模型及数值，
+`legacy_backend.py` 现在仅桥接 SDK 纯 IK/路径函数，接收规范模型及数值，
 返回关节数组/时间，不持有设备、目标或线程。配置临时文件桥、`RobotArm/ArmEndPos`
 构造和 SDK 私有成员访问已从生产控制路径删除。旧 IK 单目标和位姿 Action 的
 “送完点”完成语义暂保留；批次 6 才切换到 motion/FJT 及收敛检查。
@@ -111,7 +111,7 @@ ROS 发布使用原子快照：数值、状态码、接收序号和反馈观测�
 须先显式失能并验证，再重新使能。关闭失败也保留未知状态及错误，不假报已失能。
 健康的目标校验/规划失败在写入前拒绝，保留当前位置保持。
 
-`models/kinematics.py` 使用规范六轴约化模型提供纯数值 FK；ROS Pose 转换保留在门面。
+`controller_kinematics.py` 使用规范六轴约化模型提供纯数值 FK；ROS Pose 转换保留在门面。
 `python3 scripts/check_controller_fk.py` 可复现相同输入对照：四组输入的位置差均为
 0 m，姿态差最大 2.29e-16 rad，属于数值舍入；本次未发现可观测的发布数值漂移。
 规范 `joint3` 命名和 J2/J3 `+0.02 rad` 限位保持不变。

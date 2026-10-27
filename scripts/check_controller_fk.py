@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare legacy and canonical FK at identical joint inputs; no device objects."""
+"""用相同关节输入比较旧模型与规范模型的正运动学，不创建设备对象。"""
 from pathlib import Path
 import json
 import sys
@@ -8,7 +8,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src/rebotarmcontroller'))
 from rebotarmcontroller.gravity_control import load_gravity_model, GravitySettings
-from rebotarmcontroller.models.kinematics import ArmKinematics
+from rebotarmcontroller.controller_kinematics import ArmKinematics
 
 SAMPLES = ((0.,0.,0.,0.,0.,0.), (0.,0.,-.017453292519943295,0.,0.,0.),
            (.2,-.8,-1.1,.3,-.2,.4), (-.4,-1.4,-.5,-.5,.5,-.8))

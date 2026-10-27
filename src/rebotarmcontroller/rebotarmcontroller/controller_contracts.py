@@ -1,4 +1,4 @@
-"""Copied numeric values across controller component boundaries (no ROS/SDK objects)."""
+"""控制器组件之间传递的数值副本，不包含 ROS 或 SDK 对象。"""
 from dataclasses import dataclass
 
 @dataclass(frozen=True)
@@ -14,6 +14,7 @@ class MotorFeedback:
 
 @dataclass(frozen=True)
 class VerifiedFeedbackSample:
+    """保存验证后的反馈、对应序号和本机单调时钟观测时间。"""
     state: MotorFeedback
     sequence: int
     observed_at: float
@@ -32,6 +33,7 @@ class CachedMotorFeedback:
 
 @dataclass(frozen=True)
 class CommandReceipt:
+    """记录已发送、失败及未尝试的电机，供调用方处理部分失败。"""
     sent: tuple[str, ...]
     failed: str | None = None
     not_attempted: tuple[str, ...] = ()

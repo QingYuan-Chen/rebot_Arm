@@ -1,7 +1,7 @@
-"""Temporary pure-math bridge; move IK/path ownership to motion in batch 6.
+"""临时纯计算桥接；批次 6 将逆运动学和路径生成迁入运动包。
 
-No device handles, execution state or threads. SDK source is imported in place,
-not copied while its complete license text is unavailable.
+此模块不持有设备句柄、执行状态或线程。完整许可文本尚未取得，
+直接从原目录导入 SDK，暂不复制其源码。
 """
 from pathlib import Path
 import sys
@@ -46,5 +46,5 @@ def plan_pose_path(kinematics,q,pose,duration,dt):
     joints = track_trajectory(kinematics.model,kinematics.frame_id,path.trajectory,np.array(q,copy=True),
                              IKParams(max_iter=200,tolerance=1e-4,damping=1e-6,step_size=.8),null_gain=.1)
     if not joints or not all(p.ik_success for p in joints): return None
-    # Keep the legacy sender's duration / count schedule; the runtime advances it.
+    # 沿用旧发送器的时长与点数调度，由运行时推进轨迹。
     return [np.array(p.q,copy=True) for p in joints],[i*duration/len(joints) for i in range(len(joints))]

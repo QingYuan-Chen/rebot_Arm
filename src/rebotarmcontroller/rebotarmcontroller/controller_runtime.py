@@ -1,11 +1,11 @@
-"""One bounded, cooperative periodic writer; full request arbitration is batch 6."""
+"""有界停止、协作运行的周期写入线程；完整请求仲裁留到批次 6。"""
 from __future__ import annotations
 import math
 import threading
 import time
-from ..hardware.sdk_driver import SdkMotorDriver
-from ..execution.arm import ArmExecution
-from ..control.arm.position import ArmPositionControl
+from .sdk_driver import SdkMotorDriver
+from .arm_execution import ArmExecution
+from .arm_position_control import ArmPositionControl
 
 class ControllerRuntime:
     def __init__(self,config,kinematics,*,driver=None):
@@ -45,7 +45,7 @@ class ControllerRuntime:
     def set_target(self,value): self.execution.set_target(value)
     def target(self): return self.execution.target()
     def cancel_trajectory(self): self.execution.cancel()
-    def join_sender(self): pass  # No sender thread exists; cancel is synchronous.
+    def join_sender(self): pass  # 没有独立发送线程，取消操作同步完成。
     @property
     def trajectory_moving(self): return self.execution.moving
     @property
@@ -69,7 +69,7 @@ class ControllerRuntime:
     def send_mit_batch(self,**values): return self.driver.send_mit_batch(**values)
     def mode_pos_vel(self): return self.driver.set_mode('pos_vel')
     def mode_mit(self,**kwargs):
-        # Gains are command values in the MIT protocol, never mode registers.
+        # MIT 增益属于命令值，不写入模式寄存器。
         return self.driver.set_mode('mit')
     def mode_vel(self): return self.driver.set_mode('vel')
     def set_zero_single(self,name): return self.driver.set_zero((name,))
@@ -80,8 +80,8 @@ class ControllerRuntime:
     def current_pose_values(self,q): return self.kinematics.pose(q)
 
     def position_tick(self,_runtime,dt):
-        # Cancellation/target updates wait for an in-flight batch, then invalidate
-        # its generation. An old snapshot can never be sent after cancel returns.
+        # 取消或更新目标要等待正在发送的批次，并使旧代次失效；
+        # 取消返回后不会再发送旧快照。
         with self.execution.lock:
             target = self.execution.sample(time.monotonic())
             command = self.position.command(target)
@@ -103,11 +103,11 @@ class ControllerRuntime:
         self.request_loop_stop()
 
     def start_control_loop(self,callback,rate=None):
-        # Validate in the caller before changing the current writer.
+        # 更换写入线程前先在调用方校验频率。
         requested_rate = self.rate if rate is None else float(rate)
         if not math.isfinite(requested_rate) or requested_rate <= 0:
             raise ValueError('control rate must be finite and positive')
-        # Never start a second writer until the previous thread has exited.
+        # 确认旧写入线程退出后才能启动新线程。
         with self._thread_lock:
             if self._thread is threading.current_thread():
                 raise RuntimeError('cannot replace the hardware writer from itself')
@@ -139,7 +139,7 @@ class ControllerRuntime:
 
     def move_to_pose_ik(self,*pose):
         if not self.execution.running: return False
-        from ..compat.legacy_backend import solve_pose_ik
+        from .legacy_backend import solve_pose_ik
         generation = self.execution.generation
         q = self.feedback_reader()[0]
         solution = solve_pose_ik(self.kinematics,q,pose)
@@ -151,7 +151,7 @@ class ControllerRuntime:
 
     def move_to_pose_path(self,*args):
         if not self.execution.running: return False
-        from ..compat.legacy_backend import plan_pose_path
+        from .legacy_backend import plan_pose_path
         generation = self.execution.generation
         q = self.feedback_reader()[0]
         path = plan_pose_path(self.kinematics,q,args[:6],float(args[6]),self.arrival_poll_period)
