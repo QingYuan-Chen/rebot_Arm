@@ -39,13 +39,14 @@ import numpy as np
 from .configuration import HardwareSettings, default_config, load_configuration
 from .feedback_acquisition import FeedbackAcquisition, _FeedbackValidationError, _JOINT_POSITION_LIMITS_RAD
 from .gripper_execution import GripperExecution
+from .lifecycle import ControllerLifecycle
 from .controller_contracts import (VerifiedFeedbackSample as _VerifiedFeedbackSample,
                                CachedMotorFeedback as _CachedMotorFeedback)
 from .controller_kinematics import ArmKinematics
 from .controller_runtime import ControllerRuntime
 from .sdk_driver import CommandTransportError
 from .conversions import fk_to_pose
-from .gravity_control import (GravitySettings, LoopTiming, bounded_mit_command,
+from .gravity_control import (GravitySettings, GravityExecutionState, LoopTiming, bounded_mit_command,
                               load_gravity_model, package_file, vector)
 
 
@@ -120,25 +121,9 @@ _SAFE_HOME_JOINT_POSITIONS = (0.0, 0.0, -0.017453292519943295, 0.0, 0.0, 0.0)
 _SAFE_HOME_ARRIVE_TOL_RAD = 0.02
 _SAFE_HOME_TIMEOUT_SEC = 30.0
 
-# 生命周期状态集合。真机路径固定按
-# DISCONNECTED -> CONNECTED_DISABLED -> ENABLING -> ENABLED_HOLD
-# ->（TRAJECTORY_RUNNING）-> DISABLING 迁移；没有"自动使能"的捷径。
-_LIFECYCLE_STATES = {
-    "DISCONNECTED",
-    "CONNECTED_DISABLED",
-    "ENABLING",
-    "ENABLED_HOLD",
-    "TRAJECTORY_RUNNING",
-    "DISABLING",
-}
-
 
 def apply_gravity_compensation_tau_scale(tau: np.ndarray) -> np.ndarray:
-    """对广义重力力矩逐关节施加补偿增益。
-
-    参数 ``tau``：形状为 (6,) 的关节力矩（N.m）。返回值是副本，形状匹配
-    ``_GC_TAU_SCALE`` 时按增益缩放，否则原样返回（调用方不应依赖就地修改）。
-    """
+    """对六轴广义重力力矩施加补偿增益，返回独立副本。"""
     scaled = np.array(tau, dtype=np.float64, copy=True)
     if scaled.shape == _GC_TAU_SCALE.shape:
         scaled *= _GC_TAU_SCALE
@@ -356,24 +341,109 @@ class HardwareManager:
                     codes.append(f"GRIPPER_FEEDBACK: {failure}")
             return statuses, codes
 
-    def set_state_machine(self, state: str) -> None:
-        """设置对外可见的子系统状态机，并在必要时同步生命周期状态。
+    @property
+    def _gravity_execution(self):
+        owner = self.__dict__.get('_gravity_execution_owner')
+        if owner is None:
+            owner = GravityExecutionState()
+            self.__dict__['_gravity_execution_owner'] = owner
+        return owner
 
-        TRAJ_RUNNING 需要已使能才会切到 TRAJECTORY_RUNNING；回到 IDLE 且已使能
-        时切到 ENABLED_HOLD（即"使能但保持当前位置"）。
-        """
-        if state not in ("IDLE", "TRAJ_RUNNING", "LOWLEVEL_STREAMING", "GRAVITY_COMP"):
-            raise ValueError(f"unsupported state machine value: {state}")
-        self._state_machine = state
-        if state == "TRAJ_RUNNING" and self._enabled and self._lifecycle_state != "DISABLING":
-            self._set_lifecycle_state("TRAJECTORY_RUNNING")
-        elif state == "IDLE" and self._enabled and self._lifecycle_state != "DISABLING":
-            self._set_lifecycle_state("ENABLED_HOLD")
+    @property
+    def _gravity_comp_active(self):
+        return self._gravity_execution.active
+
+    @_gravity_comp_active.setter
+    def _gravity_comp_active(self, value):
+        self._gravity_execution.active = value
+
+    @property
+    def _gravity_comp_q_target(self):
+        return self._gravity_execution.target
+
+    @_gravity_comp_q_target.setter
+    def _gravity_comp_q_target(self, value):
+        self._gravity_execution.target = value
+
+    @property
+    def _gravity_comp_integral(self):
+        return self._gravity_execution.integral
+
+    @_gravity_comp_integral.setter
+    def _gravity_comp_integral(self, value):
+        self._gravity_execution.integral = value
+
+    @property
+    def _gravity_comp_lock_counter(self):
+        return self._gravity_execution.lock_counter
+
+    @_gravity_comp_lock_counter.setter
+    def _gravity_comp_lock_counter(self, value):
+        self._gravity_execution.lock_counter = value
+
+    @property
+    def _gravity_comp_q_last(self):
+        return self._gravity_execution.last_position
+
+    @_gravity_comp_q_last.setter
+    def _gravity_comp_q_last(self, value):
+        self._gravity_execution.last_position = value
+
+    @property
+    def _gravity_comp_last_total(self):
+        return self._gravity_execution.last_total
+
+    @_gravity_comp_last_total.setter
+    def _gravity_comp_last_total(self, value):
+        self._gravity_execution.last_total = value
+
+    @property
+    def _gravity_comp_fault(self):
+        return self._gravity_execution.fault
+
+    @_gravity_comp_fault.setter
+    def _gravity_comp_fault(self, value):
+        self._gravity_execution.fault = value
+
+    @property
+    def _gravity_comp_hold_feedforward(self):
+        return self._gravity_execution.hold_feedforward
+
+    @_gravity_comp_hold_feedforward.setter
+    def _gravity_comp_hold_feedforward(self, value):
+        self._gravity_execution.hold_feedforward = value
+
+    @property
+    def _lifecycle_owner(self):
+        # 正常构造在线程启动前完成，惰性创建兼容 __new__ 测试夹具。
+        owner = self.__dict__.get('_lifecycle_component')
+        if owner is None:
+            owner = ControllerLifecycle()
+            self.__dict__['_lifecycle_component'] = owner
+        return owner
+
+    @property
+    def _lifecycle_state(self):
+        return self._lifecycle_owner.state
+
+    @_lifecycle_state.setter
+    def _lifecycle_state(self, value):
+        self._lifecycle_owner.set_state(value)
+
+    @property
+    def _state_machine(self):
+        return self._lifecycle_owner.execution
+
+    @_state_machine.setter
+    def _state_machine(self, value):
+        self._lifecycle_owner.set_execution(value, enabled=False)
+
+    def set_state_machine(self, state: str) -> None:
+        """更新执行状态并同步生命周期；禁用过渡期间不能重新标记为保持。"""
+        self._lifecycle_owner.set_execution(state, enabled=self._enabled)
 
     def _set_lifecycle_state(self, state: str) -> None:
-        if state not in _LIFECYCLE_STATES:
-            raise ValueError(f"unsupported lifecycle state: {state}")
-        self._lifecycle_state = state
+        self._lifecycle_owner.set_state(state)
 
     def _require_connected(self) -> None:
         if not self._connected:
@@ -982,33 +1052,33 @@ class HardwareManager:
         self._set_lifecycle_state("DISCONNECTED")
 
     def shutdown(self) -> None:
-        """Stop the writer before releasing handles; report unconfirmed motor state."""
+        """已失能时停止线程并释放设备；使能状态必须先经显式失能。"""
         if not self._connected:
             return
         with self._motor_lifecycle_lock:
+            # 此检查与使能操作持同一把锁，关闭请求不能与新的使能交错。
+            if self._enabled:
+                raise RuntimeError("shutdown requires explicit disable first")
             self._stop_gripper_loop()
             self.stop_gravity_compensation()
-            # If join times out, keep ownership and refuse to close under a live writer.
+            # 写入线程未退出时保留句柄，避免线程访问已释放的设备。
             self._stop_control_loop()
-            errors = []
-            disabled_confirmed = False
             try:
-                self._disable_all_motors()
                 self._validated_joint_feedback(expected_status=0)
                 self._validated_gripper_status(expected_status=0)
-                disabled_confirmed = True
             except Exception as exc:
-                errors.append(f"shutdown disable verification: {exc}")
+                # 状态不明时保留连接供人工恢复；不能假定已失能并关闭设备。
+                self._enabled = True
+                self._set_lifecycle_state("DISABLING")
+                self._error_codes.append(f"SHUTDOWN_STATE_UNCONFIRMED: {exc}")
+                raise RuntimeError(f"shutdown disabled-state verification: {exc}") from exc
             try:
-                self._backend.disconnect()
+                self._backend.release_disabled()
             except Exception as exc:
-                errors.append(f"shutdown disconnect: {exc}")
+                self._error_codes.append(f"SHUTDOWN_RELEASE_FAILED: {exc}")
+                raise RuntimeError(f"shutdown release: {exc}") from exc
             self._connected = False
-            self._enabled = not disabled_confirmed
-            self._set_lifecycle_state("DISCONNECTED" if disabled_confirmed else "DISABLING")
-            if errors:
-                self._error_codes.append("SHUTDOWN_STATE_UNCONFIRMED: " + "; ".join(errors))
-                raise RuntimeError("; ".join(errors))
+            self._set_lifecycle_state("DISCONNECTED")
 
     def get_joint_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """返回 (位置, 速度, 力矩)；未连接时拒绝伪造首帧。
@@ -1146,7 +1216,7 @@ class HardwareManager:
         替代 ArmEndPos.safe_home（它把目标硬编码为全零）；零位为何不能停放见
         _SAFE_HOME_JOINT_POSITIONS 的说明。保留厂商的速度覆盖与到位轮询机制，
         但到位判据改为"相对请求目标"而不是零，且速度绝不允许超过厂商自身的
-        回零速度。结束时无论成功失败都清掉速度覆盖、保持当前位置并回到 IDLE。
+        回零速度。任务仍持有目标时以新鲜反馈接管保持；取消或接替后不覆盖新目标。
         """
         goal = self._validated_safe_home_target(target)
         ctrl = self._backend
@@ -1161,10 +1231,11 @@ class HardwareManager:
                 raise ValueError(
                     f"safe_home vlim must be within (0, {ctrl.home_velocity:g}] rad/s"
                 )
-            ctrl.set_speed_override(np.full(len(self.joint_names), speed, dtype=np.float64))
-            ctrl.set_target(goal)
-            ctrl.cancel_trajectory()
+            generation = ctrl.begin_scoped_target(
+                goal, np.full(len(self.joint_names), speed, dtype=np.float64)
+            )
             self.set_state_machine("TRAJ_RUNNING")
+        finished = False
         try:
             # 先等在途的发送线程收尾，再开始轮询到位情况。
             ctrl.join_sender()
@@ -1172,11 +1243,13 @@ class HardwareManager:
                 _SAFE_HOME_TIMEOUT_SEC if timeout_sec is None else float(timeout_sec)
             )
             while True:
+                if ctrl.target_generation != generation:
+                    raise RuntimeError("safe_home canceled or superseded")
                 positions, _velocities, _torques = self.get_joint_state()
                 reached = np.array(positions, dtype=np.float64)
                 worst = float(np.max(np.abs(reached - goal)))
                 if worst < _SAFE_HOME_ARRIVE_TOL_RAD:
-                    return reached
+                    break
                 if time.monotonic() > deadline:
                     raise TimeoutError(
                         f"safe_home did not reach {goal.tolist()} within "
@@ -1184,11 +1257,16 @@ class HardwareManager:
                     )
                 time.sleep(ctrl.arrival_poll_period)
         finally:
-            ctrl.set_speed_override(None)
             with self._motor_lifecycle_lock:
-                if self._enabled:
-                    self.hold_current_position()
-                self.set_state_machine("IDLE")
+                if self._enabled and ctrl.target_generation == generation:
+                    # 反馈读取期间可能发生接替，最终提交时再次以代次原子核对。
+                    positions, _, _ = self.get_joint_state()
+                    finished = ctrl.finish_scoped_target(generation, positions)
+                    if finished:
+                        self.set_state_machine("IDLE")
+        if not finished:
+            raise RuntimeError("safe_home canceled or superseded before hold")
+        return reached
 
     def enable(self) -> None:
         """显式使能：真机运动的唯一入口。
@@ -1294,10 +1372,10 @@ class HardwareManager:
             self._set_lifecycle_state("DISABLING")
             was_enabled = self._enabled
             self._enabled = False
-            self.stop_gravity_compensation()
-            self._stop_gripper_loop()
-            self._stop_control_loop()
             try:
+                self.stop_gravity_compensation()
+                self._stop_gripper_loop()
+                self._stop_control_loop()
                 self._disable_all_motors()
                 self._validated_joint_feedback(expected_status=0)
                 self._validated_gripper_status(expected_status=0)
@@ -1677,35 +1755,17 @@ class HardwareManager:
         tau_g = vector(self._gc_compute_generalized_gravity(q=q), 6, 'gravity torque')
         tau_g = apply_gravity_compensation_tau_scale(tau_g)
 
-        q_error = self._gravity_comp_q_target - q
-        if self._gravity_comp_integral is None:
-            self._gravity_comp_integral = np.zeros_like(q)
-        self._gravity_comp_integral += q_error * self._gc_settings.integral_gain * dt
-        cap = self._gc_settings.integral_limit_nm
-        np.clip(self._gravity_comp_integral, -cap, cap, out=self._gravity_comp_integral)
-
         self._gc_pin.computeJointJacobians(self._gc_model, self._gc_data, q)
         self._gc_pin.updateFramePlacements(self._gc_model, self._gc_data)
         jacobian = self._gc_pin.getFrameJacobian(
-            self._gc_model,
-            self._gc_data,
-            self._gc_ee_frame_id,
+            self._gc_model, self._gc_data, self._gc_ee_frame_id,
             self._gc_pin.ReferenceFrame.LOCAL_WORLD_ALIGNED,
         )
-        # 空间速度前三维是线速度、后三维是角速度（世界系表达）。
-        spatial_velocity = jacobian @ qd
-        linear_speed = float(np.linalg.norm(spatial_velocity[:3]))
-        angular_speed = float(np.linalg.norm(spatial_velocity[3:]))
-
-        if linear_speed > _GC_VEL_THRESHOLD or angular_speed > _GC_W_VEL_THRESHOLD:
-            # 检测到外部拖动：目标随之移动，并把积分项衰减 10%。
-            self._gravity_comp_q_target = q.copy()
-            self._gravity_comp_lock_counter = 0
-            self._gravity_comp_integral *= np.exp(-dt / .2)
-        else:
-            self._gravity_comp_lock_counter += 1
-
-        self._emit_bounded_gravity_command(q, qd, tau_g + self._gravity_comp_integral, dt)
+        # 计算状态不直接写设备；发送成功后才更新上一周期总力矩。
+        feedforward = self._gravity_execution.step(
+            q, dt, tau_g, jacobian @ qd, self._gc_settings,
+        )
+        self._emit_bounded_gravity_command(q, qd, feedforward, dt)
 
     def _emit_bounded_gravity_command(self, q, qd, feedforward, dt):
         settings = self._gc_settings

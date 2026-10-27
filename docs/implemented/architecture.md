@@ -23,7 +23,8 @@ SDK 纯 IK/路径计算，没有设备或发送线程；最终计算归 motion�
 `feedback_acquisition.py` 拥有反馈采集、验证缓存及只读健康判断；manager 通过
 窄回调提供设备分组与夹爪反馈协调。`gripper_execution.py` 持有夹爪执行状态并在
 周期中推进堵转和释放，`gripper_control.py` 计算斜坡和力矩边界；管理器保留
-兼容入口及设备发送。生命周期保护暂留 manager，完整运行时请求队列尚未接入；后续归属见
+兼容入口及设备发送。`lifecycle.py` 管理生命周期状态和关闭策略；重力补偿状态与
+计算归 `gravity_control.py`，设备切换仍由 manager 协调。完整运行时请求队列尚未接入；后续归属见
 [拆分规划](../design/controller_refactor_plan.md)。
 
 负责：

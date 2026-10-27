@@ -6,7 +6,7 @@
 ``stop_control_loop`` 请求停止并有界等待线程退出。``position_tick``
 采样目标、发送位置命令，成功后确认轨迹游标。
 
-当前反馈、夹爪及生命周期保护仍由 ``HardwareManager`` 协调；这些设备
+当前反馈、夹爪及生命周期设备操作仍由 ``HardwareManager`` 协调；这些设备
 调用尚未全部进入统一请求队列，完整仲裁留到批次 6。启动线程不等于使能，
 使能前的现场检查、新鲜反馈与显式服务调用由上层负责。旧位姿入口暂经
 ``legacy_backend`` 计算，后续逆运动学和路径生成归 motion。
@@ -56,6 +56,12 @@ class ControllerRuntime:
     def arrival_poll_period(self): return self.config.timing.arrival_poll_period
     def set_speed_override(self,value): self.execution.set_speed_override(value)
     def set_target(self,value): self.execution.set_target(value)
+    def begin_scoped_target(self, target, velocity):
+        return self.execution.begin_scoped_target(target, velocity)
+    def finish_scoped_target(self, generation, hold):
+        return self.execution.finish_scoped_target(generation, hold)
+    @property
+    def target_generation(self): return self.execution.generation
     def target(self): return self.execution.target()
     def cancel_trajectory(self): self.execution.cancel()
     def join_sender(self): pass  # 没有独立发送线程，取消操作同步完成。
@@ -77,6 +83,10 @@ class ControllerRuntime:
     def disconnect(self):
         self.stop_control_loop()
         self.driver.disconnect()
+    def release_disabled(self):
+        """调用方确认设备已失能后释放句柄，不再次发送失能命令。"""
+        self.stop_control_loop()
+        self.driver.close()
     def enable(self): self.driver.enable()
     def disable(self): self.driver.disable()
     def send_mit_batch(self,**values): return self.driver.send_mit_batch(**values)

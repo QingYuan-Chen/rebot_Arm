@@ -302,6 +302,8 @@ def test_transition_settle_allows_verified_feedback_refresh(monkeypatch, enabled
         driver._sleep = lambda _: None
         for worker in workers:
             worker.join(timeout=1.)
+        if enabled:
+            driver.disable()
         manager.shutdown()
 
 
@@ -544,12 +546,26 @@ def test_local_feedback_error_then_new_frame_recovers_without_query_effects(monk
 
 
 def test_shutdown_release_failure_does_not_claim_disabled(monkeypatch):
-    manager,opened=make_local_manager(monkeypatch);manager.connect();manager.enable()
-    opened[0].fail_disable=True
+    manager,opened=make_local_manager(monkeypatch);manager.connect()
+    opened[0].feedback=False
     with pytest.raises(RuntimeError,match='shutdown'): manager.shutdown()
-    assert not manager.connected and manager.enabled
-    assert manager.lifecycle_state=='DISABLING' and opened[0].closed
+    assert manager.connected and manager.enabled
+    assert manager.lifecycle_state=='DISABLING' and not opened[0].closed
     assert any('SHUTDOWN_STATE_UNCONFIRMED' in code for code in manager.error_codes)
+    opened[0].feedback=True
+    manager.disable(); manager.shutdown()
+
+
+def test_shutdown_rejects_enabled_arm_without_sending_disable(monkeypatch):
+    manager, opened = make_local_manager(monkeypatch)
+    manager.connect(); manager.enable()
+    bus = opened[0]
+    before = bus.disables
+    with pytest.raises(RuntimeError, match='explicit disable'):
+        manager.shutdown()
+    assert manager.connected and manager.enabled and manager.control_loop_active
+    assert bus.disables == before and not bus.closed
+    manager.disable(); manager.shutdown()
 
 
 def test_mode_failure_is_protective_and_motion_gate_stays_closed(monkeypatch):
@@ -620,3 +636,44 @@ def test_initial_gravity_send_failure_protects_instead_of_resuming_normal_output
     assert not any(m=='position' for _,m,_ in bus.events)
     assert manager._backend.driver.last_receipt.sent==('joint1','joint2')
     bus.failure=None;manager.disable();manager.shutdown()
+
+
+def test_disable_writer_stop_failure_keeps_enabled_state(monkeypatch):
+    manager, opened = make_local_manager(monkeypatch)
+    manager.connect(); manager.enable()
+    original = manager._stop_control_loop
+    monkeypatch.setattr(manager, '_stop_control_loop', lambda: (_ for _ in ()).throw(RuntimeError('join failed')))
+    with pytest.raises(RuntimeError, match='join failed'):
+        manager.disable()
+    assert manager.enabled and manager.lifecycle_state == 'DISABLING'
+    assert 'DISABLE_VERIFICATION_FAILED' in manager.error_codes
+    monkeypatch.setattr(manager, '_stop_control_loop', original)
+    manager.disable(); manager.shutdown()
+
+
+def test_safe_home_completion_switches_to_hold_and_clears_task_speed(monkeypatch):
+    manager, _ = make_local_manager(monkeypatch)
+    manager.connect(); manager.enable()
+    goal = (0.1, -0.1, -0.1, 0., 0., 0.)
+    assert manager.safe_home(goal, timeout_sec=1.) == pytest.approx(goal, abs=.02)
+    assert manager.enabled and manager.lifecycle_state == 'ENABLED_HOLD'
+    assert manager._backend.execution.sample(time.monotonic()).velocity_override is None
+    manager.disable(); manager.shutdown()
+
+
+def test_safe_home_supersession_does_not_rewrite_new_target(monkeypatch):
+    manager, _ = make_local_manager(monkeypatch)
+    manager.connect(); manager.enable()
+    successor = (0.2, -0.2, -0.2, 0., 0., 0.)
+    read = manager.get_joint_state
+    def read_and_supersede():
+        result = read()
+        manager.set_joint_target(successor)
+        return result
+    monkeypatch.setattr(manager, 'get_joint_state', read_and_supersede)
+    with pytest.raises(RuntimeError, match='canceled or superseded'):
+        manager.safe_home((0.,)*6, timeout_sec=1.)
+    assert manager.joint_target() == pytest.approx(successor)
+    assert manager._backend.execution.sample(time.monotonic()).velocity_override is None
+    monkeypatch.setattr(manager, 'get_joint_state', read)
+    manager.disable(); manager.shutdown()

@@ -3,7 +3,8 @@
 职责与位置
     本模块属于 rebotarmcontroller 的计算层，可用于离线测试，不连接电机或启动 ROS 节点。
     HardwareManager 使用本模块加载模型与配置，在硬件控制循环中计算重力补偿输出。
-    反馈读取、拖动跟随、位置误差积分、模式切换和电机指令发送由 HardwareManager 负责。
+    GravityExecutionState 持有目标、积分和拖动跟随状态；反馈读取、模式切换和
+    电机指令发送由 HardwareManager 协调。
 
 文件结构（按下文定义顺序）
     vector                统一检查向量维数与数值有效性；
@@ -11,6 +12,7 @@
     bounded_mit_command   合并 PD 与前馈力矩，限制总力矩及其变化率；
     LoopTiming            记录控制周期和执行耗时，判断是否连续超时；
     GravityModel          封装 Pinocchio 模型、重力力矩与末端雅可比计算；
+    GravityExecutionState 保存六轴补偿状态并推进积分与拖动跟随；
     load_gravity_model    从 URDF 构建六轴模型，校验关节约定并加入额外负载；
     package_file          定位安装目录或源码工作区中的模型、配置资源。
 
@@ -302,3 +304,43 @@ def package_file(package, relative):
     if not path.is_file():
         raise FileNotFoundError(f'missing {package}/{relative}')
     return path
+
+
+class GravityExecutionState:
+    """六轴重力补偿独立运行状态；周期计算不访问电机或 ROS。
+
+    启停与模式交接由硬件生命周期负责。``step`` 接收已验证反馈、重力力矩和
+    末端空间速度，按实际时间积分并返回前馈；最后总力矩在发送成功后才更新。
+    """
+
+    def __init__(self):
+        self.active = False
+        self.target = None
+        self.integral = None
+        self.lock_counter = 0
+        self.last_position = None
+        self.last_total = np.zeros(6)
+        self.fault = None
+        self.hold_feedforward = None
+
+    def step(self, q, dt, gravity, spatial_velocity, settings):
+        """更新抗漂移积分和拖动跟随目标，返回本周期前馈力矩。"""
+        q = vector(q, 6, 'gravity feedback')
+        gravity = vector(gravity, 6, 'gravity torque')
+        spatial_velocity = vector(spatial_velocity, 6, 'tool velocity')
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError('gravity control dt must be finite and positive')
+        if self.target is None:
+            raise RuntimeError('gravity target unavailable')
+        if self.integral is None:
+            self.integral = np.zeros_like(q)
+        self.integral += (self.target - q) * settings.integral_gain * dt
+        cap = settings.integral_limit_nm
+        np.clip(self.integral, -cap, cap, out=self.integral)
+        if np.linalg.norm(spatial_velocity[:3]) > .04 or np.linalg.norm(spatial_velocity[3:]) > .08:
+            self.target = q.copy()
+            self.lock_counter = 0
+            self.integral *= np.exp(-dt / .2)
+        else:
+            self.lock_counter += 1
+        return gravity + self.integral

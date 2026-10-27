@@ -19,8 +19,8 @@
     1. 硬件上电后处于未使能状态，节点启动时不自动使能；必须收到显式 enable 服务且反馈新鲜，
        电机才会输出力矩（就绪判据见 HardwareManager.ready_for_motion）。
     2. 未使能/未就绪时运动类动作的目标请求一律被拒绝，不会出现"还没使能就收到轨迹"。
-    3. 退出时默认只断开连接、不产生运动；只有 shutdown_safe_home=true 且当前状态安全检查
-       通过，才会在失能之前额外执行一次条件性安全回零。
+    3. 退出请求时若仍使能，保持控制并等待现场确认后的显式失能；可选停靠不等于
+       本轮安全基线验证。只有设备已失能后才释放连接。
     4. 使用多线程执行器：改变硬件状态的慢操作与急停、夹爪、IK 直控分属不同回调组，
        改动时不要破坏这个分组，否则会阻塞操作员的停止请求。
 """
@@ -28,14 +28,18 @@
 from __future__ import annotations
 
 import math
+import signal
+import threading
 
 import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.signals import SignalHandlerOptions
 
 from .hardware_manager import HardwareManager
+from .lifecycle import shutdown_policy
 from .motor_passthrough import MotorPassthrough
 from .ros_actions import ArmActions
 from .ros_publishers import JointStatePublisher
@@ -60,7 +64,7 @@ class reBotArmController(Node):
     """硬件控制器节点：装配硬件管理层并对外暴露话题、服务与动作接口。
 
     生命周期：构造即连接硬件（失败直接抛出并退出进程）；运行期由多线程执行器并发回调；
-    退出时先做可选的收尾动作，再断开硬件并失能。
+    退出请求时继续提供服务直至显式失能，再释放硬件连接。
     """
 
     def __init__(self) -> None:
@@ -202,16 +206,11 @@ class reBotArmController(Node):
         """刷新锁存的 arm_status 话题；状态类服务回调结束后都会调用它。"""
         self.joint_state_publisher.publish_status()
 
-    def shutdown(self) -> None:
-        """节点退出前的收尾：按需执行条件性安全回零，然后关闭硬件连接并失能。
-
-        shutdown_safe_home=false（默认）时不做任何运动，直接断开连接。
-        """
-        if self.hardware is None:
-            return
-        if bool(self.get_parameter("shutdown_safe_home").value):
-            self._conditional_safe_home_before_shutdown()
-        self.hardware.shutdown()
+    def shutdown(self) -> bool:
+        """已失能时释放设备；使能时维持控制并等待操作员显式失能。"""
+        safe_home = (self._conditional_safe_home_before_shutdown
+                     if bool(self.get_parameter("shutdown_safe_home").value) else None)
+        return shutdown_policy(self.hardware, safe_home=safe_home, logger=self.get_logger())
 
     def safe_home_joint_positions(self) -> list[float] | None:
         """安全停靠位目标关节角（弧度）；返回 None 表示使用硬件层的默认停靠位。
@@ -225,11 +224,7 @@ class reBotArmController(Node):
         return values or None
 
     def _conditional_safe_home_before_shutdown(self) -> None:
-        """退出前的条件性安全回零：确有必要且安全时才执行，任何失败都不阻塞退出。
-
-        先停止当前运动（含位置保持），再通过安全门检查；安全门不过或回零抛异常都只记日志，
-        随后照常失能退出——退出流程不能被一个可能已不可信的运动请求拖住。
-        """
+        """在安全门通过后尝试停靠；失败交给关闭协调器继续保持使能。"""
         # 只有已连接且已使能的机械臂才需要、也才能够执行回零；其余情况直接断开即可。
         if not (self.hardware is not None and self.hardware.connected and self.hardware.enabled):
             return
@@ -238,23 +233,23 @@ class reBotArmController(Node):
         try:
             self.hardware.stop_active_motion()
         except Exception as exc:
-            # 连"停下并保持当前位置"都做不到，说明底层已不可信，放弃回零直接转为失能。
-            self.get_logger().error(f"shutdown trajectory stop/hold failed; disabling: {exc}")
+            # 无法确认保持时放弃回位；关闭协调继续保留设备并由故障保护处理。
+            self.get_logger().error(f"shutdown trajectory stop/hold failed: {exc}")
             return
 
         allowed, reason = self._safe_home_shutdown_allowed(initial_state)
         if not allowed:
-            self.get_logger().warn(f"shutdown safe_home skipped: {reason}; disabling")
+            self.get_logger().warn(f"shutdown safe_home skipped: {reason}")
             return
 
         try:
-            self.get_logger().warn("shutdown requested: running conditional safe_home before disable")
+            self.get_logger().warn("shutdown requested: running conditional safe_home")
             self.hardware.stop_gravity_compensation()
             self.hardware.ensure_pos_vel_control()
             self.hardware.safe_home(self.safe_home_joint_positions())
             self.get_logger().info("shutdown conditional safe_home complete")
         except Exception as exc:
-            self.get_logger().error(f"shutdown safe_home failed; disabling anyway: {exc}")
+            self.get_logger().error(f"shutdown safe_home failed: {exc}")
 
     def _safe_home_shutdown_allowed(self, initial_state: str) -> tuple[bool, str]:
         """退出前安全回零的安全门，返回 (是否允许, 原因文本)。
@@ -291,27 +286,59 @@ class reBotArmController(Node):
 
 
 def main(args=None) -> None:
-    """节点入口：初始化 ROS、用 4 线程执行器运行节点，并保证收尾顺序。
+    """捕获退出请求并保持 ROS 可响应，直到设备已显式失能后再退出。
 
-    收尾顺序为：节点 shutdown（可能含条件性安全回零与失能）-> 执行器关闭 -> 销毁节点 ->
-    关闭 rclpy，即"先安全停下，再释放通信资源"。
+    关闭协调在独立线程等待停靠，执行器继续处理停止与失能请求。若 ROS
+    上下文被外部关闭而设备仍使能，保留硬件循环，等待保护或人工处置。
     """
-    rclpy.init(args=args)
+    requested = threading.Event()
+    previous_handlers = {}
+    def request_shutdown(_signum, _frame):
+        requested.set()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        previous_handlers[signum] = signal.signal(signum, request_shutdown)
     node = None
-    executor = MultiThreadedExecutor(num_threads=4)
+    executor = None
     try:
+        rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+        executor = MultiThreadedExecutor(num_threads=4)
         node = reBotArmController()
         executor.add_node(node)
-        executor.spin()
+        while rclpy.ok():
+            executor.spin_once(timeout_sec=0.1)
+            if not requested.is_set():
+                continue
+            requested.clear()
+            result = []
+            def close():
+                try:
+                    result.append(node.shutdown())
+                except Exception as exc:
+                    node.get_logger().error(f'shutdown failed: {exc}')
+                    result.append(False)
+            worker = threading.Thread(target=close, name='controller-shutdown')
+            worker.start()
+            while worker.is_alive() and rclpy.ok():
+                executor.spin_once(timeout_sec=0.1)
+            worker.join()
+            if result and result[0]:
+                return
     finally:
-        # 即使构造中途失败（node 为 None），也必须关闭执行器并释放 rclpy。
+        # 无论退出原因是什么，不能销毁仍在使能的控制器或其唯一写入线程。
+        if node is not None and node.hardware is not None and node.hardware.enabled:
+            node.get_logger().error('node exiting while arm enabled; retaining hardware control')
+            while node.hardware.enabled:
+                threading.Event().wait(0.5)
+        if executor is not None:
+            executor.shutdown()
         if node is not None:
-            node.shutdown()
-        executor.shutdown()
-        if node is not None:
+            if node.hardware is not None and not node.hardware.enabled and node.hardware.connected:
+                node.hardware.shutdown()
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 if __name__ == "__main__":

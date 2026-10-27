@@ -1,0 +1,13 @@
+{
+  "gravity_steps": [
+    {"target": 0.1, "position": 0.0, "gain": 2.0, "dt": 0.1, "limit": 0.5, "linear_speed": 0.0, "integral": 0.02, "follow": false},
+    {"target": 0.1, "position": 0.0, "gain": 20.0, "dt": 1.0, "limit": 0.5, "linear_speed": 0.0, "integral": 0.5, "follow": false},
+    {"target": 0.1, "position": 0.0, "gain": 2.0, "dt": 0.2, "limit": 0.5, "linear_speed": 0.1, "integral": 0.014715177646857694, "follow": true}
+  ],
+  "lifecycle": [
+    {"initial": "ENABLED_HOLD", "execution": "TRAJ_RUNNING", "enabled": true, "expected": "TRAJECTORY_RUNNING"},
+    {"initial": "TRAJECTORY_RUNNING", "execution": "IDLE", "enabled": true, "expected": "ENABLED_HOLD"},
+    {"initial": "DISABLING", "execution": "IDLE", "enabled": true, "expected": "DISABLING"},
+    {"initial": "CONNECTED_DISABLED", "execution": "TRAJ_RUNNING", "enabled": false, "expected": "CONNECTED_DISABLED"}
+  ]
+}

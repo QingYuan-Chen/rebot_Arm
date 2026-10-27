@@ -68,12 +68,34 @@ class ArmExecution:
         if override is not None and min(override)<=0: raise ValueError('velocity override must be positive')
         with self.lock: self._override = override
 
+    def begin_scoped_target(self, values, velocity):
+        """原子接纳停靠目标与速度，返回其代次；接替时速度覆盖随目标失效。"""
+        target = self.validate_target(values)
+        override = tuple(vector(velocity, 6, 'velocity override'))
+        if min(override) <= 0:
+            raise ValueError('velocity override must be positive')
+        with self.lock:
+            self.cancel()
+            self._target, self._override = target, override
+            return self._generation
+
+    def finish_scoped_target(self, generation, hold):
+        """仅当任务仍拥有当前代次时切换到反馈保持，避免覆盖接替目标。"""
+        target = self.validate_target(hold)
+        with self.lock:
+            if generation != self._generation:
+                return False
+            self.cancel()
+            self._target = target
+            return True
+
     def cancel(self):
-        """使旧代次失效并清空轨迹，保留最后目标和速度覆盖。"""
+        """使旧代次失效并清空轨迹和任务速度覆盖，保留最后目标。"""
         with self.lock:
             # 代次变化使取消前产生的轨迹和待发送快照失效。
             self._generation += 1
             self._points = self._times = ()
+            self._override = None
             self._cursor = 0
             self.moving = False
             return self._generation
@@ -88,6 +110,9 @@ class ArmExecution:
             raise ValueError('trajectory times must increase')
         with self.lock:
             if generation!=self._generation or not self.running: return False
+            # 已接纳的新轨迹接替当前任务；旧停靠覆盖和旧代次不再有效。
+            self._generation += 1
+            self._override = None
             self._points,self._times = values,stamps
             self._cursor = 0
             self._started = time.monotonic() if now is None else float(now)

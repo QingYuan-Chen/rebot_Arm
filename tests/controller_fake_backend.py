@@ -70,6 +70,7 @@ class FakeBackend:
         return motor,ctrl
     def connect(self): self._arm.connect()
     def disconnect(self): self._arm.disconnect()
+    def release_disabled(self): self._arm.disconnect()
     def send_mit_batch(self,**values):
         for index,name in enumerate(self.joint_names):
             try:
