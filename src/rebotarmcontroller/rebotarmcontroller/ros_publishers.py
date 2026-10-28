@@ -112,9 +112,7 @@ class JointStatePublisher:
 
     def _publish_feedback(self) -> None:
         try:
-            # 使能时，配置频率的统一硬件循环独占总线，本调用是空操作；失能时没有命令
-            # 写入者，它自己执行同样限速的 50 Hz 批量刷新。
-            self._hardware.refresh_feedback_if_due()
+            # 使能和失能期间均由运行时采集；发布不能主动刷新总线。
             # 一次原子读取拿到"最近一批已校验反馈"及其接收序号，两者必须配套使用。
             pos, vel, effort, status_codes, sequences, observed_at = self._hardware.get_cached_joint_sample()
             identity = (sequences, observed_at)

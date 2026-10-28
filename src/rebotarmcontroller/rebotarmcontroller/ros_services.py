@@ -12,19 +12,18 @@
     gravity_compensation/start|stop  标准触发器服务：进入/退出手动拖拽（重力补偿）模式；
     set_zero                         自定义服务：把全部关节或单个关节的当前位置标定为零点；
     set_mode                         自定义服务：切换电机控制模式；
-    move_to_pose_ik                  自定义服务：末端位姿 IK 直控（不经过规划）；
     gripper/set                      自定义服务：夹爪位置控制；
     gripper/grasp                    自定义服务：夹爪力闭合抓取（堵转检测）。
 
 回调分组（决定并发行为，不要随意改动）
     node.slow_group      互斥组。使能/失能、回零、模式切换、安全回零、重力补偿等会改变硬件
                          状态且不允许并发执行的操作放在这里，避免多条命令同时抢串口总线。
-    node.reentrant_group 可重入组。急停类（trajectory_stop）、IK 直控与夹爪操作必须能在慢操作
+    node.reentrant_group 可重入组。停止类（trajectory_stop）与夹爪操作必须能在慢操作
                          进行中被调用，否则操作员无法及时中止运动。
 
 安全约束
     1. 真机上电默认失能；只有显式调用 enable 且反馈新鲜后电机才会输出力矩。
-    2. 所有会切换控制模式的入口（safe_home / move_to_pose_ik / set_zero / set_mode）都先停止
+    2. 所有会切换控制模式的入口（safe_home / set_zero / set_mode）都先停止
        重力补偿：重力补偿工作在 MIT 模式下，不先退出会与位置控制互相抢总线。
     3. 回调内部不抛出异常：任何底层异常都翻译成 success=False 加异常文本，保证服务端始终有响应。
 """
@@ -33,10 +32,9 @@ from __future__ import annotations
 
 import math
 
-from rebotarm_msgs.srv import GraspGripper, MoveToPoseIK, SetGripper, SetMode, SetZero
+from rebotarm_msgs.srv import GraspGripper, SetGripper, SetMode, SetZero
 from std_srvs.srv import Trigger
 
-from .conversions import pose_to_xyz_rpy
 
 
 class ArmServices:
@@ -109,12 +107,6 @@ class ArmServices:
             callback_group=node.slow_group,
         )
         node.create_service(
-            MoveToPoseIK,
-            self._service("move_to_pose_ik"),
-            self.move_to_pose_ik,
-            callback_group=node.reentrant_group,
-        )
-        node.create_service(
             SetGripper,
             self._service("gripper/set"),
             self.set_gripper,
@@ -171,7 +163,7 @@ class ArmServices:
         try:
             self._hardware.stop_active_motion()
             response.success = True
-            response.message = "trajectory stop requested"
+            response.message = "trajectory stop/hold confirmed"
         except Exception as exc:
             response.success = False
             response.message = str(exc)
@@ -271,31 +263,6 @@ class ArmServices:
         except Exception as exc:
             response.success = False
             response.message = str(exc)
-        self._node.publish_arm_status()
-        return response
-
-    def move_to_pose_ik(self, request, response):
-        """末端位姿 IK 直控：把目标位姿解算成关节角后直接交给位置控制器，不经过规划。
-
-        这是绕过规划层的低层通道，调用方必须自行保证目标位姿可达且路径无碰撞。位姿先由
-        pose_to_xyz_rpy 转成 x/y/z/roll/pitch/yaw（米与弧度），返回值里回显控制器内部的
-        IK 目标关节角（弧度）；解算失败时 q_solution 为空列表。
-        """
-        try:
-            self._hardware.stop_gravity_compensation()
-            self._hardware.ensure_pos_vel_control()
-            x, y, z, roll, pitch, yaw = pose_to_xyz_rpy(request.target_pose)
-            ok = self._hardware.move_to_pose_ik(x, y, z, roll, pitch, yaw)
-            response.success = bool(ok)
-            response.message = "IK target accepted" if ok else "IK failed"
-            # 门面返回目标副本，ROS 不持有可写控制目标或 SDK 对象。
-            response.q_solution = [
-                float(v) for v in self._hardware.joint_target()
-            ]
-        except Exception as exc:
-            response.success = False
-            response.message = str(exc)
-            response.q_solution = []
         self._node.publish_arm_status()
         return response
 

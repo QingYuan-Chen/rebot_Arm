@@ -11,8 +11,8 @@
 - 固定版本：`6a49302804f25e624995e771acb6d61896d1856d`。
 - 版本清单：`third_party/rebotarm_dependencies.repos`。
 - 本机目录：`third_party/reBotArm_control_py`，不纳入主仓库版本管理。
-- 用途：尚未迁出的纯 IK/路径计算及历史设备行为对照；本地生产设备、周期线程与 FK 已不依赖 SDK 设备类。按上游许可获取和使用。
-- 固定树未含 LICENSE/COPYING/NOTICE，pyproject 无 license 字段，仅 README 声明 MIT；上游许可文本尚未取得。控制器拆分采用独立编写的窄驱动与运行时，物理参数从项目现有配置核对，不直接复制 SDK 源码；后续计算源码迁入前仍需核实许可及归属。
+- 用途：保留来源及历史设备、位姿数值对照；生产控制器与运动包已退出该 Python SDK 依赖。按上游许可获取和使用。
+- 固定树未含 LICENSE/COPYING/NOTICE，pyproject 无 license 字段，仅 README 声明 MIT；上游许可文本尚未取得。本地配置、窄驱动、运行时及位姿计算均独立实现，使用项目规范模型与 Pinocchio，不复制许可未明确的 SDK 源码。若将来复制源码，仍须先核实许可及归属。
 
 ### MotorBridge
 

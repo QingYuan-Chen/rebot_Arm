@@ -12,7 +12,7 @@
 夹爪状态由管理器另行验证；置零的上层前置检查也由管理器负责。
 
 命令操作与总线事务分别串行化，稳定等待期间允许反馈访问总线；模式或
-批量发送的部分失败不会自动重发。完整运行时请求仲裁留到批次 6。
+批量发送的部分失败不会自动重发。运行时持有时，端口断言所有设备访问来自唯一写入线程。
 """
 from __future__ import annotations
 import threading
@@ -29,11 +29,14 @@ class CommandTransportError(RuntimeError):
 
 class MotorPort:
     """一个受管理的电机句柄；释放后所有操作均失败。"""
-    def __init__(self, name, handle, bus_lock):
+    def __init__(self, name, handle, bus_lock, owner=None):
         self.name, self._handle, self._lock = name, handle, bus_lock
+        self._owner = owner
         self._closed = False
 
     def _call(self, method, *args):
+        if self._owner is not None:
+            self._owner()
         with self._lock:
             if self._closed:
                 raise RuntimeError(f'{self.name}: motor handle is closed')
@@ -62,6 +65,8 @@ class MotorPort:
             raise RuntimeError(f'{self.name} register {address} write failed: {exc}') from exc
     def set_zero_position(self): return self._call('set_zero_position')
     def close(self):
+        if self._owner is not None:
+            self._owner()
         with self._lock:
             if not self._closed:
                 self._handle.close()
@@ -69,11 +74,14 @@ class MotorPort:
 
 class BusPort:
     """共享控制器句柄的受锁访问入口；关闭后拒绝操作。"""
-    def __init__(self, handle, lock):
+    def __init__(self, handle, lock, owner=None):
         self._handle, self.bus_lock = handle, lock
+        self._owner = owner
         self._closed = False
 
     def _call(self, method):
+        if self._owner is not None:
+            self._owner()
         with self.bus_lock:
             if self._closed: raise RuntimeError('controller handle is closed')
             return getattr(self._handle, method)()
@@ -84,6 +92,8 @@ class BusPort:
     def shutdown(self): return self._call('shutdown')
     def close_bus(self): return self._call('close_bus')
     def close(self):
+        if self._owner is not None:
+            self._owner()
         with self.bus_lock:
             if not self._closed:
                 self._handle.close()
@@ -102,6 +112,7 @@ class SdkMotorDriver:
         self._bus = None
         self._motors = {}
         self.mode = 'unknown'
+        self.owner = None
         self.last_receipt = None
 
     @staticmethod
@@ -116,14 +127,16 @@ class SdkMotorDriver:
 
     def connect(self):
         """打开总线并注册七个电机；注册中途失败时释放已取得的资源。"""
+        if self.owner is not None:
+            self.owner()
         with self._command_lock, self.bus_lock:
             if self.connected: return
             factory = self._factory or self._open_controller
-            self._bus = BusPort(factory(self.config.channel, self.config.timing.serial_baud), self.bus_lock)
+            self._bus = BusPort(factory(self.config.channel, self.config.timing.serial_baud), self.bus_lock, self.owner)
             try:
                 for cfg in (*self.config.joints, self.config.gripper):
                     handle = self._bus._handle.add_damiao_motor(cfg.motor_id, cfg.feedback_id, cfg.model)
-                    self._motors[cfg.name] = MotorPort(cfg.name, handle, self.bus_lock)
+                    self._motors[cfg.name] = MotorPort(cfg.name, handle, self.bus_lock, self.owner)
             except BaseException:
                 self.close()
                 raise

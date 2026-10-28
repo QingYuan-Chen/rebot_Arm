@@ -10,12 +10,10 @@
     /<namespace>/joints/<joint>/cmd  每个关节一条低层命令（关节名取自硬件的 joint_names）；
     /<namespace>/gripper/cmd         夹爪低层命令，仅当硬件已初始化夹爪时才订阅。
 
-仲裁语义（取值来自节点参数 cmd_arbitration，构造时传入）
-    硬件状态机处于 TRAJ_RUNNING（正在执行轨迹）时：
-        "reject"（默认）    丢弃本次命令并打印警告，保护正在执行的轨迹不被打断；
-        其它取值（"preempt"）先抢占：置位底层位置控制器的停止事件、清掉 moving 标志，
-        让轨迹发送循环停下后再下发本次命令，避免两个控制源同时向同一批电机写指令。
-    夹爪通道不做这层仲裁，命令直接下发。
+仲裁语义
+    回调只提交有有效期的请求。运行时对六轴、夹爪分别原子仲裁：reject 拒绝
+    占用资源的透传；preempt 确认六轴保持或夹爪中性释放后接替旧任务。
+    不在 ROS 线程先查状态再发送，避免检查与写入之间发生目标接替。
 
 安全约束
     透传本身不负责使能：硬件未使能、反馈不新鲜或模式不支持时，底层下发会抛异常，
@@ -79,22 +77,8 @@ class MotorPassthrough:
         """生成绑定到指定关节的命令回调（闭包，省去回调内再查名字）。"""
 
         def _callback(msg: JointMotorCmd) -> None:  # 为每个关节生成一个独立的回调函数
-            # 轨迹运行期间低层指令会与轨迹控制回路抢同一条电机通道，必须先仲裁
-            if self._hardware.state_machine == "TRAJ_RUNNING":
-                if self._arbitration == "reject":
-                    # 默认策略：直接丢弃，保证正在执行的轨迹不被打断
-                    self._node.get_logger().warn(
-                        f"rejecting /joints/{joint_name}/cmd while trajectory is running"
-                    )
-                    return
-                self._node.get_logger().warn(
-                    f"preempting trajectory for /joints/{joint_name}/cmd"
-                )
-                # 抢占：置位底层位置控制器的停止事件并清掉 moving 标志，让轨迹发送循环退出
-                self._hardware.cancel_arm_trajectory()
-
             try:
-                self._hardware.send_joint_motor_cmd(joint_name, msg)
+                self._hardware.send_joint_motor_cmd(joint_name, msg, arbitration=self._arbitration)
             except Exception as exc:
                 # 底层拒绝（未使能、模式不支持等）只记警告，不影响其它关节的命令
                 self._node.get_logger().warn(f"joint cmd failed for {joint_name}: {exc}")
@@ -105,9 +89,9 @@ class MotorPassthrough:
         return _callback
 
     def _gripper_callback(self, msg: JointMotorCmd) -> None:
-        """夹爪低层命令回调：不参与轨迹仲裁，直接下发。"""
+        """夹爪低层命令回调：提交独立资源的仲裁请求。"""
         try:
-            self._hardware.send_gripper_motor_cmd(msg)
+            self._hardware.send_gripper_motor_cmd(msg, arbitration=self._arbitration)
         except Exception as exc:
             self._node.get_logger().warn(f"gripper cmd failed: {exc}")
         finally:

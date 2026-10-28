@@ -170,11 +170,11 @@ def test_disabled_mode_settle_allows_new_verified_feedback(monkeypatch, mode):
     previous = dict(manager._verified_feedback_by_label)
 
     def settle(_duration):
+        manager.refresh_feedback_if_due(force=True)
         refreshed = threading.Event()
 
         def acquire_feedback():
             try:
-                manager.refresh_feedback_if_due(force=True)
                 # ROS 发布器在释放发布锁前读取该快照；此处阻塞也会阻碍后续刷新。
                 assert manager.get_cached_joint_sample()[3] == [0] * 6
                 assert manager.get_cached_gripper_sample()[3] == 0
@@ -268,17 +268,18 @@ def test_transition_settle_allows_verified_feedback_refresh(monkeypatch, enabled
     manager.connect()
     driver = manager._backend.driver
     if not enabled:
-        driver.enable()
+        manager._backend.call(driver.enable)
     previous = dict(manager._verified_feedback_by_label)
     failures = []
     workers = []
 
     def settle(_duration):
+        manager.refresh_feedback_if_due(force=True)
         done = threading.Event()
 
         def refresh():
             try:
-                manager.refresh_feedback_if_due(force=True)
+                manager.get_cached_joint_sample()
             except Exception as exc:
                 failures.append(exc)
             finally:
@@ -296,14 +297,14 @@ def test_transition_settle_allows_verified_feedback_refresh(monkeypatch, enabled
 
     driver._sleep = settle
     try:
-        (driver.enable if enabled else driver.disable)()
+        manager._backend.call(driver.enable if enabled else driver.disable)
         assert workers
     finally:
         driver._sleep = lambda _: None
         for worker in workers:
             worker.join(timeout=1.)
         if enabled:
-            driver.disable()
+            manager._backend.call(driver.disable)
         manager.shutdown()
 
 
@@ -410,28 +411,31 @@ def test_target_is_copied_and_trajectory_advances_only_after_send_ack():
     assert not execution.moving and execution.progress==1.
 
 
-def test_runtime_self_stop_and_bounded_join_never_start_second_writer():
-    config=load_configuration();config=replace(config,timing=replace(config.timing,join_timeout=.03))
-    driver,_,_=make_driver(config=config)
-    runtime=ControllerRuntime(config,None,driver=driver)
-    finished=threading.Event()
-    def stop_from_callback(*_): runtime.stop_control_loop();finished.set()
+def test_runtime_self_stop_and_bounded_queue_never_start_second_writer():
+    config = load_configuration()
+    driver, _, _ = make_driver(config=config)
+    runtime = ControllerRuntime(config, None, driver=driver)
+    finished = threading.Event()
+    def stop_from_callback(*_):
+        runtime.stop_control_loop()
+        finished.set()
     runtime.start_control_loop(stop_from_callback)
     assert finished.wait(1.)
-    runtime.stop_control_loop()
-    blocked,release=threading.Event(),threading.Event()
-    def callback(*_): blocked.set();release.wait(1.)
+    blocked, release = threading.Event(), threading.Event()
+    def callback(*_):
+        blocked.set()
+        release.wait(1.)
     runtime.start_control_loop(callback)
     assert blocked.wait(1.)
-    old=runtime.control_thread
+    old = runtime.control_thread
     try:
-        started=time.monotonic()
-        with pytest.raises(RuntimeError,match='did not stop'): runtime.stop_control_loop()
-        assert time.monotonic()-started<.2 and runtime.control_loop_active
-        with pytest.raises(RuntimeError,match='did not stop'): runtime.start_control_loop(lambda *_:None)
+        with pytest.raises(RuntimeError, match='timed out'):
+            runtime.call(lambda: None, ttl=.03)
         assert runtime.control_thread is old
     finally:
-        release.set();runtime.stop_control_loop()
+        release.set()
+        runtime.stop_control_loop()
+        runtime.close_worker()
 
 
 def test_real_manager_local_path_default_disabled_enable_recover_reconnect(monkeypatch):
@@ -528,18 +532,18 @@ def test_local_feedback_error_then_new_frame_recovers_without_query_effects(monk
     manager,opened=make_local_manager(monkeypatch);manager.connect()
     bus=opened[0]
     bus.motors[2].state.pos=.03
-    with pytest.raises(RuntimeError,match='joint3'): manager.refresh_feedback_if_due(force=True)
+    with pytest.raises(RuntimeError,match='joint3'): manager._backend.call(lambda: manager.refresh_feedback_if_due(force=True))
     assert manager.get_joint_status_codes()==[255]*6
     assert any('INVALID_COORDINATE' in code for code in manager.error_codes)
     before=(dict(manager._verified_feedback_by_label),dict(manager._feedback_error_by_label),len(bus.events))
     for _ in range(10): manager.get_feedback_status()
     assert before==(manager._verified_feedback_by_label,manager._feedback_error_by_label,len(bus.events))
     bus.motors[2].state.pos=.019
-    manager.refresh_feedback_if_due(force=True)
+    manager._backend.call(lambda: manager.refresh_feedback_if_due(force=True))
     assert manager.get_joint_status_codes()==[0]*6
     assert not any('INVALID_COORDINATE' in code for code in manager.error_codes)
     bus.motors[1].state.status_code=11
-    manager.refresh_feedback_if_due(force=True)
+    manager._backend.call(lambda: manager.refresh_feedback_if_due(force=True))
     assert manager.get_joint_status_codes()==[0,11,0,0,0,0]
     bus.motors[1].state.status_code=0
     manager.shutdown()
@@ -581,49 +585,18 @@ def test_mode_failure_is_protective_and_motion_gate_stays_closed(monkeypatch):
     manager.disable();manager.shutdown()
 
 
-def test_pure_math_uses_canonical_model_and_cancelled_plan_cannot_submit(monkeypatch):
-    import pinocchio as pin
-    from rebotarmcontroller import legacy_backend
-    manager,_=make_local_manager(monkeypatch);manager.connect()
-    runtime=manager._backend
-    q=np.array((.2,-.8,-1.1,.3,-.2,.4))
-    position,rotation=runtime.kinematics.pose(q)
-    pose=tuple(position)+tuple(pin.rpy.matrixToRpy(rotation))
-    solution=legacy_backend.solve_pose_ik(runtime.kinematics,q,pose)
-    assert solution==pytest.approx(q)
-    path=legacy_backend.plan_pose_path(runtime.kinematics,q,pose,.1,.02)
-    assert path is not None and len(path[0])==len(path[1])
-    runtime.execution.running=True
-    def cancelled(*_):
-        runtime.cancel_trajectory()
-        return [q],[0.]
-    monkeypatch.setattr(legacy_backend,'plan_pose_path',cancelled)
-    runtime.feedback_reader=lambda:(q,np.zeros(6),np.zeros(6))
-    assert not runtime.move_to_pose_path(*pose,.1)
-    assert not runtime.trajectory_moving
-    manager.shutdown()
-
-
-@pytest.mark.parametrize("ready",[False,True])
-def test_pose_action_does_not_report_success_after_writer_stops(monkeypatch,ready):
-    from geometry_msgs.msg import Pose
-    from rebotarmcontroller import ros_actions
-    # 此适配器测试不依赖其他测试刻意精简的 ROS 桩对象。
-    monkeypatch.setattr(ros_actions,'MoveToPose',SimpleNamespace(
-        Result=lambda:SimpleNamespace(success=False,message='',final_pose=Pose()),
-        Feedback=lambda:SimpleNamespace(current_pose=Pose(),progress=0.,time_elapsed=0.)))
-    actions=ros_actions.ArmActions.__new__(ros_actions.ArmActions)
-    def no_pose(): raise RuntimeError('feedback unavailable')
-    actions._hardware=SimpleNamespace(set_state_machine=lambda _:None,ensure_pos_vel_control=lambda:None,
-        move_to_pose_path=lambda *_:True,trajectory_moving=False,ready_for_motion=ready,
-        state_machine='TRAJ_RUNNING' if ready else 'IDLE',current_pose=no_pose)
-    actions._node=SimpleNamespace(publish_arm_status=lambda:None)
-    events=[]
-    goal=SimpleNamespace(request=SimpleNamespace(target_pose=Pose(),duration=.1),is_cancel_requested=False,
-                         abort=lambda:events.append('abort'),succeed=lambda:events.append('succeed'))
-    result=actions.execute_move_to_pose(goal)
-    assert not result.success and events==['abort']
-    assert 'final pose unavailable' in result.message
+def test_pure_math_uses_canonical_model_and_cannot_write_hardware(monkeypatch):
+    from rebotarm_motion.pose_kinematics import PoseKinematics
+    from rebotarm_motion.cartesian_trajectory import plan_cartesian
+    manager, opened = make_local_manager(monkeypatch)
+    kinematics = PoseKinematics()
+    q = np.array((.2,-.8,-1.1,.3,-.2,.4))
+    target = kinematics.pose(q)
+    assert kinematics.solve(target, q).q == pytest.approx(q)
+    path, duration = plan_cartesian(kinematics, q, target, .1)
+    assert path[-1] == pytest.approx(q) and duration == .1
+    assert not opened
+    assert not hasattr(manager, 'move_to_pose_path')
 
 
 def test_initial_gravity_send_failure_protects_instead_of_resuming_normal_output(monkeypatch):
@@ -662,18 +635,16 @@ def test_safe_home_completion_switches_to_hold_and_clears_task_speed(monkeypatch
 
 
 def test_safe_home_supersession_does_not_rewrite_new_target(monkeypatch):
-    manager, _ = make_local_manager(monkeypatch)
+    manager, opened = make_local_manager(monkeypatch)
     manager.connect(); manager.enable()
     successor = (0.2, -0.2, -0.2, 0., 0., 0.)
-    read = manager.get_joint_state
-    def read_and_supersede():
-        result = read()
-        manager.set_joint_target(successor)
-        return result
-    monkeypatch.setattr(manager, 'get_joint_state', read_and_supersede)
-    with pytest.raises(RuntimeError, match='canceled or superseded'):
-        manager.safe_home((0.,)*6, timeout_sec=1.)
+    # 假电机不跟随，确保原任务仍在等待；替换目标后只允许新目标保留。
+    monkeypatch.setattr(opened[0].motors[0], 'send_pos_vel', lambda *_: None)
+    task = manager.submit_arm_trajectory(manager.joint_names,
+        [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., .02])
+    manager.set_joint_target(successor)
+    assert task.event.wait(1.)
+    assert manager.arm_execution_status(task).state == 'aborted'
     assert manager.joint_target() == pytest.approx(successor)
     assert manager._backend.execution.sample(time.monotonic()).velocity_override is None
-    monkeypatch.setattr(manager, 'get_joint_state', read)
     manager.disable(); manager.shutdown()

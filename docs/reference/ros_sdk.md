@@ -20,9 +20,9 @@
 启动文件的分层、包含关系和功能边界见
 [启动结构与功能](../../src/rebotarm_bringup/launch/README.md)。
 
-`rebotarm_ros2` 是 reBotArm B601 机械臂的 ROS2 SDK 工作空间。它将现有的
-`reBotArm_control_py` Python 控制库封装为 ROS2 topic、service 和 action，
-作为二次开发、上层规划、可视化和单电机调试的统一入口。
+`rebotarm_ros2` 是 reBotArm B601 机械臂的 ROS2 工作空间，通过本地设备驱动和运动层
+提供 topic、service 和 action，作为二次开发、规划、可视化和单电机调试入口。
+厂商 Python SDK 仅保留为参考，生产路径不再导入；不建立第二份通用 SDK。
 
 当前工作空间包含12个 ROS2 包：
 
@@ -71,7 +71,7 @@ sudo apt install ros-jazzy-moveit-simple-controller-manager
 - 支持夹爪控制：`SetGripper` service、`GripperCommand` action
 - 支持 controller 内部重力补偿：`gravity_compensation/start`、`gravity_compensation/stop`
 - 支持 per-joint sparse raw command：`JointMotorCmd`
-- 复用 `reBotArm_control_py` 的 `RobotArm`、`ArmEndPos`、FK/IK、动力学和夹爪配置加载
+- 本地配置与 MotorBridge 驱动；规范模型 FK/IK 和笛卡尔采样由 Pinocchio 与本地运动实现承接
 
 ---
 
@@ -83,7 +83,7 @@ sudo apt install ros-jazzy-moveit-simple-controller-manager
 | ROS2 | Jazzy，安装路径 `/opt/ros/jazzy` |
 | Python | 系统 Python 3.12 |
 | Python 环境 | 不使用 conda |
-| 底层 SDK | 仓库内 `third_party/reBotArm_control_py/`，按依赖清单固定版本 |
+| 底层依赖 | 带序号补丁的 MotorBridge；Pinocchio 用于规范模型计算 |
 | 默认串口 | `/dev/ttyACM0`，可通过 launch 参数覆盖 |
 
 每次构建或运行前先 source ROS2：
@@ -127,7 +127,7 @@ python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed
 `--check-installed` 不联网、不构建且不访问硬件。详细构建、检查和回退说明见
 [`docs/setup/ubuntu_ros2_jazzy.md`](../setup/ubuntu_ros2_jazzy.md)。
 
-### Step 3. 获取底层 SDK
+### Step 3. 保留参考 SDK（可选）
 
 
 ```bash
@@ -136,16 +136,14 @@ mkdir -p third_party
 vcs import third_party < third_party/rebotarm_dependencies.repos
 ```
 
-### Step 4. 确认底层 SDK 可导入
+### Step 4. 确认运行依赖
 
-如果还没有把 SDK 安装到系统 Python，可临时设置 `PYTHONPATH` 验证：
+生产无需安装厂商 Python SDK 或设置其 `PYTHONPATH`。构建前检查：
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-export PYTHONPATH=$PWD/third_party/reBotArm_control_py:$PYTHONPATH
-python3 -c "import rclpy, motorbridge, reBotArm_control_py; print('core imports OK')"
+python3 -c "import rclpy, motorbridge; print('core imports OK')"
 python3 -c "import pinocchio; print('pinocchio', pinocchio.__version__)"
-python3 -c "from reBotArm_control_py.actuator import RobotArm; from reBotArm_control_py.controllers import ArmEndPos; from reBotArm_control_py.kinematics import compute_fk; from reBotArm_control_py.kinematics.inverse_kinematics import solve_ik; from reBotArm_control_py.actuator.gripper import load_cfg; print('SDK required APIs OK')"
 ```
 
 ## 构建工作空间
@@ -268,7 +266,8 @@ ros2 action send_goal /rebotarm/move_to_pose rebotarm_msgs/action/MoveToPose \
   --feedback
 ```
 
-`move_to_pose` action 内部会确保进入 `pos_vel` 控制并启动轨迹控制循环。
+`move_to_pose` 由 motion 的 `PoseCompatNode` 提供，需要已显式使能、新鲜关节/夹爪反馈
+及可用的 MoveIt 状态有效性服务；重定时与碰撞检查通过后交唯一 FJT 执行。
 
 3. 回到安全零位：
 
@@ -334,7 +333,7 @@ ros2 run rebotarmcontroller MoveTo -- --joint joint3 --position -0.20 --duration
 ### move_to_pose.py
 
 末端位姿移动示例。脚本会通过 `/rebotarm/move_to_pose` action 发送
-`geometry_msgs/Pose` 目标；控制节点内部负责模式切换和轨迹执行。
+`geometry_msgs/Pose` 目标；运动层负责采样、IK、重定时和碰撞校验，控制器负责 FJT 执行。
 
 这是单次动作 demo，不会在结束后自动 `safe_home` 或 `disable`。
 
@@ -342,16 +341,14 @@ ros2 run rebotarmcontroller MoveTo -- --joint joint3 --position -0.20 --duration
 ros2 run rebotarmcontroller MoveToPose -- --x 0.30 --y 0.0 --z 0.30 --qw 1.0 --duration 2.0
 ```
 
-这个示例对应底层 SDK 的 `ArmEndPos.move_to_traj(...)` 能力链路，也就是
-`third_party/reBotArm_control_py/example/8_arm_traj_control.py` 的 ROS action 版本。
+Action 等待 FJT 到位；进度到 1.0 或完成规划本身不表示执行成功。
 
 ### gravity_compensation.py
 
 重力补偿锁止示例。脚本本身不再在外部节点重写控制循环，而是直接调用
 `reBotArmController` 内部的重力补偿服务；真正的重力补偿闭环在 controller
-进程内部直接使用 SDK 的 `RobotArm.get_positions/get_velocities/mit` 完成。
-内部启动流程参考新版 SDK 示例：切入 MIT 后先执行 `fresh()` 空指令，再进入重力补偿闭环，
-并对多圈角度反馈做就近连续化处理，避免启动瞬态弹跳。
+进程内部由唯一运行时采集序号验证反馈、本地重力算法计算有界输出并交 MotorBridge。
+进入 MIT 前后均校验反馈，计算或任务失败按已验证保持策略处理。
 
 ```bash
 ros2 run rebotarmcontroller GravityCompensation
@@ -419,14 +416,14 @@ q / quit    退出
 | `/rebotarm/gravity_compensation/stop` | `std_srvs/srv/Trigger` | 停止 controller 内部重力补偿闭环 | `ros2 service call /rebotarm/gravity_compensation/stop std_srvs/srv/Trigger "{}"` |
 | `/rebotarm/set_mode` | `rebotarm_msgs/srv/SetMode` | 切换 `mit`、`pos_vel`、`vel` | `ros2 service call /rebotarm/set_mode rebotarm_msgs/srv/SetMode "{mode: 'pos_vel'}"` |
 | `/rebotarm/set_zero` | `rebotarm_msgs/srv/SetZero` | 设置全部或指定关节零点，空 `joint_name` 表示全部 | `ros2 service call /rebotarm/set_zero rebotarm_msgs/srv/SetZero "{joint_name: ''}"` |
-| `/rebotarm/move_to_pose_ik` | `rebotarm_msgs/srv/MoveToPoseIK` | 只做 IK 求解并更新目标关节角，适合小步位姿调整 | 见下方预留 API |
+| `/rebotarm/move_to_pose_ik` | `rebotarm_msgs/srv/MoveToPoseIK` | motion 求解、重定时、碰撞检查后提交 FJT | success 仅表示 FJT 接纳，会触发运动 |
 | `/rebotarm/gripper/set` | `rebotarm_msgs/srv/SetGripper` | 设置夹爪开合距离和最大力矩 | `ros2 service call /rebotarm/gripper/set rebotarm_msgs/srv/SetGripper "{position: 0.05, max_effort: 0.5}"` |
 
 ### 动作 Action
 
 | API | 类型 | 说明 | 简要使用 |
 |---|---|---|---|
-| `/rebotarm/move_to_pose` | `rebotarm_msgs/action/MoveToPose` | 末端笛卡尔位姿轨迹，内部走 `ArmEndPos.move_to_traj(...)` | 适合应用层发 `Pose + duration` |
+| `/rebotarm/move_to_pose` | `rebotarm_msgs/action/MoveToPose` | motion 生成并校验笛卡尔轨迹后转 FJT，等待到位 | 输入 `Pose + duration`，重定时可延长时长 |
 | `/rebotarm/follow_joint_trajectory` | `control_msgs/action/FollowJointTrajectory` | 标准关节轨迹接口，按输入轨迹点定时下发，并做首点/速度/到位校验 | 适合上层规划器或 `move_to.py` |
 | `/rebotarm/gripper/command` | `control_msgs/action/GripperCommand` | 标准夹爪 action | 适合行为树、任务编排或 MoveIt 风格接口 |
 
@@ -482,7 +479,7 @@ ros2 topic pub --once /rebotarm/joints/joint1/cmd rebotarm_msgs/msg/JointMotorCm
 |---|---|---|---|
 | `/rebotarm/follow_joint_trajectory` | 关节轨迹 action | MoveIt2、任务规划器、离线轨迹回放 | 发送完整 `joint_names` 和 `points`，首点需接近当前关节角 |
 | `/rebotarm/move_to_pose` | 末端位姿 action | 视觉抓取、点击到达、任务级 API | 输入 `Pose + duration`，返回 `final_pose` 和执行结果 |
-| `/rebotarm/move_to_pose_ik` | IK 服务 | IK 预检查、小步 servo、UI 预览 | 服务返回 `q_solution`，适合先验证目标是否可达 |
+| `/rebotarm/move_to_pose_ik` | IK 执行兼容服务 | 旧应用接入 | 会触发运动；返回 `q_solution`，success 仅表示接纳，不可作为只读预览 |
 | `/rebotarm/joints/<joint>/cmd` | 单电机直通 topic | 调参、重力补偿、低层控制实验 | 轨迹运行时默认 `reject`，可用参数 `cmd_arbitration:=preempt` 改为抢占 |
 | `/rebotarm/gripper/command` | 标准夹爪 action | 行为树、抓取 pipeline | 使用 `control_msgs/action/GripperCommand`，位置单位为米 |
 | `/rebotarm/arm_status` | latched 状态 topic | UI、健康监控、状态机同步 | 关注 `state_machine`：`IDLE`、`TRAJ_RUNNING`、`LOWLEVEL_STREAMING`、`GRAVITY_COMP` |

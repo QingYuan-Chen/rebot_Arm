@@ -89,8 +89,9 @@ MoveIt 插件加载侧，而非仅因模拟器未启动。若包已安装仍报�
 电机自己的 sequence 在响应窗口内推进且状态/数值有效，就会进入健康反馈状态。
 不要为了“对齐”而修改电机 ID、sequence 或放宽 `status_code` 检查。
 
-若仍看到 `verified feedback pending: ...`，先用 SDK 只读测试确认每个电机的
-`get_state_with_sequence()` 都推进，再重新启动 ROS 控制器；两者不能同时占用串口。
+若仍看到 `verified feedback pending: ...`，检查控制器记录的逐电机序号和响应超时。
+需要独立 MotorBridge 诊断时，先停止并确认释放原控制器，遵守现场安全与显式使能规则；
+不能把连接、关闭流程默认当作只读，也不能让两个进程同时占用串口。
 只有某个电机 sequence 长时间不变、持续 `NO_FEEDBACK` 或 `status_code != 0` 时，
 才按底层电机反馈链路排查。
 
@@ -166,7 +167,8 @@ python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed
 保护失能策略不变。构建保留旧版本 wheel 以便回退。
 重复安装 bootstrap 清单后也必须重新安装审查补丁并检查；不要把原始 0.4.7 用作真机运行版本。
 
-厂商 SDK 使用 `third_party/rebotarm_dependencies.repos` 固定版本：
+厂商 SDK 仅供历史行为和数值对照，生产控制器与 motion 无需导入或注入其路径。
+需保留参考树时，使用 `third_party/rebotarm_dependencies.repos` 固定版本：
 
 ```bash
 mkdir -p third_party

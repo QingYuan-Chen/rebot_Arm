@@ -4,11 +4,6 @@ import sys
 from types import SimpleNamespace
 import types
 
-if "rebotarm_msgs.action" not in sys.modules:
-    action_module = types.ModuleType("rebotarm_msgs.action")
-    action_module.MoveToPose = type("MoveToPose", (), {"Result": type("Result", (), {})})
-    sys.modules["rebotarm_msgs.action"] = action_module
-
 import rebotarmcontroller.ros_actions as ros_actions_module
 from rebotarmcontroller.ros_actions import ArmActions
 
@@ -18,8 +13,21 @@ class _LongMoveHardware:
         self._clock = clock
         self.active = True
 
-    def set_gripper_target(self, _position: float, _max_effort: float) -> None:
-        return None
+    def set_gripper_target(self, _position: float, _max_effort: float):
+        return 1
+
+    def gripper_execution_status(self, generation):
+        assert generation == 1
+        if self.gripper_command_error:
+            self.active = False
+            return 'failed', self.gripper_command_error
+        if self.gripper_reached_target():
+            self.active = False
+            return 'succeeded', None
+        if self._clock[0] >= self.gripper_target_timeout_sec():
+            self.active = False
+            return 'failed', 'gripper target timeout'
+        return 'active', None
 
     def gripper_target_timeout_sec(self) -> float:
         return 10.0
@@ -40,7 +48,7 @@ class _LongMoveHardware:
         self.active = False
         return True
 
-    def cancel_gripper_position_command(self, _reason: str) -> bool:
+    def cancel_gripper_position_command(self, _reason: str, *, expected_generation=None) -> bool:
         return False
 
     @property
@@ -65,7 +73,7 @@ class _NeverMoveHardware(_LongMoveHardware):
     def gripper_reached_target(self) -> bool:
         return False
 
-    def cancel_gripper_position_command(self, _reason: str) -> bool:
+    def cancel_gripper_position_command(self, _reason: str, *, expected_generation=None) -> bool:
         self.active = False
         return True
 

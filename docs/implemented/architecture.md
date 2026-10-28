@@ -16,15 +16,17 @@
 
 包内 `configuration.py` 拥有配置解析与校验，`controller_contracts.py` 只含复制后的不可变数值。
 `sdk_driver.py` 直接通过 MotorBridge 管理唯一总线与七个电机句柄；
-`controller_runtime.py` 拥有最小周期线程，`arm_execution.py` 持有目标和轨迹游标，
+`controller_runtime.py` 拥有唯一设备线程，`device_requests.py` 提供有界优先级请求队列，
+连接、生命周期、反馈和输出均在该线程协调，失能时继续采集。
+`arm_execution.py` 持有目标和轨迹游标，`arm_trajectory.py` 持有独立任务和到位结果，
 `arm_position_control.py` 生成位置命令，`controller_kinematics.py` 以规范模型计算 FK。
-ROS 通过 manager 的目标、取消和进度接口交互。临时 `legacy_backend.py` 只桥接
-SDK 纯 IK/路径计算，没有设备或发送线程；最终计算归 motion，接口经 FJT 执行。
+ROS 通过 manager 的提交、取消和只读进度接口交互，不推进执行时间轴。
+临时 SDK 桥和路径注入已删除，生产控制器与运动计算不再导入厂商 Python SDK。
 `feedback_acquisition.py` 拥有反馈采集、验证缓存及只读健康判断；manager 通过
 窄回调提供设备分组与夹爪反馈协调。`gripper_execution.py` 持有夹爪执行状态并在
 周期中推进堵转和释放，`gripper_control.py` 计算斜坡和力矩边界；管理器保留
 兼容入口及设备发送。`lifecycle.py` 管理生命周期状态和关闭策略；重力补偿状态与
-计算归 `gravity_control.py`，设备切换仍由 manager 协调。完整运行时请求队列尚未接入；后续归属见
+计算归 `gravity_control.py`，设备切换仍由 manager 协调。全部模块平铺包根目录；C++ 后续归属见
 [拆分规划](../design/controller_refactor_plan.md)。
 
 负责：
@@ -49,6 +51,12 @@ SDK 纯 IK/路径计算，没有设备或发送线程；最终计算归 motion�
 ### 运动职责（Motion ownership）
 
 `rebotarm_motion` 负责运动生成和运动校验。
+
+`pose_kinematics.py` 独立提供规范模型 FK/阻尼 IK，`cartesian_trajectory.py` 提供
+SE(3) 采样、连续 IK 跟踪和重定时。`pose_compat_node.py` 唯一提供旧
+`move_to_pose` Action 和 `move_to_pose_ik` 服务：要求新鲜且显式使能的状态，
+经动态限位重定时、全路径碰撞预检后交给唯一 FJT 服务端。服务成功只表示接纳；
+Action 等待到位。迟到接纳仍跟踪并取消，停止确认前不接新请求。
 
 负责：
 

@@ -13,8 +13,8 @@
 - 拒绝不安全的低层命令：未连接/未使能、反馈过期、越限、状态码异常。
 
 并发的关键约定：
-- 电机命令与反馈读写共享同一条总线，因此所有写操作都通过
-  驱动提供的共享总线重入锁串行化；
+- 所有设备命令、反馈采集和句柄生命周期均经有界请求队列交唯一设备线程；
+  驱动的命令锁及共享总线锁继续保护单次事务，端口断言禁止外部线程访问；
 - ``_motor_lifecycle_lock`` 保护连接/使能/失能/置零等生命周期迁移，
   与运动命令互斥；
 - ``_gripper_lock`` 保护夹爪状态机；``_feedback_lock`` 保护已验证反馈样本。
@@ -44,6 +44,8 @@ from .controller_contracts import (VerifiedFeedbackSample as _VerifiedFeedbackSa
                                CachedMotorFeedback as _CachedMotorFeedback)
 from .controller_kinematics import ArmKinematics
 from .controller_runtime import ControllerRuntime
+from .device_requests import device_request
+from .arm_trajectory import ArmTrajectory
 from .sdk_driver import CommandTransportError
 from .conversions import fk_to_pose
 from .gravity_control import (GravitySettings, GravityExecutionState, LoopTiming, bounded_mit_command,
@@ -51,7 +53,7 @@ from .gravity_control import (GravitySettings, GravityExecutionState, LoopTiming
 
 
 class GravityCommandError(RuntimeError):
-    """Motor command transport failed; holding torque cannot be trusted."""
+    """电机命令传输失败，无法确认保持力矩。"""
 
 
 _LOG = logging.getLogger(__name__)
@@ -137,9 +139,9 @@ class HardwareManager:
     -> ``shutdown()``。构造仅加载配置和规范模型；设备打开发生在 ``connect()``，
     连接后默认失能，运动必须显式 enable。
 
-    并发的回调模型：普通运动写入跑在本地唯一控制线程（``ControllerRuntime``
-    启动）里，生命周期和透传仍以共享总线锁串行访问；ROS 定时器线程只允许读取已缓存的
-    已验证反馈（``refresh_feedback_if_due`` 会拒绝在循环运行期间做同步刷新）。
+    并发的回调模型：运动、生命周期与透传均跑在 ``ControllerRuntime`` 的唯一
+    设备线程；同步公共入口在生命周期锁外排队等待结果。ROS 定时器线程只读
+    已验证缓存，即使失能也不得同步刷新总线。
     因此任何跨线程状态都由 ``_motor_lifecycle_lock`` / ``_gripper_lock`` /
     ``_feedback_lock`` 保护。
     """
@@ -174,6 +176,8 @@ class HardwareManager:
         self._gc_torque_limits = self._gravity_model.effort
         self._backend = ControllerRuntime(self._configuration, ArmKinematics(self._gravity_model.model))
         self._backend.feedback_reader = self.get_joint_state
+        self._backend.idle_callback = self._runtime_feedback_tick
+        self._arm_trajectory = ArmTrajectory(self._backend.execution)
         self._backend.on_error = lambda exc: self._protective_disable_from_hardware_loop(str(exc),category="CONTROLLER")
         # 重力补偿用的动力学模型：pinocchio 模型 + 数据缓冲 + 末端帧 id，
         # 计算函数和数据缓冲来自同一个权威模型，不再使用 SDK 的另一份 URDF。
@@ -980,6 +984,7 @@ class HardwareManager:
         if errors:
             raise RuntimeError("; ".join(errors))
 
+    @device_request(priority=5, ttl=10., invalidate=('device',))
     def connect(self) -> None:
         """连接硬件并停留在"已连接但失能"状态。
 
@@ -991,6 +996,7 @@ class HardwareManager:
         if self._connected:
             return
         try:
+            self._arm_passthrough_until = self._gripper_passthrough_until = None
             self._backend.connect()
             with self._feedback_lock:
                 self._verified_feedback_by_label.clear()
@@ -1051,6 +1057,7 @@ class HardwareManager:
         self._enabled = False
         self._set_lifecycle_state("DISCONNECTED")
 
+    @device_request(priority=5, ttl=10., invalidate=('device',))
     def shutdown(self) -> None:
         """已失能时停止线程并释放设备；使能状态必须先经显式失能。"""
         if not self._connected:
@@ -1061,7 +1068,7 @@ class HardwareManager:
                 raise RuntimeError("shutdown requires explicit disable first")
             self._stop_gripper_loop()
             self.stop_gravity_compensation()
-            # 写入线程未退出时保留句柄，避免线程访问已释放的设备。
+            # 先移除周期输出回调；本请求仍由唯一设备线程执行，释放后才退出线程。
             self._stop_control_loop()
             try:
                 self._validated_joint_feedback(expected_status=0)
@@ -1083,8 +1090,8 @@ class HardwareManager:
     def get_joint_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """返回 (位置, 速度, 力矩)；未连接时拒绝伪造首帧。
 
-        已连接时要求状态码与使能状态一致（使能 -> 1，失能 -> 0），并在控制循环
-        未运行时顺带刷新反馈。
+        已连接时要求状态码与使能状态一致（使能 -> 1，失能 -> 0）。正式运行时
+        的采集始终归唯一设备线程，本入口只读取缓存。
         """
         with self._motor_lifecycle_lock:
             if not self._connected:
@@ -1092,7 +1099,7 @@ class HardwareManager:
             expected_status = 1 if self._enabled else 0
             positions, velocities, torques, _statuses = self._validated_joint_feedback(
                 expected_status=expected_status,
-                refresh=not self.control_loop_active,
+                refresh=not hasattr(self._backend, "requests") and not self.control_loop_active,
             )
             return positions, velocities, torques
 
@@ -1135,6 +1142,7 @@ class HardwareManager:
                 min(item.sample.observed_at for item in feedback),
             )
 
+    @device_request(resource='arm', priority=0, invalidate=('arm',))
     def hold_current_position(self) -> np.ndarray:
         """把当前关节角写成保持目标，使机械臂停在原地。"""
         q, _, _ = self.get_joint_state()
@@ -1142,23 +1150,115 @@ class HardwareManager:
         self._backend.set_target(current)
         return current
 
-    def stop_active_motion(self) -> None:
-        """立即停止正在下发的轨迹：置停止标志、取消移动、保持当前位置。"""
-        with self._motor_lifecycle_lock:
-            self._backend.cancel_trajectory()
-            if self._enabled:
-                self.hold_current_position()
-            self.set_state_machine("IDLE")
+    @device_request(resource='arm', priority=0, ttl=5.)
+    def stop_active_motion(self, task=None) -> None:
+        """撤销当前任务并确认保持；旧任务的取消不能停止接替任务。
 
+        只有保持命令成功发送且后续新帧持续静止 0.1 s 才返回成功。超时报告
+        未确认，保留使能和保持目标；这里绝不把普通取消变成自动失能。
+        """
+        owner = getattr(self, '_arm_trajectory', None)
+        active = None if owner is None else owner.task
+        if task is not None and (active is not task or task.event.is_set()):
+            return
+        with self._motor_lifecycle_lock:
+            if hasattr(self._backend, 'requests'):
+                self._backend.requests.invalidate('arm')
+            if active is not None:
+                owner.stopping(active)
+            self._backend.cancel_trajectory()
+            self._arm_passthrough_until = None
+            if self._enabled:
+                self.stop_gravity_compensation()
+                self.ensure_pos_vel_control()
+                current = self.hold_current_position()
+                if hasattr(self._backend, 'requests'):
+                    try:
+                        self._confirm_arm_hold(current)
+                    except Exception as exc:
+                        if active is not None:
+                            owner.finish(active, 'aborted', f'stop/hold unconfirmed: {exc}')
+                        raise
+            self.set_state_machine('IDLE')
+            if active is not None:
+                owner.finish(active, 'canceled', 'stop/hold confirmed')
+
+    def _confirm_arm_hold(self, current):
+        """运行时独占的停止确认事务；保持发送与反馈确认使用同一写入者。"""
+        deadline = time.monotonic() + 2.
+        quiet_since = None
+        sent = time.monotonic()
+        while time.monotonic() < deadline:
+            self._backend.position_tick(self._backend, 1./self._backend.rate)
+            self.refresh_feedback_if_due(force=True)
+            q, qd, _, _, _, stamp = self.get_cached_joint_sample()
+            quiet = (stamp > sent and np.max(np.abs(q-current)) <= .03
+                     and np.max(np.abs(qd)) <= .05)
+            if quiet:
+                quiet_since = stamp if quiet_since is None else quiet_since
+                if stamp - quiet_since >= .10:
+                    return
+            else:
+                quiet_since = None
+            self._backend.device_wait(.01)
+        raise RuntimeError('fresh stationary hold feedback not confirmed')
+
+    @device_request(resource='arm')
+    def submit_arm_trajectory(self, joint_names, points, times, *, home=False,
+                              velocity=None, timeout=2.):
+        """原子检查六轴资源并提交轨迹；返回只属于本请求的任务句柄。"""
+        self._require_enabled()
+        if len(joint_names) != 6 or set(joint_names) != set(self.joint_names):
+            raise ValueError('trajectory joints must match hardware exactly')
+        if not points or len(points) != len(times):
+            raise ValueError('trajectory must contain matching points and times')
+        if any(len(point) != 6 for point in points):
+            raise ValueError('each trajectory point must contain six positions')
+        if not np.isfinite(timeout) or timeout <= 0:
+            raise ValueError('trajectory settling timeout must be positive and finite')
+        order = [joint_names.index(name) for name in self.joint_names]
+        ordered = [self._backend.execution.validate_target([point[i] for i in order])
+                   for point in points]
+        stamps = [float(value) for value in times]
+        if (not np.isfinite(stamps).all() or min(stamps) < 0
+                or any(b < a for a, b in zip(stamps, stamps[1:]))):
+            raise ValueError('trajectory times must be finite, nonnegative and nondecreasing')
+        active = self._arm_trajectory.task
+        if active is not None and not active.event.is_set():
+            raise RuntimeError('arm resource busy')
+        if getattr(self, '_arm_passthrough_until', None) is not None:
+            raise RuntimeError('arm resource owned by passthrough')
+        current, _, _ = self.get_joint_state()
+        if np.max(np.abs(np.asarray(ordered[0])-current)) > .10:
+            raise ValueError('first trajectory point is too far from current joint state')
+        self.ensure_pos_vel_control()
+        # 同时刻的点合并为最后一个；t=0 首点按既有接口仅作为对齐占位。
+        samples = {0.: tuple(current)}
+        for index, (stamp, point) in enumerate(zip(stamps, ordered)):
+            if index == 0 and stamp <= 1e-9:
+                continue
+            samples[stamp] = point
+        task = self._arm_trajectory.submit(list(samples.values()), list(samples), current,
+            tolerance=.02 if home else .03, settle=timeout,
+            velocity=velocity, hold_on_success=home)
+        self.set_state_machine('TRAJ_RUNNING')
+        return task
+
+    def arm_execution_status(self, task):
+        return self._arm_trajectory.snapshot(task)
+
+    @device_request(resource='arm')
     def set_joint_target(self, positions) -> None:
         self._require_enabled()
+        self._arm_passthrough_until = None
         self._backend.set_target(positions)
 
     def joint_target(self):
         return self._backend.target()
 
+    @device_request(resource='arm', priority=0, invalidate=('arm',))
     def cancel_arm_trajectory(self) -> None:
-        self._backend.cancel_trajectory()
+        self.stop_active_motion()
 
     @property
     def trajectory_moving(self):
@@ -1167,14 +1267,6 @@ class HardwareManager:
     @property
     def trajectory_progress(self):
         return self._backend.trajectory_progress
-
-    def move_to_pose_path(self, *args):
-        self._require_enabled()
-        return self._backend.move_to_pose_path(*args)
-
-    def move_to_pose_ik(self, *args):
-        self._require_enabled()
-        return self._backend.move_to_pose_ik(*args)
 
     def safe_home_target(self) -> np.ndarray:
         return np.array(_SAFE_HOME_JOINT_POSITIONS, dtype=np.float64)
@@ -1205,69 +1297,25 @@ class HardwareManager:
                 )
         return values
 
-    def safe_home(
-        self,
-        target: Optional[Sequence[float]] = None,
-        vlim: Optional[float] = None,
-        timeout_sec: Optional[float] = None,
-    ) -> np.ndarray:
-        """把机械臂驱到无碰撞的停放姿态。
-
-        替代 ArmEndPos.safe_home（它把目标硬编码为全零）；零位为何不能停放见
-        _SAFE_HOME_JOINT_POSITIONS 的说明。保留厂商的速度覆盖与到位轮询机制，
-        但到位判据改为"相对请求目标"而不是零，且速度绝不允许超过厂商自身的
-        回零速度。任务仍持有目标时以新鲜反馈接管保持；取消或接替后不覆盖新目标。
-        """
+    def safe_home(self, target=None, vlim=None, timeout_sec=None) -> np.ndarray:
+        """提交有速度覆盖的停靠任务并等待；超时/取消由周期执行器处理。"""
         goal = self._validated_safe_home_target(target)
-        ctrl = self._backend
-        with self._motor_lifecycle_lock:
-            self._require_enabled()
-            if not ctrl.execution_running:
-                raise RuntimeError(
-                    "control loop is inactive; safe_home needs position-velocity control"
-                )
-            speed = ctrl.home_velocity if vlim is None else float(vlim)
-            if not 0.0 < speed <= ctrl.home_velocity:
-                raise ValueError(
-                    f"safe_home vlim must be within (0, {ctrl.home_velocity:g}] rad/s"
-                )
-            generation = ctrl.begin_scoped_target(
-                goal, np.full(len(self.joint_names), speed, dtype=np.float64)
-            )
-            self.set_state_machine("TRAJ_RUNNING")
-        finished = False
-        try:
-            # 先等在途的发送线程收尾，再开始轮询到位情况。
-            ctrl.join_sender()
-            deadline = time.monotonic() + (
-                _SAFE_HOME_TIMEOUT_SEC if timeout_sec is None else float(timeout_sec)
-            )
-            while True:
-                if ctrl.target_generation != generation:
-                    raise RuntimeError("safe_home canceled or superseded")
-                positions, _velocities, _torques = self.get_joint_state()
-                reached = np.array(positions, dtype=np.float64)
-                worst = float(np.max(np.abs(reached - goal)))
-                if worst < _SAFE_HOME_ARRIVE_TOL_RAD:
-                    break
-                if time.monotonic() > deadline:
-                    raise TimeoutError(
-                        f"safe_home did not reach {goal.tolist()} within "
-                        f"{_SAFE_HOME_ARRIVE_TOL_RAD} rad; worst joint error {worst:.4f} rad"
-                    )
-                time.sleep(ctrl.arrival_poll_period)
-        finally:
-            with self._motor_lifecycle_lock:
-                if self._enabled and ctrl.target_generation == generation:
-                    # 反馈读取期间可能发生接替，最终提交时再次以代次原子核对。
-                    positions, _, _ = self.get_joint_state()
-                    finished = ctrl.finish_scoped_target(generation, positions)
-                    if finished:
-                        self.set_state_machine("IDLE")
-        if not finished:
-            raise RuntimeError("safe_home canceled or superseded before hold")
-        return reached
+        speed = self._backend.home_velocity if vlim is None else float(vlim)
+        timeout = _SAFE_HOME_TIMEOUT_SEC if timeout_sec is None else float(timeout_sec)
+        if not np.isfinite(timeout) or timeout <= 0:
+            raise ValueError('safe_home timeout must be positive and finite')
+        if not 0 < speed <= self._backend.home_velocity:
+            raise ValueError('safe_home velocity exceeds reviewed limit')
+        current, _, _ = self.get_joint_state()
+        task = self.submit_arm_trajectory(self.joint_names, [current, goal], [0., .001],
+            home=True, velocity=[speed]*6, timeout=timeout)
+        task.event.wait()
+        status = self.arm_execution_status(task)
+        if status.state != 'succeeded':
+            raise RuntimeError(status.message)
+        return self.get_joint_state()[0]
 
+    @device_request(priority=5, ttl=5., invalidate=('device',))
     def enable(self) -> None:
         """显式使能：真机运动的唯一入口。
 
@@ -1361,6 +1409,7 @@ class HardwareManager:
         self._set_lifecycle_state("CONNECTED_DISABLED" if self._connected else "DISCONNECTED")
         return None
 
+    @device_request(priority=1, ttl=10., invalidate=('device',))
     def disable(self) -> None:
         """失能：先标记未使能（阻止新的运动命令），再停循环并验证状态码为 0。
 
@@ -1372,6 +1421,7 @@ class HardwareManager:
             self._set_lifecycle_state("DISABLING")
             was_enabled = self._enabled
             self._enabled = False
+            self._arm_passthrough_until = self._gripper_passthrough_until = None
             try:
                 self.stop_gravity_compensation()
                 self._stop_gripper_loop()
@@ -1388,6 +1438,7 @@ class HardwareManager:
                 self._state_machine = "IDLE"
                 self._set_lifecycle_state("CONNECTED_DISABLED")
 
+    @device_request(priority=5, ttl=5., invalidate=('device',))
     def set_mode(self, mode: str) -> bool:
         """切换电机控制模式："mit" / "pos_vel" / "vel"（大小写与空格不敏感）。
 
@@ -1401,6 +1452,7 @@ class HardwareManager:
             mode = mode.strip().lower()
             if mode not in ("mit", "pos_vel", "vel"):
                 raise ValueError(f"unsupported mode: {mode}")
+            self._arm_passthrough_until = None
             self.stop_gravity_compensation()
 
             if mode == self.mode:
@@ -1428,6 +1480,7 @@ class HardwareManager:
             self.set_state_machine("IDLE")
             return bool(ok)
 
+    @device_request(priority=5, ttl=5., invalidate=('device',))
     def set_zero(self, joint_name: str = "") -> bool:
         """标定零点。空字符串表示全部关节，``"gripper"`` 表示夹爪。
 
@@ -1510,6 +1563,7 @@ class HardwareManager:
                     self._gripper_zero_error = message
                 raise RuntimeError(message) from exc
 
+    @device_request(resource='arm', priority=5)
     def ensure_pos_vel_control(self) -> None:
         """确保处于位置-速度模式且统一控制循环在运行（否则保持当前位置）。"""
         with self._motor_lifecycle_lock:
@@ -1522,7 +1576,17 @@ class HardwareManager:
             else:
                 self.hold_current_position()
 
-    def send_joint_motor_cmd(self, joint_name: str, cmd) -> None:
+    @staticmethod
+    def _validate_passthrough_values(pos, vel, kp, kd, tau, vlim, bounds, max_velocity, max_effort, mode):
+        if not np.isfinite([pos, vel, kp, kd, tau, vlim]).all():
+            raise ValueError('passthrough values must be finite')
+        if not bounds[0] <= pos <= bounds[1] or abs(vel) > max_velocity or not 0 < vlim <= max_velocity:
+            raise ValueError('passthrough position or velocity outside configured limits')
+        if mode == 0 and (not 0 <= kp <= 500 or not 0 <= kd <= 5 or abs(tau) > max_effort):
+            raise ValueError('passthrough gains or torque outside protocol limits')
+
+    @device_request(resource='arm', ttl=.25)
+    def send_joint_motor_cmd(self, joint_name: str, cmd, arbitration="reject") -> None:
         """低层单关节直通命令（JointMotorCmd）。
 
         未显式给出的字段回落到当前反馈值或关节默认增益，避免用零值覆盖。命令
@@ -1534,6 +1598,13 @@ class HardwareManager:
             if joint_name not in self.joint_names:
                 raise KeyError(f"unknown joint: {joint_name}")
 
+            task = getattr(getattr(self, '_arm_trajectory', None), 'task', None)
+            if ((task is not None and not task.event.is_set())
+                    or self.gravity_compensation_active()):
+                if arbitration != 'preempt':
+                    raise RuntimeError('arm resource busy')
+                # 模式交接与保持确认也在本请求内完成，不允许透传越过拖动任务。
+                self.stop_active_motion(task)
             mot = self._backend.joint_device(joint_name)
             jc = self._backend.joint_configuration(joint_name)
             feedback_failure = self._arm_feedback_failure_reason()
@@ -1548,6 +1619,13 @@ class HardwareManager:
             tau = float(cmd.tau) if cmd.use_tau else 0.0
             vlim = float(cmd.vlim) if cmd.use_vlim else float(jc.vlim)
 
+            if hasattr(self._backend, 'requests'):
+                self._validate_passthrough_values(pos, vel, kp, kd, tau, vlim,
+                    _JOINT_POSITION_LIMITS_RAD[joint_name], jc.vlim,
+                    float(self._gravity_model.model.effortLimit[self.joint_names.index(joint_name)]), int(cmd.mode))
+                expected_mode = {0:'mit', 1:'pos_vel', 2:'vel'}.get(int(cmd.mode))
+                if expected_mode != self.mode:
+                    raise ValueError('passthrough mode does not match explicit device mode')
             try:
                 if int(cmd.mode) == 0:
                     mot.send_mit(pos, vel, kp, kd, tau)
@@ -1562,8 +1640,11 @@ class HardwareManager:
             except CommandTransportError as exc:
                 self._protective_disable_from_hardware_loop(str(exc),category="COMMAND")
                 raise
+            # 一次透传租约最长 0.25 s；后续周期不覆盖它，断流后在当前位置保持。
+            self._arm_passthrough_until = time.monotonic() + .25
             self.set_state_machine("LOWLEVEL_STREAMING")
 
+    @device_request(resource='arm', priority=5, invalidate=('arm',))
     def start_gravity_compensation(self) -> None:
         with self._motor_lifecycle_lock:
             self._start_gravity_compensation_locked()
@@ -1577,6 +1658,7 @@ class HardwareManager:
         停止时再回到位置-速度保持。
         """
         self._require_enabled()
+        self._arm_passthrough_until = None
         timing = LoopTiming(float(self._backend.rate))
         self.stop_gravity_compensation()
         self._stop_control_loop()
@@ -1588,7 +1670,7 @@ class HardwareManager:
             self._protective_disable_from_hardware_loop(str(exc))
             raise
         self._gravity_comp_q_last = self._gravity_comp_q_target.copy()
-        # Before switching modes reject a model that cannot support this pose.
+        # 切模式前先拒绝无法支撑当前姿态的模型计算结果。
         try:
             gravity = vector(self._gc_compute_generalized_gravity(q=self._gravity_comp_q_target),
                              6, 'gravity torque')
@@ -1606,7 +1688,7 @@ class HardwareManager:
                 kp=np.full(6, self._gc_settings.kp), kd=np.full(6, self._gc_settings.kd)
             ):
                 raise RuntimeError('MIT mode switch did not succeed on all joints')
-            # Mode switching can take hundreds of ms; refresh after, not only before.
+            # 模式交接可能持续数百毫秒，交接后必须重新取得新帧。
             self._refresh_arm_feedback()
             self._gravity_comp_q_target = self._read_gravity_comp_positions()
             samples = self._verified_feedback_samples(self.joint_names)
@@ -1621,8 +1703,7 @@ class HardwareManager:
             raise
         except Exception:
             self._gravity_comp_active = False
-            # Restore healthy hardware to verified current-position hold.
-            # A failed restore is a motor/communication fault, not a task failure.
+            # 健康任务失败恢复已验证的当前位置保持；恢复失败按设备故障处理。
             try:
                 self._refresh_arm_feedback()
                 target = self._read_gravity_comp_positions()
@@ -1639,6 +1720,7 @@ class HardwareManager:
         self.set_state_machine("GRAVITY_COMP")
         self._backend.start_control_loop(self._gravity_hardware_tick, rate=self._backend.rate)
 
+    @device_request(resource='arm', priority=5, invalidate=('arm',))
     def stop_gravity_compensation(self) -> None:
         with self._motor_lifecycle_lock:
             self._stop_gravity_compensation_locked()
@@ -1838,6 +1920,7 @@ class HardwareManager:
         self._gripper_cfg=gc
         self._gripper_mot,self._gripper_ctrl=self._backend.add_gripper(gc)
 
+    @device_request(resource='gripper')
     def set_gripper_target(self, position_m: float, max_effort: float = 0.0) -> None:
         """下发夹爪位置目标（异步）：只登记目标，实际下发由 统一硬件循环完成。
 
@@ -1861,6 +1944,10 @@ class HardwareManager:
         start_angle, _velocity, _torque, status = self._validated_gripper_feedback_values(state)
         if status != 1:
             raise RuntimeError(f"gripper status_code={status}, expected 1 before position command")
+        if getattr(self, '_gripper_passthrough_until', None) is not None:
+            raise RuntimeError('gripper resource owned by passthrough')
+        if not np.isfinite([position_m, max_effort]).all():
+            raise ValueError('gripper target and effort must be finite')
         distance = float(np.clip(position_m, 0.0, _G_VERIFIED_OPEN_LIMIT_M))
         # 使用完整标称行程：90 mm 对应 -5 rad，不再额外裁到 -4.9 rad。
         target = (distance / _G_MAX_DIST_M) * _G_ANGLE_OPEN
@@ -1908,6 +1995,7 @@ class HardwareManager:
             feedback_updated,
         )
         self._start_gripper_loop()
+        return self._gripper_execution._generation
 
     def gripper_target_timeout_sec(self) -> float:
         with self._gripper_lock:
@@ -1923,75 +2011,39 @@ class HardwareManager:
         """当前反馈不可用原因；查询不写入或锁存派生错误。"""
         return self._cached_gripper_feedback().failure_reason
 
-    def wait_gripper_target(self, timeout: float | None = None) -> bool:
-        """阻塞等待当前位置命令完成；返回是否到位。
-
-        只等待"自己那一次"的命令：先记住目标代次，若期间出现更新的命令就
-        立即返回 False，避免旧等待者误判或误释放新命令。到位后必须调用
-        ``_release_gripper_position_target`` 解除 MIT 位置命令（完成一次定位移动
-        不等于抓取保持，不能继续顶住目标）。
-        超时同样结束本次命令的所有权并取消位置命令，不留残余力矩。
-        """
-        # 记住本次等待归属于哪个目标，这样"到位"与"超时"两条路径都不会释放
-        # 期间新下发的命令。
+    def gripper_execution_status(self, generation):
+        """返回本目标的状态，旧代次永远不能读成新目标的成功。"""
         with self._gripper_lock:
-            owned_goal = self._gripper_goal_angle
-            owned_generation = self._gripper_execution._generation
-            deadline = self._gripper_target_deadline_monotonic
-            if self._gripper_position_result == "succeeded":
-                return True
-            if self._gripper_position_result == "failed":
+            if generation != self._gripper_execution._generation:
+                return 'superseded', 'gripper target superseded'
+            state = self._gripper_position_result
+            if self._gripper_neutral_pending is not None:
+                state = 'releasing'
+            return state, self._gripper_command_error
+
+    def wait_gripper_target(self, timeout=None, generation=None) -> bool:
+        """兼容等待入口；只读快照，显式超时通过队列取消自己的代次。"""
+        if generation is None:
+            generation = self._gripper_execution._generation
+        deadline = float('inf') if timeout is None else time.monotonic()+max(0., timeout)
+        while True:
+            state, _ = self.gripper_execution_status(generation)
+            if state in ('succeeded', 'failed', 'superseded'):
+                return state == 'succeeded'
+            if time.monotonic() >= deadline:
+                self.cancel_gripper_position_command('gripper target timeout',
+                    expected_generation=generation)
                 return False
-        now = time.monotonic()
-        explicit_deadline = (
-            None if timeout is None else now + max(float(timeout), 0.0)
-        )
-        if deadline is None:
-            deadline = now if explicit_deadline is None else explicit_deadline
-        elif explicit_deadline is not None:
-            deadline = min(deadline, explicit_deadline)
-        while time.monotonic() < deadline:
-            with self._gripper_lock:
-                if self._gripper_execution._generation != owned_generation:
-                    return False
-                if not self._gripper_active:
-                    if self._gripper_position_result == "succeeded":
-                        return True
-                    if self._gripper_position_result == "failed":
-                        return False
-                feedback_failure = self._gripper_feedback_failure_reason_locked()
-                if feedback_failure is not None:
-                    self._fail_active_gripper_command_locked(feedback_failure)
-                    return False
-                arrived = bool(
-                    self._gripper_active
-                    and abs(self._gripper_pos - owned_goal) < _G_ARRIVE_TOL
-                )
-            if arrived:
-                # 一次定位移动完成并不等于抓取保持。在确认成功之前先释放 MIT
-                # 位置命令，使得本函数返回后电机不会继续朝目标推进。
-                self._release_gripper_position_target(
-                    owned_goal, expected_generation=owned_generation,
-                )
-                time.sleep(1.0 / _G_CTRL_RATE)
-                continue
-            time.sleep(0.02)
-        # 超时同样结束本次命令对夹爪的所有权：停止下发，而不是留下一个过期的
-        # 位置保持命令。
-        self.cancel_gripper_position_command(
-            "gripper target timeout: "
-            f"goal={owned_goal:.6f}rad feedback={self._gripper_pos:.6f}rad",
-            expected_generation=owned_generation,
-        )
-        return False
+            time.sleep(.02)
 
     def set_gripper_position(self, position_m: float, max_effort: float = 0.0) -> tuple[bool, float]:
         """同步版位置命令：下发并等待到位，返回 (是否到位, 实际位置 m)。"""
-        self.set_gripper_target(position_m, max_effort)
-        reached = self.wait_gripper_target()
+        generation = self.set_gripper_target(position_m, max_effort)
+        reached = self.wait_gripper_target(generation=generation)
         return reached, self.gripper_position_m()
 
-    def grasp_gripper(
+    @device_request(resource='gripper')
+    def submit_grasp(
         self,
         close_force: float = _G_GRASP_CLOSE_FORCE_DEFAULT,
         hold_force: float = _G_GRASP_HOLD_FORCE_DEFAULT,
@@ -2024,6 +2076,8 @@ class HardwareManager:
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
 
+        if getattr(self, '_gripper_passthrough_until', None) is not None:
+            raise RuntimeError('gripper resource owned by passthrough')
         close_effort = float(np.clip(close_force, 0.05, _G_GRASP_CLOSE_FORCE_MAX))
         hold_effort = float(np.clip(hold_force, 0.05, _G_TAU_MAX))
         # 抓取保持必须有界；无界保持会让电机在控制循环中持续加载且没有退出路径。
@@ -2045,10 +2099,12 @@ class HardwareManager:
             hold_timeout=hold_timeout, start_position=start_position_m, now=start,
         )
         self._start_gripper_loop()
-        # 同步接口只等待周期线程的事件；它不判断堵转，也不直接向总线写入。
-        while not request['event'].wait(0.01):
-            if time.monotonic() >= start + timeout or not self.control_loop_active:
-                self._gripper_execution.expire_grasp(request)
+        return request
+
+    def grasp_gripper(self, **kwargs):
+        """同步兼容入口：提交后只等待周期执行器的完成事件。"""
+        request = self.submit_grasp(**kwargs)
+        request['event'].wait()
         return request['result']
 
     def _cached_gripper_feedback(self, *, now: float | None = None) -> _CachedMotorFeedback:
@@ -2130,7 +2186,8 @@ class HardwareManager:
                 return False
             return False
 
-    def send_gripper_motor_cmd(self, cmd) -> None:
+    @device_request(resource='gripper', ttl=.25)
+    def send_gripper_motor_cmd(self, cmd, arbitration="reject") -> None:
         """低层夹爪直通命令（JointMotorCmd）：未给出的字段回落到反馈或配置增益。
 
         直通后夹爪状态机被置为 idle，避免与高层位置/抓取命令互相干扰。
@@ -2156,20 +2213,38 @@ class HardwareManager:
             raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
         if mode == 2 and not hasattr(self._gripper_mot, "send_vel"):
             raise RuntimeError("gripper does not support send_vel")
+        if hasattr(self._backend, 'requests'):
+            self._validate_passthrough_values(pos, vel, kp, kd, tau, vlim,
+                (_G_ANGLE_OPEN, 0.), self._gripper_cfg.vlim, _G_TAU_MAX, mode)
         with self._gripper_lock:
-            # 过渡阶段透传仍由调用线程发送，但与周期输出在同一把锁下交接。
-            # 先使旧等待者失效并清除旧中性命令，避免接替后再次覆盖透传。
+            if (self._gripper_active or self._gripper_neutral_pending is not None) and arbitration != 'preempt':
+                raise RuntimeError('gripper resource busy')
+            # 先确认旧命令中性化，再交接透传；旧等待者不能释放新命令。
+            if self._gripper_active:
+                self._queue_gripper_neutral_locked('passthrough preempt', marks_success=False)
+            if self._gripper_neutral_pending is not None:
+                if not self._emit_pending_gripper_neutral_locked():
+                    raise RuntimeError('gripper preempt neutral failed')
             self._gripper_execution.supersede_locked()
             self._gripper_active = False
             self._gripper_mode = "idle"
             self._gripper_position_result = "failed"
             self._gripper_neutral_pending = None
-            if mode == 0:
-                self._gripper_mot.send_mit(pos, vel, kp, kd, tau)
-            elif mode == 1:
-                self._gripper_mot.send_pos_vel(pos, vlim)
-            else:
-                self._gripper_mot.send_vel(vel)
+            try:
+                if hasattr(self._backend, 'requests'):
+                    from motorbridge import Mode
+                    self._gripper_mot.ensure_mode({0:Mode.MIT, 1:Mode.POS_VEL, 2:Mode.VEL}[mode], 1000)
+                if mode == 0:
+                    self._gripper_mot.send_mit(pos, vel, kp, kd, tau)
+                elif mode == 1:
+                    self._gripper_mot.send_pos_vel(pos, vlim)
+                else:
+                    self._gripper_mot.send_vel(vel)
+            except Exception as exc:
+                if hasattr(self._backend, 'requests'):
+                    self._protective_disable_from_hardware_loop(str(exc), category='COMMAND')
+                raise
+            self._gripper_passthrough_until = time.monotonic() + .25
 
     def _start_pos_vel_loop(self, target: np.ndarray | None = None) -> None:
         """启动统一硬件控制循环（位置-速度跟踪），并把控制器标记为运行中。
@@ -2189,6 +2264,41 @@ class HardwareManager:
             self._backend.set_execution_running(False)
             raise
 
+    def _expire_passthrough(self):
+        """透传租约到期后交回保持/中性输出；没有消息也必须有本地终止路径。"""
+        now = time.monotonic()
+        expires = getattr(self, '_arm_passthrough_until', None)
+        if expires is not None and now >= expires:
+            self._arm_passthrough_until = None
+            self.ensure_pos_vel_control()
+            self.hold_current_position()
+            self.set_state_machine('IDLE')
+        expires = getattr(self, '_gripper_passthrough_until', None)
+        if expires is not None and now >= expires:
+            self._gripper_passthrough_until = None
+            from motorbridge import Mode
+            self._gripper_mot.ensure_mode(Mode.MIT, 1000)
+            with self._gripper_lock:
+                self._queue_gripper_neutral_locked('passthrough lease expired', marks_success=False)
+                if not self._emit_pending_gripper_neutral_locked():
+                    raise RuntimeError('passthrough neutral release failed')
+
+    def _runtime_feedback_tick(self):
+        """设备事务等待和失能期间只采集；发布线程不再轮询总线。"""
+        if self._connected and not self._feedback_force_refresh_active:
+            self.refresh_feedback_if_due()
+        if self._enabled and not self._backend._waiting:
+            failure = self._arm_feedback_failure_reason()
+            if failure is not None:
+                self._protective_disable_from_hardware_loop(failure)
+                return
+            self._expire_passthrough()
+        owner = getattr(self, '_arm_trajectory', None)
+        task = None if owner is None else owner.task
+        if (task is not None and task.result.state != 'stopping'
+                and task.generation != self._backend.target_generation):
+            owner.finish(task, 'aborted', 'execution canceled or superseded')
+
     def _endpos_hardware_tick(self, arm, dt: float) -> None:
         self._hardware_control_tick(arm, dt, self._backend.position_tick)
 
@@ -2204,8 +2314,7 @@ class HardwareManager:
             self._protective_disable_from_hardware_loop(str(exc), category='GRAVITY_COMMAND')
             return
         except Exception as exc:
-            # Programming/model failure must not kill the sole writer thread
-            # and leave a stale MIT target running on healthy motors.
+            # 模型或计算异常不能直接终止唯一线程，让健康电机持续旧 MIT 目标。
             try:
                 self._gravity_fault_hold(str(exc))
                 q, qd = self._read_gravity_comp_feedback()
@@ -2237,8 +2346,11 @@ class HardwareManager:
             self._gravity_next_log = started + 5.
 
     def _protective_disable_from_hardware_loop(self, reason: str, *, category: str = 'FEEDBACK') -> None:
-        """停掉唯一写入者并请求控制器失能，且不自连接（避免线程自 join 死锁）。"""
+        """停止周期输出并请求保护失能；保留设备线程采集反馈，不在自身 join。"""
         message = str(reason)
+        self._arm_passthrough_until = self._gripper_passthrough_until = None
+        if hasattr(self._backend, 'requests'):
+            self._backend.requests.invalidate('device', 'arm', 'gripper')
         with self._gripper_lock:
             if self._gripper_active:
                 self._fail_active_gripper_command_locked(message)
@@ -2248,8 +2360,10 @@ class HardwareManager:
                         "FEEDBACK_PROTECTIVE_NEUTRAL_FAILED"
                     )
 
-        # 只请求协作退出；失能属于设备操作，不携带 join 或另开写入线程。
+        # 只停止周期输出；失能在当前设备线程执行，不 join 或另开写入线程。
         self._backend.request_loop_stop()
+        if hasattr(self, '_arm_trajectory') and self._arm_trajectory.task is not None:
+            self._arm_trajectory.finish(self._arm_trajectory.task, 'aborted', message)
         self._backend.set_execution_running(False)
         self._backend.cancel_trajectory()
         self._gravity_comp_active = False
@@ -2308,7 +2422,9 @@ class HardwareManager:
             self._protective_disable_from_hardware_loop(feedback_failure)
             return
         try:
-            arm_callback(arm, dt)
+            self._expire_passthrough()
+            if getattr(self, '_arm_passthrough_until', None) is None:
+                arm_callback(arm, dt)
         except CommandTransportError as exc:
             self._protective_disable_from_hardware_loop(str(exc), category="COMMAND")
             return
@@ -2318,6 +2434,14 @@ class HardwareManager:
                 raise
             self._protective_disable_from_hardware_loop(feedback_failure)
             return
+        if hasattr(self, '_arm_trajectory'):
+            q, _, _, _, _, stamp = self.get_cached_joint_sample()
+            hold = self._arm_trajectory.update(q, stamp)
+            if hold is not None:
+                self._backend.set_target(hold)
+            task = self._arm_trajectory.task
+            if task is not None and task.event.is_set() and self.state_machine == 'TRAJ_RUNNING':
+                self.set_state_machine('IDLE')
         self._gripper_tick()
         if getattr(self,"_gripper_transport_error",None) is not None:
             self._protective_disable_from_hardware_loop(self._gripper_transport_error,category="COMMAND")
@@ -2325,9 +2449,12 @@ class HardwareManager:
     def _stop_control_loop(self) -> None:
         self._backend.stop_control_loop()
         thread = self._backend.control_thread
-        if thread is not None and thread.is_alive():
+        if (not hasattr(self._backend, 'requests') and thread is not None and thread.is_alive()):
             raise RuntimeError('hardware writer did not stop; refusing a second writer')
         self._backend.set_execution_running(False)
+        owner = getattr(self, '_arm_trajectory', None)
+        if owner is not None and owner.task is not None:
+            owner.finish(owner.task, 'aborted', 'control mode or lifecycle changed')
 
     def _gripper_safe_mit(
         self,
@@ -2370,9 +2497,14 @@ class HardwareManager:
     def _emit_pending_gripper_neutral_locked(self, *args, **kwargs):
         return self._gripper_execution._emit_pending_gripper_neutral_locked(*args, **kwargs)
 
+    @device_request(resource='gripper', priority=0)
     def cancel_gripper_position_command(self, *args, **kwargs):
-        return self._gripper_execution.cancel_gripper_position_command(*args, **kwargs)
+        canceled = self._gripper_execution.cancel_gripper_position_command(*args, **kwargs)
+        if canceled and hasattr(self._backend, 'requests'):
+            self._backend.requests.invalidate('gripper')
+        return canceled
 
+    @device_request(resource='gripper', priority=0)
     def _release_gripper_position_target(self, *args, **kwargs):
         return self._gripper_execution._release_gripper_position_target(*args, **kwargs)
 
@@ -2385,6 +2517,7 @@ class HardwareManager:
     def _release_grasp_hold_locked(self, *args, **kwargs):
         return self._gripper_execution._release_grasp_hold_locked(*args, **kwargs)
 
+    @device_request(resource='gripper', priority=0, invalidate=('gripper',))
     def release_grasp_hold(self, *args, **kwargs):
         return self._gripper_execution.release_grasp_hold(*args, **kwargs)
 
@@ -2414,3 +2547,4 @@ class HardwareManager:
             self._gripper_hold_deadline = None
             self._gripper_target_deadline_monotonic = None
             self._gripper_loop_running = False
+            self._gripper_passthrough_until = None

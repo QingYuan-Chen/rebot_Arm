@@ -79,6 +79,14 @@ def generate_launch_description():
             # frame_id / ee_frame_id：对外位姿的参考坐标系与末端坐标系名称，需与 URDF 一致。
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             DeclareLaunchArgument("ee_frame_id", default_value="end_link"),
+            # 旧位姿接口归运动层；控制器本身仅提供唯一 FJT 执行入口。
+            Node(
+                package="rebotarm_motion",
+                executable="PoseCompatNode",
+                name="pose_compat",
+                output="screen",
+                parameters=[{"arm_namespace": LaunchConfiguration("arm_namespace")}],
+            ),
             Node(
                 package="rebotarmcontroller",
                 executable="reBotArmController",

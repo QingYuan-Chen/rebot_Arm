@@ -1,6 +1,6 @@
 # 硬件控制器功能拆分与 C++ 迁移初步规划
 
-> 状态：DESIGN；类型：控制器拆分与 SDK 功能整合方案，按批次实施，当前进展见项目状态；适用范围：Ubuntu 24.04 / ROS 2 Jazzy 的 `rebotarmcontroller` 与其 SDK 依赖；最后核对：2026-10-27（收口过渡依赖，明确驱动及位姿接口行为变化，合并批次与验收门）。
+> 状态：DESIGN；类型：控制器拆分与 SDK 功能整合方案，按批次实施，当前进展见项目状态；适用范围：Ubuntu 24.04 / ROS 2 Jazzy 的 `rebotarmcontroller` 与其 SDK 依赖；最后核对：2026-10-28（同步平铺组件映射、SDK 退出契约与 C++ 初始承载方案）。
 
 ## 当前范围
 
@@ -12,7 +12,7 @@
 
 ## 前置条件与当前依据
 
-2026-10-27 当前工作区源码核对：
+2026-10-27 设计起点的源码快照（不是当前实现状态）：
 
 - `hardware_manager.py` 共 3096 行，`HardwareManager` 有 132 个方法，集中了设备连接、反馈缓存、生命周期、位置保持、回位、重力补偿、夹爪与线程管理。
 - `ros_actions.py` 共 672 行，除 ROS Action 协议处理外，还负责轨迹时间推进、到位等待和取消；会直接修改 SDK 的 `_q_target` 等内部成员。
@@ -122,7 +122,7 @@ flowchart TD
 
 ### 核对范围与依赖入口
 
-2026-10-27 核对本机 SDK 为固定提交 `6a49302804f25e624995e771acb6d61896d1856d`，其工作区无未提交修改。以当前生产调用及其内部依赖为迁移依据，不以 SDK 的包级导出列表作为功能需求。
+2026-10-27 核对本机 SDK 为固定提交 `6a49302804f25e624995e771acb6d61896d1856d`，其工作区无未提交修改。以下记录迁移起点的调用清单，不代表当前仍有这些依赖；以实际已用能力为依据，不以 SDK 的包级导出列表作为功能需求。
 
 - [hardware_manager.py](../../src/rebotarmcontroller/rebotarmcontroller/hardware_manager.py)：直接导入 `RobotArm`、`ArmEndPos`、`compute_fk` 和夹爪配置 `load_cfg`；默认机械臂及夹爪配置也从 SDK 目录读取。
 - [ros_services.py](../../src/rebotarmcontroller/rebotarmcontroller/ros_services.py)、[ros_actions.py](../../src/rebotarmcontroller/rebotarmcontroller/ros_actions.py) 与 [motor_passthrough.py](../../src/rebotarmcontroller/rebotarmcontroller/motor_passthrough.py)：间接使用 `ArmEndPos` 的 IK、笛卡尔轨迹、目标缓存和送点线程，并访问其私有状态。
@@ -131,7 +131,7 @@ flowchart TD
 
 ### 功能迁入清单
 
-下表目标文件均为拟议路径，路径相对于各包的 Python 模块目录；包级 `config/` 另行注明。现有本地反馈、安全与重力实现优先保留，SDK 的相同能力由这些组件接管，避免产生第二份实现。
+下表路径相对于各包的 Python 模块目录；包级 `config/` 另行注明。现有本地反馈、安全与重力实现优先保留，SDK 的相同能力由这些组件接管，避免产生第二份实现。反馈缓存与健康判断当前合在 `feedback_acquisition.py`，不为了文件名预建空壳。
 
 | SDK 来源与实际使用能力 | 迁入位置与组件 | 迁移要求 |
 | --- | --- | --- |
@@ -144,8 +144,8 @@ flowchart TD
 | `ArmEndPos._loop_cb`、位置目标和速度上限 | `rebotarmcontroller/arm_position_control.py` | 批次 2 接管最小位置输出，只生成 POS_VEL 命令，发送归驱动；不保留 SDK 控制对象或另一份公开可写目标 |
 | `ArmEndPos` 的轨迹列表、送点、停止与运行状态 | `rebotarmcontroller/arm_execution.py` 与运行时 | 批次 2 接管最小目标/轨迹游标，停止 SDK 送点线程；后续补全执行器。用窄接口替代 `_q_target/_moving/_stop_send/_traj/_traj_idx`，取消后旧目标失效 |
 | `ArmEndPos._home_vel/_dt/_n/_vlim_override` 及本地 `safe_home` | 静态参数归 `configuration.py`；任务覆盖归 `arm_execution.py`，位置算法消费有效上限 | 保留 0.3 rad/s 回位上限、20 ms 到位轮询与六轴维度；速度覆盖在任务结束/取消时清除，不与普通目标共享可变缓存；20 ms 不是硬件循环频率 |
-| `kinematics/robot_model.py` 的模型加载/末端帧；`forward_kinematics.py` 的 FK | 控制器薄适配 `controller_kinematics.py`；运动包薄适配 `kinematics/model.py`、`forward.py` | 两处均直接调用 Pinocchio，读取同一规范 URDF，不互相导入实现或复制 IK 算法；模型与运行数据各自持有，输出普通数值 |
-| `inverse_kinematics.py` 的 `pos_rot_to_se3/solve_ik/solve_ik_with_retry`、所需参数与结果类型 | `rebotarm_motion/kinematics/inverse.py`，接入现有 `pose_preview_solver.py` | 保留现用迭代、阻尼、回溯与重试策略的对照样本；测试可注入随机源；不可达不产生执行目标，求解成功仍需运动校验 |
+| `kinematics/robot_model.py` 的模型加载/末端帧；`forward_kinematics.py` 的 FK | 控制器薄适配 `controller_kinematics.py`；运动包 `pose_kinematics.py` | 两处均直接调用 Pinocchio，读取同一规范 URDF，不互相导入实现或复制 IK 算法；模型与运行数据各自持有，输出普通数值 |
+| `inverse_kinematics.py` 的 `pos_rot_to_se3/solve_ik/solve_ik_with_retry`、所需参数与结果类型 | `rebotarm_motion/pose_kinematics.py`，接入现有 `pose_preview_solver.py` | 独立实现，保留迭代、阻尼、回溯与重试策略的对照样本；测试可注入随机源；不可达不产生执行目标，求解成功仍需运动校验 |
 | `trajectory/sampler.py` 的现用 SE(3) 路径采样与最小 jerk 时间剖面；`clik_tracker.py` 的 CLIK 跟踪及内部限位辅助 | `rebotarm_motion/cartesian_trajectory.py` | 承接 `ArmEndPos.move_to_traj` 的纯计算部分，保留当前 20 ms 采样参数和逐点求解结果；未使用的线性/梯形剖面不作为迁入要求；输出经校验的关节轨迹，由控制器执行，不携带硬件句柄或发送线程 |
 | `ArmEndPos.move_to_ik/move_to_traj` 的入口协调 | 运动包 `pose_compat_node.py` | 保留旧服务/Action 名称与类型，经运动校验、重定时后走 FJT；明确下文成功、容差与取消语义变化；bringup 切换唯一服务端，控制器不反向导入运动实现 |
 
@@ -153,10 +153,7 @@ flowchart TD
 
 ```text
 rebotarm_motion/
-├── kinematics/
-│   ├── model.py                 # 规范模型、六轴降维与末端帧定位
-│   ├── forward.py               # Pinocchio FK 薄适配
-│   └── inverse.py               # 已使用的 IK、重试与参数/结果
+├── pose_kinematics.py           # 规范六轴模型、FK、IK、重试与结果
 ├── cartesian_trajectory.py      # SE(3) 采样与 CLIK 纯计算
 ├── pose_preview_solver.py      # 保留上层接口，替换 SDK 导入及路径注入
 ├── pose_compat_node.py          # 旧位姿服务/Action 适配，经运动校验后转 FJT
@@ -167,7 +164,7 @@ rebotarm_motion/
 
 ### 规范模型与现有行为的处理
 
-SDK 默认 URDF 与项目规范模型并不完全一致：SDK 的第三轴名为 `join3`，J2/J3 上限为 `0 rad`；规范 URDF 使用 `joint3`，J2/J3 上限为 `+0.02 rad`，并包含手指关节及当前末端模型。当前重力补偿已经使用规范模型，而 `ArmEndPos` 和位姿预览仍默认加载 SDK 模型。
+SDK 默认 URDF 与项目规范模型并不完全一致：SDK 的第三轴名为 `join3`，J2/J3 上限为 `0 rad`；规范 URDF 使用 `joint3`，J2/J3 上限为 `+0.02 rad`，并包含手指关节及当前末端模型。迁移起点的重力补偿已使用规范模型，而旧 `ArmEndPos` 和位姿预览曾默认加载 SDK 模型。
 
 整合直接使用正确的项目规范模型 `rebotarm_moveit_config/config/rebotarm.urdf`，保留 `joint3` 与 J2/J3 的 `+0.02 rad` 上限；SDK 的不同命名和限位仅作迁移背景，不列为项目模型缺陷或待解决问题，也不要求迁入实现复现这些差异。
 
@@ -258,21 +255,19 @@ rebotarmcontroller/
 ├── hardware_manager.py        # 现有 API 的兼容门面
 ├── configuration.py           # 参数、范围与资源路径
 ├── controller_contracts.py    # 值类型、请求、结果与故障
-├── legacy_backend.py          # 临时 SDK 纯计算桥，批次 6 删除
 ├── sdk_driver.py              # MotorBridge 设备与总线收发
 ├── controller_kinematics.py   # 规范模型的 FK 薄适配
-├── controller_runtime.py      # 调度及后续请求仲裁
-├── feedback_acquisition.py    # 拟议：反馈请求与采集调度
-├── feedback_store.py          # 拟议：反馈缓存与采集错误
-├── lifecycle.py               # 拟议：连接、使能与模式状态
-├── feedback_safety.py         # 拟议：反馈可用性检查
+├── controller_runtime.py      # 唯一设备线程与周期调度
+├── device_requests.py         # 有界请求、优先级、有效期和资源代次
+├── feedback_acquisition.py    # 反馈采集、缓存、采集错误与只读判断
+├── lifecycle.py               # 连接、使能与模式状态、关闭策略
 ├── command_guard.py           # 拟议：命令准入与保护决策
 ├── arm_position_control.py    # 六轴位置命令
-├── arm_gravity_control.py     # 拟议：重力补偿控制与内部状态
 ├── arm_execution.py           # 六轴目标与轨迹执行
-├── gripper_control.py         # 拟议：夹爪控制算法
-├── gripper_execution.py       # 拟议：夹爪执行状态
-├── gravity_control.py         # 重力补偿与模型工具
+├── arm_trajectory.py          # 六轴任务接纳、到位与取消结果
+├── gripper_control.py         # 夹爪控制算法
+├── gripper_execution.py       # 夹爪执行状态
+├── gravity_control.py         # 重力补偿状态、计算与模型工具
 ├── ros_actions.py             # Action 协议映射
 ├── ros_services.py            # Service 适配
 ├── ros_publishers.py          # 状态发布
@@ -371,7 +366,14 @@ rebotarmcontroller/
 
 ### 初步推荐
 
-目标为不依赖 Python 的 C++ 周期控制核心与薄 ROS 适配层。初期保留现有 ROS 对外接口，规划、视觉、示教和 Dashboard 通过原有协议访问控制器。迁移验证时可将新旧算法离线运行在同一组反馈上比较；不同时启动两个真实硬件后端。
+批次 7 的初始承载方案为独立 C++ 周期核心与薄 ROS 适配层，核心不依赖 Python。
+保留现有 ROS 对外接口，规划、视觉、示教和 Dashboard 通过原有协议访问控制器。
+迁移验证时可将新旧算法离线运行在同一组反馈上比较；不同时启动两个真实硬件后端。
+
+Python 对照接口固定为请求的 resource/priority/ttl/代次及实际结果、不可变反馈数值与时间、
+六轴 ArmTask/ArmResult、夹爪目标代次/中性结果，以及驱动逐电机回执。具体队列容量、
+停止确认和位姿差异见[硬件执行契约](../implemented/features/hardware_execution.md#请求资源与停止确认)。
+ABI 布局和 PTY 探测只是接入依据，不能代替完整 C++ 驱动、周期测量或实机验收。
 
 优先验证 C++ 经 MotorBridge C ABI 使用现有通信实现，保留已有反馈序号和传输修补。原始协议暂不重写。若 ABI 缺少必要能力，单独评估扩展适配层和新增维护成本，不能退回在 C++ 周期里嵌入 Python 调用并声称已完成迁移。
 

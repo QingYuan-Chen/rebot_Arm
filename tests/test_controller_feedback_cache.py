@@ -101,7 +101,7 @@ def test_joint_state_publisher_reads_validated_cache_without_serial_io() -> None
 
     publisher.publish()
 
-    assert publisher._hardware.refresh_calls == 1
+    assert publisher._hardware.refresh_calls == 0
     assert len(publisher._publisher.messages) == 1
     assert len(publisher._gripper_state_publisher.messages) == 1
     assert status_calls == [{"force": False}]

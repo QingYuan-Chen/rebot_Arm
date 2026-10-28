@@ -584,7 +584,7 @@ class FeedbackAcquisition:
         observed_at = time.monotonic() if now is None else float(now)
         control_thread = self._backend.control_thread
         if (
-            self.control_loop_active
+            (self.control_loop_active or getattr(self._backend, "writer_active", False))
             and control_thread is not None
             and threading.current_thread() is not control_thread
         ):

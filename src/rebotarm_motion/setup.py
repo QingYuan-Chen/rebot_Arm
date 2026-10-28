@@ -36,6 +36,7 @@ setup(
     entry_points={
         "console_scripts": [
             # 可执行名 = 模块:函数；左侧名字被上层启动文件以 executable=... 引用。
+            "PoseCompatNode = rebotarm_motion.pose_compat_node:main",
             "PoseExecutionNode = rebotarm_motion.pose_execution_node:main",
             "rebotarm_mujoco_moveit_acceptance = rebotarm_motion.mujoco_moveit_acceptance:main",
         ],

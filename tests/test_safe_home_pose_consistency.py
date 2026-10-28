@@ -111,5 +111,14 @@ def test_controller_defaults_web_safe_home_to_the_recorded_operator_pose():
 
 
 def test_safe_home_never_exceeds_the_vendor_homing_speed():
-    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/hardware_manager.py")
-    assert "if not 0.0 < speed <= ctrl.home_velocity:" in hardware
+    import pytest
+    from test_controller_local_runtime import make_local_manager
+    from _pytest.monkeypatch import MonkeyPatch
+    with MonkeyPatch.context() as patch:
+        manager, _ = make_local_manager(patch)
+        manager.connect(); manager.enable()
+        try:
+            with pytest.raises(ValueError, match='velocity'):
+                manager.safe_home(vlim=.31)
+        finally:
+            manager.disable(); manager.shutdown()

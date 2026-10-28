@@ -1136,13 +1136,12 @@ def test_joint_state_read_waits_for_disable_transition() -> None:
 
 
 def test_action_goal_callback_rejects_motion_until_explicit_enable() -> None:
-    source = (
-        Path(__file__).resolve().parents[1]
-        / "src/rebotarmcontroller/rebotarmcontroller/ros_actions.py"
-    ).read_text(encoding="utf-8")
-
-    assert "if not self._hardware.ready_for_motion:" in source
-    assert "return GoalResponse.REJECT" in source
+    from rebotarmcontroller.ros_actions import ArmActions, GoalResponse
+    actions = ArmActions.__new__(ArmActions)
+    actions._hardware = SimpleNamespace(ready_for_motion=False)
+    assert actions.goal_callback(None) == GoalResponse.REJECT
+    actions._hardware.ready_for_motion = True
+    assert actions.goal_callback(None) == GoalResponse.ACCEPT
 
 
 def test_connect_rejects_missing_or_out_of_limit_feedback_and_disconnects() -> None:
@@ -1862,9 +1861,7 @@ def test_waiter_accepts_in_tolerance_feedback_without_rewriting_goal() -> None:
 
     waiter.start()
     deadline = time.monotonic() + 0.2
-    while manager._gripper_neutral_pending is None and time.monotonic() < deadline:
-        time.sleep(0.001)
-    assert manager._gripper_neutral_pending is not None
+    # 等待者不再推进到位释放；周期执行器在新反馈上决定并发送中性命令。
     manager._gripper_tick()
     waiter.join(timeout=0.5)
 
@@ -1887,7 +1884,7 @@ def test_waiter_queues_release_but_only_hardware_loop_emits_neutral() -> None:
     manager._gripper_tick()
 
     assert commands == [(-4.72, 0.0, 0.0, 0.0, 0.0)]
-    assert manager.gripper_reached_target() is True
+    assert manager.gripper_reached_target() is False
 
 
 def test_gripper_tick_neutralizes_arrived_position_move_without_waiter() -> None:
@@ -2428,6 +2425,7 @@ def test_wait_gripper_target_rejects_stale_arrival(monkeypatch) -> None:
     manager._gripper_feedback_updated_monotonic = 10.0
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: 11.0)
 
+    manager._gripper_tick()
     assert manager.wait_gripper_target() is False
     assert manager.gripper_reached_target() is False
     assert "stale" in manager.gripper_command_error

@@ -24,9 +24,10 @@
   <exec_depend>geometry_msgs</exec_depend>
   <!-- builtin_interfaces：时间与时长类型，用于轨迹点的时间戳。 -->
   <exec_depend>builtin_interfaces</exec_depend>
-  <!-- pinocchio：刚体运动学/动力学库。当前包内源码未见直接 import（动力学计算主要在硬件
-       控制包使用），此处按清单保留声明，不对具体调用点作断言。 -->
+  <!-- pinocchio：位姿预览、规范模型 IK 和笛卡尔路径采样使用的刚体运动学库。 -->
   <exec_depend>pinocchio</exec_depend>
+  <exec_depend>rebotarm_moveit_config</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <!-- ruckig：加加速度（jerk）受限的在线轨迹生成库，用作可选的重定时后端。运行时探测能否
        导入该模块，不可用时自动回落到内置重定时实现，因此缺失它不会让功能失败。 -->
   <exec_depend>ruckig</exec_depend>

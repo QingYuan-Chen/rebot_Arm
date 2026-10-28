@@ -44,9 +44,8 @@ class FakeBackend:
     def move_to_pose_ik(self,*args): return self._endpos.move_to_ik(*args)
     def position_tick(self,arm,dt): self._endpos._loop_cb(arm,dt)
     def current_pose_values(self,q):
-        from reBotArm_control_py.kinematics import compute_fk
-        position,rotation,_=compute_fk(self._endpos._model,q)
-        return position,rotation
+        from rebotarmcontroller.controller_kinematics import ArmKinematics
+        return ArmKinematics(self._endpos._model).pose(q)
     def joint_device(self,name): return self._arm._motor_map[name]
     def joint_configuration(self,name): return next(j for j in self._arm._joints if j.name==name)
     def controllers(self): return tuple(self._arm._ctrl_map.values())

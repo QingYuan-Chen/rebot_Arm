@@ -8,7 +8,7 @@
 
 | 目录或文件 | 用途与引用 | 维护方式 |
 | --- | --- | --- |
-| `reBotArm_control_py/` | 控制器厂商适配、动力学和配置；运动层通过所需接口使用运动学 | 保留；固定版本由 `rebotarm_dependencies.repos` 声明 |
+| `reBotArm_control_py/` | 历史设备行为及位姿计算参考，生产路径不再导入 | 保留；固定版本由 `rebotarm_dependencies.repos` 声明 |
 | `graspnet-baseline/` | 视觉后端加载网络、工具模块及 PointNet2 扩展 | 保留部署实际使用的源码、模型和许可证 |
 | `graspnetAPI/` | 视觉后端使用的 `GraspGroup` 数据结构 | 与所选 GraspNet 版本配套 |
 | `rebotarm_dependencies.repos` | 固定 reBotArm SDK 地址和提交 | 变更前核对兼容性，不随目录整理升级 |

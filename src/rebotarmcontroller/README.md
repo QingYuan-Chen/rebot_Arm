@@ -8,9 +8,23 @@
 rebotarmcontroller/
 ├── rebotarmcontroller/
 │   ├── rebotarm_controller.py       # reBotArmController ROS 节点装配
-│   ├── hardware_manager.py           # 电机 SDK、通道和唯一硬件控制环
+│   ├── hardware_manager.py           # 公共门面、准入和组件交接
+│   ├── configuration.py              # 配置解析、范围和资源定位
+│   ├── controller_contracts.py       # 不可变反馈与发送回执
+│   ├── sdk_driver.py                 # MotorBridge 唯一总线与句柄
+│   ├── device_requests.py            # 有界请求、优先级、有效期与资源代次
+│   ├── controller_runtime.py         # 唯一设备线程、反馈与周期调度
+│   ├── feedback_acquisition.py       # 序号采集、缓存和只读健康判断
+│   ├── lifecycle.py                  # 生命周期状态与关闭策略
+│   ├── arm_execution.py              # 六轴目标、速度覆盖和轨迹游标
+│   ├── arm_trajectory.py             # 六轴任务、到位与取消结果
+│   ├── arm_position_control.py       # 位置命令计算
+│   ├── controller_kinematics.py       # 状态查询所需的规范模型 FK
+│   ├── gravity_control.py            # 重力模型、补偿状态和积分计算
+│   ├── gripper_execution.py          # 独立夹爪任务与周期推进
+│   ├── gripper_control.py            # 夹爪斜坡和有界力矩
 │   ├── ros_services.py               # enable/disable/safe_home/stop/zero/夹爪等服务
-│   ├── ros_actions.py                # MoveToPose、FollowJointTrajectory、夹爪动作
+│   ├── ros_actions.py                # FJT、夹爪 Action 协议映射
 │   ├── ros_publishers.py              # joint_states、JointMotorState、ArmStatus
 │   ├── motor_passthrough.py           # 受门控的低层电机命令透传
 │   ├── conversions.py                 # 位姿、RPY、旋转矩阵互转
@@ -25,11 +39,12 @@ rebotarmcontroller/
 
 ## 模块职责
 
-- `HardwareManager` 独占厂商 SDK、串口/总线和硬件控制循环；其它模块只能通过它访问真实电机。
+- `HardwareManager` 是兼容门面，所有设备请求由 `ControllerRuntime` 的唯一线程串行执行；驱动独占串口和电机句柄。控制器与 motion 不再导入厂商 Python SDK，参考目录保留。
 - `rebotarm_controller.py` 组合参数、硬件管理器、服务、动作和发布器，形成唯一真实 controller 节点。
 - `ros_publishers.py` 只发布已校验反馈；`ArmStatus` 用于通告 connected/enabled/control loop/error 状态。
-- `ros_services.py` 是服务级安全边界；`ros_actions.py` 处理位姿、轨迹和夹爪的长时执行/取消。
-- `motor_passthrough.py` 是绕过规划的底层入口，只能在硬件层允许时使用，不做轨迹插值、碰撞检查或限位策略。
+- `ros_services.py` / `ros_actions.py` 只适配协议和任务结果；到位、超时、取消保持由本地执行器及运行时处理。
+- `motor_passthrough.py` 提交带有效期的底层请求；设备线程原子处理 reject/preempt、配置范围检查和 0.25 s 断流租约，不做上层碰撞规划。
+- 位姿 IK、笛卡尔路径、重定时及碰撞检查归 `rebotarm_motion`。其 `PoseCompatNode` 唯一提供旧 MoveToPose/MoveToPoseIK 接口并转 FJT；服务成功只表示接纳，Action 等待到位。新增模块按职责平铺，不新建职责子目录。
 
 ## 对外入口
 
@@ -49,3 +64,5 @@ MoveToPose              -> 末端位姿演示
 2. 必须通过显式 `/rebotarm/enable` 才允许运动。
 3. `FollowJointTrajectory`、停止、safe home、夹爪和底层命令都必须经过本包。
 4. 健康 enabled 状态下，任务级失败不能直接把机械臂带离已验证 baseline 后失能；应停止并保持，或受保护回 baseline、确认到位后再失能。
+
+请求队列、停止确认、SDK 对照及验证范围见[硬件执行说明](../../docs/implemented/features/hardware_execution.md#请求资源与停止确认)。软件回归和内存假硬件执行均不替代实机验收。
