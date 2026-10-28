@@ -152,7 +152,7 @@ def test_register_failure_aborts_mode_and_enable_path(monkeypatch):
     opened[0].failure=(2,'register')
     with pytest.raises(RuntimeError,match='enable failed'): manager.enable()
     bus=opened[0]
-    assert not manager.enabled and not manager.control_loop_active
+    assert not manager._lifecycle.enabled and not manager.control_loop_active
     assert manager.mode=='unknown'
     assert not any(n>2 and m in ('mode','register') for n,m,_ in bus.events)
     assert not any(m=='enable' for _,m,_ in bus.events)
@@ -167,7 +167,7 @@ def test_disabled_mode_settle_allows_new_verified_feedback(monkeypatch, mode):
     driver = manager._backend.driver
     workers = []
     failures = []
-    previous = dict(manager._verified_feedback_by_label)
+    previous = dict(manager._feedback_component._verified_feedback_by_label)
 
     def settle(_duration):
         manager.refresh_feedback_if_due(force=True)
@@ -189,13 +189,13 @@ def test_disabled_mode_settle_allows_new_verified_feedback(monkeypatch, mode):
         worker.start()
         assert refreshed.wait(.5), "mode settle blocked feedback on the bus lock"
         assert not failures
-        for label, sample in manager._verified_feedback_by_label.items():
+        for label, sample in manager._feedback_component._verified_feedback_by_label.items():
             assert sample.sequence > previous[label].sequence
             assert sample.observed_at > previous[label].observed_at
-        previous.update(manager._verified_feedback_by_label)
+        previous.update(manager._feedback_component._verified_feedback_by_label)
         assert manager.get_feedback_status() == ([0] * 6, [])
         assert manager.get_cached_gripper_sample()[3] == 0
-        assert not manager.enabled and not manager.control_loop_active
+        assert not manager._lifecycle.enabled and not manager.control_loop_active
 
     driver._sleep = settle
     try:
@@ -269,7 +269,7 @@ def test_transition_settle_allows_verified_feedback_refresh(monkeypatch, enabled
     driver = manager._backend.driver
     if not enabled:
         manager._backend.call(driver.enable)
-    previous = dict(manager._verified_feedback_by_label)
+    previous = dict(manager._feedback_component._verified_feedback_by_label)
     failures = []
     workers = []
 
@@ -290,10 +290,10 @@ def test_transition_settle_allows_verified_feedback_refresh(monkeypatch, enabled
         worker.start()
         assert done.wait(.5), 'transition blocked verified feedback refresh'
         assert not failures
-        for label, sample in manager._verified_feedback_by_label.items():
+        for label, sample in manager._feedback_component._verified_feedback_by_label.items():
             assert sample.sequence > previous[label].sequence
             assert sample.observed_at > previous[label].observed_at
-        previous.update(manager._verified_feedback_by_label)
+        previous.update(manager._feedback_component._verified_feedback_by_label)
 
     driver._sleep = settle
     try:
@@ -440,27 +440,27 @@ def test_runtime_self_stop_and_bounded_queue_never_start_second_writer():
 
 def test_real_manager_local_path_default_disabled_enable_recover_reconnect(monkeypatch):
     manager,opened=make_local_manager(monkeypatch)
-    assert not opened and not manager.enabled and not manager.connected
+    assert not opened and not manager._lifecycle.enabled and not manager._lifecycle.connected
     assert manager.get_joint_status_codes()==[255]*6
     with pytest.raises(RuntimeError,match='disabled|not connected'): manager.set_gripper_target(.01)
     manager.connect()
     bus=opened[0]
-    assert not manager.enabled and manager.get_joint_status_codes()==[0]*6
+    assert not manager._lifecycle.enabled and manager.get_joint_status_codes()==[0]*6
     assert len(opened)==1 and len(bus.motors)==7
     manager.enable()
     wait_until(lambda:any(m=='position' for _,m,_ in bus.events))
-    assert manager.enabled and manager.control_loop_active
+    assert manager._lifecycle.enabled and manager.control_loop_active
     with pytest.raises(RuntimeError,match='owns bus'): manager.refresh_feedback_if_due(force=True)
     manager.set_joint_target((.1,-.1,-.1,0.,0.,0.))
     wait_until(lambda:bus.motors[0].state.pos==.1)
     manager.stop_active_motion()
-    assert manager.enabled and manager.lifecycle_state=='ENABLED_HOLD'
+    assert manager._lifecycle.enabled and manager._lifecycle.state=='ENABLED_HOLD'
     manager.disable()
-    assert not manager.enabled and not manager.control_loop_active
+    assert not manager._lifecycle.enabled and not manager.control_loop_active
     manager.shutdown()
-    assert bus.closed and not manager.connected
+    assert bus.closed and not manager._lifecycle.connected
     manager.connect()
-    assert len(opened)==2 and not manager.enabled
+    assert len(opened)==2 and not manager._lifecycle.enabled
     assert manager.get_joint_status_codes()==[0]*6
     manager.shutdown()
 
@@ -471,8 +471,8 @@ def test_local_writer_partial_send_cancels_and_protects_shared_bus(monkeypatch,d
     bus=opened[0];bus.failure=(3,'position');bus.fail_disable=disable_fails
     manager.enable()
     wait_until(lambda:not manager.control_loop_active)
-    assert not manager.trajectory_moving and manager.lifecycle_state=='DISABLING'
-    assert manager.enabled  # output state is unknown until disabled feedback is verified
+    assert not manager._backend.trajectory_moving and manager._lifecycle.state=='DISABLING'
+    assert manager._lifecycle.enabled  # output state is unknown until disabled feedback is verified
     assert bus.disables==1
     assert [n for n,m,_ in bus.events if m=='position']==[1,2,3]
     assert 'COMMAND_PROTECTIVE_DISABLE' in manager.error_codes
@@ -493,7 +493,7 @@ def test_persistent_stale_feedback_requests_protection_once_until_verified_disab
         # 在真实唯一设备线程推进多个空闲周期，不让一次暂时恢复掩盖重复失能。
         manager._backend.call(lambda: [manager._runtime_feedback_tick() for _ in range(30)])
         assert bus.disables == 1
-        assert manager.enabled and manager.lifecycle_state == 'DISABLING'
+        assert manager._lifecycle.enabled and manager._lifecycle.state == 'DISABLING'
         assert not manager.control_loop_active
         assert sum('protective disable requested' in record.message for record in caplog.records) == 1
         if disable_fails:
@@ -510,7 +510,7 @@ def test_persistent_stale_feedback_requests_protection_once_until_verified_disab
         before = bus.disables
         bus.feedback = False
         wait_until(lambda: bus.disables == before + 1)
-        assert manager.lifecycle_state == 'DISABLING'
+        assert manager._lifecycle.state == 'DISABLING'
     finally:
         bus.feedback = True; bus.fail_disable = False
         manager.disable(); manager.shutdown()
@@ -526,7 +526,7 @@ def test_protection_cleanup_failure_cannot_skip_disable(monkeypatch):
     monkeypatch.setattr(manager._backend, 'cancel_trajectory', fail)
     try:
         manager._backend.call(lambda: manager._protective_disable_from_hardware_loop('fault'))
-        assert bus.disables == 1 and manager.lifecycle_state == 'DISABLING'
+        assert bus.disables == 1 and manager._lifecycle.state == 'DISABLING'
         assert not manager.control_loop_active
         assert any('PROTECTIVE_PREPARE_FAILED' in code for code in manager.error_codes)
     finally:
@@ -589,8 +589,8 @@ def test_valid_passthrough_preempt_uses_feedback_after_stop_confirmation(monkeyp
         assert task.event.is_set() and manager.arm_execution_status(task).state == 'canceled'
         sent = [args for number, method, args in bus.events if number == 1 and method == 'position']
         assert sent[-1][0] == pytest.approx(.012)
-        assert manager.state_machine == 'LOWLEVEL_STREAMING'
-        assert manager.enabled
+        assert manager._lifecycle.execution == 'LOWLEVEL_STREAMING'
+        assert manager._lifecycle.enabled
     finally:
         manager.disable(); manager.shutdown()
 
@@ -649,9 +649,9 @@ def test_local_feedback_error_then_new_frame_recovers_without_query_effects(monk
     with pytest.raises(RuntimeError,match='joint3'): manager._backend.call(lambda: manager.refresh_feedback_if_due(force=True))
     assert manager.get_joint_status_codes()==[255]*6
     assert any('INVALID_COORDINATE' in code for code in manager.error_codes)
-    before=(dict(manager._verified_feedback_by_label),dict(manager._feedback_error_by_label),len(bus.events))
+    before=(dict(manager._feedback_component._verified_feedback_by_label),dict(manager._feedback_component._feedback_error_by_label),len(bus.events))
     for _ in range(10): manager.get_feedback_status()
-    assert before==(manager._verified_feedback_by_label,manager._feedback_error_by_label,len(bus.events))
+    assert before==(manager._feedback_component._verified_feedback_by_label,manager._feedback_component._feedback_error_by_label,len(bus.events))
     bus.motors[2].state.pos=.019
     manager._backend.call(lambda: manager.refresh_feedback_if_due(force=True))
     assert manager.get_joint_status_codes()==[0]*6
@@ -667,8 +667,8 @@ def test_shutdown_release_failure_does_not_claim_disabled(monkeypatch):
     manager,opened=make_local_manager(monkeypatch);manager.connect()
     opened[0].feedback=False
     with pytest.raises(RuntimeError,match='shutdown'): manager.shutdown()
-    assert manager.connected and manager.enabled
-    assert manager.lifecycle_state=='DISABLING' and not opened[0].closed
+    assert manager._lifecycle.connected and manager._lifecycle.enabled
+    assert manager._lifecycle.state=='DISABLING' and not opened[0].closed
     assert any('SHUTDOWN_STATE_UNCONFIRMED' in code for code in manager.error_codes)
     opened[0].feedback=True
     manager.disable(); manager.shutdown()
@@ -681,7 +681,7 @@ def test_shutdown_rejects_enabled_arm_without_sending_disable(monkeypatch):
     before = bus.disables
     with pytest.raises(RuntimeError, match='explicit disable'):
         manager.shutdown()
-    assert manager.connected and manager.enabled and manager.control_loop_active
+    assert manager._lifecycle.connected and manager._lifecycle.enabled and manager.control_loop_active
     assert bus.disables == before and not bus.closed
     manager.disable(); manager.shutdown()
 
@@ -690,9 +690,9 @@ def test_mode_failure_is_protective_and_motion_gate_stays_closed(monkeypatch):
     manager,opened=make_local_manager(monkeypatch);manager.connect();manager.enable()
     opened[0].failure=(2,'mode')
     with pytest.raises(CommandTransportError): manager.set_mode('mit')
-    assert manager.lifecycle_state=='DISABLING'
+    assert manager._lifecycle.state=='DISABLING'
     manager.set_state_machine('IDLE')
-    assert manager.lifecycle_state=='DISABLING'
+    assert manager._lifecycle.state=='DISABLING'
     for call in (lambda:manager.set_joint_target((0.,)*6),lambda:manager.set_gripper_target(.01),manager.enable):
         with pytest.raises(RuntimeError): call()
     opened[0].failure=None
@@ -718,7 +718,7 @@ def test_initial_gravity_send_failure_protects_instead_of_resuming_normal_output
     bus=opened[0];manager._stop_control_loop()
     bus.events.clear();bus.failure=(3,'mit')
     with pytest.raises(RuntimeError,match='joint3'): manager.start_gravity_compensation()
-    assert manager.lifecycle_state=='DISABLING' and not manager.control_loop_active
+    assert manager._lifecycle.state=='DISABLING' and not manager.control_loop_active
     assert [n for n,m,_ in bus.events if m=='mit']==[1,2,3]
     assert not any(m=='position' for _,m,_ in bus.events)
     assert manager._backend.driver.last_receipt.sent==('joint1','joint2')
@@ -732,7 +732,7 @@ def test_disable_writer_stop_failure_keeps_enabled_state(monkeypatch):
     monkeypatch.setattr(manager, '_stop_control_loop', lambda: (_ for _ in ()).throw(RuntimeError('join failed')))
     with pytest.raises(RuntimeError, match='join failed'):
         manager.disable()
-    assert manager.enabled and manager.lifecycle_state == 'DISABLING'
+    assert manager._lifecycle.enabled and manager._lifecycle.state == 'DISABLING'
     assert 'DISABLE_VERIFICATION_FAILED' in manager.error_codes
     monkeypatch.setattr(manager, '_stop_control_loop', original)
     manager.disable(); manager.shutdown()
@@ -743,7 +743,7 @@ def test_safe_home_completion_switches_to_hold_and_clears_task_speed(monkeypatch
     manager.connect(); manager.enable()
     goal = (0.1, -0.1, -0.1, 0., 0., 0.)
     assert manager.safe_home(goal, timeout_sec=1.) == pytest.approx(goal, abs=.02)
-    assert manager.enabled and manager.lifecycle_state == 'ENABLED_HOLD'
+    assert manager._lifecycle.enabled and manager._lifecycle.state == 'ENABLED_HOLD'
     assert manager._backend.execution.sample(time.monotonic()).velocity_override is None
     manager.disable(); manager.shutdown()
 

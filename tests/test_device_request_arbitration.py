@@ -112,7 +112,7 @@ def test_cancel_waits_for_hold_and_old_cancel_cannot_stop_successor(monkeypatch)
         manager.stop_active_motion(task)
         assert successor.event.wait(1.)
         assert manager.arm_execution_status(successor).state == 'succeeded'
-        assert manager.enabled
+        assert manager._lifecycle.enabled
     finally:
         manager.disable(); manager.shutdown()
 
@@ -126,9 +126,9 @@ def test_goal_tolerance_timeout_holds_without_disable(monkeypatch):
         task = manager.submit_arm_trajectory(manager.joint_names,
             [(0.,)*6, (.2,0.,0.,0.,0.,0.)], [0., .02], timeout=.03)
         assert task.event.wait(1.)
-        wait_until(lambda: manager.state_machine == 'IDLE')
+        wait_until(lambda: manager._lifecycle.execution == 'IDLE')
         assert manager.arm_execution_status(task).state == 'tolerance'
-        assert manager.enabled and manager.joint_target()[0] == 0.
+        assert manager._lifecycle.enabled and manager.joint_target()[0] == 0.
         assert opened[0].disables == 0
     finally:
         manager.disable(); manager.shutdown()
@@ -149,8 +149,8 @@ def test_passthrough_reject_preempt_and_lease_expiry(monkeypatch):
             manager.send_joint_motor_cmd('joint1', motor_command())
         manager.send_joint_motor_cmd('joint1', motor_command(), arbitration='preempt')
         assert manager.arm_execution_status(task).state == 'canceled'
-        assert manager.state_machine == 'LOWLEVEL_STREAMING'
-        wait_until(lambda: manager.state_machine == 'IDLE')
+        assert manager._lifecycle.execution == 'LOWLEVEL_STREAMING'
+        wait_until(lambda: manager._lifecycle.execution == 'IDLE')
         assert manager.joint_target()[0] == pytest.approx(.01)
     finally:
         manager.disable(); manager.shutdown()
@@ -176,7 +176,7 @@ def test_wrong_point_dimension_rejected_without_replacing_hold(monkeypatch, poin
         with pytest.raises(ValueError, match='six positions'):
             manager.submit_arm_trajectory(manager.joint_names, [point], [0.])
         assert manager._backend.target_generation == generation
-        assert manager.enabled
+        assert manager._lifecycle.enabled
     finally:
         manager.disable(); manager.shutdown()
 
@@ -192,7 +192,7 @@ def test_gravity_resource_rejects_passthrough_and_preempt_confirms_hold(monkeypa
         manager.send_joint_motor_cmd('joint1', motor_command(), arbitration='preempt')
         assert not manager.gravity_compensation_active()
         assert manager.mode == 'pos_vel'
-        assert manager.enabled
+        assert manager._lifecycle.enabled
     finally:
         manager.disable(); manager.shutdown()
 

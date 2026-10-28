@@ -1,12 +1,16 @@
 """保留旧行为样本的设备替身；实现运行时接口，不改变生产准入条件。"""
 import threading
+import time
+from rebotarmcontroller.arm_execution import ArmExecution
 import numpy as np
 from rebotarmcontroller.device_requests import DeviceRequests
 
 class FakeBackend:
-    def __init__(self, arm, endpos):
+    def __init__(self, arm, config):
         self._arm=arm
-        self._endpos=endpos
+        self.config = config
+        self.execution = ArmExecution()
+        self.position_callback = lambda _runtime, _dt: None
         self.requests = DeviceRequests()
         self.in_writer = True
         self._waiting = False
@@ -22,34 +26,25 @@ class FakeBackend:
     @property
     def control_thread(self): return getattr(self._arm,'_ctrl_thread',None)
     @property
-    def execution_running(self): return bool(self._endpos._running)
-    def set_execution_running(self,value): self._endpos._running=bool(value)
+    def execution_running(self): return self.execution.running
+    def set_execution_running(self, value): self.execution.running = bool(value)
     @property
-    def home_velocity(self): return float(self._endpos._home_vel)
+    def home_velocity(self): return self.config.timing.home_velocity
     @property
-    def arrival_poll_period(self): return float(self._endpos._dt)
-    def set_speed_override(self,value): self._endpos._vlim_override=value
-    def set_target(self,value): self._endpos._q_target[:]=np.array(value,dtype=float,copy=True)
-    def target(self): return self._endpos._q_target.copy()
-    def cancel_trajectory(self):
-        self._endpos._stop_send.set()
-        self._endpos._moving=False
-    def join_sender(self):
-        thread=self._endpos._send_thread
-        if thread is not None: thread.join(timeout=5.)
-        if thread is not None and thread.is_alive(): raise RuntimeError('trajectory sender did not stop')
+    def arrival_poll_period(self): return self.config.timing.arrival_poll_period
+    def set_speed_override(self, value): self.execution.set_speed_override(value)
+    def set_target(self, value): self.execution.set_target(value)
+    def target(self): return np.asarray(self.execution.target())
+    def cancel_trajectory(self): self.execution.cancel()
     @property
-    def trajectory_moving(self): return bool(self._endpos._moving)
+    def target_generation(self): return self.execution.generation
     @property
-    def trajectory_progress(self):
-        points=getattr(self._endpos,'_traj',())
-        return min(1.,float(self._endpos._traj_idx)/len(points)) if points else 1.
-    def move_to_pose_path(self,*args): return self._endpos.move_to_traj(*args)
-    def move_to_pose_ik(self,*args): return self._endpos.move_to_ik(*args)
-    def position_tick(self,arm,dt): self._endpos._loop_cb(arm,dt)
-    def current_pose_values(self,q):
-        from rebotarmcontroller.controller_kinematics import ArmKinematics
-        return ArmKinematics(self._endpos._model).pose(q)
+    def trajectory_moving(self): return self.execution.moving
+    @property
+    def trajectory_progress(self): return self.execution.progress
+    def position_tick(self, runtime, dt): self.position_callback(runtime, dt)
+    def current_pose_values(self, q): return self.kinematics.pose(q)
+    def device_wait(self, duration): time.sleep(duration)
     def joint_device(self,name): return self._arm._motor_map[name]
     def joint_configuration(self,name): return next(j for j in self._arm._joints if j.name==name)
     def controllers(self): return tuple(self._arm._ctrl_map.values())

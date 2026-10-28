@@ -159,6 +159,8 @@ class HardwareManager:
         gripper_feedback_stale_timeout_sec: float = _G_FEEDBACK_STALE_TIMEOUT_SEC,
         grasp_hold_timeout_sec: float = _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC,
         gravity_config: Optional[str] = None,
+        *,
+        runtime_factory=ControllerRuntime,
     ) -> None:
         settings = HardwareSettings(hardware_feedback_rate_hz,gripper_position_torque_cap_nm,
                                     gripper_position_max_speed_rad_s,gripper_position_timeout_margin_sec,
@@ -176,7 +178,7 @@ class HardwareManager:
         self._gravity_model = load_gravity_model(
             package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'), self._gc_settings)
         self._gc_torque_limits = self._gravity_model.effort
-        self._backend = ControllerRuntime(self._configuration, ArmKinematics(self._gravity_model.model))
+        self._backend = runtime_factory(self._configuration, ArmKinematics(self._gravity_model.model))
         self._backend.idle_callback = self._runtime_feedback_tick
         self._arm_trajectory = ArmTrajectory(self._backend.execution)
         self._lifecycle = self._assemble_lifecycle()
@@ -195,63 +197,18 @@ class HardwareManager:
         self._gripper_cfg = None
         self._gripper_mot = None
         self._gripper_ctrl = None
-        # 夹爪角度语义：0 rad = 完全闭合，_G_ANGLE_OPEN = 完全张开；
-        # _gripper_target_angle 是斜坡中间值，_gripper_goal_angle 是最终目标。
-        self._gripper_target_angle = 0.0
-        self._gripper_goal_angle = 0.0
-        self._gripper_target_effort = _G_DEFAULT_FORCE
-        self._gripper_close_force = _G_GRASP_CLOSE_FORCE_DEFAULT
-        self._gripper_hold_force = _G_GRASP_HOLD_FORCE_DEFAULT
-        self._gripper_hold_angle = 0.0
-        self._gripper_hold_deadline: float | None = None
-        self._gripper_hold_release_reason: str | None = None
-        self._gripper_mode = "idle"
-        self._gripper_active = False
-        self._gripper_pos = 0.0
-        self._gripper_vel = 0.0
-        self._gripper_torque = 0.0
-        self._gripper_feedback_updated_monotonic: float | None = None
-        self._gripper_feedback_error: str | None = None
-        self._gripper_zero_error: str | None = None
-        self._gripper_command_error: str | None = None
-        self._gripper_transport_error: str | None = None
-        self._gripper_position_result = "idle"
-        # 待发送的中性命令：(角度, 原因, 是否标记成功)，由硬件循环消费。
-        self._gripper_neutral_pending: tuple[float, str, bool] | None = None
-        self._gripper_target_timeout_sec = 0.0
-        self._gripper_target_deadline_monotonic: float | None = None
-        # 机械臂与夹爪命令共用同一个本地硬件循环。以下兼容字段只保留可观测性
-        # 用于诊断，不会创建独立的夹爪线程。
-        self._gripper_loop_thread: None = None
-        self._gripper_loop_running = False
-        self._gripper_last_tick_monotonic: float | None = None
-        self._gripper_lock = threading.RLock()
-        self._feedback_lock = threading.RLock()
-        self._feedback_next_refresh_monotonic: float | None = None
-        self._verified_feedback_by_label: dict[str, _VerifiedFeedbackSample] = {}
-        # 请求-响应式反馈验证状态：baseline 记录请求前的接收序号，deadline 是
-        # 该次请求的截止时刻，只有序号前进才算收到新帧。
-        self._feedback_request_baseline_by_label: dict[str, int] = {}
-        self._feedback_request_deadline_by_label: dict[str, float] = {}
-        self._feedback_error_by_label: dict[str, str] = {}
-        # 启动时的强制刷新可能要跨多个轮询周期才收齐电机帧；在这个有界收集窗口
-        # 内不要发布中间态的 "pending" 错误。
-        self._feedback_force_refresh_active = False
-        self._arm_feedback_updated_monotonic: float | None = None
-        self._arm_feedback_error: str | None = None
-
-        # 重力补偿运行态：目标关节角、误差积分（抗漂移）、锁定计数与上一帧角度。
-        self._gravity_comp_active = False
-        self._gravity_comp_q_target: np.ndarray | None = None
-        self._gravity_comp_integral: np.ndarray | None = None
-        self._gravity_comp_lock_counter = 0
-        self._gravity_comp_q_last: np.ndarray | None = None
-        self._gravity_comp_last_total = np.zeros(6)
-        self._gravity_comp_fault: str | None = None
-        self._gravity_comp_hold_feedforward = None
+        # 组件在启动任何线程前一次初始化；生产与离线替身使用同一装配路径。
+        self._gravity_execution = GravityExecutionState()
+        self._gripper_execution = self._assemble_gripper()
+        self._feedback_component = self._assemble_feedback()
+        self._gripper_feedback_updated_monotonic = None
+        self._gripper_feedback_error = None
+        self._gripper_zero_error = None
+        self._gripper_transport_error = None
         self._gravity_timing = None
         self._gravity_feedback_metrics = {}
         self._gravity_next_log = 0.
+        self._arm_passthrough_until = self._gripper_passthrough_until = None
 
 
     def default_arm_cfg(self) -> Path:
@@ -304,13 +261,13 @@ class HardwareManager:
 
     @property
     def gripper_active(self) -> bool:
-        with self._gripper_lock:
-            return bool(self._gripper_active)
+        with self._gripper_execution._gripper_lock:
+            return bool(self._gripper_execution._gripper_active)
 
     @property
     def gripper_mode(self) -> str:
-        with self._gripper_lock:
-            return str(self._gripper_mode)
+        with self._gripper_execution._gripper_lock:
+            return str(self._gripper_execution._gripper_mode)
 
     @property
     def error_codes(self) -> list[str]:
@@ -323,7 +280,7 @@ class HardwareManager:
 
     def get_feedback_status(self) -> tuple[list[int], list[str]]:
         """一次只读快照生成 ArmStatus 的状态码与诊断，避免恢复帧混用旧错误。"""
-        with self._feedback_lock, self._gripper_lock:
+        with self._feedback_component._feedback_lock, self._gripper_execution._gripper_lock:
             now = time.monotonic()
             codes = list(self._lifecycle.errors)
             failure = self._arm_feedback_failure_reason(now=now)
@@ -340,78 +297,6 @@ class HardwareManager:
                 if failure is not None:
                     codes.append(f"GRIPPER_FEEDBACK: {failure}")
             return statuses, codes
-
-    @property
-    def _gravity_execution(self):
-        owner = self.__dict__.get('_gravity_execution_owner')
-        if owner is None:
-            owner = GravityExecutionState()
-            self.__dict__['_gravity_execution_owner'] = owner
-        return owner
-
-    @property
-    def _gravity_comp_active(self):
-        return self._gravity_execution.active
-
-    @_gravity_comp_active.setter
-    def _gravity_comp_active(self, value):
-        self._gravity_execution.active = value
-
-    @property
-    def _gravity_comp_q_target(self):
-        return self._gravity_execution.target
-
-    @_gravity_comp_q_target.setter
-    def _gravity_comp_q_target(self, value):
-        self._gravity_execution.target = value
-
-    @property
-    def _gravity_comp_integral(self):
-        return self._gravity_execution.integral
-
-    @_gravity_comp_integral.setter
-    def _gravity_comp_integral(self, value):
-        self._gravity_execution.integral = value
-
-    @property
-    def _gravity_comp_lock_counter(self):
-        return self._gravity_execution.lock_counter
-
-    @_gravity_comp_lock_counter.setter
-    def _gravity_comp_lock_counter(self, value):
-        self._gravity_execution.lock_counter = value
-
-    @property
-    def _gravity_comp_q_last(self):
-        return self._gravity_execution.last_position
-
-    @_gravity_comp_q_last.setter
-    def _gravity_comp_q_last(self, value):
-        self._gravity_execution.last_position = value
-
-    @property
-    def _gravity_comp_last_total(self):
-        return self._gravity_execution.last_total
-
-    @_gravity_comp_last_total.setter
-    def _gravity_comp_last_total(self, value):
-        self._gravity_execution.last_total = value
-
-    @property
-    def _gravity_comp_fault(self):
-        return self._gravity_execution.fault
-
-    @_gravity_comp_fault.setter
-    def _gravity_comp_fault(self, value):
-        self._gravity_execution.fault = value
-
-    @property
-    def _gravity_comp_hold_feedforward(self):
-        return self._gravity_execution.hold_feedforward
-
-    @_gravity_comp_hold_feedforward.setter
-    def _gravity_comp_hold_feedforward(self, value):
-        self._gravity_execution.hold_feedforward = value
 
 
     def _assemble_lifecycle(self):
@@ -441,7 +326,7 @@ class HardwareManager:
 
     def _lifecycle_gripper_coordinate_failure(self):
         if self._gripper_mot is not None:
-            with self._gripper_lock:
+            with self._gripper_execution._gripper_lock:
                 return self._gripper_coordinate_failure_reason_locked()
         return None
 
@@ -457,23 +342,23 @@ class HardwareManager:
 
     def _reset_device_session(self):
         """会话装配协调；旧缓存与旧夹爪代次不得跨重连复用。"""
-        with self._feedback_lock:
-            self._verified_feedback_by_label.clear()
-            self._feedback_request_baseline_by_label.clear()
-            self._feedback_request_deadline_by_label.clear()
-            self._feedback_error_by_label.clear()
-            self._feedback_next_refresh_monotonic = None
-            self._arm_feedback_updated_monotonic = None
-            self._arm_feedback_error = None
+        with self._feedback_component._feedback_lock:
+            self._feedback_component._verified_feedback_by_label.clear()
+            self._feedback_component._feedback_request_baseline_by_label.clear()
+            self._feedback_component._feedback_request_deadline_by_label.clear()
+            self._feedback_component._feedback_error_by_label.clear()
+            self._feedback_component._feedback_next_refresh_monotonic = None
+            self._feedback_component._arm_feedback_updated_monotonic = None
+            self._feedback_component._arm_feedback_error = None
             self._gripper_feedback_updated_monotonic = None
             self._gripper_feedback_error = None
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             self._gripper_execution.supersede_locked()
-            self._gripper_active = False
-            self._gripper_mode = "idle"
-            self._gripper_neutral_pending = None
-            self._gripper_hold_deadline = None
-            self._gripper_target_deadline_monotonic = None
+            self._gripper_execution._gripper_active = False
+            self._gripper_execution._gripper_mode = "idle"
+            self._gripper_execution._gripper_neutral_pending = None
+            self._gripper_execution._gripper_hold_deadline = None
+            self._gripper_execution._gripper_target_deadline_monotonic = None
             self._gripper_transport_error = None
 
 
@@ -519,248 +404,34 @@ class HardwareManager:
             raise RuntimeError("hardware feedback controller map unavailable")
         return groups
 
-    @property
-    def _gripper_execution(self):
-        # 正常构造在启动线程之前创建；旧测试夹具通过 __new__ 创建时也可惰性初始化。
-        component = self.__dict__.get('_gripper_execution_owner')
-        if component is None:
-            component = GripperExecution(
-                motor=lambda: self._gripper_mot,
-                verified=lambda: self._verified_feedback_sample('gripper').state,
-                feedback_failure=lambda: self._gripper_feedback_failure_reason_locked(),
-                record_feedback_error=lambda message: self._record_gripper_feedback_error(message),
-                validate=lambda state: self._validated_gripper_feedback_values(state),
-                feedback_age=lambda: self._gripper_feedback_age_sec(),
-                feedback_updated=lambda: self._gripper_feedback_updated_monotonic,
-                speed=lambda: self._gripper_position_max_speed_rad_s,
-                send=lambda *args, **kwargs: self._gripper_safe_mit(*args, **kwargs),
-            )
-            self.__dict__['_gripper_execution_owner'] = component
-        return component
+    def _assemble_gripper(self):
+        """构造时一次装配组件，运行期间不惰性补建状态。"""
+        return GripperExecution(
+            motor=lambda: self._gripper_mot,
+            verified=lambda: self._verified_feedback_sample('gripper').state,
+            feedback_failure=lambda: self._gripper_feedback_failure_reason_locked(),
+            record_feedback_error=lambda message: self._record_gripper_feedback_error(message),
+            validate=lambda state: self._validated_gripper_feedback_values(state),
+            feedback_age=lambda: self._gripper_feedback_age_sec(),
+            feedback_updated=lambda: self._gripper_feedback_updated_monotonic,
+            speed=lambda: self._gripper_position_max_speed_rad_s,
+            send=lambda *args, **kwargs: self._gripper_safe_mit(*args, **kwargs),
+        )
 
-    @property
-    def _gripper_target_angle(self):
-        return self._gripper_execution._gripper_target_angle
 
-    @_gripper_target_angle.setter
-    def _gripper_target_angle(self, value):
-        self._gripper_execution._gripper_target_angle = value
+    def _assemble_feedback(self):
+        """构造时一次装配组件，运行期间不惰性补建状态。"""
+        return FeedbackAcquisition(
+            groups=self._feedback_controller_groups, joint_names=lambda: self.joint_names,
+            gripper_motor=lambda: self._gripper_mot,
+            gripper_values=self._validated_gripper_feedback_values,
+            gripper_sample=self._record_gripper_feedback,
+            gripper_error=self._record_gripper_feedback_error,
+            period=lambda: self._hardware_feedback_period_sec,
+            stale_timeout=lambda: self._gripper_feedback_stale_timeout_sec,
+            backend=lambda: self._backend, loop_active=lambda: self.control_loop_active,
+        )
 
-    @property
-    def _gripper_goal_angle(self):
-        return self._gripper_execution._gripper_goal_angle
-
-    @_gripper_goal_angle.setter
-    def _gripper_goal_angle(self, value):
-        self._gripper_execution._gripper_goal_angle = value
-
-    @property
-    def _gripper_target_effort(self):
-        return self._gripper_execution._gripper_target_effort
-
-    @_gripper_target_effort.setter
-    def _gripper_target_effort(self, value):
-        self._gripper_execution._gripper_target_effort = value
-
-    @property
-    def _gripper_close_force(self):
-        return self._gripper_execution._gripper_close_force
-
-    @_gripper_close_force.setter
-    def _gripper_close_force(self, value):
-        self._gripper_execution._gripper_close_force = value
-
-    @property
-    def _gripper_hold_force(self):
-        return self._gripper_execution._gripper_hold_force
-
-    @_gripper_hold_force.setter
-    def _gripper_hold_force(self, value):
-        self._gripper_execution._gripper_hold_force = value
-
-    @property
-    def _gripper_hold_angle(self):
-        return self._gripper_execution._gripper_hold_angle
-
-    @_gripper_hold_angle.setter
-    def _gripper_hold_angle(self, value):
-        self._gripper_execution._gripper_hold_angle = value
-
-    @property
-    def _gripper_hold_deadline(self):
-        return self._gripper_execution._gripper_hold_deadline
-
-    @_gripper_hold_deadline.setter
-    def _gripper_hold_deadline(self, value):
-        self._gripper_execution._gripper_hold_deadline = value
-
-    @property
-    def _gripper_hold_release_reason(self):
-        return self._gripper_execution._gripper_hold_release_reason
-
-    @_gripper_hold_release_reason.setter
-    def _gripper_hold_release_reason(self, value):
-        self._gripper_execution._gripper_hold_release_reason = value
-
-    @property
-    def _gripper_mode(self):
-        return self._gripper_execution._gripper_mode
-
-    @_gripper_mode.setter
-    def _gripper_mode(self, value):
-        self._gripper_execution._gripper_mode = value
-
-    @property
-    def _gripper_active(self):
-        return self._gripper_execution._gripper_active
-
-    @_gripper_active.setter
-    def _gripper_active(self, value):
-        self._gripper_execution._gripper_active = value
-
-    @property
-    def _gripper_pos(self):
-        return self._gripper_execution._gripper_pos
-
-    @_gripper_pos.setter
-    def _gripper_pos(self, value):
-        self._gripper_execution._gripper_pos = value
-
-    @property
-    def _gripper_vel(self):
-        return self._gripper_execution._gripper_vel
-
-    @_gripper_vel.setter
-    def _gripper_vel(self, value):
-        self._gripper_execution._gripper_vel = value
-
-    @property
-    def _gripper_torque(self):
-        return self._gripper_execution._gripper_torque
-
-    @_gripper_torque.setter
-    def _gripper_torque(self, value):
-        self._gripper_execution._gripper_torque = value
-
-    @property
-    def _gripper_command_error(self):
-        return self._gripper_execution._gripper_command_error
-
-    @_gripper_command_error.setter
-    def _gripper_command_error(self, value):
-        self._gripper_execution._gripper_command_error = value
-
-    @property
-    def _gripper_position_result(self):
-        return self._gripper_execution._gripper_position_result
-
-    @_gripper_position_result.setter
-    def _gripper_position_result(self, value):
-        self._gripper_execution._gripper_position_result = value
-
-    @property
-    def _gripper_neutral_pending(self):
-        return self._gripper_execution._gripper_neutral_pending
-
-    @_gripper_neutral_pending.setter
-    def _gripper_neutral_pending(self, value):
-        self._gripper_execution._gripper_neutral_pending = value
-
-    @property
-    def _gripper_target_timeout_sec(self):
-        return self._gripper_execution._gripper_target_timeout_sec
-
-    @_gripper_target_timeout_sec.setter
-    def _gripper_target_timeout_sec(self, value):
-        self._gripper_execution._gripper_target_timeout_sec = value
-
-    @property
-    def _gripper_target_deadline_monotonic(self):
-        return self._gripper_execution._gripper_target_deadline_monotonic
-
-    @_gripper_target_deadline_monotonic.setter
-    def _gripper_target_deadline_monotonic(self, value):
-        self._gripper_execution._gripper_target_deadline_monotonic = value
-
-    @property
-    def _gripper_last_tick_monotonic(self):
-        return self._gripper_execution._gripper_last_tick_monotonic
-
-    @_gripper_last_tick_monotonic.setter
-    def _gripper_last_tick_monotonic(self, value):
-        self._gripper_execution._gripper_last_tick_monotonic = value
-
-    @property
-    def _gripper_lock(self):
-        return self._gripper_execution._gripper_lock
-
-    @_gripper_lock.setter
-    def _gripper_lock(self, value):
-        self._gripper_execution._gripper_lock = value
-
-    @property
-    def _feedback_component(self):
-        # 正常构造时在启动任何线程之前由反馈字段初始化触发；惰性创建也兼容
-        # 使用 __new__ 构造的旧夹具。以下转发字段不保存第二份反馈状态。
-        component = self.__dict__.get("_feedback_owner")
-        if component is None:
-            component = FeedbackAcquisition(
-                groups=self._feedback_controller_groups, joint_names=lambda: self.joint_names,
-                gripper_motor=lambda: self._gripper_mot,
-                gripper_values=self._validated_gripper_feedback_values,
-                gripper_sample=self._record_gripper_feedback,
-                gripper_error=self._record_gripper_feedback_error,
-                period=lambda: self._hardware_feedback_period_sec,
-                stale_timeout=lambda: self._gripper_feedback_stale_timeout_sec,
-                backend=lambda: self._backend, loop_active=lambda: self.control_loop_active,
-            )
-            self.__dict__["_feedback_owner"] = component
-        return component
-
-    @property
-    def _feedback_lock(self): return self._feedback_component._feedback_lock
-    @_feedback_lock.setter
-    def _feedback_lock(self, value): self._feedback_component._feedback_lock = value
-
-    @property
-    def _feedback_next_refresh_monotonic(self): return self._feedback_component._feedback_next_refresh_monotonic
-    @_feedback_next_refresh_monotonic.setter
-    def _feedback_next_refresh_monotonic(self, value): self._feedback_component._feedback_next_refresh_monotonic = value
-
-    @property
-    def _verified_feedback_by_label(self): return self._feedback_component._verified_feedback_by_label
-    @_verified_feedback_by_label.setter
-    def _verified_feedback_by_label(self, value): self._feedback_component._verified_feedback_by_label = value
-
-    @property
-    def _feedback_request_baseline_by_label(self): return self._feedback_component._feedback_request_baseline_by_label
-    @_feedback_request_baseline_by_label.setter
-    def _feedback_request_baseline_by_label(self, value): self._feedback_component._feedback_request_baseline_by_label = value
-
-    @property
-    def _feedback_request_deadline_by_label(self): return self._feedback_component._feedback_request_deadline_by_label
-    @_feedback_request_deadline_by_label.setter
-    def _feedback_request_deadline_by_label(self, value): self._feedback_component._feedback_request_deadline_by_label = value
-
-    @property
-    def _feedback_error_by_label(self): return self._feedback_component._feedback_error_by_label
-    @_feedback_error_by_label.setter
-    def _feedback_error_by_label(self, value): self._feedback_component._feedback_error_by_label = value
-
-    @property
-    def _feedback_force_refresh_active(self): return self._feedback_component._feedback_force_refresh_active
-    @_feedback_force_refresh_active.setter
-    def _feedback_force_refresh_active(self, value): self._feedback_component._feedback_force_refresh_active = value
-
-    @property
-    def _arm_feedback_updated_monotonic(self): return self._feedback_component._arm_feedback_updated_monotonic
-    @_arm_feedback_updated_monotonic.setter
-    def _arm_feedback_updated_monotonic(self, value): self._feedback_component._arm_feedback_updated_monotonic = value
-
-    @property
-    def _arm_feedback_error(self): return self._feedback_component._arm_feedback_error
-    @_arm_feedback_error.setter
-    def _arm_feedback_error(self, value): self._feedback_component._arm_feedback_error = value
 
     _feedback_state_with_sequence = staticmethod(FeedbackAcquisition._feedback_state_with_sequence)
 
@@ -839,11 +510,11 @@ class HardwareManager:
     def _record_gripper_feedback(self, state, *, observed_at: float | None = None) -> None:
         position, velocity, torque, status = self._validated_gripper_feedback_values(state)
         timestamp = time.monotonic() if observed_at is None else float(observed_at)
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             recovered = self._gripper_feedback_error is not None
-            self._gripper_pos = position
-            self._gripper_vel = velocity
-            self._gripper_torque = torque
+            self._gripper_execution._gripper_pos = position
+            self._gripper_execution._gripper_vel = velocity
+            self._gripper_execution._gripper_torque = torque
             self._gripper_feedback_updated_monotonic = timestamp
             # 有限的原始坐标仍保留供显式置零使用，健康判定和控制入口必须拒绝越限。
             coordinate_error = self._gripper_coordinate_failure_reason_locked(
@@ -866,14 +537,14 @@ class HardwareManager:
 
     def _record_gripper_feedback_error(self, reason: str) -> None:
         message = str(reason)
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             changed = message != self._gripper_feedback_error
             self._gripper_feedback_error = message
         if changed:
             _LOG.error("gripper feedback error: %s", message)
 
     def _gripper_feedback_age_sec(self, *, now: float | None = None) -> float:
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             updated = self._gripper_feedback_updated_monotonic
         if updated is None:
             return float("inf")
@@ -902,7 +573,7 @@ class HardwareManager:
         if check_zero and self._gripper_zero_error is not None:
             return f"[ZERO_INVALID] {self._gripper_zero_error}"
         if position is None:
-            position = self._gripper_pos
+            position = self._gripper_execution._gripper_pos
         if not np.isfinite(position) or not (
             _G_ANGLE_OPEN - _G_COORDINATE_TOL_RAD
             <= position <= _G_CLOSED_FEEDBACK_TOL_RAD
@@ -1041,7 +712,7 @@ class HardwareManager:
         这里只读已验证缓存，不依赖生命周期锁；否则发布回调会在慢模式切换
         中阻塞，并因占有发布锁而阻止下一轮反馈刷新。
         """
-        with self._feedback_lock:
+        with self._feedback_component._feedback_lock:
             now = time.monotonic()
             failure = self._arm_feedback_failure_reason(now=now)
             if failure is not None:
@@ -1263,9 +934,9 @@ class HardwareManager:
         if self._gripper_mot is None:
             raise RuntimeError("gripper is not initialized")
         self._stop_gripper_loop()
-        with self._feedback_lock:
+        with self._feedback_component._feedback_lock:
             self._validated_gripper_status(expected_status=0)
-            with self._gripper_lock:
+            with self._gripper_execution._gripper_lock:
                 self._gripper_zero_error = "gripper zero verification pending"
             try:
                 self._gripper_mot.set_zero_position()
@@ -1290,7 +961,7 @@ class HardwareManager:
                         consecutive + 1 if abs(position) <= _G_COORDINATE_TOL_RAD else 0
                     )
                     if consecutive >= _G_ZERO_VERIFY_SAMPLES:
-                        with self._gripper_lock:
+                        with self._gripper_execution._gripper_lock:
                             self._gripper_zero_error = None
                         self._lifecycle.enabled = False
                         self.set_state_machine("IDLE")
@@ -1303,7 +974,7 @@ class HardwareManager:
                 )
             except Exception as exc:
                 message = f"gripper set_zero failed: {exc}"
-                with self._gripper_lock:
+                with self._gripper_execution._gripper_lock:
                     # 仅凭新帧并不能证明标定失败已消除；在显式置零验证通过之前
                     # 一直保留该失败标记。
                     self._gripper_zero_error = message
@@ -1414,24 +1085,24 @@ class HardwareManager:
         self._backend.cancel_trajectory()
         try:
             self._refresh_arm_feedback()
-            self._gravity_comp_q_target = self._read_gravity_comp_positions()
+            self._gravity_execution.target = self._read_gravity_comp_positions()
         except Exception as exc:
             self._protective_disable_from_hardware_loop(str(exc))
             raise
-        self._gravity_comp_q_last = self._gravity_comp_q_target.copy()
+        self._gravity_execution.last_position = self._gravity_execution.target.copy()
         # 切模式前先拒绝无法支撑当前姿态的模型计算结果。
         try:
-            gravity = vector(self._gc_compute_generalized_gravity(q=self._gravity_comp_q_target),
+            gravity = vector(self._gc_compute_generalized_gravity(q=self._gravity_execution.target),
                              6, 'gravity torque')
             if (np.abs(gravity) > self._gc_torque_limits).any():
                 raise RuntimeError('gravity torque exceeds model effort limits')
         except Exception:
-            self._start_pos_vel_loop(target=self._gravity_comp_q_target)
+            self._start_pos_vel_loop(target=self._gravity_execution.target)
             raise
-        self._gravity_comp_fault = None
-        self._gravity_comp_hold_feedforward = None
-        self._gravity_comp_integral = np.zeros_like(self._gravity_comp_q_target)
-        self._gravity_comp_lock_counter = 0
+        self._gravity_execution.fault = None
+        self._gravity_execution.hold_feedforward = None
+        self._gravity_execution.integral = np.zeros_like(self._gravity_execution.target)
+        self._gravity_execution.lock_counter = 0
         try:
             if not self._backend.mode_mit(
                 kp=np.full(6, self._gc_settings.kp), kd=np.full(6, self._gc_settings.kd)
@@ -1439,19 +1110,19 @@ class HardwareManager:
                 raise RuntimeError('MIT mode switch did not succeed on all joints')
             # 模式交接可能持续数百毫秒，交接后必须重新取得新帧。
             self._refresh_arm_feedback()
-            self._gravity_comp_q_target = self._read_gravity_comp_positions()
+            self._gravity_execution.target = self._read_gravity_comp_positions()
             samples = self._verified_feedback_samples(self.joint_names)
-            self._gravity_comp_last_total = np.clip(
+            self._gravity_execution.last_total = np.clip(
                 [float(s.state.torq) for s in samples],
                 -self._gc_torque_limits, self._gc_torque_limits)
-            self._gravity_comp_active = True
+            self._gravity_execution.active = True
             self._gravity_comp_tick(self._backend, 1. / float(self._backend.rate))
         except (GravityCommandError, CommandTransportError) as exc:
-            self._gravity_comp_active = False
+            self._gravity_execution.active = False
             self._protective_disable_from_hardware_loop(str(exc),category="GRAVITY_COMMAND")
             raise
         except Exception:
-            self._gravity_comp_active = False
+            self._gravity_execution.active = False
             # 健康任务失败恢复已验证的当前位置保持；恢复失败按设备故障处理。
             try:
                 self._refresh_arm_feedback()
@@ -1476,14 +1147,14 @@ class HardwareManager:
 
     def _stop_gravity_compensation_locked(self) -> None:
         """退出重力补偿：用最新验证角度接管位置-速度保持。"""
-        if not self._gravity_comp_active:
+        if not self._gravity_execution.active:
             return
         self._stop_control_loop()
-        self._gravity_comp_active = False
-        self._gravity_comp_q_target = None
-        self._gravity_comp_integral = None
-        self._gravity_comp_lock_counter = 0
-        self._gravity_comp_q_last = None
+        self._gravity_execution.active = False
+        self._gravity_execution.target = None
+        self._gravity_execution.integral = None
+        self._gravity_execution.lock_counter = 0
+        self._gravity_execution.last_position = None
         if self._lifecycle.enabled:
             try:
                 self._refresh_arm_feedback()
@@ -1497,12 +1168,12 @@ class HardwareManager:
         self.set_state_machine("IDLE")
 
     def gravity_compensation_active(self) -> bool:
-        return self._gravity_comp_active
+        return self._gravity_execution.active
 
     def gravity_compensation_target(self) -> np.ndarray | None:
-        if self._gravity_comp_q_target is None:
+        if self._gravity_execution.target is None:
             return None
-        return self._gravity_comp_q_target.copy()
+        return self._gravity_execution.target.copy()
 
     def _refresh_arm_feedback(self) -> None:
         self.refresh_feedback_if_due(force=True)
@@ -1540,7 +1211,7 @@ class HardwareManager:
         角度会解到与上一帧最接近的分支，结果同时更新 ``_gravity_comp_q_last``。
         """
         joint_names = self.joint_names
-        with self._feedback_lock:
+        with self._feedback_component._feedback_lock:
             feedback_failure = self._arm_feedback_failure_reason()
             if feedback_failure is not None:
                 raise RuntimeError(feedback_failure)
@@ -1560,11 +1231,11 @@ class HardwareManager:
 
         q = np.array(positions, dtype=np.float64)
         qd = np.array(velocities, dtype=np.float64)
-        ref = reference if reference is not None else self._gravity_comp_q_last
+        ref = reference if reference is not None else self._gravity_execution.last_position
         if ref is not None:
             q = self._angles_near_reference(q, ref)
-        self._gravity_comp_q_last = np.array(q, dtype=np.float64, copy=True)
-        return self._gravity_comp_q_last.copy(), qd
+        self._gravity_execution.last_position = np.array(q, dtype=np.float64, copy=True)
+        return self._gravity_execution.last_position.copy(), qd
 
     def _gravity_comp_tick(self, arm, dt: float) -> None:
         """重力补偿的单周期控制律（运行在统一控制循环里）。
@@ -1576,12 +1247,12 @@ class HardwareManager:
         否则累加锁定计数（"锁定"模式）。
         下发时位置/速度目标固定，仅用 tau 项补偿重力，因此机械臂呈现"轻"的手感。
         """
-        if not self._gravity_comp_active or self._gravity_comp_q_target is None:
+        if not self._gravity_execution.active or self._gravity_execution.target is None:
             return
 
         q, qd = self._read_gravity_comp_feedback()
-        if self._gravity_comp_fault is not None:
-            self._emit_bounded_gravity_command(q, qd, self._gravity_comp_hold_feedforward, dt)
+        if self._gravity_execution.fault is not None:
+            self._emit_bounded_gravity_command(q, qd, self._gravity_execution.hold_feedforward, dt)
             return
         tau_g = vector(self._gc_compute_generalized_gravity(q=q), 6, 'gravity torque')
         tau_g = apply_gravity_compensation_tau_scale(tau_g)
@@ -1601,14 +1272,14 @@ class HardwareManager:
     def _emit_bounded_gravity_command(self, q, qd, feedforward, dt):
         settings = self._gc_settings
         kp, kd, tau, total = bounded_mit_command(
-            self._gravity_comp_q_target, q, qd, np.full(6, settings.kp),
+            self._gravity_execution.target, q, qd, np.full(6, settings.kp),
             np.full(6, settings.kd), feedforward, self._gc_torque_limits,
-            settings.torque_rate_limits_nm_s, self._gravity_comp_last_total, dt)
+            settings.torque_rate_limits_nm_s, self._gravity_execution.last_total, dt)
         self._send_gravity_mit(
-            pos=self._gravity_comp_q_target,
+            pos=self._gravity_execution.target,
             vel=np.zeros(6), kp=kp, kd=kd, tau=tau,
         )
-        self._gravity_comp_last_total = total
+        self._gravity_execution.last_total = total
 
     def _send_gravity_mit(self, *, pos, vel, kp, kd, tau):
         try:
@@ -1618,11 +1289,11 @@ class HardwareManager:
 
     def _gravity_fault_hold(self, reason):
         q, _ = self._read_gravity_comp_feedback()
-        if self._gravity_comp_fault is None:
-            self._gravity_comp_fault = str(reason)
-            self._gravity_comp_q_target = q.copy()
-            self._gravity_comp_integral.fill(0.)
-            self._gravity_comp_hold_feedforward = self._gravity_comp_last_total.copy()
+        if self._gravity_execution.fault is None:
+            self._gravity_execution.fault = str(reason)
+            self._gravity_execution.target = q.copy()
+            self._gravity_execution.integral.fill(0.)
+            self._gravity_execution.hold_feedforward = self._gravity_execution.last_total.copy()
             self._lifecycle.errors.append(f'GRAVITY_HOLD: {reason}')
             _LOG.error('gravity compensation stopped; enabled guarded hold: %s', reason)
 
@@ -1633,7 +1304,7 @@ class HardwareManager:
         return dict(timing=timing.snapshot() if timing else {},
                     feedback={k: dict(v) for k, v in getattr(self, '_gravity_feedback_metrics', {}).items()},
                     configured_feedback_rate_hz=self._hardware_feedback_rate_hz,
-                    fault=getattr(self, '_gravity_comp_fault', None),
+                    fault=getattr(self._gravity_execution, 'fault', None),
                     model_path=model.path if model else None,
                     model_sha256=model.sha256 if model else None,
                     gravity_xyz_m_s2=list(settings.gravity_xyz_m_s2) if settings else None,
@@ -1648,7 +1319,7 @@ class HardwareManager:
 
     def get_joint_status_codes(self) -> list[int]:
         """返回各关节状态码；反馈整体失效时统一返回 255(未知)。"""
-        with self._feedback_lock:
+        with self._feedback_component._feedback_lock:
             now = time.monotonic()
             failure = self._arm_feedback_failure_reason(now=now)
             return [
@@ -1685,7 +1356,7 @@ class HardwareManager:
             )
         if self._gripper_mot is None:
             raise RuntimeError("gripper is not initialized")
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             feedback_failure = self._gripper_feedback_failure_reason_locked()
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
@@ -1706,11 +1377,11 @@ class HardwareManager:
             abs(target - start_angle) / self._gripper_position_max_speed_rad_s
             + self._gripper_position_timeout_margin_sec
         )
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             self._gripper_execution.supersede_locked()
-            self._gripper_target_angle = start_angle
-            self._gripper_goal_angle = target
-            self._gripper_target_effort = float(
+            self._gripper_execution._gripper_target_angle = start_angle
+            self._gripper_execution._gripper_goal_angle = target
+            self._gripper_execution._gripper_target_effort = float(
                 np.clip(
                     effort,
                     0.05,
@@ -1721,15 +1392,15 @@ class HardwareManager:
                     ),
                 )
             )
-            self._gripper_mode = "position"
-            self._gripper_active = True
-            self._gripper_position_result = "active"
-            self._gripper_command_error = None
-            self._gripper_last_tick_monotonic = now
-            self._gripper_target_timeout_sec = target_timeout_sec
-            self._gripper_target_deadline_monotonic = now + target_timeout_sec
+            self._gripper_execution._gripper_mode = "position"
+            self._gripper_execution._gripper_active = True
+            self._gripper_execution._gripper_position_result = "active"
+            self._gripper_execution._gripper_command_error = None
+            self._gripper_execution._gripper_last_tick_monotonic = now
+            self._gripper_execution._gripper_target_timeout_sec = target_timeout_sec
+            self._gripper_execution._gripper_target_deadline_monotonic = now + target_timeout_sec
             feedback_updated = self._gripper_feedback_updated_monotonic
-            applied_effort = self._gripper_target_effort
+            applied_effort = self._gripper_execution._gripper_target_effort
         _LOG.info(
             "gripper position command requested=%.6fm clamped=%.6fm "
             "start=%.6frad goal=%.6frad effort=%.6fNm speed=%.6frad/s "
@@ -1747,13 +1418,13 @@ class HardwareManager:
         return self._gripper_execution._generation
 
     def gripper_target_timeout_sec(self) -> float:
-        with self._gripper_lock:
-            return float(self._gripper_target_timeout_sec)
+        with self._gripper_execution._gripper_lock:
+            return float(self._gripper_execution._gripper_target_timeout_sec)
 
     @property
     def gripper_command_error(self) -> str | None:
-        with self._gripper_lock:
-            return self._gripper_command_error
+        with self._gripper_execution._gripper_lock:
+            return self._gripper_execution._gripper_command_error
 
     @property
     def gripper_feedback_error(self) -> str | None:
@@ -1762,13 +1433,13 @@ class HardwareManager:
 
     def gripper_execution_status(self, generation):
         """返回本目标的状态，旧代次永远不能读成新目标的成功。"""
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             if generation != self._gripper_execution._generation:
                 return 'superseded', 'gripper target superseded'
-            state = self._gripper_position_result
-            if self._gripper_neutral_pending is not None:
+            state = self._gripper_execution._gripper_position_result
+            if self._gripper_execution._gripper_neutral_pending is not None:
                 state = 'releasing'
-            return state, self._gripper_command_error
+            return state, self._gripper_execution._gripper_command_error
 
     def wait_gripper_target(self, timeout=None, generation=None) -> bool:
         """兼容等待入口；只读快照，显式超时通过队列取消自己的代次。"""
@@ -1820,7 +1491,7 @@ class HardwareManager:
             )
         if self._gripper_mot is None:
             raise RuntimeError("gripper is not initialized")
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             feedback_failure = self._gripper_feedback_failure_reason_locked()
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
@@ -1858,9 +1529,9 @@ class HardwareManager:
 
     def _cached_gripper_feedback(self, *, now: float | None = None) -> _CachedMotorFeedback:
         # 采集路径使用反馈锁 -> 夹爪锁；查询保持相同顺序，避免与控制循环互锁。
-        with self._feedback_lock, self._gripper_lock:
+        with self._feedback_component._feedback_lock, self._gripper_execution._gripper_lock:
             now = time.monotonic() if now is None else now
-            sample = self._verified_feedback_by_label.get("gripper")
+            sample = self._feedback_component._verified_feedback_by_label.get("gripper")
             failure = self._feedback_failure_reason(
                 "gripper", error=self._gripper_feedback_error,
                 updated=sample.observed_at if sample is not None else None, now=now,
@@ -1884,9 +1555,9 @@ class HardwareManager:
 
         不可用时开口为 NaN;保留旧样本身份和时间,不把错误查询当作新反馈。
         """
-        with self._feedback_lock, self._gripper_lock:
+        with self._feedback_component._feedback_lock, self._gripper_execution._gripper_lock:
             feedback = self._cached_gripper_feedback()
-            values = feedback.values or (self._gripper_pos, self._gripper_vel, self._gripper_torque)
+            values = feedback.values or (self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel, self._gripper_execution._gripper_torque)
             distance = float("nan") if feedback.failure_reason is not None else float(
                 np.clip(values[0] / _G_ANGLE_OPEN * _G_MAX_DIST_M, 0.0, _G_MAX_DIST_M)
             )
@@ -1904,30 +1575,30 @@ class HardwareManager:
         读取不刷新总线、不登记错误、不改变反馈时间。无样本时沿用最后缓存数值，
         这些回退数值必须结合 255 解读，不能视为当前有效反馈。
         """
-        with self._feedback_lock:
+        with self._feedback_component._feedback_lock:
             feedback = self._cached_gripper_feedback()
             values = feedback.values
             if values is None:
-                with self._gripper_lock:
-                    values = (self._gripper_pos, self._gripper_vel, self._gripper_torque)
+                with self._gripper_execution._gripper_lock:
+                    values = (self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel, self._gripper_execution._gripper_torque)
             return (*values, feedback.status_code)
 
     def gripper_position_m(self) -> float:
         """把夹爪原始角度换算为开口距离(m,0 表示闭合）。"""
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             if self._gripper_coordinate_failure_reason_locked() is not None:
                 # 坐标非法时返回 NaN，让上层无法把无效值当距离使用。
                 return float("nan")
-            distance = (self._gripper_pos / _G_ANGLE_OPEN) * _G_MAX_DIST_M
+            distance = (self._gripper_execution._gripper_pos / _G_ANGLE_OPEN) * _G_MAX_DIST_M
         # 只有落在已验证反馈容差内的端点越界才会到这里被夹紧。
         return float(np.clip(distance, 0.0, _G_MAX_DIST_M))
 
     def gripper_reached_target(self) -> bool:
         """查询位置命令是否已到位且中性释放发送成功。"""
-        with self._gripper_lock:
-            if self._gripper_position_result == "succeeded":
+        with self._gripper_execution._gripper_lock:
+            if self._gripper_execution._gripper_position_result == "succeeded":
                 return True
-            if self._gripper_position_result == "failed" or not self._gripper_active:
+            if self._gripper_execution._gripper_position_result == "failed" or not self._gripper_execution._gripper_active:
                 return False
             feedback_failure = self._gripper_feedback_failure_reason_locked()
             if feedback_failure is not None:
@@ -1945,7 +1616,7 @@ class HardwareManager:
         self._require_enabled()
         if self._gripper_mot is None or self._gripper_cfg is None:
             raise RuntimeError("gripper is not initialized")
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             feedback_failure = self._gripper_feedback_failure_reason_locked()
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
@@ -1964,20 +1635,20 @@ class HardwareManager:
             raise RuntimeError("gripper does not support send_vel")
         self._validate_passthrough_values(pos, vel, kp, kd, tau, vlim,
             (_G_ANGLE_OPEN, 0.), self._gripper_cfg.vlim, _G_TAU_MAX, mode)
-        with self._gripper_lock:
-            if (self._gripper_active or self._gripper_neutral_pending is not None) and arbitration != 'preempt':
+        with self._gripper_execution._gripper_lock:
+            if (self._gripper_execution._gripper_active or self._gripper_execution._gripper_neutral_pending is not None) and arbitration != 'preempt':
                 raise RuntimeError('gripper resource busy')
             # 先确认旧命令中性化，再交接透传；旧等待者不能释放新命令。
-            if self._gripper_active:
+            if self._gripper_execution._gripper_active:
                 self._queue_gripper_neutral_locked('passthrough preempt', marks_success=False)
-            if self._gripper_neutral_pending is not None:
+            if self._gripper_execution._gripper_neutral_pending is not None:
                 if not self._emit_pending_gripper_neutral_locked():
                     raise RuntimeError('gripper preempt neutral failed')
             self._gripper_execution.supersede_locked()
-            self._gripper_active = False
-            self._gripper_mode = "idle"
-            self._gripper_position_result = "failed"
-            self._gripper_neutral_pending = None
+            self._gripper_execution._gripper_active = False
+            self._gripper_execution._gripper_mode = "idle"
+            self._gripper_execution._gripper_position_result = "failed"
+            self._gripper_execution._gripper_neutral_pending = None
             try:
                 from motorbridge import Mode
                 self._gripper_mot.ensure_mode({0:Mode.MIT, 1:Mode.POS_VEL, 2:Mode.VEL}[mode], 1000)
@@ -2024,14 +1695,14 @@ class HardwareManager:
             self._gripper_passthrough_until = None
             from motorbridge import Mode
             self._gripper_mot.ensure_mode(Mode.MIT, 1000)
-            with self._gripper_lock:
+            with self._gripper_execution._gripper_lock:
                 self._queue_gripper_neutral_locked('passthrough lease expired', marks_success=False)
                 if not self._emit_pending_gripper_neutral_locked():
                     raise RuntimeError('passthrough neutral release failed')
 
     def _runtime_feedback_tick(self):
         """设备事务等待和失能期间只采集；发布线程不再轮询总线。"""
-        if self._lifecycle.connected and not self._feedback_force_refresh_active:
+        if self._lifecycle.connected and not self._feedback_component._feedback_force_refresh_active:
             self.refresh_feedback_if_due()
         if self._lifecycle.enabled and not self._backend._waiting:
             failure = self._arm_feedback_failure_reason()
@@ -2065,18 +1736,18 @@ class HardwareManager:
                 self._gravity_fault_hold(str(exc))
                 q, qd = self._read_gravity_comp_feedback()
                 self._emit_bounded_gravity_command(
-                    q, qd, self._gravity_comp_hold_feedforward, actual_dt)
+                    q, qd, self._gravity_execution.hold_feedforward, actual_dt)
             except Exception as hold_error:
                 self._protective_disable_from_hardware_loop(str(hold_error))
                 return
         finally:
             timing.finish(time.monotonic())
-        if not self._gravity_comp_active:
+        if not self._gravity_execution.active:
             return
         if timing.faulted:
             self._gravity_fault_hold('three consecutive control deadline misses')
         metrics = getattr(self, '_gravity_feedback_metrics', {})
-        with self._feedback_lock:
+        with self._feedback_component._feedback_lock:
             for name, sample in zip(self.joint_names, self._verified_feedback_samples(self.joint_names)):
                 entry = metrics.setdefault(name, dict(sequence=sample.sequence, first=sample.observed_at,
                                                        last=sample.observed_at, updates=0))
@@ -2111,10 +1782,10 @@ class HardwareManager:
         attempt('stop output', self._backend.request_loop_stop)
         attempt('invalidate requests', lambda: self._backend.requests.invalidate('device', 'arm', 'gripper'))
         try:
-            with self._gripper_lock:
-                if self._gripper_active:
+            with self._gripper_execution._gripper_lock:
+                if self._gripper_execution._gripper_active:
                     self._fail_active_gripper_command_locked(message)
-                if self._gripper_neutral_pending is not None:
+                if self._gripper_execution._gripper_neutral_pending is not None:
                     if not self._emit_pending_gripper_neutral_locked():
                         self._lifecycle.errors.append("FEEDBACK_PROTECTIVE_NEUTRAL_FAILED")
         except Exception as exc:
@@ -2124,9 +1795,9 @@ class HardwareManager:
             attempt('finish arm task', lambda: owner.finish(owner.task, 'aborted', message))
         attempt('stop execution', lambda: self._backend.set_execution_running(False))
         attempt('cancel trajectory', self._backend.cancel_trajectory)
-        self._gravity_comp_active = False
-        self._gravity_comp_q_target = None
-        self._gravity_comp_integral = None
+        self._gravity_execution.active = False
+        self._gravity_execution.target = None
+        self._gravity_execution.integral = None
         self._lifecycle.execution = "IDLE"
         self._lifecycle.set_state("DISABLING")
         code = f'{category}_PROTECTIVE_DISABLE'
@@ -2235,7 +1906,7 @@ class HardwareManager:
         if self._gripper_mot is None or self._gripper_ctrl is None:
             raise RuntimeError("gripper motor or controller unavailable")
         pos_cmd, vel, kp, kd, tau_safe = GripperControl.bounded_mit(
-            pos, vel, kp, kd, tau_ff, tau_limit, self._gripper_pos, self._gripper_vel,
+            pos, vel, kp, kd, tau_ff, tau_limit, self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel,
         )
         lock = getattr(self._gripper_ctrl, "bus_lock", None)
         try:
@@ -2299,13 +1970,13 @@ class HardwareManager:
     def _stop_gripper_loop(self) -> None:
         # 使能/连接会话结束时使旧目标和等待者失效，防止重启循环后续发旧命令。
         # 此处不发送命令；调用方负责随后停止周期线程并执行生命周期设备操作。
-        with self._gripper_lock:
+        with self._gripper_execution._gripper_lock:
             self._gripper_execution.supersede_locked()
-            self._gripper_active = False
-            self._gripper_mode = "idle"
-            self._gripper_position_result = "failed"
-            self._gripper_neutral_pending = None
-            self._gripper_hold_deadline = None
-            self._gripper_target_deadline_monotonic = None
+            self._gripper_execution._gripper_active = False
+            self._gripper_execution._gripper_mode = "idle"
+            self._gripper_execution._gripper_position_result = "failed"
+            self._gripper_execution._gripper_neutral_pending = None
+            self._gripper_execution._gripper_hold_deadline = None
+            self._gripper_execution._gripper_target_deadline_monotonic = None
             self._gripper_loop_running = False
             self._gripper_passthrough_until = None

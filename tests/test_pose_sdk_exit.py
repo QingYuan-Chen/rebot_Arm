@@ -90,7 +90,7 @@ from rebotarm_motion.pose_preview_solver import PosePreviewSolver
 from rebotarm_motion.cartesian_trajectory import plan_cartesian
 from rebotarm_motion.pose_compat_node import PoseCompatNode
 manager = HardwareManager()
-assert not manager.connected
+assert not manager._lifecycle.connected
 solver = PosePreviewSolver()
 q = (0., -1., -1., 0., .3, 0.)
 target = solver.kinematics.pose(q)
