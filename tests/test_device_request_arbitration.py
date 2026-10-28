@@ -93,7 +93,7 @@ def test_trajectory_is_local_and_gripper_does_not_preempt_arm(monkeypatch):
             manager.submit_arm_trajectory(manager.joint_names, [(0.,)*6], [0.])
         assert task.event.wait(1.)
         assert manager.arm_execution_status(task).state == 'succeeded'
-        assert generation == manager._gripper_execution._generation
+        assert generation == manager.gripper._gripper_execution._generation
     finally:
         manager.disable(); manager.shutdown()
 
@@ -204,7 +204,7 @@ def test_disable_clears_stream_lease_before_new_session(monkeypatch):
     manager.disable()
     manager.enable()
     try:
-        assert manager._arm_passthrough_until is None
+        assert manager.arm._arm_passthrough_until is None
         task = manager.submit_arm_trajectory(manager.joint_names,
             [(0.01,0.,0.,0.,0.,0.)], [0.])
         assert task.event.wait(1.)

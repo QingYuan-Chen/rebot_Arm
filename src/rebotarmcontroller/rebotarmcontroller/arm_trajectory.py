@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 import threading
 import time
 import numpy as np
+from .command_guard import SafetyDecision, failure_decision
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class ArmResult:
     message: str = ''
     progress: float = 0.
     desired: tuple = ()
+    decision: SafetyDecision | None = None
 
 
 @dataclass
@@ -79,7 +81,7 @@ class ArmTrajectory:
         """成功后保留终点；超差时返回需要接管保持的实测角度。"""
         with self.lock:
             task = self.task
-            if task is None or task.event.is_set():
+            if task is None or task.event.is_set() or task.result.state == 'stopping':
                 return None
             if task.generation != self.execution.generation:
                 self.finish(task, 'aborted', 'execution superseded')
@@ -94,6 +96,8 @@ class ArmTrajectory:
                 self.finish(task, 'succeeded', 'trajectory goal reached')
                 return positions if task.hold_on_success else None
             if now >= task.deadline:
-                self.finish(task, 'tolerance', 'trajectory goal not reached within tolerance')
+                decision = failure_decision('trajectory goal not reached within tolerance', 'TRAJECTORY')
+                task.result = replace(task.result, decision=decision)
+                self.finish(task, 'tolerance', decision.reason)
                 return positions
             return None

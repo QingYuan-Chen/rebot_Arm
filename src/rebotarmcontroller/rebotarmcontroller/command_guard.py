@@ -18,6 +18,7 @@ class SafetyAction(str, Enum):
     """本组件已接管的命令准入和设备故障决策。"""
     ALLOW = 'allow'
     REJECT = 'reject'
+    STOP_HOLD = 'stop_hold'
     PROTECTIVE_DISABLE = 'protective_disable'
 
 
@@ -31,6 +32,12 @@ class SafetyDecision:
     def require_allowed(self):
         if self.action != SafetyAction.ALLOW:
             raise ValueError(self.reason)
+
+
+def failure_decision(reason, category, *, device_fault=False):
+    """任务/计算失败保持，已确认的设备或通信故障才允许保护失能。"""
+    action = SafetyAction.PROTECTIVE_DISABLE if device_fault else SafetyAction.STOP_HOLD
+    return SafetyDecision(action, str(reason), category)
 
 
 def passthrough_decision(pos, vel, kp, kd, tau, vlim, bounds,
@@ -68,7 +75,7 @@ class CommandGuard:
         if self._protection is not None:
             return False
         # 先锁存再执行设备动作，防止采集/中性释放异常重入同一保护分支。
-        self._protection = SafetyDecision(SafetyAction.PROTECTIVE_DISABLE, str(reason), category)
+        self._protection = failure_decision(reason, category, device_fault=True)
         return True
 
     def confirm_disabled(self):

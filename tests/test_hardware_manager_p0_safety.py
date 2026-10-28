@@ -13,6 +13,7 @@ import rebotarmcontroller.hardware_manager as hardware_manager_module
 from controller_fake_backend import FakeBackend
 from rebotarmcontroller.configuration import load_configuration
 from rebotarmcontroller.command_guard import CommandGuard
+from rebotarmcontroller.feedback_acquisition import FeedbackAcquisition
 from rebotarmcontroller.hardware_manager import (
     HardwareManager,
     _JOINT_POSITION_LIMITS_RAD,
@@ -174,9 +175,9 @@ def make_manager(
         runtime_factory=lambda _config, kinematics: backend,
     )
     manager.test_arm = arm
-    manager.init_gripper = lambda _path: None
-    manager._stop_gripper_loop = lambda: None
-    manager._start_gripper_loop = lambda: None
+    manager.gripper.init_gripper = lambda _path: None
+    manager.gripper._stop_gripper_loop = lambda: None
+    manager.gripper._start_gripper_loop = lambda: None
     return manager
 
 
@@ -189,25 +190,25 @@ def seed_verified_feedback(
 ) -> dict[str, object]:
     """Seed the controller-owned cache without touching a MotorBridge getter."""
     timestamp = time.monotonic() if observed_at is None else float(observed_at)
-    with manager._feedback_component._feedback_lock:
+    with manager.feedback._feedback_component._feedback_lock:
         for sequence, name in enumerate(JOINT_NAMES, start=11):
             motor_state = manager.test_arm._motor_map[name].state
             motor_state.status_code = int(arm_status)
-            manager._record_verified_feedback(
+            manager.feedback._record_verified_feedback(
                 name,
                 motor_state,
                 sequence,
                 timestamp,
             )
         if gripper_state is not None:
-            manager._record_verified_feedback(
+            manager.feedback._record_verified_feedback(
                 "gripper",
                 gripper_state,
                 31,
                 timestamp,
             )
-        manager._sync_feedback_health()
-        return dict(manager._feedback_component._verified_feedback_by_label)
+        manager.feedback._sync_feedback_health()
+        return dict(manager.feedback._feedback_component._verified_feedback_by_label)
 
 
 def forbid_raw_feedback_reads(manager: HardwareManager) -> None:
@@ -217,19 +218,19 @@ def forbid_raw_feedback_reads(manager: HardwareManager) -> None:
     for motor in manager.test_arm._motor_map.values():
         motor.get_state = fail
         motor.get_state_with_sequence = fail
-    if manager._gripper_mot is not None:
-        manager._gripper_mot.get_state = fail
-        manager._gripper_mot.get_state_with_sequence = fail
+    if manager.gripper._gripper_mot is not None:
+        manager.gripper._gripper_mot.get_state = fail
+        manager.gripper._gripper_mot.get_state_with_sequence = fail
 
 
 def assert_verified_feedback_unchanged(
     manager: HardwareManager,
     before: dict[str, object],
 ) -> None:
-    with manager._feedback_component._feedback_lock:
-        assert manager._feedback_component._verified_feedback_by_label.keys() == before.keys()
+    with manager.feedback._feedback_component._feedback_lock:
+        assert manager.feedback._feedback_component._verified_feedback_by_label.keys() == before.keys()
         for label, sample in before.items():
-            current = manager._feedback_component._verified_feedback_by_label[label]
+            current = manager.feedback._feedback_component._verified_feedback_by_label[label]
             assert current is sample
             assert current.sequence == sample.sequence
             assert current.observed_at == sample.observed_at
@@ -260,17 +261,17 @@ def configure_gravity_compensation_test(
     manager.test_arm._rate = 500.0
     manager.test_arm.mode_mit = lambda **_kwargs: True
     mit_commands: list[dict[str, object]] = []
-    manager._send_gravity_mit = lambda **kwargs: mit_commands.append(dict(kwargs))
+    manager.gravity._send_gravity_mit = lambda **kwargs: mit_commands.append(dict(kwargs))
     from rebotarmcontroller.gravity_control import GravitySettings
-    manager._gc_settings = GravitySettings()
-    manager._gc_torque_limits = np.array([27., 27., 27., 7., 7., 7.])
-    manager._gravity_execution.last_total = np.zeros(6)
-    manager._gravity_execution.fault = None
-    manager._gravity_execution.hold_feedforward = None
-    manager._gc_compute_generalized_gravity = lambda q: np.zeros_like(q)
-    manager._gc_model = object()
-    manager._gc_data = object()
-    manager._gc_ee_frame_id = 0
+    manager.gravity._gc_settings = GravitySettings()
+    manager.gravity._gc_torque_limits = np.array([27., 27., 27., 7., 7., 7.])
+    manager.gravity._gravity_execution.last_total = np.zeros(6)
+    manager.gravity._gravity_execution.fault = None
+    manager.gravity._gravity_execution.hold_feedforward = None
+    manager.gravity._gc_compute_generalized_gravity = lambda q: np.zeros_like(q)
+    manager.gravity._gc_model = object()
+    manager.gravity._gc_data = object()
+    manager.gravity._gc_ee_frame_id = 0
 
     class FakePin:
         class ReferenceFrame:
@@ -289,7 +290,7 @@ def configure_gravity_compensation_test(
         def getFrameJacobian(_model, _data, _frame_id, _reference):
             return np.zeros((6, 6), dtype=np.float64)
 
-    manager._gc_pin = FakePin
+    manager.gravity._gc_pin = FakePin
     return mit_commands
 
 
@@ -298,12 +299,12 @@ def test_gravity_integral_has_same_effect_at_different_control_rates():
         manager = make_manager(gripper_feedback_stale_timeout_sec=2.)
         q = np.array([.2, -.3, -.4, .1, .2, -.1])
         configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
-        manager._gravity_execution.active = True
-        manager._gravity_execution.target = q + .01
-        manager._gravity_execution.integral = np.zeros(6)
+        manager.gravity._gravity_execution.active = True
+        manager.gravity._gravity_execution.target = q + .01
+        manager.gravity._gravity_execution.integral = np.zeros(6)
         for _ in range(round(.1 / dt)):
-            manager._gravity_comp_tick(manager.test_arm, dt)
-        return manager._gravity_execution.integral
+            manager.gravity._gravity_comp_tick(manager.test_arm, dt)
+        return manager.gravity._gravity_execution.integral
     np.testing.assert_allclose(integrate(.01), integrate(.002), atol=1e-12)
     np.testing.assert_allclose(integrate(.01), .001, atol=1e-12)
 
@@ -325,13 +326,13 @@ def test_gravity_mode_failure_rolls_back_to_verified_position_hold():
 def test_gravity_sender_does_not_swallow_motor_send_failure():
     manager = make_manager()
     configure_gravity_compensation_test(manager, positions=np.zeros(6), velocities=np.zeros(6))
-    del manager._send_gravity_mit
+    del manager.gravity._send_gravity_mit
     for motor in manager.test_arm._motor_map.values():
         motor.send_mit = lambda *args: None
     manager.test_arm._motor_map['joint3'].send_mit = lambda *args: (_ for _ in ()).throw(
         RuntimeError('serial write failed'))
     with pytest.raises(RuntimeError, match='joint3.*serial write failed'):
-        manager._send_gravity_mit(pos=np.zeros(6), vel=np.zeros(6), kp=np.ones(6),
+        manager.gravity._send_gravity_mit(pos=np.zeros(6), vel=np.zeros(6), kp=np.ones(6),
                                   kd=np.ones(6), tau=np.zeros(6))
 
 
@@ -340,12 +341,12 @@ def test_gravity_model_exception_keeps_healthy_arm_enabled_in_guarded_hold(monke
     q = np.array([.2, -.3, -.4, .1, .2, -.1])
     commands = configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
     manager.start_gravity_compensation()
-    manager._gc_compute_generalized_gravity = lambda **kwargs: (_ for _ in ()).throw(
+    manager.gravity._gc_compute_generalized_gravity = lambda **kwargs: (_ for _ in ()).throw(
         RuntimeError('invalid model output'))
-    monkeypatch.setattr(manager, 'refresh_feedback_if_due', lambda **kwargs: False)
-    manager._gravity_hardware_tick(manager.test_arm, .002)
+    monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **kwargs: False)
+    manager.gravity._gravity_hardware_tick(manager.test_arm, .002)
     assert manager._lifecycle.enabled and manager.gravity_compensation_active()
-    assert manager._gravity_execution.fault is not None
+    assert manager.gravity._gravity_execution.fault is not None
     np.testing.assert_allclose(commands[-1]['pos'], q)
     assert manager.test_arm.disable_calls == 0
 
@@ -354,7 +355,7 @@ def test_gravity_preflight_model_failure_leaves_position_hold_running():
     manager = make_manager()
     q = np.array([.2, -.3, -.4, .1, .2, -.1])
     configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
-    manager._gc_compute_generalized_gravity = lambda **kwargs: np.full(6, np.nan)
+    manager.gravity._gc_compute_generalized_gravity = lambda **kwargs: np.full(6, np.nan)
     with pytest.raises(ValueError, match='finite'):
         manager.start_gravity_compensation()
     assert manager.test_arm.control_loop_active and manager._lifecycle.enabled
@@ -368,14 +369,14 @@ def test_gravity_deadline_fault_keeps_healthy_arm_enabled(monkeypatch):
     configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
     manager.start_gravity_compensation()
     from rebotarmcontroller.gravity_control import LoopTiming
-    manager._gravity_timing = LoopTiming(100.)
-    monkeypatch.setattr(manager, 'refresh_feedback_if_due', lambda **kwargs: False)
+    manager.gravity._gravity_timing = LoopTiming(100.)
+    monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **kwargs: False)
     for i in range(4):
         now = 10. + i * .02
         monkeypatch.setattr(hardware_manager_module.time, 'monotonic', lambda: now)
         seed_verified_feedback(manager, observed_at=now, arm_status=1)
-        manager._gravity_hardware_tick(manager.test_arm, .01)
-    assert manager._gravity_execution.fault == 'three consecutive control deadline misses'
+        manager.gravity._gravity_hardware_tick(manager.test_arm, .01)
+    assert manager.gravity._gravity_execution.fault == 'three consecutive control deadline misses'
     assert manager._lifecycle.enabled and manager.test_arm.disable_calls == 0
 
 
@@ -385,12 +386,12 @@ def test_gravity_send_failure_requests_protective_disable(monkeypatch):
     configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
     manager.start_gravity_compensation()
     from rebotarmcontroller.hardware_manager import GravityCommandError
-    manager._send_gravity_mit = lambda **kwargs: (_ for _ in ()).throw(
+    manager.gravity._send_gravity_mit = lambda **kwargs: (_ for _ in ()).throw(
         GravityCommandError('serial write failed'))
-    monkeypatch.setattr(manager, 'refresh_feedback_if_due', lambda **kwargs: False)
+    monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **kwargs: False)
     disables = []
     manager.test_arm._ctrl_map['fake'].disable_all = lambda: disables.append(True)
-    manager._gravity_hardware_tick(manager.test_arm, .002)
+    manager.gravity._gravity_hardware_tick(manager.test_arm, .002)
     assert disables == [True]
     assert not manager.gravity_compensation_active()
     assert 'GRAVITY_COMMAND_PROTECTIVE_DISABLE' in manager.error_codes
@@ -420,7 +421,7 @@ def test_validated_joint_feedback_uses_verified_cache_only() -> None:
     before = seed_verified_feedback(manager, arm_status=1)
     forbid_raw_feedback_reads(manager)
 
-    positions, velocities, torques, statuses = manager._validated_joint_feedback(
+    positions, velocities, torques, statuses = manager.feedback._validated_joint_feedback(
         expected_status=1,
         refresh=False,
     )
@@ -451,7 +452,7 @@ def test_cached_joint_sample_exposes_verified_identity_without_serial_reads() ->
     positions, velocities, torques, statuses, identity, observed_at = manager.get_cached_joint_sample()
     assert len(positions) == len(velocities) == len(torques) == 6
     assert statuses == [1] * 6
-    assert identity == tuple(manager._verified_feedback_sample(name).sequence for name in JOINT_NAMES)
+    assert identity == tuple(manager.feedback._verified_feedback_sample(name).sequence for name in JOINT_NAMES)
     assert observed_at == min(sample.observed_at for sample in before.values())
     assert_verified_feedback_unchanged(manager, before)
 
@@ -462,17 +463,17 @@ def test_validated_gripper_status_uses_verified_cache_after_refresh(
     manager = make_manager()
     manager._lifecycle.connected = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
-    manager._gripper_mot = FakeMotor(position=gripper_state.pos)
-    manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_mot = FakeMotor(position=gripper_state.pos)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
     before = seed_verified_feedback(
         manager,
         arm_status=1,
         gripper_state=gripper_state,
     )
     forbid_raw_feedback_reads(manager)
-    monkeypatch.setattr(manager, "refresh_feedback_if_due", lambda **_kwargs: False)
+    monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **_kwargs: False)
 
-    manager._validated_gripper_status(expected_status=1)
+    manager.gripper._validated_gripper_status(expected_status=1)
 
     assert_verified_feedback_unchanged(manager, before)
 
@@ -481,8 +482,8 @@ def test_gripper_publication_uses_verified_cache_only() -> None:
     manager = make_manager()
     manager._lifecycle.connected = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
-    manager._gripper_mot = FakeMotor(position=gripper_state.pos)
-    manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_mot = FakeMotor(position=gripper_state.pos)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
     before = seed_verified_feedback(
         manager,
         arm_status=1,
@@ -500,8 +501,8 @@ def test_gripper_target_start_uses_verified_cache_only() -> None:
     manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
-    manager._gripper_mot = FakeMotor(position=gripper_state.pos)
-    manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_mot = FakeMotor(position=gripper_state.pos)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
     before = seed_verified_feedback(
         manager,
         arm_status=1,
@@ -511,7 +512,7 @@ def test_gripper_target_start_uses_verified_cache_only() -> None:
 
     manager.set_gripper_target(0.04, max_effort=0.4)
 
-    assert manager._gripper_execution._gripper_target_angle == pytest.approx(-1.25)
+    assert manager.gripper._gripper_execution._gripper_target_angle == pytest.approx(-1.25)
     assert manager.gripper_active is True
     assert_verified_feedback_unchanged(manager, before)
 
@@ -558,12 +559,12 @@ def test_gripper_motor_command_defaults_use_verified_cache_only() -> None:
     manager._lifecycle.enabled = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     commands: list[tuple[float, ...]] = []
-    manager._gripper_mot = FakeMotor(position=gripper_state.pos)
-    manager._gripper_mot.send_mit = (
+    manager.gripper._gripper_mot = FakeMotor(position=gripper_state.pos)
+    manager.gripper._gripper_mot.send_mit = (
         lambda *values: commands.append(tuple(float(value) for value in values))
     )
-    manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
-    manager._gripper_cfg = SimpleNamespace(kp=3.0, kd=0.4, vlim=1.5)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_cfg = SimpleNamespace(kp=3.0, kd=0.4, vlim=1.5)
     before = seed_verified_feedback(
         manager,
         arm_status=1,
@@ -610,7 +611,7 @@ def test_gripper_tick_uses_verified_cache_only() -> None:
     )
     forbid_raw_feedback_reads(manager)
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert manager.gripper_active is True
     assert len(commands) == 1
@@ -635,7 +636,7 @@ def test_gravity_start_and_tick_use_one_verified_joint_snapshot() -> None:
     assert np.allclose(mit_commands[0]["pos"], positions)
 
     mit_commands.clear()
-    manager._gravity_comp_tick(manager.test_arm, 1.0 / 500.0)
+    manager.gravity._gravity_comp_tick(manager.test_arm, 1.0 / 500.0)
 
     assert len(mit_commands) == 1
     assert np.allclose(mit_commands[0]["pos"], positions)
@@ -661,18 +662,18 @@ def test_gravity_tick_rejects_unhealthy_verified_feedback_before_torque(
         positions=positions,
         velocities=velocities,
     )
-    manager._gravity_execution.active = True
-    manager._gravity_execution.target = positions.copy()
-    manager._gravity_execution.integral = np.zeros(6, dtype=np.float64)
+    manager.gravity._gravity_execution.active = True
+    manager.gravity._gravity_execution.target = positions.copy()
+    manager.gravity._gravity_execution.integral = np.zeros(6, dtype=np.float64)
     if failure_kind == "error":
-        manager._feedback_component._arm_feedback_error = "serial feedback timeout"
+        manager.feedback._feedback_component._arm_feedback_error = "serial feedback timeout"
     else:
-        manager._feedback_component._arm_feedback_error = None
-        manager._feedback_component._arm_feedback_updated_monotonic = 10.0
+        manager.feedback._feedback_component._arm_feedback_error = None
+        manager.feedback._feedback_component._arm_feedback_updated_monotonic = 10.0
         monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: 11.0)
 
     with pytest.raises(RuntimeError, match=expected_error):
-        manager._gravity_comp_tick(manager.test_arm, 1.0 / 500.0)
+        manager.gravity._gravity_comp_tick(manager.test_arm, 1.0 / 500.0)
 
     assert mit_commands == []
 
@@ -690,32 +691,32 @@ def test_gripper_tick_does_not_copy_unhealthy_sample_before_neutral(
         effort=1.0,
     )
     original = (
-        manager._gripper_execution._gripper_pos,
-        manager._gripper_execution._gripper_vel,
-        manager._gripper_execution._gripper_torque,
+        manager.gripper._gripper_execution._gripper_pos,
+        manager.gripper._gripper_execution._gripper_vel,
+        manager.gripper._gripper_execution._gripper_torque,
     )
-    with manager._feedback_component._feedback_lock:
-        previous = manager._feedback_component._verified_feedback_by_label["gripper"]
-        manager._feedback_component._verified_feedback_by_label["gripper"] = type(previous)(
+    with manager.feedback._feedback_component._feedback_lock:
+        previous = manager.feedback._feedback_component._verified_feedback_by_label["gripper"]
+        manager.feedback._feedback_component._verified_feedback_by_label["gripper"] = type(previous)(
             state=SimpleNamespace(pos=-3.0, vel=0.3, torq=0.7, status_code=1),
             sequence=previous.sequence + 1,
             observed_at=10.0,
         )
     forbid_raw_feedback_reads(manager)
     if failure_kind == "error":
-        manager._gripper_feedback_error = "serial feedback timeout"
+        manager.gripper._gripper_feedback_error = "serial feedback timeout"
     else:
-        manager._gripper_feedback_error = None
-        manager._gripper_feedback_updated_monotonic = 10.0
+        manager.gripper._gripper_feedback_error = None
+        manager.gripper._gripper_feedback_updated_monotonic = 10.0
         monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: 11.0)
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert manager.gripper_active is False
     assert (
-        manager._gripper_execution._gripper_pos,
-        manager._gripper_execution._gripper_vel,
-        manager._gripper_execution._gripper_torque,
+        manager.gripper._gripper_execution._gripper_pos,
+        manager.gripper._gripper_execution._gripper_vel,
+        manager.gripper._gripper_execution._gripper_torque,
     ) == original
     assert commands == [(-0.5, 0.0, 0.0, 0.0, 0.0)]
 
@@ -738,9 +739,9 @@ def test_outer_hardware_tick_protects_on_arm_feedback_loss(
         goal=-4.0,
         effort=1.0,
     )
-    manager._gravity_execution.active = True
-    manager._gravity_execution.target = positions.copy()
-    manager._gravity_execution.integral = np.zeros(6, dtype=np.float64)
+    manager.gravity._gravity_execution.active = True
+    manager.gravity._gravity_execution.target = positions.copy()
+    manager.gravity._gravity_execution.integral = np.zeros(6, dtype=np.float64)
     manager._lifecycle.state = "ENABLED_HOLD"
     manager.test_arm._running = True
     manager._backend.execution.running = True
@@ -750,26 +751,26 @@ def test_outer_hardware_tick_protects_on_arm_feedback_loss(
     disable_calls: list[str] = []
     shared_controller = manager.test_arm._ctrl_map["fake"]
     manager.test_arm._ctrl_map["duplicate"] = shared_controller
-    manager._gripper_ctrl = shared_controller
+    manager.gripper._gripper_ctrl = shared_controller
     shared_controller.disable_all = lambda: disable_calls.append("arm")
-    monkeypatch.setattr(manager, "refresh_feedback_if_due", lambda **_kwargs: False)
+    monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **_kwargs: False)
     if failure_kind == "error":
-        manager._feedback_component._arm_feedback_error = "serial feedback timeout"
+        manager.feedback._feedback_component._arm_feedback_error = "serial feedback timeout"
     else:
-        manager._feedback_component._arm_feedback_error = None
-        manager._feedback_component._arm_feedback_updated_monotonic = 10.0
+        manager.feedback._feedback_component._arm_feedback_error = None
+        manager.feedback._feedback_component._arm_feedback_updated_monotonic = 10.0
         monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: 11.0)
-        with manager._gripper_execution._gripper_lock:
-            manager._queue_gripper_neutral_locked(
+        with manager.gripper._gripper_execution._gripper_lock:
+            manager.gripper._queue_gripper_neutral_locked(
                 "pre-existing operator release",
                 marks_success=False,
             )
 
-    manager._gravity_hardware_tick(manager.test_arm, 1.0 / 500.0)
+    manager.gravity._gravity_hardware_tick(manager.test_arm, 1.0 / 500.0)
 
     assert mit_commands == []
     assert gripper_commands == [(-0.5, 0.0, 0.0, 0.0, 0.0)]
-    assert manager._gripper_execution._gripper_neutral_pending is None
+    assert manager.gripper._gripper_execution._gripper_neutral_pending is None
     assert manager.gripper_active is False
     assert disable_calls == ["arm"]
     assert manager.test_arm._running is False
@@ -792,21 +793,21 @@ def test_outer_hardware_tick_records_neutral_and_disable_failures(
         velocities=np.zeros(6, dtype=np.float64),
     )
     _configure_gripper_position_move(manager, position=-0.5, goal=-4.0)
-    manager._gravity_execution.active = True
-    manager._gravity_execution.target = positions.copy()
+    manager.gravity._gravity_execution.active = True
+    manager.gravity._gravity_execution.target = positions.copy()
     manager.test_arm._running = True
-    manager._feedback_component._arm_feedback_error = "serial feedback timeout"
-    manager._gripper_mot.send_mit = lambda *_args: (_ for _ in ()).throw(
+    manager.feedback._feedback_component._arm_feedback_error = "serial feedback timeout"
+    manager.gripper._gripper_mot.send_mit = lambda *_args: (_ for _ in ()).throw(
         RuntimeError("neutral write failed")
     )
     controller = manager.test_arm._ctrl_map["fake"]
-    manager._gripper_ctrl = controller
+    manager.gripper._gripper_ctrl = controller
     controller.disable_all = lambda: (_ for _ in ()).throw(
         RuntimeError("disable write failed")
     )
-    monkeypatch.setattr(manager, "refresh_feedback_if_due", lambda **_kwargs: False)
+    monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **_kwargs: False)
 
-    manager._gravity_hardware_tick(manager.test_arm, 1.0 / 500.0)
+    manager.gravity._gravity_hardware_tick(manager.test_arm, 1.0 / 500.0)
 
     assert manager.test_arm._running is False
     assert manager._lifecycle.enabled is True
@@ -822,18 +823,18 @@ def test_outer_hardware_tick_protects_when_scheduler_raises_feedback_error(
     manager._lifecycle.connected = True
     manager._lifecycle.enabled = True
     manager.test_arm._running = True
-    manager._feedback_component._arm_feedback_error = None
+    manager.feedback._feedback_component._arm_feedback_error = None
 
     def fail_feedback_refresh(**_kwargs) -> None:
-        manager._feedback_component._arm_feedback_error = "scheduler serial timeout"
+        manager.feedback._feedback_component._arm_feedback_error = "scheduler serial timeout"
         raise RuntimeError("scheduler transaction failed")
 
     disable_calls: list[int] = []
     manager.test_arm._ctrl_map["fake"].disable_all = lambda: disable_calls.append(1)
-    monkeypatch.setattr(manager, "refresh_feedback_if_due", fail_feedback_refresh)
+    monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', fail_feedback_refresh)
     callback_calls: list[int] = []
 
-    manager._hardware_control_tick(
+    manager.cycle._hardware_control_tick(
         manager.test_arm,
         1.0 / 500.0,
         lambda _arm, _dt: callback_calls.append(1),
@@ -852,10 +853,10 @@ def test_outer_hardware_tick_reraises_non_feedback_callback_failure(
     manager._lifecycle.connected = True
     manager._lifecycle.enabled = True
     seed_verified_feedback(manager, arm_status=1)
-    monkeypatch.setattr(manager, "refresh_feedback_if_due", lambda **_kwargs: True)
+    monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **_kwargs: True)
 
     with pytest.raises(RuntimeError, match="controller bug"):
-        manager._hardware_control_tick(
+        manager.cycle._hardware_control_tick(
             manager.test_arm,
             1.0 / 500.0,
             lambda _arm, _dt: (_ for _ in ()).throw(RuntimeError("controller bug")),
@@ -865,12 +866,12 @@ def test_outer_hardware_tick_reraises_non_feedback_callback_failure(
     assert manager._lifecycle.state != "DISABLING"
 
     monkeypatch.setattr(
-        manager,
+        manager.feedback,
         "refresh_feedback_if_due",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("scheduler bug")),
     )
     with pytest.raises(RuntimeError, match="scheduler bug"):
-        manager._hardware_control_tick(
+        manager.cycle._hardware_control_tick(
             manager.test_arm,
             1.0 / 500.0,
             lambda _arm, _dt: None,
@@ -888,13 +889,13 @@ def test_outer_hardware_tick_orders_feedback_before_arm_and_gripper(
     seed_verified_feedback(manager, arm_status=1)
     events: list[str] = []
     monkeypatch.setattr(
-        manager,
+        manager.feedback,
         "refresh_feedback_if_due",
         lambda **_kwargs: events.append("feedback") or True,
     )
-    monkeypatch.setattr(manager, "_gripper_tick", lambda: events.append("gripper"))
+    monkeypatch.setattr(manager.gripper, '_gripper_tick', lambda: events.append("gripper"))
 
-    manager._hardware_control_tick(
+    manager.cycle._hardware_control_tick(
         manager.test_arm,
         1.0 / 500.0,
         lambda _arm, _dt: events.append("arm"),
@@ -1181,7 +1182,7 @@ def test_feedback_refresh_batches_requests_before_one_controller_poll() -> None:
         [motor.deliver_requested_feedback() for motor in manager.test_arm._motor_map.values()],
     )[0]
 
-    manager._refresh_arm_feedback()
+    manager.gravity._refresh_arm_feedback()
 
     assert events == [*(f"request:{name}" for name in JOINT_NAMES), "poll"]
 
@@ -1217,7 +1218,7 @@ def test_feedback_refresh_holds_controller_lock_for_full_transaction() -> None:
         [motor.deliver_requested_feedback() for motor in manager.test_arm._motor_map.values()],
     )[0]
 
-    manager._refresh_arm_feedback()
+    manager.gravity._refresh_arm_feedback()
 
     assert events[0] == "lock:enter"
     assert events[-1] == "lock:exit"
@@ -1244,18 +1245,18 @@ def test_forced_lifecycle_feedback_refresh_retries_transient_failure() -> None:
             )
             state_holder["sequence"] += 1
 
-    manager._gripper_mot = SimpleNamespace(
+    manager.gripper._gripper_mot = SimpleNamespace(
         request_feedback=request_feedback,
         get_state=lambda: state_holder["state"],
         get_state_with_sequence=lambda: (
             state_holder["state"], state_holder["sequence"]
         ),
     )
-    manager._gripper_ctrl = SimpleNamespace(
+    manager.gripper._gripper_ctrl = SimpleNamespace(
         poll_feedback_once=poll_feedback_once,
     )
 
-    manager._refresh_all_feedback()
+    manager.feedback._refresh_all_feedback()
 
     assert calls == {"request": 2, "poll": 2}
 
@@ -1281,7 +1282,7 @@ def test_gripper_mode_is_set_before_explicit_gripper_enable() -> None:
         state.status_code = 0
 
     sequence = {"value": 0}
-    manager._gripper_mot = SimpleNamespace(
+    manager.gripper._gripper_mot = SimpleNamespace(
         request_feedback=lambda: None,
         get_state=lambda: state,
         get_state_with_sequence=lambda: (state, sequence["value"]),
@@ -1289,7 +1290,7 @@ def test_gripper_mode_is_set_before_explicit_gripper_enable() -> None:
         enable=gripper_enable,
         disable=gripper_disable,
     )
-    manager._gripper_ctrl = SimpleNamespace(
+    manager.gripper._gripper_ctrl = SimpleNamespace(
         poll_feedback_once=lambda: sequence.update(value=sequence["value"] + 1)
     )
     original_arm_enable = manager.test_arm.enable
@@ -1299,7 +1300,7 @@ def test_gripper_mode_is_set_before_explicit_gripper_enable() -> None:
         original_arm_enable()
 
     manager.test_arm.enable = arm_enable
-    manager._start_gripper_loop = lambda: events.append("gripper_loop")
+    manager.gripper._start_gripper_loop = lambda: events.append("gripper_loop")
     manager.connect()
 
     manager.enable()
@@ -1319,16 +1320,16 @@ def test_gripper_target_does_not_create_an_independent_control_thread(
     manager._lifecycle.connected = True
     manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
-    manager._gripper_loop_running = False
+    manager.gripper._gripper_loop_running = False
     manager._gripper_loop_thread = None
-    del manager._start_gripper_loop
-    manager._gripper_mot = FakeMotor(position=-1.0)
-    manager._gripper_mot.state.status_code = 1
-    manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    del manager.gripper._start_gripper_loop
+    manager.gripper._gripper_mot = FakeMotor(position=-1.0)
+    manager.gripper._gripper_mot.state.status_code = 1
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
     seed_verified_feedback(
         manager,
         arm_status=1,
-        gripper_state=manager._gripper_mot.state,
+        gripper_state=manager.gripper._gripper_mot.state,
     )
     created_threads: list[FakeThread] = []
 
@@ -1359,7 +1360,7 @@ def test_arm_control_callback_also_emits_active_gripper_command() -> None:
     manager._lifecycle.enabled = True
     seed_verified_feedback(manager, arm_status=1)
 
-    manager._start_pos_vel_loop(target=np.zeros(6))
+    manager.arm._start_pos_vel_loop(target=np.zeros(6))
     assert manager.test_arm.control_callback is not None
     manager.test_arm.control_callback(manager.test_arm, 1.0 / 500.0)
 
@@ -1375,16 +1376,16 @@ def test_shared_feedback_scheduler_batches_all_seven_motors_at_50hz() -> None:
         poll_feedback_once=lambda: poll_calls.append(1),
     )
     manager.test_arm._ctrl_map = {"fake": controller}
-    manager._gripper_mot = FakeMotor(position=-1.0)
-    manager._gripper_mot.state.status_code = 1
-    manager._gripper_ctrl = controller
+    manager.gripper._gripper_mot = FakeMotor(position=-1.0)
+    manager.gripper._gripper_mot.state.status_code = 1
+    manager.gripper._gripper_ctrl = controller
 
     for tick in range(500):
         manager.refresh_feedback_if_due(now=tick / 500.0)
 
     for motor in manager.test_arm._motor_map.values():
         assert motor.request_feedback_calls == 50
-    assert manager._gripper_mot.request_feedback_calls == 50
+    assert manager.gripper._gripper_mot.request_feedback_calls == 50
     assert len(poll_calls) == 50
 
 
@@ -1396,12 +1397,12 @@ def test_unchanged_feedback_sequence_does_not_advance_timestamp() -> None:
     for motor in manager.test_arm._motor_map.values():
         motor.advance_feedback_on_poll = False
     assert manager.refresh_feedback_if_due(now=10.02) is True
-    accepted_at = manager._feedback_component._arm_feedback_updated_monotonic
+    accepted_at = manager.feedback._feedback_component._arm_feedback_updated_monotonic
 
     assert accepted_at == pytest.approx(10.02)
     assert manager.refresh_feedback_if_due(now=10.04) is True
     assert controller.poll_feedback_calls == 3
-    assert manager._feedback_component._arm_feedback_updated_monotonic == accepted_at
+    assert manager.feedback._feedback_component._arm_feedback_updated_monotonic == accepted_at
 
 
 def test_identical_numeric_feedback_with_advanced_sequence_is_accepted() -> None:
@@ -1411,17 +1412,17 @@ def test_identical_numeric_feedback_with_advanced_sequence_is_accepted() -> None
     }
 
     assert manager.refresh_feedback_if_due(now=20.0) is True
-    assert manager._feedback_component._arm_feedback_updated_monotonic is None
+    assert manager.feedback._feedback_component._arm_feedback_updated_monotonic is None
     assert manager.refresh_feedback_if_due(now=20.02) is True
 
-    assert manager._feedback_component._arm_feedback_updated_monotonic == pytest.approx(20.02)
-    assert manager._arm_feedback_failure_reason(now=20.02) is None
+    assert manager.feedback._feedback_component._arm_feedback_updated_monotonic == pytest.approx(20.02)
+    assert manager.feedback._arm_feedback_failure_reason(now=20.02) is None
     assert {
-        name: manager._feedback_component._verified_feedback_by_label[name].state.pos
+        name: manager.feedback._feedback_component._verified_feedback_by_label[name].state.pos
         for name in JOINT_NAMES
     } == expected_positions
     assert {
-        manager._feedback_component._verified_feedback_by_label[name].sequence for name in JOINT_NAMES
+        manager.feedback._feedback_component._verified_feedback_by_label[name].sequence for name in JOINT_NAMES
     } == {1}
 
 
@@ -1431,17 +1432,17 @@ def test_arm_feedback_can_recover_while_gripper_sequence_stays_unchanged() -> No
     gripper.advance_feedback_on_poll = False
     controller = manager.test_arm._ctrl_map["fake"]
     controller._motors.append(gripper)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = controller
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = controller
 
     assert manager.refresh_feedback_if_due(now=30.0) is True
     assert manager.refresh_feedback_if_due(now=30.02) is True
 
-    assert manager._feedback_component._arm_feedback_updated_monotonic == pytest.approx(30.02)
-    assert manager._arm_feedback_failure_reason(now=30.02) is None
-    assert manager._gripper_feedback_updated_monotonic is None
-    assert manager._gripper_feedback_failure_reason_locked(now=30.02) is not None
-    assert "gripper" not in manager._feedback_component._verified_feedback_by_label
+    assert manager.feedback._feedback_component._arm_feedback_updated_monotonic == pytest.approx(30.02)
+    assert manager.feedback._arm_feedback_failure_reason(now=30.02) is None
+    assert manager.gripper._gripper_feedback_updated_monotonic is None
+    assert manager.gripper._gripper_feedback_failure_reason_locked(now=30.02) is not None
+    assert "gripper" not in manager.feedback._feedback_component._verified_feedback_by_label
 
 
 def test_delayed_sequence_within_pending_window_is_accepted_later() -> None:
@@ -1451,15 +1452,15 @@ def test_delayed_sequence_within_pending_window_is_accepted_later() -> None:
         motor.advance_feedback_on_poll = False
 
     assert manager.refresh_feedback_if_due(now=40.0) is True
-    assert manager._feedback_component._arm_feedback_updated_monotonic is None
+    assert manager.feedback._feedback_component._arm_feedback_updated_monotonic is None
     for motor in manager.test_arm._motor_map.values():
         motor.feedback_sequence = 1
 
     assert manager.refresh_feedback_if_due(now=40.02) is True
 
     assert controller.poll_feedback_calls == 2
-    assert manager._feedback_component._arm_feedback_updated_monotonic == pytest.approx(40.02)
-    assert manager._arm_feedback_failure_reason(now=40.02) is None
+    assert manager.feedback._feedback_component._arm_feedback_updated_monotonic == pytest.approx(40.02)
+    assert manager.feedback._arm_feedback_failure_reason(now=40.02) is None
 
 
 def test_feedback_deadline_expiry_retains_diagnostic_sample_and_reports_unknown() -> None:
@@ -1467,14 +1468,14 @@ def test_feedback_deadline_expiry_retains_diagnostic_sample_and_reports_unknown(
     gripper = FakeMotor(position=-1.0)
     controller = manager.test_arm._ctrl_map["fake"]
     controller._motors.append(gripper)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = controller
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = controller
 
     assert manager.refresh_feedback_if_due(now=50.0) is True
     gripper.advance_feedback_on_poll = False
     assert manager.refresh_feedback_if_due(now=50.02) is True
-    accepted = manager._feedback_component._verified_feedback_by_label["gripper"]
-    deadline = manager._feedback_component._feedback_request_deadline_by_label["gripper"]
+    accepted = manager.feedback._feedback_component._verified_feedback_by_label["gripper"]
+    deadline = manager.feedback._feedback_component._feedback_request_deadline_by_label["gripper"]
     gripper.state = SimpleNamespace(
         pos=-2.0,
         vel=0.0,
@@ -1484,13 +1485,13 @@ def test_feedback_deadline_expiry_retains_diagnostic_sample_and_reports_unknown(
 
     assert manager.refresh_feedback_if_due(now=deadline + 0.001) is True
 
-    retained = manager._feedback_component._verified_feedback_by_label["gripper"]
+    retained = manager.feedback._feedback_component._verified_feedback_by_label["gripper"]
     assert retained is accepted
     assert retained.state.pos == pytest.approx(-1.0)
     assert retained.observed_at == pytest.approx(50.02)
-    assert manager._gripper_feedback_updated_monotonic == pytest.approx(50.02)
-    assert "gripper" in manager._gripper_feedback_error
-    assert "baseline=1" in manager._gripper_feedback_error
+    assert manager.gripper._gripper_feedback_updated_monotonic == pytest.approx(50.02)
+    assert "gripper" in manager.gripper._gripper_feedback_error
+    assert "baseline=1" in manager.gripper._gripper_feedback_error
     assert manager.get_gripper_state()[3] == 255
 
 
@@ -1498,8 +1499,8 @@ def test_runtime_sequence_read_failure_is_scoped_and_recovers() -> None:
     manager = make_manager()
     gripper = FakeMotor(position=-1.0)
     gripper_controller = FakeController([gripper])
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = gripper_controller
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = gripper_controller
     joint1 = manager.test_arm._motor_map["joint1"]
     real_getter = joint1.get_state_with_sequence
     fail = {"active": True}
@@ -1511,16 +1512,16 @@ def test_runtime_sequence_read_failure_is_scoped_and_recovers() -> None:
 
     joint1.get_state_with_sequence = getter
     assert manager.refresh_feedback_if_due(now=60.0) is False
-    assert "joint1 isolated read failure" in manager._feedback_component._feedback_error_by_label["joint1"]
-    assert "gripper" not in manager._feedback_component._feedback_error_by_label
+    assert "joint1 isolated read failure" in manager.feedback._feedback_component._feedback_error_by_label["joint1"]
+    assert "gripper" not in manager.feedback._feedback_component._feedback_error_by_label
     assert manager.refresh_feedback_if_due(now=60.02) is False
-    assert manager._gripper_feedback_updated_monotonic == pytest.approx(60.02)
+    assert manager.gripper._gripper_feedback_updated_monotonic == pytest.approx(60.02)
 
     fail["active"] = False
     assert manager.refresh_feedback_if_due(now=60.04) is True
     assert manager.refresh_feedback_if_due(now=60.06) is True
-    assert "joint1" not in manager._feedback_component._feedback_error_by_label
-    assert manager._arm_feedback_failure_reason(now=60.06) is None
+    assert "joint1" not in manager.feedback._feedback_component._feedback_error_by_label
+    assert manager.feedback._arm_feedback_failure_reason(now=60.06) is None
 
 
 def test_active_feedback_accepts_uint64_max_wrap_to_one() -> None:
@@ -1534,8 +1535,8 @@ def test_active_feedback_accepts_uint64_max_wrap_to_one() -> None:
         motor.feedback_sequence = 1
     assert manager.refresh_feedback_if_due(now=70.02) is True
 
-    assert manager._feedback_component._arm_feedback_updated_monotonic == pytest.approx(70.02)
-    assert {manager._feedback_component._verified_feedback_by_label[name].sequence for name in JOINT_NAMES} == {1}
+    assert manager.feedback._feedback_component._arm_feedback_updated_monotonic == pytest.approx(70.02)
+    assert {manager.feedback._feedback_component._verified_feedback_by_label[name].sequence for name in JOINT_NAMES} == {1}
 
 
 def test_forced_feedback_accepts_uint64_max_wrap_to_one() -> None:
@@ -1543,14 +1544,14 @@ def test_forced_feedback_accepts_uint64_max_wrap_to_one() -> None:
     for motor in manager.test_arm._motor_map.values():
         motor.feedback_sequence = UINT64_MAX
 
-    manager._refresh_all_feedback()
+    manager.feedback._refresh_all_feedback()
 
-    assert {manager._feedback_component._verified_feedback_by_label[name].sequence for name in JOINT_NAMES} == {1}
-    assert manager._arm_feedback_failure_reason() is None
+    assert {manager.feedback._feedback_component._verified_feedback_by_label[name].sequence for name in JOINT_NAMES} == {1}
+    assert manager.feedback._arm_feedback_failure_reason() is None
 
 
 def test_feedback_sequence_advance_rejects_equal_backward_and_half_range() -> None:
-    advanced = HardwareManager._feedback_sequence_advanced
+    advanced = FeedbackAcquisition._feedback_sequence_advanced
 
     assert advanced(8, 7) is True
     assert advanced(1, UINT64_MAX) is True
@@ -1564,18 +1565,18 @@ def test_feedback_sequence_advance_rejects_equal_backward_and_half_range() -> No
 
 def test_forced_refresh_rejects_old_sample_after_raw_sequence_reset() -> None:
     manager = make_manager()
-    manager._refresh_all_feedback()
-    old_samples = dict(manager._feedback_component._verified_feedback_by_label)
-    old_updated = manager._feedback_component._arm_feedback_updated_monotonic
+    manager.feedback._refresh_all_feedback()
+    old_samples = dict(manager.feedback._feedback_component._verified_feedback_by_label)
+    old_updated = manager.feedback._feedback_component._arm_feedback_updated_monotonic
     for motor in manager.test_arm._motor_map.values():
         motor.feedback_sequence = 0
         motor.advance_feedback_on_poll = False
 
     with pytest.raises(RuntimeError, match="feedback"):
-        manager._refresh_all_feedback()
+        manager.feedback._refresh_all_feedback()
 
-    assert manager._feedback_component._arm_feedback_updated_monotonic == old_updated
-    assert all(manager._feedback_component._verified_feedback_by_label[name] is old_samples[name] for name in JOINT_NAMES)
+    assert manager.feedback._feedback_component._arm_feedback_updated_monotonic == old_updated
+    assert all(manager.feedback._feedback_component._verified_feedback_by_label[name] is old_samples[name] for name in JOINT_NAMES)
 
 
 def test_forced_refresh_rejects_poll_that_delivers_then_raises() -> None:
@@ -1592,17 +1593,17 @@ def test_forced_refresh_rejects_poll_that_delivers_then_raises() -> None:
     )
 
     with pytest.raises(RuntimeError, match="recv failed after frames"):
-        manager._refresh_all_feedback()
+        manager.feedback._refresh_all_feedback()
 
-    assert manager._feedback_component._verified_feedback_by_label == {}
-    assert "recv failed after frames" in manager._feedback_component._arm_feedback_error
+    assert manager.feedback._feedback_component._verified_feedback_by_label == {}
+    assert "recv failed after frames" in manager.feedback._feedback_component._arm_feedback_error
 
 
 def test_forced_refresh_requires_success_after_latest_group_failure() -> None:
     manager = make_manager()
     arm_motors = list(manager.test_arm._motor_map.values())
     gripper = FakeMotor(position=-1.0)
-    manager._gripper_mot = gripper
+    manager.gripper._gripper_mot = gripper
     arm_attempts = 0
     gripper_attempts = 0
 
@@ -1625,19 +1626,19 @@ def test_forced_refresh_requires_success_after_latest_group_failure() -> None:
     manager.test_arm._ctrl_map["fake"] = SimpleNamespace(
         bus_lock=threading.RLock(), poll_feedback_once=poll_arm
     )
-    manager._gripper_ctrl = SimpleNamespace(
+    manager.gripper._gripper_ctrl = SimpleNamespace(
         bus_lock=threading.RLock(), poll_feedback_once=poll_gripper
     )
 
     with pytest.raises(RuntimeError, match="arm transient bus error"):
-        manager._refresh_all_feedback()
+        manager.feedback._refresh_all_feedback()
 
     assert arm_attempts == 3
     assert gripper_attempts == 3
-    assert all(name in manager._feedback_component._feedback_error_by_label for name in JOINT_NAMES)
-    assert manager._arm_feedback_failure_reason() is not None
-    assert manager._feedback_component._feedback_request_baseline_by_label == {}
-    assert manager._feedback_component._feedback_request_deadline_by_label == {}
+    assert all(name in manager.feedback._feedback_component._feedback_error_by_label for name in JOINT_NAMES)
+    assert manager.feedback._arm_feedback_failure_reason() is not None
+    assert manager.feedback._feedback_component._feedback_request_baseline_by_label == {}
+    assert manager.feedback._feedback_component._feedback_request_deadline_by_label == {}
 
     def poll_arm_with_fresh_frame() -> None:
         nonlocal arm_attempts
@@ -1647,10 +1648,10 @@ def test_forced_refresh_requires_success_after_latest_group_failure() -> None:
 
     manager.test_arm._ctrl_map["fake"].poll_feedback_once = poll_arm_with_fresh_frame
 
-    manager._refresh_all_feedback()
+    manager.feedback._refresh_all_feedback()
 
-    assert all(name not in manager._feedback_component._feedback_error_by_label for name in JOINT_NAMES)
-    assert manager._arm_feedback_failure_reason() is None
+    assert all(name not in manager.feedback._feedback_component._feedback_error_by_label for name in JOINT_NAMES)
+    assert manager.feedback._arm_feedback_failure_reason() is None
 
 
 def test_forced_refresh_accepts_staggered_motor_feedback() -> None:
@@ -1667,16 +1668,16 @@ def test_forced_refresh_accepts_staggered_motor_feedback() -> None:
 
     manager.test_arm._ctrl_map["fake"].poll_feedback_once = poll_staggered
 
-    manager._refresh_all_feedback()
+    manager.feedback._refresh_all_feedback()
 
     assert polls >= 2
-    assert set(manager._feedback_component._verified_feedback_by_label) == set(JOINT_NAMES)
-    assert manager._feedback_component._arm_feedback_error is None
+    assert set(manager.feedback._feedback_component._verified_feedback_by_label) == set(JOINT_NAMES)
+    assert manager.feedback._feedback_component._arm_feedback_error is None
 
 
 def test_forced_initial_getter_failure_records_group_before_any_request() -> None:
     manager = make_manager()
-    manager._refresh_all_feedback()
+    manager.feedback._refresh_all_feedback()
     requests_before = {
         name: motor.request_feedback_calls
         for name, motor in manager.test_arm._motor_map.items()
@@ -1687,9 +1688,9 @@ def test_forced_initial_getter_failure_records_group_before_any_request() -> Non
     )
 
     with pytest.raises(RuntimeError, match="initial baseline read failed"):
-        manager._refresh_all_feedback()
+        manager.feedback._refresh_all_feedback()
 
-    assert "initial baseline read failed" in manager._feedback_component._arm_feedback_error
+    assert "initial baseline read failed" in manager.feedback._feedback_component._arm_feedback_error
     assert {
         name: motor.request_feedback_calls
         for name, motor in manager.test_arm._motor_map.items()
@@ -1724,15 +1725,15 @@ def test_failed_feedback_batch_stops_gripper_before_next_target() -> None:
         )
     )
     manager.test_arm._ctrl_map = {"fake": controller}
-    manager._gripper_ctrl = controller
+    manager.gripper._gripper_ctrl = controller
 
     assert manager.refresh_feedback_if_due(now=1.0) is False
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert commands == [(-0.5, 0.0, 0.0, 0.0, 0.0)]
     assert "serial feedback timeout" in manager.gripper_command_error
     before = len(commands)
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert len(commands) == before
 
 
@@ -1750,35 +1751,35 @@ def _configure_gripper_position_move(
     def send_mit(pos: float, vel: float, kp: float, kd: float, tau: float) -> None:
         commands.append((pos, vel, kp, kd, tau))
 
-    manager._gripper_mot = SimpleNamespace(
+    manager.gripper._gripper_mot = SimpleNamespace(
         get_state=lambda: state,
         get_state_with_sequence=lambda: (state, 0),
         send_mit=send_mit,
         request_feedback=lambda: None,
     )
-    manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
-    manager._gripper_execution._gripper_pos = state.pos
-    manager._gripper_execution._gripper_vel = state.vel
-    manager._gripper_execution._gripper_torque = state.torq
-    manager._gripper_execution._gripper_target_angle = goal
-    manager._gripper_execution._gripper_goal_angle = goal
-    manager._gripper_execution._gripper_target_effort = float(effort)
-    manager._gripper_execution._gripper_close_force = 0.4
-    manager._gripper_execution._gripper_hold_force = 0.4
-    manager._gripper_execution._gripper_hold_angle = state.pos
-    manager._gripper_execution._gripper_hold_deadline = None
-    manager._gripper_execution._gripper_hold_release_reason = None
-    manager._gripper_execution._gripper_mode = mode
-    manager._gripper_execution._gripper_active = True
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_execution._gripper_pos = state.pos
+    manager.gripper._gripper_execution._gripper_vel = state.vel
+    manager.gripper._gripper_execution._gripper_torque = state.torq
+    manager.gripper._gripper_execution._gripper_target_angle = goal
+    manager.gripper._gripper_execution._gripper_goal_angle = goal
+    manager.gripper._gripper_execution._gripper_target_effort = float(effort)
+    manager.gripper._gripper_execution._gripper_close_force = 0.4
+    manager.gripper._gripper_execution._gripper_hold_force = 0.4
+    manager.gripper._gripper_execution._gripper_hold_angle = state.pos
+    manager.gripper._gripper_execution._gripper_hold_deadline = None
+    manager.gripper._gripper_execution._gripper_hold_release_reason = None
+    manager.gripper._gripper_execution._gripper_mode = mode
+    manager.gripper._gripper_execution._gripper_active = True
     observed_at = time.monotonic()
-    with manager._feedback_component._feedback_lock:
-        manager._record_verified_feedback(
+    with manager.feedback._feedback_component._feedback_lock:
+        manager.feedback._record_verified_feedback(
             "gripper",
             state,
             1,
             observed_at,
         )
-    manager._gripper_execution._gripper_position_result = "active"
+    manager.gripper._gripper_execution._gripper_position_result = "active"
     return commands
 
 
@@ -1790,7 +1791,7 @@ def test_completed_gripper_position_move_neutralizes_and_goes_idle() -> None:
     manager = make_manager()
     commands = _configure_arrived_gripper_position_move(manager)
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert manager.wait_gripper_target(timeout=0.01) is True
 
     # Neutral MIT: zero stiffness, zero damping, zero feed-forward torque.
@@ -1799,7 +1800,7 @@ def test_completed_gripper_position_move_neutralizes_and_goes_idle() -> None:
     assert manager.gripper_mode == "idle"
 
     # No further position command may be emitted once the move is released.
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert commands == [(-4.72, 0.0, 0.0, 0.0, 0.0)]
 
 
@@ -1818,11 +1819,11 @@ def test_waiter_accepts_in_tolerance_feedback_without_rewriting_goal() -> None:
     waiter.start()
     deadline = time.monotonic() + 0.2
     # 等待者不再推进到位释放；周期执行器在新反馈上决定并发送中性命令。
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     waiter.join(timeout=0.5)
 
     assert result == [True]
-    assert manager._gripper_execution._gripper_goal_angle == pytest.approx(-4.444444444444445)
+    assert manager.gripper._gripper_execution._gripper_goal_angle == pytest.approx(-4.444444444444445)
     assert commands == [(-4.328030586242676, 0.0, 0.0, 0.0, 0.0)]
 
 
@@ -1831,13 +1832,13 @@ def test_waiter_queues_release_but_only_hardware_loop_emits_neutral() -> None:
     manager = make_manager()
     commands = _configure_arrived_gripper_position_move(manager)
     manager.test_arm.control_loop_active = True
-    manager._gripper_execution._gripper_neutral_pending = None
+    manager.gripper._gripper_execution._gripper_neutral_pending = None
 
     assert manager.wait_gripper_target(timeout=0.01) is False
     assert commands == []
-    assert manager._gripper_execution._gripper_neutral_pending is not None
+    assert manager.gripper._gripper_execution._gripper_neutral_pending is not None
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert commands == [(-4.72, 0.0, 0.0, 0.0, 0.0)]
     assert manager.gripper_reached_target() is False
@@ -1847,13 +1848,13 @@ def test_gripper_tick_neutralizes_arrived_position_move_without_waiter() -> None
     manager = make_manager()
     commands = _configure_arrived_gripper_position_move(manager)
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert commands == [(-4.72, 0.0, 0.0, 0.0, 0.0)]
     assert manager.gripper_active is False
     assert manager.gripper_mode == "idle"
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert commands == [(-4.72, 0.0, 0.0, 0.0, 0.0)]
 
 
@@ -1865,13 +1866,13 @@ def test_timed_out_gripper_position_move_neutralizes_and_goes_idle() -> None:
     assert manager.wait_gripper_target(timeout=0.05) is False
 
     assert commands == []
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert commands[-1] == (-0.5, 0.0, 0.0, 0.0, 0.0)
     assert manager.gripper_active is False
     assert manager.gripper_mode == "idle"
 
     before = len(commands)
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert len(commands) == before
 
 
@@ -1882,7 +1883,7 @@ def test_gripper_position_move_applies_configured_torque_cap() -> None:
         manager, position=-0.5, goal=-4.72, effort=0.40
     )
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert len(commands) == 1
     pos, vel, kp, kd, tau_safe = commands[0]
@@ -1904,7 +1905,7 @@ def test_gripper_position_target_advances_by_configured_speed_ramp(monkeypatch) 
         goal=-1.0,
         effort=1.0,
     )
-    manager._start_gripper_loop = lambda: None
+    manager.gripper._start_gripper_loop = lambda: None
 
     now = [10.0]
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: now[0])
@@ -1914,10 +1915,10 @@ def test_gripper_position_target_advances_by_configured_speed_ramp(monkeypatch) 
     # commanded target may advance by at most 0.1 rad, never jump to the final
     # approximately -4.44 rad goal in one control tick.
     now[0] = 10.2
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert commands[0][0] == pytest.approx(-1.1)
-    assert manager._gripper_execution._gripper_goal_angle == pytest.approx((0.08 / _G_MAX_DIST_M) * _G_ANGLE_OPEN)
+    assert manager.gripper._gripper_execution._gripper_goal_angle == pytest.approx((0.08 / _G_MAX_DIST_M) * _G_ANGLE_OPEN)
 
 
 def test_gripper_position_timeout_scales_with_command_distance() -> None:
@@ -1926,7 +1927,7 @@ def test_gripper_position_timeout_scales_with_command_distance() -> None:
     manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     _configure_gripper_position_move(manager, position=-1.0, goal=-1.0)
-    manager._start_gripper_loop = lambda: None
+    manager.gripper._start_gripper_loop = lambda: None
 
     manager.set_gripper_target(0.08, max_effort=1.0)
 
@@ -1942,7 +1943,7 @@ def test_gripper_position_command_logs_command_feedback_and_timing(monkeypatch) 
     manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     _configure_gripper_position_move(manager, position=-1.0, goal=-1.0)
-    manager._start_gripper_loop = lambda: None
+    manager.gripper._start_gripper_loop = lambda: None
 
     messages: list[str] = []
     monkeypatch.setattr(
@@ -1975,17 +1976,17 @@ def test_gripper_feedback_exception_stops_active_position_command() -> None:
         effort=1.0,
     )
 
-    with manager._feedback_component._feedback_lock:
-        manager._record_feedback_label_error("gripper", "feedback read failed")
-        manager._sync_feedback_health()
-    manager._gripper_tick()
+    with manager.feedback._feedback_component._feedback_lock:
+        manager.feedback._record_feedback_label_error("gripper", "feedback read failed")
+        manager.feedback._sync_feedback_health()
+    manager.gripper._gripper_tick()
 
     assert manager.gripper_active is False
     assert manager.gripper_mode == "idle"
     assert "feedback read failed" in manager.gripper_command_error
     # The only allowable command after feedback loss is zero-gain/zero-torque
     # neutral at the last trusted position; no Kp=5 target may be emitted.
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert commands == [(-0.5, 0.0, 0.0, 0.0, 0.0)]
 
 
@@ -1997,9 +1998,9 @@ def test_gripper_non_enabled_status_stops_before_next_target() -> None:
         goal=-4.0,
         effort=1.0,
     )
-    with manager._feedback_component._feedback_lock:
-        previous = manager._feedback_component._verified_feedback_by_label["gripper"]
-        manager._record_verified_feedback(
+    with manager.feedback._feedback_component._feedback_lock:
+        previous = manager.feedback._feedback_component._verified_feedback_by_label["gripper"]
+        manager.feedback._record_verified_feedback(
             "gripper",
             SimpleNamespace(pos=-0.5, vel=0.0, torq=0.0, status_code=0),
             previous.sequence + 1,
@@ -2007,11 +2008,11 @@ def test_gripper_non_enabled_status_stops_before_next_target() -> None:
         )
     forbid_raw_feedback_reads(manager)
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert commands == []
     assert "status_code=0" in manager.gripper_command_error
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert commands == [(-0.5, 0.0, 0.0, 0.0, 0.0)]
 
 
@@ -2023,12 +2024,12 @@ def test_stale_gripper_feedback_stops_ramp_before_next_target(monkeypatch) -> No
         goal=-4.0,
         effort=1.0,
     )
-    manager._gripper_feedback_updated_monotonic = 10.0
-    manager._gripper_feedback_error = None
-    manager._gripper_execution._gripper_last_tick_monotonic = 10.9
+    manager.gripper._gripper_feedback_updated_monotonic = 10.0
+    manager.gripper._gripper_feedback_error = None
+    manager.gripper._gripper_execution._gripper_last_tick_monotonic = 10.9
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: 11.0)
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert manager.gripper_active is False
     assert manager.gripper_mode == "idle"
@@ -2047,8 +2048,8 @@ def test_grasp_rejects_stale_feedback_before_sending_close_command() -> None:
         goal=-1.0,
         mode="idle",
     )
-    manager._gripper_execution._gripper_active = False
-    manager._gripper_feedback_updated_monotonic = time.monotonic() - 1.0
+    manager.gripper._gripper_execution._gripper_active = False
+    manager.gripper._gripper_feedback_updated_monotonic = time.monotonic() - 1.0
 
     with pytest.raises(RuntimeError, match="feedback stale"):
         manager.grasp_gripper(close_timeout_sec=0.1)
@@ -2058,7 +2059,7 @@ def test_grasp_rejects_stale_feedback_before_sending_close_command() -> None:
 
 def test_get_gripper_state_reports_unknown_status_without_verified_sample() -> None:
     manager = make_manager()
-    manager._gripper_mot = FakeMotor()
+    manager.gripper._gripper_mot = FakeMotor()
 
     position, velocity, torque, status = manager.get_gripper_state()
 
@@ -2069,12 +2070,12 @@ def test_get_gripper_state_reports_unknown_status_without_verified_sample() -> N
 
 def test_get_gripper_state_reports_unknown_status_when_feedback_is_stale(monkeypatch) -> None:
     manager = make_manager()
-    manager._gripper_mot = FakeMotor(position=-1.0)
-    manager._gripper_mot.state.status_code = 1
+    manager.gripper._gripper_mot = FakeMotor(position=-1.0)
+    manager.gripper._gripper_mot.state.status_code = 1
     before = seed_verified_feedback(
         manager,
         observed_at=10.0,
-        gripper_state=manager._gripper_mot.state,
+        gripper_state=manager.gripper._gripper_mot.state,
     )
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: 11.0)
 
@@ -2088,26 +2089,26 @@ def test_get_gripper_state_reports_unknown_status_when_feedback_is_stale(monkeyp
 
 def test_get_gripper_state_reports_unknown_status_after_shared_refresh_error() -> None:
     manager = make_manager()
-    manager._gripper_mot = FakeMotor(position=-1.0)
-    manager._gripper_mot.state.status_code = 1
+    manager.gripper._gripper_mot = FakeMotor(position=-1.0)
+    manager.gripper._gripper_mot.state.status_code = 1
     before = seed_verified_feedback(
         manager,
-        gripper_state=manager._gripper_mot.state,
+        gripper_state=manager.gripper._gripper_mot.state,
     )
-    manager._gripper_feedback_error = "shared feedback batch failed: serial timeout"
+    manager.gripper._gripper_feedback_error = "shared feedback batch failed: serial timeout"
 
     position, velocity, torque, status = manager.get_gripper_state()
 
     assert (position, velocity, torque) == (-1.0, 0.0, 0.0)
     assert status == 255
     assert "[READ_FAILED] shared feedback batch failed: serial timeout" in manager.gripper_feedback_error
-    assert manager._gripper_feedback_error == "shared feedback batch failed: serial timeout"
+    assert manager.gripper._gripper_feedback_error == "shared feedback batch failed: serial timeout"
     assert_verified_feedback_unchanged(manager, before)
 
 
 def test_joint_statuses_report_unknown_after_shared_refresh_error() -> None:
     manager = make_manager()
-    manager._feedback_component._arm_feedback_error = "shared feedback batch failed: serial timeout"
+    manager.feedback._feedback_component._arm_feedback_error = "shared feedback batch failed: serial timeout"
 
     assert manager.get_joint_status_codes() == [255] * 6
 
@@ -2115,18 +2116,18 @@ def test_joint_statuses_report_unknown_after_shared_refresh_error() -> None:
 def test_missing_verified_joint_status_is_not_reported_as_disabled() -> None:
     manager = make_manager()
     seed_verified_feedback(manager)
-    with manager._feedback_component._feedback_lock:
-        manager._feedback_component._verified_feedback_by_label.pop("joint3")
+    with manager.feedback._feedback_component._feedback_lock:
+        manager.feedback._feedback_component._verified_feedback_by_label.pop("joint3")
 
     assert manager.get_joint_status_codes() == [0, 0, 255, 0, 0, 0]
 
 
 def test_feedback_failures_are_exposed_in_arm_status_error_codes() -> None:
     manager = make_manager()
-    manager._gripper_mot = FakeMotor(position=-1.0)
-    manager._gripper_feedback_updated_monotonic = time.monotonic()
-    manager._feedback_component._arm_feedback_error = "shared feedback batch failed: serial timeout"
-    manager._gripper_feedback_error = "shared feedback batch failed: serial timeout"
+    manager.gripper._gripper_mot = FakeMotor(position=-1.0)
+    manager.gripper._gripper_feedback_updated_monotonic = time.monotonic()
+    manager.feedback._feedback_component._arm_feedback_error = "shared feedback batch failed: serial timeout"
+    manager.gripper._gripper_feedback_error = "shared feedback batch failed: serial timeout"
 
     assert manager.error_codes == [
         "ARM_FEEDBACK: arm feedback unavailable: [READ_FAILED] shared feedback batch failed: serial timeout",
@@ -2137,10 +2138,10 @@ def test_feedback_failures_are_exposed_in_arm_status_error_codes() -> None:
 @pytest.mark.parametrize("status", [0, 1, 8, 9, 10, 11, 12, 13, 14])
 def test_arm_and_gripper_report_original_status_from_verified_cache(status) -> None:
     manager = make_manager()
-    manager._gripper_mot = FakeMotor(position=-1.0)
-    manager._gripper_mot.state.status_code = status
+    manager.gripper._gripper_mot = FakeMotor(position=-1.0)
+    manager.gripper._gripper_mot.state.status_code = status
     before = seed_verified_feedback(
-        manager, arm_status=status, gripper_state=manager._gripper_mot.state,
+        manager, arm_status=status, gripper_state=manager.gripper._gripper_mot.state,
     )
     forbid_raw_feedback_reads(manager)
 
@@ -2154,17 +2155,17 @@ def test_arm_and_gripper_report_original_status_from_verified_cache(status) -> N
 def test_first_frame_wait_is_derived_and_recovers_without_status_initialization() -> None:
     manager = make_manager()
     gripper = FakeMotor(position=-1.0)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = FakeController([gripper])
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = FakeController([gripper])
 
     for _ in range(3):
         assert manager.get_joint_status_codes() == [255] * 6
         assert manager.get_gripper_state()[3] == 255
         assert "[WAITING_FIRST_FRAME]" in manager.gripper_feedback_error
         assert all("[WAITING_FIRST_FRAME]" in error for error in manager.error_codes)
-    assert manager._feedback_component._verified_feedback_by_label == {}
-    assert manager._gripper_feedback_error is None
-    assert manager._feedback_component._arm_feedback_error is None
+    assert manager.feedback._feedback_component._verified_feedback_by_label == {}
+    assert manager.gripper._gripper_feedback_error is None
+    assert manager.feedback._feedback_component._arm_feedback_error is None
     assert gripper.request_feedback_calls == 0
 
     manager.refresh_feedback_if_due(force=True)
@@ -2184,12 +2185,12 @@ def test_first_frame_wait_is_derived_and_recovers_without_status_initialization(
 def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fault, code) -> None:
     manager = make_manager()
     gripper = FakeMotor(position=-1.0)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = FakeController([gripper])
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = FakeController([gripper])
     clock = [100.0]
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: clock[0])
     manager.refresh_feedback_if_due(force=True)
-    previous = manager._feedback_component._verified_feedback_by_label["gripper"]
+    previous = manager.feedback._feedback_component._verified_feedback_by_label["gripper"]
     original_getter = gripper.get_state_with_sequence
 
     def fail_read():
@@ -2209,15 +2210,15 @@ def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fau
     if fault in ("read", "sequence", "values"):
         with pytest.raises(RuntimeError):
             manager.refresh_feedback_if_due(force=True)
-        assert manager._feedback_component._verified_feedback_by_label["gripper"] is previous
+        assert manager.feedback._feedback_component._verified_feedback_by_label["gripper"] is previous
     elif fault == "coordinate":
         manager.refresh_feedback_if_due(force=True)
         assert manager.get_gripper_state()[0] == pytest.approx(2 * np.pi)
 
-    before = dict(manager._feedback_component._verified_feedback_by_label)
-    errors = dict(manager._feedback_component._feedback_error_by_label)
-    gripper_error = manager._gripper_feedback_error
-    updated = manager._gripper_feedback_updated_monotonic
+    before = dict(manager.feedback._feedback_component._verified_feedback_by_label)
+    errors = dict(manager.feedback._feedback_component._feedback_error_by_label)
+    gripper_error = manager.gripper._gripper_feedback_error
+    updated = manager.gripper._gripper_feedback_updated_monotonic
     with monkeypatch.context() as reads:
         reads.setattr(manager, "refresh_feedback_if_due", fail_read)
         for motor in [*manager.test_arm._motor_map.values(), gripper]:
@@ -2228,15 +2229,15 @@ def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fau
             assert f"[{code}]" in manager.gripper_feedback_error
             assert any(f"[{code}]" in reason for reason in manager.error_codes)
         assert_verified_feedback_unchanged(manager, before)
-        assert manager._feedback_component._feedback_error_by_label == errors
-        assert manager._gripper_feedback_error == gripper_error
-        assert manager._gripper_feedback_updated_monotonic == updated
+        assert manager.feedback._feedback_component._feedback_error_by_label == errors
+        assert manager.gripper._gripper_feedback_error == gripper_error
+        assert manager.gripper._gripper_feedback_updated_monotonic == updated
 
     manager._lifecycle.connected = manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     with pytest.raises(RuntimeError):
         manager.set_gripper_target(0.01)
-    assert manager._gripper_execution._gripper_active is False
+    assert manager.gripper._gripper_execution._gripper_active is False
     manager.test_arm.control_loop_active = False
 
     gripper.get_state_with_sequence = original_getter
@@ -2257,7 +2258,7 @@ def test_gripper_motor_fault_is_reported_and_rejected_by_command_gate() -> None:
     manager.test_arm.control_loop_active = True
     gripper = FakeMotor(position=-1.0)
     gripper.state.status_code = 11
-    manager._gripper_mot = gripper
+    manager.gripper._gripper_mot = gripper
     seed_verified_feedback(manager, arm_status=1, gripper_state=gripper.state)
 
     assert manager.get_joint_status_codes() == [1] * 6
@@ -2278,13 +2279,13 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
 ) -> None:
     manager = make_manager()
     gripper = FakeMotor(position=-1.0)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = FakeController([gripper])
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = FakeController([gripper])
     clock = [100.0]
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: clock[0])
     manager.refresh_feedback_if_due(force=True)
     motor = manager.test_arm._motor_map["joint3"]
-    old_sample = manager._verified_feedback_sample("joint3")
+    old_sample = manager.feedback._verified_feedback_sample("joint3")
     getter = motor.get_state_with_sequence
 
     def failed_read():
@@ -2297,8 +2298,8 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
     elif fault == "stale":
         clock[0] += 1.0
         # 夹爪新鲜度独立于六轴整体健康状态。
-        with manager._feedback_component._feedback_lock:
-            manager._record_verified_feedback("gripper", gripper.state, 10, clock[0])
+        with manager.feedback._feedback_component._feedback_lock:
+            manager.feedback._record_verified_feedback("gripper", gripper.state, 10, clock[0])
     else:
         motor.state = SimpleNamespace(
             pos=0.5 if fault == "coordinate" else float("inf"),
@@ -2307,10 +2308,10 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
     if fault != "stale":
         with pytest.raises(RuntimeError):
             manager.refresh_feedback_if_due(force=True)
-    assert manager._verified_feedback_sample("joint3") is old_sample
-    before = dict(manager._feedback_component._verified_feedback_by_label)
-    errors = dict(manager._feedback_component._feedback_error_by_label)
-    health = (manager._feedback_component._arm_feedback_error, manager._feedback_component._arm_feedback_updated_monotonic)
+    assert manager.feedback._verified_feedback_sample("joint3") is old_sample
+    before = dict(manager.feedback._feedback_component._verified_feedback_by_label)
+    errors = dict(manager.feedback._feedback_component._feedback_error_by_label)
+    health = (manager.feedback._feedback_component._arm_feedback_error, manager.feedback._feedback_component._arm_feedback_updated_monotonic)
     polls = manager.test_arm._ctrl_map["fake"].poll_feedback_calls
     for _ in range(query_count):
         assert manager.get_joint_status_codes() == [255] * 6
@@ -2320,8 +2321,8 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
         with pytest.raises(RuntimeError):
             manager.get_cached_joint_sample()
     assert_verified_feedback_unchanged(manager, before)
-    assert manager._feedback_component._feedback_error_by_label == errors
-    assert (manager._feedback_component._arm_feedback_error, manager._feedback_component._arm_feedback_updated_monotonic) == health
+    assert manager.feedback._feedback_component._feedback_error_by_label == errors
+    assert (manager.feedback._feedback_component._arm_feedback_error, manager.feedback._feedback_component._arm_feedback_updated_monotonic) == health
     assert manager.test_arm._ctrl_map["fake"].poll_feedback_calls == polls
 
     manager._lifecycle.connected = manager._lifecycle.enabled = True
@@ -2341,13 +2342,13 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
 
 def test_gripper_publication_uses_sample_values_and_time_not_control_mirrors() -> None:
     manager = make_manager()
-    manager._gripper_mot = FakeMotor(position=-1.0)
-    before = seed_verified_feedback(manager, gripper_state=manager._gripper_mot.state)
+    manager.gripper._gripper_mot = FakeMotor(position=-1.0)
+    before = seed_verified_feedback(manager, gripper_state=manager.gripper._gripper_mot.state)
     sample = before["gripper"]
-    manager._gripper_execution._gripper_pos = -4.0
-    manager._gripper_execution._gripper_vel = 4.0
-    manager._gripper_execution._gripper_torque = 5.0
-    manager._gripper_feedback_updated_monotonic = 0.0
+    manager.gripper._gripper_execution._gripper_pos = -4.0
+    manager.gripper._gripper_execution._gripper_vel = 4.0
+    manager.gripper._gripper_execution._gripper_torque = 5.0
+    manager.gripper._gripper_feedback_updated_monotonic = 0.0
     forbid_raw_feedback_reads(manager)
 
     position, velocity, torque, status, sequence, observed_at = manager.get_cached_gripper_sample()
@@ -2377,31 +2378,31 @@ def test_wait_gripper_target_rejects_stale_arrival(monkeypatch) -> None:
         position=-4.0,
         goal=-4.0,
     )
-    manager._gripper_execution._gripper_target_deadline_monotonic = 12.0
-    manager._gripper_feedback_updated_monotonic = 10.0
+    manager.gripper._gripper_execution._gripper_target_deadline_monotonic = 12.0
+    manager.gripper._gripper_feedback_updated_monotonic = 10.0
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: 11.0)
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert manager.wait_gripper_target() is False
     assert manager.gripper_reached_target() is False
     assert "stale" in manager.gripper_command_error
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert commands == [(-4.0, 0.0, 0.0, 0.0, 0.0)]
 
 
 def test_gripper_arrival_is_not_success_when_neutral_command_fails() -> None:
     manager = make_manager()
     commands = _configure_arrived_gripper_position_move(manager)
-    original_send = manager._gripper_mot.send_mit
+    original_send = manager.gripper._gripper_mot.send_mit
 
     def fail_neutral(pos, vel, kp, kd, tau) -> None:
         if kp == 0.0 and kd == 0.0 and tau == 0.0:
             raise RuntimeError("neutral command failed")
         original_send(pos, vel, kp, kd, tau)
 
-    manager._gripper_mot.send_mit = fail_neutral
+    manager.gripper._gripper_mot.send_mit = fail_neutral
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert manager.gripper_reached_target() is False
     assert "neutral command failed" in manager.gripper_command_error
@@ -2416,7 +2417,7 @@ def test_gripper_position_move_default_cap_matches_web_teleop() -> None:
         manager, position=-0.5, goal=-4.72, effort=_G_LARGE_MOVE_MAX_TAU_NM
     )
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert len(commands) == 1
     pos, vel, kp, kd, tau_safe = commands[0]
@@ -2435,7 +2436,7 @@ def test_gripper_position_torque_cap_rejects_out_of_range(bad_cap: float) -> Non
 def test_gripper_position_torque_cap_accepts_hard_max() -> None:
     assert _G_LARGE_MOVE_MAX_TAU_CAP_NM == _G_TAU_MAX
     manager = make_manager(gripper_position_torque_cap_nm=_G_TAU_MAX)
-    assert manager._gripper_position_torque_cap_nm == pytest.approx(_G_TAU_MAX)
+    assert manager.gripper.settings.gripper_position_torque_cap_nm == pytest.approx(_G_TAU_MAX)
 
 
 @pytest.mark.parametrize("bad_rate", [19.9, 100.1])
@@ -2452,7 +2453,7 @@ def test_gripper_tick_emits_no_command_once_arrival_is_detected() -> None:
     manager = make_manager()
     commands = _configure_gripper_position_move(manager, position=0.0, goal=0.0)
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     # Only the neutral release, never a kp=5 command carrying tau_ff.
     assert commands == [(0.0, 0.0, 0.0, 0.0, 0.0)]
@@ -2462,32 +2463,32 @@ def test_gripper_tick_emits_no_command_once_arrival_is_detected() -> None:
 def test_grasp_hold_is_released_after_timeout() -> None:
     manager = make_manager()
     commands = _configure_gripper_position_move(manager, mode="grasp_holding")
-    manager._gripper_execution._gripper_hold_deadline = time.monotonic() + 60.0
+    manager.gripper._gripper_execution._gripper_hold_deadline = time.monotonic() + 60.0
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert manager.gripper_mode == "grasp_holding"
     assert commands[-1][:4] == (-4.72, 0.0, 5.0, 1.0)
 
     # Deadline reached: neutralize and stop loading the motor.
-    manager._gripper_execution._gripper_hold_deadline = time.monotonic() - 0.01
-    manager._gripper_tick()
+    manager.gripper._gripper_execution._gripper_hold_deadline = time.monotonic() - 0.01
+    manager.gripper._gripper_tick()
 
     assert manager.gripper_active is False
     assert manager.gripper_mode == "idle"
     assert commands[-1] == (-4.72, 0.0, 0.0, 0.0, 0.0)
-    assert manager._gripper_execution.grasp_hold_release_reason == "hold timeout"
+    assert manager.gripper._gripper_execution.grasp_hold_release_reason == "hold timeout"
 
     before = len(commands)
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert len(commands) == before
 
 
 def test_grasp_hold_without_deadline_is_not_released() -> None:
     manager = make_manager()
     _configure_gripper_position_move(manager, mode="grasp_holding")
-    manager._gripper_execution._gripper_hold_deadline = None
+    manager.gripper._gripper_execution._gripper_hold_deadline = None
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert manager.gripper_mode == "grasp_holding"
 
@@ -2495,16 +2496,16 @@ def test_grasp_hold_without_deadline_is_not_released() -> None:
 def test_release_grasp_hold_neutralizes_on_request() -> None:
     manager = make_manager()
     commands = _configure_gripper_position_move(manager, mode="grasp_holding")
-    manager._gripper_execution._gripper_hold_deadline = time.monotonic() + 60.0
+    manager.gripper._gripper_execution._gripper_hold_deadline = time.monotonic() + 60.0
 
     assert manager.release_grasp_hold("external release") is True
 
     assert commands == []
     assert manager.gripper_active is False
     assert manager.gripper_mode == "idle"
-    assert manager._gripper_execution.grasp_hold_release_reason == "external release"
+    assert manager.gripper._gripper_execution.grasp_hold_release_reason == "external release"
 
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
     assert commands == [(-4.72, 0.0, 0.0, 0.0, 0.0)]
 
     # Idempotent: nothing active to release.
@@ -2533,8 +2534,8 @@ def test_grasp_modes_are_not_released_by_position_neutralization() -> None:
         manager = make_manager()
         commands = _configure_gripper_position_move(manager, mode=mode)
 
-        manager._gripper_tick()
-        manager._gripper_tick()
+        manager.gripper._gripper_tick()
+        manager.gripper._gripper_tick()
 
         assert manager.gripper_active is True
         assert manager.gripper_mode == mode
@@ -2557,13 +2558,13 @@ def test_gripper_position_target_uses_full_90mm_range(
     manager._lifecycle.connected = True
     manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
-    manager._gripper_execution._gripper_pos = 0.0
-    manager._gripper_mot = SimpleNamespace(
+    manager.gripper._gripper_execution._gripper_pos = 0.0
+    manager.gripper._gripper_mot = SimpleNamespace(
         get_state=lambda: SimpleNamespace(pos=0.0, vel=0.0, torq=0.0, status_code=1),
         request_feedback=lambda: None,
     )
-    manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
-    manager._start_gripper_loop = lambda: None
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._start_gripper_loop = lambda: None
     seed_verified_feedback(
         manager,
         arm_status=1,
@@ -2572,7 +2573,7 @@ def test_gripper_position_target_uses_full_90mm_range(
 
     manager.set_gripper_target(requested_m, max_effort=0.15)
 
-    assert manager._gripper_execution._gripper_goal_angle == pytest.approx(expected_angle)
+    assert manager.gripper._gripper_execution._gripper_goal_angle == pytest.approx(expected_angle)
 
 
 def test_gripper_full_open_command_reaches_motor_without_extra_open_margin(monkeypatch) -> None:
@@ -2585,13 +2586,13 @@ def test_gripper_full_open_command_reaches_motor_without_extra_open_margin(monke
 
     manager.set_gripper_target(0.09, max_effort=0.15)
     clock[0] += 1.0
-    manager._gripper_tick()
+    manager.gripper._gripper_tick()
 
     assert len(commands) == 1
     assert commands[0][0] == -5.0
     # Removing the angular margin must retain the total torque cap.
     position, _velocity, kp, kd, tau_ff = commands[0]
-    total_torque = kp * (position - manager._gripper_execution._gripper_pos) - kd * manager._gripper_execution._gripper_vel + tau_ff
+    total_torque = kp * (position - manager.gripper._gripper_execution._gripper_pos) - kd * manager.gripper._gripper_execution._gripper_vel + tau_ff
     assert abs(total_torque) <= 0.15 + 1e-12
 
 
@@ -2604,7 +2605,7 @@ def test_gripper_mit_keeps_nominal_position_range(requested_angle, expected_angl
     manager = make_manager()
     commands = _configure_gripper_position_move(manager, position=-4.8)
 
-    manager._gripper_safe_mit(requested_angle, 0.0, 5.0, 1.0, tau_limit=0.15)
+    manager.gripper._gripper_safe_mit(requested_angle, 0.0, 5.0, 1.0, tau_limit=0.15)
 
     assert commands[0][0] == expected_angle
 
@@ -2630,29 +2631,29 @@ def test_gripper_initialization_defers_background_loop_until_first_command(
     monkeypatch,
 ) -> None:
     manager = make_manager()
-    del manager.init_gripper
+    del manager.gripper.init_gripper
     gripper_motor = FakeMotor()
     controller = SimpleNamespace(
         add_damiao_motor=lambda _motor_id, _feedback_id, _model: gripper_motor,
         poll_feedback_once=lambda: None,
     )
     manager.test_arm._ctrl_map["damiao"] = controller
-    manager._gripper_loop_running = False
-    manager._start_gripper_loop = lambda: setattr(
+    manager.gripper._gripper_loop_running = False
+    manager.gripper._start_gripper_loop = lambda: setattr(
         manager, "_gripper_loop_running", True
     )
 
     manager.init_gripper("unused-gripper.yaml")
 
-    assert manager._gripper_mot is gripper_motor
-    assert manager._gripper_loop_running is False
+    assert manager.gripper._gripper_mot is gripper_motor
+    assert manager.gripper._gripper_loop_running is False
 
 
 def test_set_zero_gripper_only_calibrates_disabled_gripper_motor() -> None:
     manager = make_manager()
     gripper = FakeMotor(position=0.0)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = FakeController([gripper])
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = FakeController([gripper])
     manager.connect()
 
     assert manager.set_zero("gripper") is True
@@ -2664,8 +2665,8 @@ def test_set_zero_gripper_only_calibrates_disabled_gripper_motor() -> None:
 
 def test_set_zero_gripper_rejects_enabled_arm() -> None:
     manager = make_manager()
-    manager._gripper_mot = FakeMotor(position=0.0)
-    manager._gripper_ctrl = FakeController([manager._gripper_mot])
+    manager.gripper._gripper_mot = FakeMotor(position=0.0)
+    manager.gripper._gripper_ctrl = FakeController([manager.gripper._gripper_mot])
     manager.connect()
     manager._lifecycle.enabled = True
 
@@ -2677,8 +2678,8 @@ def test_set_zero_gripper_rejects_enabled_arm() -> None:
 def test_invalid_gripper_coordinate_preserves_raw_but_reports_unknown(position) -> None:
     manager = make_manager()
     gripper = FakeMotor(position=position)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = FakeController([gripper])
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = FakeController([gripper])
     manager.connect()
 
     assert manager.get_gripper_state()[0] == pytest.approx(position)
@@ -2703,7 +2704,7 @@ def test_invalid_gripper_coordinate_preserves_raw_but_reports_unknown(position) 
 )
 def test_gripper_width_allows_closed_tolerance_and_open_quantization(position, width) -> None:
     manager = make_manager()
-    manager._gripper_execution._gripper_pos = position
+    manager.gripper._gripper_execution._gripper_pos = position
     assert manager.gripper_position_m() == pytest.approx(width)
 
 
@@ -2712,8 +2713,8 @@ def test_closed_tolerance_keeps_feedback_valid_without_rezeroing(equivalent_widt
     manager = make_manager()
     position = equivalent_width_m * 5 / 0.09
     gripper = FakeMotor(position=position)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = FakeController([gripper])
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = FakeController([gripper])
     manager.connect()
 
     raw_position, _velocity, _torque, status = manager.get_gripper_state()
@@ -2733,11 +2734,11 @@ def test_coordinate_jump_stops_gripper_without_disabling_healthy_arm(mode) -> No
     commands = _configure_gripper_position_move(manager, position=-1.0, goal=-2.0, mode=mode)
     state = SimpleNamespace(pos=2 * np.pi, vel=0.0, torq=0.0, status_code=1)
     seed_verified_feedback(manager, arm_status=1, gripper_state=state)
-    manager._feedback_component._feedback_next_refresh_monotonic = time.monotonic() + 1.0
+    manager.feedback._feedback_component._feedback_next_refresh_monotonic = time.monotonic() + 1.0
     arm_ticks = []
-    manager._gripper_cfg = SimpleNamespace()
+    manager.gripper._gripper_cfg = SimpleNamespace()
 
-    manager._hardware_control_tick(manager.test_arm, 0.002, lambda *_: arm_ticks.append(True))
+    manager.cycle._hardware_control_tick(manager.test_arm, 0.002, lambda *_: arm_ticks.append(True))
 
     assert arm_ticks == [True]
     assert manager._lifecycle.enabled is True
@@ -2759,8 +2760,8 @@ def test_coordinate_jump_stops_gripper_without_disabling_healthy_arm(mode) -> No
 def _manager_for_zero_verification(position=0.0):
     manager = make_manager()
     gripper = FakeMotor(position=position)
-    manager._gripper_mot = gripper
-    manager._gripper_ctrl = FakeController([gripper])
+    manager.gripper._gripper_mot = gripper
+    manager.gripper._gripper_ctrl = FakeController([gripper])
     manager.connect()
     return manager, gripper
 
@@ -2807,7 +2808,7 @@ def test_zero_rejects_old_zero_cache_and_retains_failure_until_verified() -> Non
 @pytest.mark.parametrize("result", ["nonzero", "closed_tolerance", "enabled", "nonfinite", "write_error"])
 def test_zero_failure_never_returns_success_or_retries_write(result, monkeypatch) -> None:
     manager, gripper = _manager_for_zero_verification(-1.0)
-    monkeypatch.setattr(hardware_manager_module, "_G_ZERO_VERIFY_TIMEOUT_SEC", 0.03)
+    monkeypatch.setattr(__import__("rebotarmcontroller.gripper_controller", fromlist=["_G_ZERO_VERIFY_TIMEOUT_SEC"]), "_G_ZERO_VERIFY_TIMEOUT_SEC", 0.03)
 
     def zero():
         gripper.set_zero_position_calls += 1
@@ -2830,7 +2831,7 @@ def test_zero_failure_never_returns_success_or_retries_write(result, monkeypatch
 
 def test_zero_requires_consecutive_near_zero_samples(monkeypatch) -> None:
     manager, gripper = _manager_for_zero_verification(-1.0)
-    monkeypatch.setattr(hardware_manager_module, "_G_ZERO_VERIFY_TIMEOUT_SEC", 0.04)
+    monkeypatch.setattr(__import__("rebotarmcontroller.gripper_controller", fromlist=["_G_ZERO_VERIFY_TIMEOUT_SEC"]), "_G_ZERO_VERIFY_TIMEOUT_SEC", 0.04)
     deliver = gripper.deliver_requested_feedback
     samples = iter([0.0, 0.0, -1.0])
 

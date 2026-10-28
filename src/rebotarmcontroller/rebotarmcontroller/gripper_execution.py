@@ -12,6 +12,7 @@ import numpy as np
 from .gripper_control import (GripperControl, _G_ARRIVE_TOL, _G_TAU_MAX,
     _G_KP_MOVE, _G_KD_MOVE, _G_GRASP_CLOSE_KP, _G_GRASP_CLOSE_KD,
     _G_GRASP_HOLD_KP, _G_GRASP_HOLD_KD, _G_MAX_DIST_M, _G_ANGLE_OPEN)
+from .controller_values import GripperTarget, GripperResult
 
 _LOG = logging.getLogger('rebotarmcontroller.hardware_manager')
 
@@ -44,6 +45,30 @@ class GripperExecution:
         self._gripper_last_tick_monotonic = None
         self._grasp_request = None
         self._generation = 0
+
+    def accept_position(self, target: GripperTarget, now):
+        """单次接纳已校验的数值，代次、目标和超时在同一锁内更新。"""
+        with self._gripper_lock:
+            self.supersede_locked()
+            self._gripper_target_angle = target.start_angle
+            self._gripper_goal_angle = target.goal_angle
+            self._gripper_target_effort = target.effort
+            self._gripper_mode, self._gripper_active = "position", True
+            self._gripper_position_result = "active"
+            self._gripper_command_error = None
+            self._gripper_last_tick_monotonic = now
+            self._gripper_target_timeout_sec = target.timeout
+            self._gripper_target_deadline_monotonic = now + target.timeout
+            return self._generation
+
+    def snapshot(self, generation):
+        """查询旧代次只返回 superseded，不能读成接替目标的成功。"""
+        with self._gripper_lock:
+            if generation != self._generation:
+                return GripperResult(generation, 'superseded', 'gripper target superseded')
+            state = ('releasing' if self._gripper_neutral_pending is not None
+                     else self._gripper_position_result)
+            return GripperResult(generation, state, self._gripper_command_error)
 
     def _position_m_locked(self):
         return float(np.clip(self._gripper_pos / _G_ANGLE_OPEN * _G_MAX_DIST_M,

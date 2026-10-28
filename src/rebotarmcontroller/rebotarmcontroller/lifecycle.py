@@ -78,6 +78,12 @@ class ControllerLifecycle:
         self.state = 'DISCONNECTED'
         self.execution = 'IDLE'
 
+    @property
+    def ready_for_motion(self):
+        """只有明确处于使能保持/轨迹状态才能接纳运动。"""
+        return bool(self.connected and self.enabled
+                    and self.state in ("ENABLED_HOLD", "TRAJECTORY_RUNNING"))
+
     def set_state(self, state):
         if state not in LIFECYCLE_STATES:
             raise ValueError(f'unsupported lifecycle state: {state}')
@@ -92,6 +98,10 @@ class ControllerLifecycle:
                 self.state = 'TRAJECTORY_RUNNING'
             elif state == 'IDLE':
                 self.state = 'ENABLED_HOLD'
+
+    def set_execution_state(self, state):
+        """执行器通过本入口同步状态，不直接覆盖生命周期状态字段。"""
+        self.set_execution(state, enabled=self.enabled)
 
     def require_connected(self):
         if not self.connected:

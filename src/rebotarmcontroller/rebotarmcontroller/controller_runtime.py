@@ -6,8 +6,9 @@
 
 普通请求每轮最多处理四个；停止/失能使用保留的优先级入口。较长模式及
 使能握手属于独占设备事务，稳定等待通过 ``device_wait`` 继续采集反馈，
-不补跑积压运动周期。已开始事务完成状态确认后再处理下一请求；底层单次
-ABI 调用的最长阻塞仍受驱动超时约束，软件停止不是硬件急停。
+不补跑积压运动周期。模式/使能握手仍是独占事务；停止确认通过周期结果
+等待新反馈，其间可处理失能请求。底层单次 ABI 调用的最长阻塞仍受驱动
+超时约束，软件停止不是硬件急停。
 """
 from __future__ import annotations
 import math
@@ -16,7 +17,8 @@ import time
 from .sdk_driver import SdkMotorDriver
 from .arm_execution import ArmExecution
 from .arm_position_control import ArmPositionControl
-from .device_requests import DeviceRequests
+from .device_requests import DeviceRequests, RequestRejected
+from .arm_stop import CycleResult
 
 class ControllerRuntime:
     """管理唯一周期线程和六轴执行状态；可注入驱动以进行离线验证。"""
@@ -39,6 +41,7 @@ class ControllerRuntime:
         self._period = 1. / self.rate
         self.idle_callback = None
         self._waiting = False
+        self._deferred = []
         if isinstance(self.driver, SdkMotorDriver):
             self.driver._sleep = self.device_wait
             self.driver.owner = self.assert_writer
@@ -181,7 +184,14 @@ class ControllerRuntime:
                     except Exception as exc:
                         self.requests.finish(request, error=exc)
                     else:
-                        self.requests.finish(request, result=value)
+                        if isinstance(value, CycleResult):
+                            # 事务已接纳，等待者仍等自己的事件；写入线程继续服务周期和紧急请求。
+                            with self.requests.lock:
+                                generations = tuple((name, self.requests.generations[name])
+                                                    for name, _ in request.generations)
+                            self._deferred.append((request, value, generations))
+                        else:
+                            self.requests.finish(request, result=value)
                     if self._closing:
                         break
                     # 事务可能包含慢握手；最多补一次周期，不能在此追赶时间轴。
@@ -204,10 +214,36 @@ class ControllerRuntime:
                             except Exception as protection_error:
                                 self.last_error += f'; protection failed: {protection_error}'
                     deadline = time.monotonic() + self._period
+                self._advance_deferred()
                 self._wake.wait(max(0., deadline-time.monotonic()))
         finally:
             self.request_loop_stop()
             self.requests.close()
+            self._advance_deferred(closing=True)
+
+    def _advance_deferred(self, *, closing=False):
+        """周期推进已开始的停止事务；代次失效时禁止执行旧续体。"""
+        for item in tuple(self._deferred):
+            request, value, generations = item
+            try:
+                with self.requests.lock:
+                    obsolete = any(self.requests.generations[name] != generation
+                                   for name, generation in generations)
+                if closing or obsolete:
+                    raise RequestRejected('deferred execution superseded or runtime closed')
+                done, result = value.advance()
+                if not done:
+                    continue
+            except Exception as exc:
+                try:
+                    value.cancel(str(exc))
+                except Exception as cleanup_error:
+                    exc = RuntimeError(f'{exc}; deferred cleanup failed: {cleanup_error}')
+                finally:
+                    self.requests.finish(request, error=exc)
+            else:
+                self.requests.finish(request, result=result)
+            self._deferred.remove(item)
 
     def request_loop_stop(self):
         """停止周期输出并作废执行，保留设备线程以服务反馈和显式恢复。"""

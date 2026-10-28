@@ -63,7 +63,7 @@ def test_srdfs_agree_on_safe_home_and_home():
 
 
 def test_driver_safe_home_default_matches_the_srdf_named_state():
-    source = _read("src/rebotarmcontroller/rebotarmcontroller/hardware_manager.py")
+    source = _read("src/rebotarmcontroller/rebotarmcontroller/controller_parameters.py")
     rendered = ", ".join(repr(value) for value in SAFE_HOME)
     assert f"_SAFE_HOME_JOINT_POSITIONS = ({rendered})" in source
 
@@ -96,7 +96,7 @@ def test_driver_safe_home_does_not_delegate_to_the_vendor_zero_homing():
 
 
 def test_configured_safe_home_target_is_validated_against_joint_limits():
-    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/hardware_manager.py")
+    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/arm_controller.py")
     assert "def _validated_safe_home_target(" in hardware
     assert "_JOINT_POSITION_LIMITS_RAD.get(name)" in hardware
     assert "safe_home target must be finite" in hardware
