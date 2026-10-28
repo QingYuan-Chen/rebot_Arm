@@ -45,6 +45,7 @@ from .controller_contracts import (VerifiedFeedbackSample as _VerifiedFeedbackSa
 from .controller_kinematics import ArmKinematics
 from .controller_runtime import ControllerRuntime
 from .device_requests import device_request
+from .command_guard import CommandGuard, passthrough_decision
 from .arm_trajectory import ArmTrajectory
 from .sdk_driver import CommandTransportError
 from .conversions import fk_to_pose
@@ -166,6 +167,7 @@ class HardwareManager:
             setattr(self,'_'+name,getattr(settings,name))
         self._hardware_feedback_period_sec=1. / settings.hardware_feedback_rate_hz
         self._configuration=load_configuration(arm_cfg,gripper_cfg,channel)
+        self._command_guard = CommandGuard()
         import pinocchio as pin
 
         settings_path = (Path(gravity_config).expanduser() if gravity_config else
@@ -175,7 +177,6 @@ class HardwareManager:
             package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'), self._gc_settings)
         self._gc_torque_limits = self._gravity_model.effort
         self._backend = ControllerRuntime(self._configuration, ArmKinematics(self._gravity_model.model))
-        self._backend.feedback_reader = self.get_joint_state
         self._backend.idle_callback = self._runtime_feedback_tick
         self._arm_trajectory = ArmTrajectory(self._backend.execution)
         self._backend.on_error = lambda exc: self._protective_disable_from_hardware_loop(str(exc),category="CONTROLLER")
@@ -1030,6 +1031,7 @@ class HardwareManager:
                 self._validated_joint_feedback(expected_status=0)
                 self._validated_gripper_status(expected_status=0)
             self._enabled = False
+            self._command_guard.confirm_disabled()
             self._set_lifecycle_state("CONNECTED_DISABLED")
         except Exception:
             self._disconnect_after_failed_connect()
@@ -1095,11 +1097,11 @@ class HardwareManager:
         """
         with self._motor_lifecycle_lock:
             if not self._connected:
-                return self._backend.get_state()
+                raise RuntimeError('hardware is not connected; waiting for verified first frame')
             expected_status = 1 if self._enabled else 0
             positions, velocities, torques, _statuses = self._validated_joint_feedback(
                 expected_status=expected_status,
-                refresh=not hasattr(self._backend, "requests") and not self.control_loop_active,
+                refresh=False,
             )
             return positions, velocities, torques
 
@@ -1107,7 +1109,7 @@ class HardwareManager:
         """与 ``get_joint_state`` 相同，但不触发新的总线事务（只读缓存）。"""
         with self._motor_lifecycle_lock:
             if not self._connected:
-                return self._backend.get_state()
+                raise RuntimeError('hardware is not connected; waiting for verified first frame')
             expected_status = 1 if self._enabled else 0
             positions, velocities, torques, _statuses = self._validated_joint_feedback(
                 expected_status=expected_status,
@@ -1162,8 +1164,7 @@ class HardwareManager:
         if task is not None and (active is not task or task.event.is_set()):
             return
         with self._motor_lifecycle_lock:
-            if hasattr(self._backend, 'requests'):
-                self._backend.requests.invalidate('arm')
+            self._backend.requests.invalidate('arm')
             if active is not None:
                 owner.stopping(active)
             self._backend.cancel_trajectory()
@@ -1172,13 +1173,12 @@ class HardwareManager:
                 self.stop_gravity_compensation()
                 self.ensure_pos_vel_control()
                 current = self.hold_current_position()
-                if hasattr(self._backend, 'requests'):
-                    try:
-                        self._confirm_arm_hold(current)
-                    except Exception as exc:
-                        if active is not None:
-                            owner.finish(active, 'aborted', f'stop/hold unconfirmed: {exc}')
-                        raise
+                try:
+                    self._confirm_arm_hold(current)
+                except Exception as exc:
+                    if active is not None:
+                        owner.finish(active, 'aborted', f'stop/hold unconfirmed: {exc}')
+                    raise
             self.set_state_machine('IDLE')
             if active is not None:
                 owner.finish(active, 'canceled', 'stop/hold confirmed')
@@ -1406,6 +1406,7 @@ class HardwareManager:
             self._set_lifecycle_state("DISABLING")
             return "; ".join(rollback_errors)
         self._enabled = False
+        self._command_guard.confirm_disabled()
         self._set_lifecycle_state("CONNECTED_DISABLED" if self._connected else "DISCONNECTED")
         return None
 
@@ -1436,6 +1437,7 @@ class HardwareManager:
             else:
                 self._enabled = False
                 self._state_machine = "IDLE"
+                self._command_guard.confirm_disabled()
                 self._set_lifecycle_state("CONNECTED_DISABLED")
 
     @device_request(priority=5, ttl=5., invalidate=('device',))
@@ -1578,12 +1580,8 @@ class HardwareManager:
 
     @staticmethod
     def _validate_passthrough_values(pos, vel, kp, kd, tau, vlim, bounds, max_velocity, max_effort, mode):
-        if not np.isfinite([pos, vel, kp, kd, tau, vlim]).all():
-            raise ValueError('passthrough values must be finite')
-        if not bounds[0] <= pos <= bounds[1] or abs(vel) > max_velocity or not 0 < vlim <= max_velocity:
-            raise ValueError('passthrough position or velocity outside configured limits')
-        if mode == 0 and (not 0 <= kp <= 500 or not 0 <= kd <= 5 or abs(tau) > max_effort):
-            raise ValueError('passthrough gains or torque outside protocol limits')
+        passthrough_decision(pos, vel, kp, kd, tau, vlim, bounds,
+                             max_velocity, max_effort, mode).require_allowed()
 
     @device_request(resource='arm', ttl=.25)
     def send_joint_motor_cmd(self, joint_name: str, cmd, arbitration="reject") -> None:
@@ -1599,12 +1597,10 @@ class HardwareManager:
                 raise KeyError(f"unknown joint: {joint_name}")
 
             task = getattr(getattr(self, '_arm_trajectory', None), 'task', None)
-            if ((task is not None and not task.event.is_set())
-                    or self.gravity_compensation_active()):
-                if arbitration != 'preempt':
-                    raise RuntimeError('arm resource busy')
-                # 模式交接与保持确认也在本请求内完成，不允许透传越过拖动任务。
-                self.stop_active_motion(task)
+            busy = ((task is not None and not task.event.is_set())
+                    or self.gravity_compensation_active())
+            if busy and arbitration != 'preempt':
+                raise RuntimeError('arm resource busy')
             mot = self._backend.joint_device(joint_name)
             jc = self._backend.joint_configuration(joint_name)
             feedback_failure = self._arm_feedback_failure_reason()
@@ -1612,20 +1608,29 @@ class HardwareManager:
                 raise RuntimeError(feedback_failure)
             state = self._verified_feedback_sample(joint_name).state
 
-            pos = float(cmd.pos) if cmd.use_pos else float(state.pos if state is not None else 0.0)
-            vel = float(cmd.vel) if cmd.use_vel else float(state.vel if state is not None else 0.0)
-            kp = float(cmd.kp) if cmd.use_kp else float(jc.kp)
-            kd = float(cmd.kd) if cmd.use_kd else float(jc.kd)
-            tau = float(cmd.tau) if cmd.use_tau else 0.0
-            vlim = float(cmd.vlim) if cmd.use_vlim else float(jc.vlim)
+            def values_from(sample):
+                return (float(cmd.pos) if cmd.use_pos else float(sample.pos),
+                        float(cmd.vel) if cmd.use_vel else float(sample.vel),
+                        float(cmd.kp) if cmd.use_kp else float(jc.kp),
+                        float(cmd.kd) if cmd.use_kd else float(jc.kd),
+                        float(cmd.tau) if cmd.use_tau else 0.,
+                        float(cmd.vlim) if cmd.use_vlim else float(jc.vlim))
 
-            if hasattr(self._backend, 'requests'):
-                self._validate_passthrough_values(pos, vel, kp, kd, tau, vlim,
+            values = values_from(state)
+            passthrough_decision(*values,
+                _JOINT_POSITION_LIMITS_RAD[joint_name], jc.vlim,
+                float(self._gc_torque_limits[self.joint_names.index(joint_name)]),
+                int(cmd.mode), device_mode='pos_vel' if busy else self.mode).require_allowed()
+            if busy:
+                # 无效命令不得取消原任务；完成准入后才交接资源并确认保持。
+                self.stop_active_motion(task)
+                # 停止可能耗时且切回 POS_VEL；默认反馈值须取停止后的新快照。
+                values = values_from(self._verified_feedback_sample(joint_name).state)
+                passthrough_decision(*values,
                     _JOINT_POSITION_LIMITS_RAD[joint_name], jc.vlim,
-                    float(self._gravity_model.model.effortLimit[self.joint_names.index(joint_name)]), int(cmd.mode))
-                expected_mode = {0:'mit', 1:'pos_vel', 2:'vel'}.get(int(cmd.mode))
-                if expected_mode != self.mode:
-                    raise ValueError('passthrough mode does not match explicit device mode')
+                    float(self._gc_torque_limits[self.joint_names.index(joint_name)]),
+                    int(cmd.mode), device_mode=self.mode).require_allowed()
+            pos, vel, kp, kd, tau, vlim = values
             try:
                 if int(cmd.mode) == 0:
                     mot.send_mit(pos, vel, kp, kd, tau)
@@ -2213,9 +2218,8 @@ class HardwareManager:
             raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
         if mode == 2 and not hasattr(self._gripper_mot, "send_vel"):
             raise RuntimeError("gripper does not support send_vel")
-        if hasattr(self._backend, 'requests'):
-            self._validate_passthrough_values(pos, vel, kp, kd, tau, vlim,
-                (_G_ANGLE_OPEN, 0.), self._gripper_cfg.vlim, _G_TAU_MAX, mode)
+        self._validate_passthrough_values(pos, vel, kp, kd, tau, vlim,
+            (_G_ANGLE_OPEN, 0.), self._gripper_cfg.vlim, _G_TAU_MAX, mode)
         with self._gripper_lock:
             if (self._gripper_active or self._gripper_neutral_pending is not None) and arbitration != 'preempt':
                 raise RuntimeError('gripper resource busy')
@@ -2231,9 +2235,8 @@ class HardwareManager:
             self._gripper_position_result = "failed"
             self._gripper_neutral_pending = None
             try:
-                if hasattr(self._backend, 'requests'):
-                    from motorbridge import Mode
-                    self._gripper_mot.ensure_mode({0:Mode.MIT, 1:Mode.POS_VEL, 2:Mode.VEL}[mode], 1000)
+                from motorbridge import Mode
+                self._gripper_mot.ensure_mode({0:Mode.MIT, 1:Mode.POS_VEL, 2:Mode.VEL}[mode], 1000)
                 if mode == 0:
                     self._gripper_mot.send_mit(pos, vel, kp, kd, tau)
                 elif mode == 1:
@@ -2241,8 +2244,7 @@ class HardwareManager:
                 else:
                     self._gripper_mot.send_vel(vel)
             except Exception as exc:
-                if hasattr(self._backend, 'requests'):
-                    self._protective_disable_from_hardware_loop(str(exc), category='COMMAND')
+                self._protective_disable_from_hardware_loop(str(exc), category='COMMAND')
                 raise
             self._gripper_passthrough_until = time.monotonic() + .25
 
@@ -2346,26 +2348,38 @@ class HardwareManager:
             self._gravity_next_log = started + 5.
 
     def _protective_disable_from_hardware_loop(self, reason: str, *, category: str = 'FEEDBACK') -> None:
-        """停止周期输出并请求保护失能；保留设备线程采集反馈，不在自身 join。"""
+        """每个故障会话只请求一次保护失能；确认失能前保留未知状态。
+
+        先锁存，避免空闲采集或重入错误路径每周期重复写总线。即使发送失败也不
+        自动重试；操作员可显式调用 disable 重试，只有新鲜失能反馈才解除锁存。
+        """
+        if not self._command_guard.begin_protection(reason, category):
+            return
         message = str(reason)
         self._arm_passthrough_until = self._gripper_passthrough_until = None
-        if hasattr(self._backend, 'requests'):
-            self._backend.requests.invalidate('device', 'arm', 'gripper')
-        with self._gripper_lock:
-            if self._gripper_active:
-                self._fail_active_gripper_command_locked(message)
-            if self._gripper_neutral_pending is not None:
-                if not self._emit_pending_gripper_neutral_locked():
-                    self._error_codes.append(
-                        "FEEDBACK_PROTECTIVE_NEUTRAL_FAILED"
-                    )
-
-        # 只停止周期输出；失能在当前设备线程执行，不 join 或另开写入线程。
-        self._backend.request_loop_stop()
-        if hasattr(self, '_arm_trajectory') and self._arm_trajectory.task is not None:
-            self._arm_trajectory.finish(self._arm_trajectory.task, 'aborted', message)
-        self._backend.set_execution_running(False)
-        self._backend.cancel_trajectory()
+        # 先停止输出。任务收尾出错也必须继续尝试失能，不能因锁存而漏发首个保护命令。
+        preparation_errors = []
+        def attempt(label, operation):
+            try:
+                operation()
+            except Exception as exc:
+                preparation_errors.append(f'{label}: {exc}')
+        attempt('stop output', self._backend.request_loop_stop)
+        attempt('invalidate requests', lambda: self._backend.requests.invalidate('device', 'arm', 'gripper'))
+        try:
+            with self._gripper_lock:
+                if self._gripper_active:
+                    self._fail_active_gripper_command_locked(message)
+                if self._gripper_neutral_pending is not None:
+                    if not self._emit_pending_gripper_neutral_locked():
+                        self._error_codes.append("FEEDBACK_PROTECTIVE_NEUTRAL_FAILED")
+        except Exception as exc:
+            preparation_errors.append(f'gripper stop: {exc}')
+        owner = getattr(self, '_arm_trajectory', None)
+        if owner is not None and owner.task is not None:
+            attempt('finish arm task', lambda: owner.finish(owner.task, 'aborted', message))
+        attempt('stop execution', lambda: self._backend.set_execution_running(False))
+        attempt('cancel trajectory', self._backend.cancel_trajectory)
         self._gravity_comp_active = False
         self._gravity_comp_q_target = None
         self._gravity_comp_integral = None
@@ -2374,19 +2388,25 @@ class HardwareManager:
         code = f'{category}_PROTECTIVE_DISABLE'
         if code not in self._error_codes:
             self._error_codes.append(code)
+        if preparation_errors:
+            self._error_codes.append(f'{category}_PROTECTIVE_PREPARE_FAILED: ' + '; '.join(preparation_errors))
 
         controllers: list[object] = []
-        for controller in self._backend.controllers():
-            if all(controller is not existing for existing in controllers):
-                controllers.append(controller)
+        disable_errors: list[str] = []
+        try:
+            for controller in self._backend.controllers():
+                if all(controller is not existing for existing in controllers):
+                    controllers.append(controller)
+        except Exception as exc:
+            disable_errors.append(f'controller lookup: {exc}')
         if self._gripper_ctrl is not None and all(
             self._gripper_ctrl is not controller for controller in controllers
         ):
             controllers.append(self._gripper_ctrl)
-        disable_errors: list[str] = []
         for controller in controllers:
             disable_all = getattr(controller, "disable_all", None)
             if not callable(disable_all):
+                disable_errors.append(f'{type(controller).__name__}: disable_all unavailable')
                 continue
             try:
                 disable_all()
@@ -2448,9 +2468,6 @@ class HardwareManager:
 
     def _stop_control_loop(self) -> None:
         self._backend.stop_control_loop()
-        thread = self._backend.control_thread
-        if (not hasattr(self._backend, 'requests') and thread is not None and thread.is_alive()):
-            raise RuntimeError('hardware writer did not stop; refusing a second writer')
         self._backend.set_execution_running(False)
         owner = getattr(self, '_arm_trajectory', None)
         if owner is not None and owner.task is not None:
@@ -2500,7 +2517,7 @@ class HardwareManager:
     @device_request(resource='gripper', priority=0)
     def cancel_gripper_position_command(self, *args, **kwargs):
         canceled = self._gripper_execution.cancel_gripper_position_command(*args, **kwargs)
-        if canceled and hasattr(self._backend, 'requests'):
+        if canceled:
             self._backend.requests.invalidate('gripper')
         return canceled
 

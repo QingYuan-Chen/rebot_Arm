@@ -26,7 +26,6 @@ class ControllerRuntime:
         self.execution = ArmExecution()
         self.position = ArmPositionControl(j.vlim for j in config.joints)
         self.kinematics = kinematics
-        self.feedback_reader = None
         self.on_error = None
         self.last_error = None
         self._stop = threading.Event()
@@ -73,7 +72,6 @@ class ControllerRuntime:
     def target_generation(self): return self.execution.generation
     def target(self): return self.execution.target()
     def cancel_trajectory(self): self.execution.cancel()
-    def join_sender(self): pass  # 没有独立发送线程，取消操作同步完成。
     @property
     def trajectory_moving(self): return self.execution.moving
     @property
@@ -109,9 +107,6 @@ class ControllerRuntime:
     def mode_vel(self): return self.driver.set_mode('vel')
     def set_zero_single(self,name): return self.driver.set_zero((name,))
     def set_zero(self): return self.driver.set_zero()
-    def get_state(self):
-        if self.feedback_reader is None: raise RuntimeError('verified feedback reader unavailable')
-        raise RuntimeError('hardware is not connected; waiting for verified first frame')
     def current_pose_values(self,q): return self.kinematics.pose(q)
 
     def position_tick(self,_runtime,dt):

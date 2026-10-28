@@ -1,11 +1,15 @@
-"""Legacy-shaped fake seam for the retained manager behavior regressions only."""
+"""保留旧行为样本的设备替身；实现运行时接口，不改变生产准入条件。"""
 import threading
 import numpy as np
+from rebotarmcontroller.device_requests import DeviceRequests
 
 class FakeBackend:
     def __init__(self, arm, endpos):
         self._arm=arm
         self._endpos=endpos
+        self.requests = DeviceRequests()
+        self.in_writer = True
+        self._waiting = False
 
     @property
     def joint_names(self): return list(self._arm.joint_names)
@@ -87,7 +91,11 @@ class FakeBackend:
     def start_control_loop(self,callback,rate=None):
         if rate is None: self._arm.start_control_loop(callback)
         else: self._arm.start_control_loop(callback,rate=rate)
-    def stop_control_loop(self): self._arm.stop_control_loop()
+    def stop_control_loop(self):
+        self._arm.stop_control_loop()
+        thread = self.control_thread
+        if thread is not None and thread.is_alive():
+            raise RuntimeError('hardware writer did not stop; refusing a second writer')
     def request_loop_stop(self): self._arm._running=False
     def patch_bus(self):
         for ctrl in self.controllers(): self._patch_controller_bus(ctrl)

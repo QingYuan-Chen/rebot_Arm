@@ -481,6 +481,120 @@ def test_local_writer_partial_send_cancels_and_protects_shared_bus(monkeypatch,d
     manager.disable();manager.shutdown()
 
 
+@pytest.mark.parametrize('disable_fails', [False, True])
+def test_persistent_stale_feedback_requests_protection_once_until_verified_disable(monkeypatch, caplog, disable_fails):
+    manager, opened = make_local_manager(monkeypatch)
+    manager.connect(); manager.enable()
+    bus = opened[0]
+    bus.fail_disable = disable_fails
+    bus.feedback = False
+    try:
+        wait_until(lambda: bus.disables == 1)
+        # 在真实唯一设备线程推进多个空闲周期，不让一次暂时恢复掩盖重复失能。
+        manager._backend.call(lambda: [manager._runtime_feedback_tick() for _ in range(30)])
+        assert bus.disables == 1
+        assert manager.enabled and manager.lifecycle_state == 'DISABLING'
+        assert not manager.control_loop_active
+        assert sum('protective disable requested' in record.message for record in caplog.records) == 1
+        if disable_fails:
+            assert any('PROTECTIVE_DISABLE_FAILED' in code for code in manager.error_codes)
+        bus.feedback = True
+        bus.fail_disable = False
+        manager._backend.call(lambda: manager.refresh_feedback_if_due(force=True))
+        assert manager._command_guard.protection is not None
+        with pytest.raises(RuntimeError, match='verify disable'):
+            manager.enable()
+        manager.disable()
+        assert manager._command_guard.protection is None
+        manager.enable()
+        before = bus.disables
+        bus.feedback = False
+        wait_until(lambda: bus.disables == before + 1)
+        assert manager.lifecycle_state == 'DISABLING'
+    finally:
+        bus.feedback = True; bus.fail_disable = False
+        manager.disable(); manager.shutdown()
+
+
+def test_protection_cleanup_failure_cannot_skip_disable(monkeypatch):
+    manager, opened = make_local_manager(monkeypatch)
+    manager.connect(); manager.enable()
+    bus = opened[0]
+    cancel = manager._backend.cancel_trajectory
+    def fail():
+        raise RuntimeError('injected cancellation failure')
+    monkeypatch.setattr(manager._backend, 'cancel_trajectory', fail)
+    try:
+        manager._backend.call(lambda: manager._protective_disable_from_hardware_loop('fault'))
+        assert bus.disables == 1 and manager.lifecycle_state == 'DISABLING'
+        assert not manager.control_loop_active
+        assert any('PROTECTIVE_PREPARE_FAILED' in code for code in manager.error_codes)
+    finally:
+        monkeypatch.setattr(manager._backend, 'cancel_trajectory', cancel)
+        manager.disable(); manager.shutdown()
+
+
+@pytest.mark.parametrize('resource', ['arm', 'gripper'])
+@pytest.mark.parametrize('field,value', [('pos', float('nan')), ('pos', 99.), ('vel', 99.), ('kp', 501.), ('tau', 99.)])
+def test_invalid_passthrough_cannot_preempt_active_task(monkeypatch, resource, field, value):
+    manager, opened = make_local_manager(monkeypatch)
+    manager.connect(); manager.enable()
+    bus = opened[0]
+    command = SimpleNamespace(mode=1 if resource == 'arm' else 0,
+        **{f'use_{key}': True for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')},
+        pos=0., vel=0., kp=1., kd=.1, tau=0., vlim=.3)
+    # MIT 增益与力矩只在 MIT 命令中约束；无效请求仍不得取消正在运行的轨迹。
+    if resource == 'arm' and field in ('kp', 'tau'):
+        command.mode = 0
+    setattr(command, field, value)
+    try:
+        if resource == 'arm':
+            task = manager.submit_arm_trajectory(manager.joint_names,
+                [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., 10.])
+            generation = manager._backend.target_generation
+            count = len(bus.events)
+            with pytest.raises(ValueError):
+                manager.send_joint_motor_cmd('joint1', command, arbitration='preempt')
+            assert manager._backend.target_generation == generation
+            assert not task.event.is_set()
+        else:
+            manager.set_gripper_target(.04)
+            generation = manager._gripper_execution._generation
+            count = len(bus.events)
+            with pytest.raises(ValueError):
+                manager.send_gripper_motor_cmd(command, arbitration='preempt')
+            assert manager._gripper_execution._generation == generation
+        assert not any(method in ('mode', 'disable') for _, method, _ in bus.events[count:])
+    finally:
+        manager.disable(); manager.shutdown()
+
+
+def test_valid_passthrough_preempt_uses_feedback_after_stop_confirmation(monkeypatch):
+    manager, opened = make_local_manager(monkeypatch)
+    manager.connect(); manager.enable()
+    bus = opened[0]
+    task = manager.submit_arm_trajectory(manager.joint_names,
+        [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., 10.])
+    command = SimpleNamespace(mode=1,
+        **{f'use_{key}': False for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')})
+    original = manager._confirm_arm_hold
+    def stopped(current):
+        original(current)
+        # 模拟停止确认后才收到的位置变化；未显式指定的位置不得沿用抢占前快照。
+        bus.motors[0].state.pos = .012
+        manager.refresh_feedback_if_due(force=True)
+    monkeypatch.setattr(manager, '_confirm_arm_hold', stopped)
+    try:
+        manager.send_joint_motor_cmd('joint1', command, arbitration='preempt')
+        assert task.event.is_set() and manager.arm_execution_status(task).state == 'canceled'
+        sent = [args for number, method, args in bus.events if number == 1 and method == 'position']
+        assert sent[-1][0] == pytest.approx(.012)
+        assert manager.state_machine == 'LOWLEVEL_STREAMING'
+        assert manager.enabled
+    finally:
+        manager.disable(); manager.shutdown()
+
+
 def test_fk_canonical_matches_legacy_at_identical_inputs():
     root=Path(__file__).resolve().parents[1]
     spec=importlib.util.spec_from_file_location('controller_fk_probe',root/'scripts/check_controller_fk.py')

@@ -12,6 +12,7 @@ import pytest
 import rebotarmcontroller.hardware_manager as hardware_manager_module
 from controller_fake_backend import FakeBackend
 from rebotarmcontroller.configuration import load_configuration
+from rebotarmcontroller.command_guard import CommandGuard
 from rebotarmcontroller.hardware_manager import (
     HardwareManager,
     _JOINT_POSITION_LIMITS_RAD,
@@ -62,6 +63,9 @@ class FakeMotor:
 
     def set_zero_position(self) -> None:
         self.set_zero_position_calls += 1
+
+    def ensure_mode(self, *_args) -> None:
+        pass
 
 
 class FakeController:
@@ -163,6 +167,8 @@ def make_manager(
             f"[0.05, {_G_LARGE_MOVE_MAX_TAU_CAP_NM:g}] N.m"
         )
     manager = HardwareManager.__new__(HardwareManager)
+    manager._command_guard = CommandGuard()
+    manager._gc_torque_limits = np.array([27., 27., 27., 7., 7., 7.])
     manager._gripper_position_torque_cap_nm = requested_cap
     manager._gripper_position_max_speed_rad_s = float(gripper_position_max_speed_rad_s)
     manager._gripper_position_timeout_margin_sec = float(gripper_position_timeout_margin_sec)
@@ -198,6 +204,8 @@ def make_manager(
     )
     manager._backend = FakeBackend(manager.test_arm, manager.test_endpos)
     manager._configuration = load_configuration()
+    manager.test_arm._joints = [SimpleNamespace(**(vars(joint) | {'vendor': 'fake'}))
+                               for joint in manager._configuration.joints]
     manager._connected = False
     manager._enabled = False
     manager._lifecycle_state = "DISCONNECTED"
@@ -963,14 +971,14 @@ def test_connect_keeps_all_motors_disabled_and_does_not_start_control() -> None:
     assert manager.get_joint_status_codes() == [0] * 6
 
 
-def test_disabled_joint_state_reads_request_fresh_feedback() -> None:
+def test_disabled_joint_state_reads_use_cache_without_bus_transaction() -> None:
     manager = make_manager()
     manager.connect()
     requests_before = manager.test_arm._motor_map["joint1"].request_feedback_calls
 
     manager.get_joint_state()
 
-    assert manager.test_arm._motor_map["joint1"].request_feedback_calls == requests_before + 1
+    assert manager.test_arm._motor_map["joint1"].request_feedback_calls == requests_before
 
 
 def test_enabled_joint_state_reads_use_control_loop_cache() -> None:

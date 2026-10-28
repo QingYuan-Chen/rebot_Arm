@@ -39,9 +39,6 @@ import yaml
 
 # 模型必须保留这六个关节的名称、顺序和坐标定义，不能通过偏移反馈来适配模型。
 JOINT_NAMES = tuple(f"joint{i}" for i in range(1, 7))
-# 模型加载时逐轴核对的硬件位置范围（rad），不是在此对输入关节角做裁剪。
-POSITION_LIMITS = ((-2.8, 2.8), (-3.14, .02), (-3.14, .02),
-                   (-1.87, 1.57), (-1.57, 1.57), (-3.14, 3.14))
 
 
 def vector(value, size, label):
@@ -304,6 +301,30 @@ def package_file(package, relative):
     if not path.is_file():
         raise FileNotFoundError(f'missing {package}/{relative}')
     return path
+
+
+def read_position_limits(path):
+    """按六轴固定顺序读取 URDF 的有限位置范围；缺失或重复关节一律拒绝。"""
+    joints = ET.parse(path).getroot().findall('joint')
+    result = []
+    for name in JOINT_NAMES:
+        matches = [joint for joint in joints if joint.get('name') == name]
+        if len(matches) != 1 or matches[0].get('type') != 'revolute':
+            raise ValueError(f'{name} must be a unique bounded revolute joint')
+        limit = matches[0].find('limit')
+        try:
+            bounds = (float(limit.get('lower')), float(limit.get('upper')))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(f'{name} is missing finite position limits') from exc
+        if not np.isfinite(bounds).all() or bounds[0] >= bounds[1]:
+            raise ValueError(f'{name} has invalid position limits')
+        result.append(bounds)
+    return tuple(result)
+
+
+# 所有控制与反馈边界共享规范模型的只读数值；导入仅解析资源，不连接设备。
+# 显式加载的其他动力学模型仍须与此规范范围逐轴一致，不可借模型覆盖扩大限位。
+POSITION_LIMITS = read_position_limits(package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'))
 
 
 class GravityExecutionState:

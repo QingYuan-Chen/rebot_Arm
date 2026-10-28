@@ -29,6 +29,10 @@ ROS 通过 manager 的提交、取消和只读进度接口交互，不推进执�
 计算归 `gravity_control.py`，设备切换仍由 manager 协调。全部模块平铺包根目录；C++ 后续归属见
 [拆分规划](../design/controller_refactor_plan.md)。
 
+`command_guard.py` 已接管透传准入与故障保护锁存，位置边界统一读取规范 URDF。
+manager 仍持有生命周期事务、重力周期协调和可写私有状态转发，尚未收敛为纯门面；
+完整保护分类、独立组件装配及停止确认周期化须在 C++ 迁移前完成。
+
 负责：
 
 - 电机 SDK / 串口通道访问

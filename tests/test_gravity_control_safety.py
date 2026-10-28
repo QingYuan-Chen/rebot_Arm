@@ -94,6 +94,35 @@ def test_model_rejects_wrong_joint_coordinates_before_hardware(tmp_path):
         load_gravity_model(bad, GravitySettings())
 
 
+@pytest.mark.parametrize('attributes', [dict(lower='nan', upper='2.8'),
+                                      dict(lower='2.8', upper='-2.8'), dict(lower='-2.8')])
+def test_model_limit_parser_rejects_incomplete_nonfinite_or_reversed_ranges(tmp_path, attributes):
+    from xml.etree import ElementTree as ET
+    from rebotarmcontroller.gravity_control import read_position_limits
+    path = tmp_path / 'bad.urdf'
+    tree = ET.parse(URDF)
+    limit = tree.find("joint[@name='joint1']/limit")
+    limit.attrib.clear()
+    limit.attrib.update(attributes)
+    tree.write(path)
+    with pytest.raises(ValueError, match='joint1.*limit'):
+        read_position_limits(path)
+
+
+def test_model_limit_parser_reads_values_and_rejects_duplicate_joint(tmp_path):
+    from rebotarmcontroller.gravity_control import POSITION_LIMITS, read_position_limits
+    from rebotarmcontroller.feedback_acquisition import _JOINT_POSITION_LIMITS_RAD
+    path = tmp_path / 'changed.urdf'
+    path.write_text(URDF.read_text().replace('lower="-2.8"', 'lower="-2.7"'))
+    assert read_position_limits(path)[0] == (-2.7, 2.8)
+    assert tuple(_JOINT_POSITION_LIMITS_RAD.values()) == POSITION_LIMITS
+    with pytest.raises(TypeError):
+        _JOINT_POSITION_LIMITS_RAD['joint1'] = (-99., 99.)
+    path.write_text(URDF.read_text().replace('</robot>', '<joint name="joint1" type="revolute"/></robot>'))
+    with pytest.raises(ValueError, match='joint1.*unique'):
+        read_position_limits(path)
+
+
 def test_settings_reject_unknown_fields_and_invalid_payload(tmp_path):
     bad = tmp_path / 'settings.yaml'
     bad.write_text('payload_mass_kg: -1\n')

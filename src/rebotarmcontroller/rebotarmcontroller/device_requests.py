@@ -108,14 +108,14 @@ class DeviceRequests:
 def device_request(*, resource='device', priority=10, ttl=2., invalidate=()):
     """兼容门面的同步入口：复制输入后排队，运行时内部的嵌套调用直接执行。
 
-    无运行时的测试替身仍可验证局部算法；正式 HardwareManager 始终装配运行时。
     装饰器必须位于生命周期锁外，避免调用者持锁等待而写入线程反向等待该锁。
+    所有装配必须提供同一运行时契约；算法测试应直接使用对应组件，不能绕过准入。
     """
     def decorate(method):
         @wraps(method)
         def wrapped(self, *args, **kwargs):
             runtime = self._backend
-            if not hasattr(runtime, 'requests') or runtime.in_writer:
+            if runtime.in_writer:
                 return method(self, *args, **kwargs)
             values, options = copy.deepcopy(args), copy.deepcopy(kwargs)
             result = runtime.call(lambda: method(self, *values, **options),

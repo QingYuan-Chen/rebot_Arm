@@ -14,6 +14,8 @@ import threading
 import time
 from typing import Sequence
 import numpy as np
+from types import MappingProxyType
+from .gravity_control import JOINT_NAMES, POSITION_LIMITS
 from .controller_contracts import MotorFeedback, VerifiedFeedbackSample as _VerifiedFeedbackSample, CachedMotorFeedback as _CachedMotorFeedback
 
 _LOG = logging.getLogger('rebotarmcontroller.hardware_manager')
@@ -21,10 +23,8 @@ _FEEDBACK_REFRESH_RETRIES = 3
 _FEEDBACK_RETRY_INTERVAL_SEC = 0.05
 _UINT64_MAX = (1 << 64) - 1
 _UINT64_HALF_RANGE = 1 << 63
-_JOINT_POSITION_LIMITS_RAD = {
-    'joint1': (-2.8, 2.8), 'joint2': (-3.14, 0.02), 'joint3': (-3.14, 0.02),
-    'joint4': (-1.87, 1.57), 'joint5': (-1.57, 1.57), 'joint6': (-3.14, 3.14),
-}
+# 与驱动、六轴目标及重力模型共用规范 URDF；只读映射防止消费者修改安全边界。
+_JOINT_POSITION_LIMITS_RAD = MappingProxyType(dict(zip(JOINT_NAMES, POSITION_LIMITS)))
 
 class _FeedbackValidationError(RuntimeError):
     """保留采集失败分类，供状态发布与故障判断使用。"""
