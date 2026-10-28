@@ -22,19 +22,28 @@
 `arm_position_control.py` 生成位置命令，`controller_kinematics.py` 以规范模型计算 FK。
 ROS 通过 manager 的提交、取消和只读进度接口交互，不推进执行时间轴。
 临时 SDK 桥和路径注入已删除，生产控制器与运动计算不再导入厂商 Python SDK。
-`feedback_acquisition.py` 拥有反馈采集、验证缓存及只读健康判断；manager 通过
-窄回调提供设备分组与夹爪反馈协调。`gripper_execution.py` 持有夹爪执行状态并在
-周期中推进堵转和释放，`gripper_control.py` 计算斜坡和力矩边界；管理器保留
-兼容入口及设备发送。`lifecycle.py` 拥有连接、显式使能及回滚、失能确认、模式切换、
+`feedback_acquisition.py` 拥有反馈采集、验证缓存及只读健康判断，
+`feedback_reader.py` 装配设备分组、提供一致数值快照与兼容查询。
+`gripper_controller.py` 负责夹爪坐标、零位验证、目标准入和发送；
+`gripper_execution.py` 持有夹爪执行状态并在周期中推进堵转和释放，
+`gripper_control.py` 计算斜坡和力矩边界。
+`lifecycle.py` 拥有连接、显式使能及回滚、失能确认、模式切换、
 置零准入和关闭验证事务，以及生命周期状态和关闭策略；通过 `LifecyclePorts`
 注入设备、反馈及执行器接口，不接收整个 manager。夹爪零位连续新帧验证仍由夹爪接口提供。
-重力补偿状态与
-计算归 `gravity_control.py`，设备切换仍由 manager 协调。全部模块平铺包根目录；C++ 后续归属见
+`arm_controller.py` 负责六轴准入、保持、停靠与透传，`arm_stop.py` 按周期确认停止；
+停止请求等待时，运行时继续处理失能请求，旧代次的续体不能发送命令。
+重力补偿状态与计算归 `gravity_control.py`，启停、模式交接与诊断归
+`gravity_controller.py`。`controller_cycle.py` 分发采集和执行，
+`controller_protection.py` 协调设备故障清理及一次保护失能。
+全部模块平铺包根目录；C++ 后续归属见
 [拆分规划](../design/controller_refactor_plan.md)。
 
 `command_guard.py` 已接管透传准入与故障保护锁存，位置边界统一读取规范 URDF。
-manager 已移除生命周期私有状态转发，仍持有重力周期协调、夹爪零位验证及其他可写私有状态转发，尚未收敛为纯门面；
-完整保护分类、独立组件装配及停止确认周期化须在 C++ 迁移前完成。
+`HardwareManager` 只装配组件及转发公开接口，不保存业务状态、不提供可写私有转发或
+惰性装配。正式构造允许注入运行时，离线组件使用假驱动/时钟，与生产遵守同一准入路径。
+`controller_values.py` 补充不可变六轴快照、夹爪接纳和结果，沿用既有目标、命令及回执；
+健康任务失败的 `STOP_HOLD` 与设备故障的 `PROTECTIVE_DISABLE` 均有实际执行路径。
+跨语言对照输入、输出、回执和状态顺序见[对照样本说明](features/controller_reference_samples.md)。
 
 负责：
 

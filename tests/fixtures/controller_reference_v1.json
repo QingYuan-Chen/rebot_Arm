@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "absolute_tolerance": 1e-9,
+  "units": {"position": "rad", "velocity": "rad/s", "torque": "N.m", "time": "monotonic_s"},
+  "arm": [
+    {
+      "name": "fresh_goal_after_final_write",
+      "goal": [0.1, -0.1, -0.1, 0, 0, 0],
+      "steps": [
+        {"time": 0, "feedback": [0, 0, 0, 0, 0, 0], "observed_at": 0, "state": "running", "progress": 0.5},
+        {"time": 1, "feedback": [0.1, -0.1, -0.1, 0, 0, 0], "observed_at": 1, "state": "running", "progress": 1},
+        {"time": 1.1, "feedback": [0.1, -0.1, -0.1, 0, 0, 0], "observed_at": 1.1, "state": "succeeded", "progress": 1}
+      ],
+      "decision": null
+    },
+    {
+      "name": "healthy_goal_timeout_holds_feedback",
+      "goal": [0.1, -0.1, -0.1, 0, 0, 0],
+      "steps": [
+        {"time": 0, "feedback": [0, 0, 0, 0, 0, 0], "observed_at": 0, "state": "running", "progress": 0.5},
+        {"time": 1, "feedback": [0, 0, 0, 0, 0, 0], "observed_at": 1, "state": "running", "progress": 1},
+        {"time": 3.1, "feedback": [0, 0, 0, 0, 0, 0], "observed_at": 3.1, "state": "tolerance", "progress": 1}
+      ],
+      "decision": "stop_hold",
+      "hold": [0, 0, 0, 0, 0, 0]
+    }
+  ],
+  "partial_write": {
+    "goal": [0.1, -0.1, -0.1, 0, 0, 0],
+    "failure_motor": 3,
+    "sent": ["joint1", "joint2"],
+    "failed": "joint3",
+    "not_attempted": ["joint4", "joint5", "joint6"],
+    "progress": 0,
+    "decision": "protective_disable"
+  },
+  "stop": [
+    {"name": "confirmed", "feedback_times": [0.01, 0.12], "clock_times": [0.01, 0.12], "velocity": 0, "state": "confirmed", "decision": null},
+    {"name": "cache_does_not_confirm", "feedback_times": [0.01, 0.01], "clock_times": [0.01, 2.1], "velocity": 0, "state": "timeout", "decision": "stop_hold"},
+    {"name": "moving_does_not_confirm", "feedback_times": [0.01, 2.1], "clock_times": [0.01, 2.1], "velocity": 0.06, "state": "timeout", "decision": "stop_hold"}
+  ],
+  "lifecycle": [
+    {"request": "connect", "state": "CONNECTED_DISABLED", "enabled": false, "writes": ["clear_streams", "connect", "reset", "init_gripper", "feedback_None", "confirmed_disabled"]},
+    {"request": "enable", "state": "ENABLED_HOLD", "enabled": true, "writes": ["feedback_0", "gripper_feedback_0", "target", "mode_pos_vel", "prepare_gripper", "enable", "feedback_1", "gripper_feedback_1", "clear_transport", "start_position"]},
+    {"request": "disable", "state": "CONNECTED_DISABLED", "enabled": false, "writes": ["clear_streams", "stop_gravity", "stop_gripper", "stop_control", "disable", "feedback_0", "gripper_feedback_0", "confirmed_disabled"]},
+    {"request": "shutdown", "state": "DISCONNECTED", "enabled": false, "writes": ["stop_gripper", "stop_gravity", "stop_control", "feedback_0", "gripper_feedback_0", "release"]}
+  ],
+  "gripper": {"start_angle": -1, "goal_angle": -1, "effort": 0.4, "timeout": 2, "command": [-1, 0, 0, 0], "tau_limit": 0.05, "state": "succeeded"}
+}

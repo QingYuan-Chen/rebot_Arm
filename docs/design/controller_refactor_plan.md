@@ -255,19 +255,28 @@ rebotarmcontroller/
 ├── hardware_manager.py        # 现有 API 的兼容门面
 ├── configuration.py           # 参数、范围与资源路径
 ├── controller_contracts.py    # 值类型、请求、结果与故障
+├── controller_values.py       # 六轴快照、夹爪接纳及结果值
+├── controller_parameters.py   # 无状态默认值和兼容常量
 ├── sdk_driver.py              # MotorBridge 设备与总线收发
 ├── controller_kinematics.py   # 规范模型的 FK 薄适配
 ├── controller_runtime.py      # 唯一设备线程与周期调度
 ├── device_requests.py         # 有界请求、优先级、有效期和资源代次
 ├── feedback_acquisition.py    # 反馈采集、缓存、采集错误与只读判断
+├── feedback_reader.py         # 采集装配、成套快照与兼容查询
 ├── lifecycle.py               # 连接、使能与模式状态、关闭策略
-├── command_guard.py           # 拟议：命令准入与保护决策
+├── command_guard.py           # 命令准入、健康失败保持与保护决策
+├── controller_cycle.py        # 周期采集、租约检查及执行分发
+├── controller_protection.py   # 保护清理与一次失能协调
+├── arm_controller.py          # 六轴准入、停靠、保持与透传事务
+├── arm_stop.py                # 发送后的周期静止确认
 ├── arm_position_control.py    # 六轴位置命令
 ├── arm_execution.py           # 六轴目标与轨迹执行
 ├── arm_trajectory.py          # 六轴任务接纳、到位与取消结果
 ├── gripper_control.py         # 夹爪控制算法
 ├── gripper_execution.py       # 夹爪执行状态
+├── gripper_controller.py      # 坐标、零位验证、接纳与发送
 ├── gravity_control.py         # 重力补偿状态、计算与模型工具
+├── gravity_controller.py      # 补偿启停、模式交接及周期诊断
 ├── ros_actions.py             # Action 协议映射
 ├── ros_services.py            # Service 适配
 ├── ros_publishers.py          # 状态发布
@@ -283,12 +292,12 @@ rebotarmcontroller/
 | `default_*_cfg`、SDK 路径查找、`_arm_cfg_with_channel`、构造参数校验 | `configuration.py` 负责配置；默认 YAML 迁入本包，以内存覆盖替代临时文件；完成迁移后删除 SDK 路径注入 | 接受现有构造参数，保留显式路径覆盖；不顺带统一不同入口的默认值 |
 | `init_gripper` 的设备注册、`_patch_*_bus*`、`_wrap_motor_bus`、实际 send/enable/disable/mode/zero 调用 | `SdkMotorDriver` | 提交设备操作；不向外返回可写的 SDK 对象 |
 | `_refresh_feedback_batch`、`_force_feedback_refresh`、`_inspect_pending_feedback`、接收序号基线与 deadline | `FeedbackAcquisition`，由运行时调用驱动 | `refresh_feedback_if_due()` 过渡转发，后续发布端只取快照 |
-| `_verified_feedback_by_label`、采集错误、观测时间、`get_cached_*`、`get_feedback_status` | `FeedbackStore` 持有数据；`feedback_safety.py` 提供只读判断 | 返回现有数值/状态/原因和一致快照 |
-| `connect/enable/disable/set_mode/set_zero/shutdown`、回滚、生命周期字段与置零失败标志 | `LifecycleController` 持有迁移及验证状态；运行时执行设备操作 | 保留公共方法及结果语义；同步等待发生在调用侧 |
-| `hold_current_position/stop_active_motion/safe_home`、速度覆盖及轨迹状态 | `ArmExecution`；回位参数和六轴维度归配置，保持输出归 `ArmPositionControl` | 委托六轴执行，停止结果以实际保持确认为准 |
-| `_gravity_comp_tick`、`_gravity_comp_*`、`_gc_*` | 模型与积分/跟随状态归 `ArmGravityControl`；模式交接归生命周期；时序诊断归运行时 | 启停、目标及诊断查询 |
-| `set_gripper_target/grasp_gripper/wait_gripper_target`、`_gripper_tick`、中性释放与保持 deadline | `GripperExecution` 持有模式、目标、期限、终态；`GripperControl` 持有斜坡和堵转计算状态 | 保留位置/抓取/取消/释放接口及兼容等待函数 |
-| `_hardware_control_tick`、启动/停止循环、保护性失能与低层透传调度 | `ControllerRuntime`；保护条件归 `SafetyPolicy` | 提交请求并查询结果，不执行周期计算 |
+| `_verified_feedback_by_label`、采集错误、观测时间、`get_cached_*`、`get_feedback_status` | `FeedbackAcquisition` 合并持有缓存及健康判断；`FeedbackReader` 提供装配和成套快照 | 返回现有数值/状态/原因和一致快照 |
+| `connect/enable/disable/set_mode/set_zero/shutdown`、回滚及生命周期字段 | `ControllerLifecycle` 通过 `LifecyclePorts` 执行事务；夹爪零位验证归 `GripperController` | 保留公共方法及结果语义；同步等待发生在调用侧 |
+| `hold_current_position/stop_active_motion/safe_home`、速度覆盖及轨迹状态 | `ArmController` 协调 `ArmExecution/ArmTrajectory/ArmStop`；保持输出归 `ArmPositionControl` | 委托六轴执行，停止结果以实际保持确认为准 |
+| `_gravity_comp_tick`、`_gravity_comp_*`、`_gc_*` | `GravityController` 负责交接与诊断，复用 `gravity_control.py` 模型和独立执行状态 | 启停、目标及诊断查询 |
+| `set_gripper_target/grasp_gripper/wait_gripper_target`、`_gripper_tick`、中性释放与保持 deadline | `GripperController` 接纳并发送；`GripperExecution` 持有模式、目标、期限、终态；`GripperControl` 负责有界计算 | 保留位置/抓取/取消/释放接口及兼容等待函数 |
+| `_hardware_control_tick`、启动/停止循环、保护性失能与低层透传调度 | `ControllerRuntime` 唯一线程，`ControllerCycle` 分发，`ControllerProtection` 协调保护，`CommandGuard` 返回决策 | 提交请求并查询结果，不执行周期计算 |
 
 `gripper` 的位置/速度/力矩以反馈快照为准。算法可保留执行一次计算所需的状态，但不另建一份对外健康状态。六轴和夹爪各自持有任务状态，生命周期的整机状态及旧 `ArmStatus.state_machine` 由明确映射生成。
 
@@ -387,6 +396,10 @@ rebotarmcontroller/
 软件通过不能替代实机验收，涉及实机时仍按现场安全及显式授权规则分项验证。
 模块继续平铺包根目录，不建立第二份 SDK，只迁已用能力；IK 与路径生成仍归 motion。
 当前完成项与仍未满足的门统一记在项目状态，不用“结构完成百分比”代替逐项验证。
+
+实现采用已有执行/反馈值类型，加上 `controller_values.py` 的实际跨组件输入与快照；
+不为草案名新增重复空类型。固定数据、容差及运行方法见
+[Python/C++ 对照样本](../implemented/features/controller_reference_samples.md)。
 
 每批复用现有硬件安全、反馈缓存、夹爪完成、重力补偿与协议测试，按新组件边界逐步替换依赖 `HardwareManager.__new__` 和私有字段的夹具；保留原行为断言，明确的行为变化使用修订后的预期。新增测试聚焦资源仲裁、代次失效、停止确认、部分发送和线程交接。实施批次执行仓库规定的分层、完整回归及编译检查；安装区验证确认新增子包实际被打包。实机测试按项目安全边界分项安排。
 
