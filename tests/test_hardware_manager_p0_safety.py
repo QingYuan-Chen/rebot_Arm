@@ -203,14 +203,15 @@ def make_manager(
         _loop_cb=lambda _arm, _dt: None,
     )
     manager._backend = FakeBackend(manager.test_arm, manager.test_endpos)
+    manager._lifecycle = manager._assemble_lifecycle()
     manager._configuration = load_configuration()
     manager.test_arm._joints = [SimpleNamespace(**(vars(joint) | {'vendor': 'fake'}))
                                for joint in manager._configuration.joints]
-    manager._connected = False
-    manager._enabled = False
-    manager._lifecycle_state = "DISCONNECTED"
-    manager._state_machine = "IDLE"
-    manager._error_codes = []
+    manager._lifecycle.connected = False
+    manager._lifecycle.enabled = False
+    manager._lifecycle.state = "DISCONNECTED"
+    manager._lifecycle.execution = "IDLE"
+    manager._lifecycle.errors = []
     manager._gripper_cfg_path = Path("unused-gripper.yaml")
     manager._gripper_cfg = None
     manager._gripper_mot = None
@@ -222,7 +223,6 @@ def make_manager(
     manager._gripper_torque = 0.0
     manager._gripper_lock = threading.RLock()
     manager._feedback_lock = threading.RLock()
-    manager._motor_lifecycle_lock = threading.RLock()
     manager._gravity_comp_active = False
     manager._gravity_comp_q_target = None
     manager._gravity_comp_integral = None
@@ -295,8 +295,8 @@ def configure_gravity_compensation_test(
     positions: np.ndarray,
     velocities: np.ndarray,
 ) -> list[dict[str, object]]:
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     for name, position, velocity in zip(JOINT_NAMES, positions, velocities):
         state = manager.test_arm._motor_map[name].state
         state.pos = float(position)
@@ -466,8 +466,8 @@ class FakeThread:
 
 def test_validated_joint_feedback_uses_verified_cache_only() -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     expected = np.array([0.1, -0.2, -0.3, 0.4, 0.5, -0.6])
     for name, position in zip(JOINT_NAMES, expected):
         manager.test_arm._motor_map[name].state.pos = float(position)
@@ -488,7 +488,7 @@ def test_validated_joint_feedback_uses_verified_cache_only() -> None:
 
 def test_joint_status_codes_use_verified_cache_only() -> None:
     manager = make_manager()
-    manager._connected = True
+    manager._lifecycle.connected = True
     before = seed_verified_feedback(manager, arm_status=1)
     forbid_raw_feedback_reads(manager)
 
@@ -498,8 +498,8 @@ def test_joint_status_codes_use_verified_cache_only() -> None:
 
 def test_cached_joint_sample_exposes_verified_identity_without_serial_reads() -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     before = seed_verified_feedback(manager, arm_status=1)
     forbid_raw_feedback_reads(manager)
     positions, velocities, torques, statuses, identity, observed_at = manager.get_cached_joint_sample()
@@ -514,7 +514,7 @@ def test_validated_gripper_status_uses_verified_cache_after_refresh(
     monkeypatch,
 ) -> None:
     manager = make_manager()
-    manager._connected = True
+    manager._lifecycle.connected = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     manager._gripper_mot = FakeMotor(position=gripper_state.pos)
     manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
@@ -533,7 +533,7 @@ def test_validated_gripper_status_uses_verified_cache_after_refresh(
 
 def test_gripper_publication_uses_verified_cache_only() -> None:
     manager = make_manager()
-    manager._connected = True
+    manager._lifecycle.connected = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     manager._gripper_mot = FakeMotor(position=gripper_state.pos)
     manager._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
@@ -550,8 +550,8 @@ def test_gripper_publication_uses_verified_cache_only() -> None:
 
 def test_gripper_target_start_uses_verified_cache_only() -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     manager._gripper_mot = FakeMotor(position=gripper_state.pos)
@@ -572,8 +572,8 @@ def test_gripper_target_start_uses_verified_cache_only() -> None:
 
 def test_joint_motor_command_defaults_use_verified_cache_only() -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     state = manager.test_arm._motor_map["joint1"].state
     state.pos = 0.25
     state.vel = -0.5
@@ -608,8 +608,8 @@ def test_joint_motor_command_defaults_use_verified_cache_only() -> None:
 
 def test_gripper_motor_command_defaults_use_verified_cache_only() -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     commands: list[tuple[float, ...]] = []
     manager._gripper_mot = FakeMotor(position=gripper_state.pos)
@@ -654,8 +654,8 @@ def test_gripper_tick_uses_verified_cache_only() -> None:
         goal=-4.0,
         effort=1.0,
     )
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     gripper_state = SimpleNamespace(pos=-0.5, vel=0.0, torq=0.0, status_code=1)
     before = seed_verified_feedback(
         manager,
@@ -795,7 +795,7 @@ def test_outer_hardware_tick_protects_on_arm_feedback_loss(
     manager._gravity_comp_active = True
     manager._gravity_comp_q_target = positions.copy()
     manager._gravity_comp_integral = np.zeros(6, dtype=np.float64)
-    manager._lifecycle_state = "ENABLED_HOLD"
+    manager._lifecycle.state = "ENABLED_HOLD"
     manager.test_arm._running = True
     manager.test_endpos._stop_send = threading.Event()
     manager.test_endpos._moving = True
@@ -871,8 +871,8 @@ def test_outer_hardware_tick_protects_when_scheduler_raises_feedback_error(
     monkeypatch,
 ) -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     manager.test_arm._running = True
     manager._arm_feedback_error = None
 
@@ -901,8 +901,8 @@ def test_outer_hardware_tick_reraises_non_feedback_callback_failure(
     monkeypatch,
 ) -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     seed_verified_feedback(manager, arm_status=1)
     monkeypatch.setattr(manager, "refresh_feedback_if_due", lambda **_kwargs: True)
 
@@ -935,8 +935,8 @@ def test_outer_hardware_tick_orders_feedback_before_arm_and_gripper(
     monkeypatch,
 ) -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     seed_verified_feedback(manager, arm_status=1)
     events: list[str] = []
     monkeypatch.setattr(
@@ -1057,7 +1057,7 @@ def test_stop_active_motion_is_safe_during_concurrent_disable() -> None:
     manager.enable()
     disable_started = threading.Event()
     allow_disable = threading.Event()
-    original_disable_all_motors = manager._disable_all_motors
+    original_disable_all_motors = manager.test_arm.disable
     errors: list[BaseException] = []
 
     def delayed_disable_all_motors() -> None:
@@ -1071,7 +1071,7 @@ def test_stop_active_motion_is_safe_during_concurrent_disable() -> None:
         except BaseException as exc:  # pragma: no cover - assertion reports details
             errors.append(exc)
 
-    manager._disable_all_motors = delayed_disable_all_motors
+    manager.test_arm.disable = delayed_disable_all_motors
     disable_thread = threading.Thread(
         target=record_errors,
         args=(manager.disable,),
@@ -1103,7 +1103,7 @@ def test_joint_state_read_waits_for_disable_transition() -> None:
     manager.enable()
     disable_started = threading.Event()
     allow_disable = threading.Event()
-    original_disable_all_motors = manager._disable_all_motors
+    original_disable_all_motors = manager.test_arm.disable
     errors: list[BaseException] = []
     reads: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
 
@@ -1124,7 +1124,7 @@ def test_joint_state_read_waits_for_disable_transition() -> None:
         except BaseException as exc:  # pragma: no cover - assertion reports details
             errors.append(exc)
 
-    manager._disable_all_motors = delayed_disable_all_motors
+    manager.test_arm.disable = delayed_disable_all_motors
     disable_thread = threading.Thread(target=disable)
     read_thread = threading.Thread(target=read_joint_state)
 
@@ -1368,8 +1368,8 @@ def test_gripper_target_does_not_create_an_independent_control_thread(
 ) -> None:
     """Removing the shared-loop backport must recreate the extra 500 Hz writer."""
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     manager._gripper_loop_running = False
     manager._gripper_loop_thread = None
@@ -1407,8 +1407,8 @@ def test_arm_control_callback_also_emits_active_gripper_command() -> None:
         goal=-4.0,
         effort=1.0,
     )
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     seed_verified_feedback(manager, arm_status=1)
 
     manager._start_pos_vel_loop(target=np.zeros(6))
@@ -1947,8 +1947,8 @@ def test_gripper_position_move_applies_configured_torque_cap() -> None:
 
 def test_gripper_position_target_advances_by_configured_speed_ramp(monkeypatch) -> None:
     manager = make_manager(gripper_position_torque_cap_nm=1.0)
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     commands = _configure_gripper_position_move(
         manager,
@@ -1974,8 +1974,8 @@ def test_gripper_position_target_advances_by_configured_speed_ramp(monkeypatch) 
 
 def test_gripper_position_timeout_scales_with_command_distance() -> None:
     manager = make_manager(gripper_position_max_speed_rad_s=0.5)
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     _configure_gripper_position_move(manager, position=-1.0, goal=-1.0)
     manager._start_gripper_loop = lambda: None
@@ -1990,8 +1990,8 @@ def test_gripper_position_timeout_scales_with_command_distance() -> None:
 
 def test_gripper_position_command_logs_command_feedback_and_timing(monkeypatch) -> None:
     manager = make_manager(gripper_position_torque_cap_nm=1.0)
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     _configure_gripper_position_move(manager, position=-1.0, goal=-1.0)
     manager._start_gripper_loop = lambda: None
@@ -2090,8 +2090,8 @@ def test_stale_gripper_feedback_stops_ramp_before_next_target(monkeypatch) -> No
 
 def test_grasp_rejects_stale_feedback_before_sending_close_command() -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     commands = _configure_gripper_position_move(
         manager,
@@ -2284,7 +2284,7 @@ def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fau
         assert manager._gripper_feedback_error == gripper_error
         assert manager._gripper_feedback_updated_monotonic == updated
 
-    manager._connected = manager._enabled = True
+    manager._lifecycle.connected = manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     with pytest.raises(RuntimeError):
         manager.set_gripper_target(0.01)
@@ -2305,7 +2305,7 @@ def test_gripper_feedback_diagnostics_are_read_only_and_recover(monkeypatch, fau
 
 def test_gripper_motor_fault_is_reported_and_rejected_by_command_gate() -> None:
     manager = make_manager()
-    manager._connected = manager._enabled = True
+    manager._lifecycle.connected = manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     gripper = FakeMotor(position=-1.0)
     gripper.state.status_code = 11
@@ -2376,7 +2376,7 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
     assert (manager._arm_feedback_error, manager._arm_feedback_updated_monotonic) == health
     assert manager.test_arm._ctrl_map["fake"].poll_feedback_calls == polls
 
-    manager._connected = manager._enabled = True
+    manager._lifecycle.connected = manager._lifecycle.enabled = True
     with pytest.raises(RuntimeError):
         manager.send_joint_motor_cmd("joint3", SimpleNamespace())
     assert manager.test_arm.enable_calls == manager.test_arm.disable_calls == 0
@@ -2411,7 +2411,7 @@ def test_gripper_publication_uses_sample_values_and_time_not_control_mirrors() -
 
 def test_arm_publication_preserves_motor_fault_but_motion_still_rejects_it() -> None:
     manager = make_manager()
-    manager._connected = manager._enabled = True
+    manager._lifecycle.connected = manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     seed_verified_feedback(manager, arm_status=11)
     forbid_raw_feedback_reads(manager)
@@ -2606,8 +2606,8 @@ def test_gripper_position_target_uses_full_90mm_range(
     requested_m: float, expected_angle: float,
 ) -> None:
     manager = make_manager()
-    manager._connected = True
-    manager._enabled = True
+    manager._lifecycle.connected = True
+    manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
     manager._gripper_pos = 0.0
     manager._gripper_mot = SimpleNamespace(
@@ -2632,7 +2632,7 @@ def test_gripper_full_open_command_reaches_motor_without_extra_open_margin(monke
     monkeypatch.setattr(hardware_manager_module.time, "monotonic", lambda: clock[0])
     manager = make_manager(gripper_feedback_stale_timeout_sec=2.0)
     commands = _configure_gripper_position_move(manager, position=-4.8, goal=-4.8)
-    manager._connected = manager._enabled = True
+    manager._lifecycle.connected = manager._lifecycle.enabled = True
     manager.test_arm.control_loop_active = True
 
     manager.set_gripper_target(0.09, max_effort=0.15)
@@ -2719,7 +2719,7 @@ def test_set_zero_gripper_rejects_enabled_arm() -> None:
     manager._gripper_mot = FakeMotor(position=0.0)
     manager._gripper_ctrl = FakeController([manager._gripper_mot])
     manager.connect()
-    manager._enabled = True
+    manager._lifecycle.enabled = True
 
     with pytest.raises(RuntimeError, match="CONNECTED_DISABLED"):
         manager.set_zero("gripper")

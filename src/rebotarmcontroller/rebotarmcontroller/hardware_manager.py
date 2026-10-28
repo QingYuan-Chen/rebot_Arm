@@ -5,7 +5,7 @@
 向上提供设备生命周期和执行接口。
 
 主要职责：
-- 连接/断开、使能/失能（真机默认失能，必须显式 enable 才能运动）；
+- 装配生命周期组件并转发连接、使能、失能、模式、置零及关闭请求；
 - 协调反馈组件采集与校验位置、速度、力矩、状态码、时效性及接收序号；
 - 位置-速度（pos_vel）轨迹跟踪、safe_home、trajectory_stop 的落地点；
 - 夹爪的位置移动、抓取闭合与有界保持；
@@ -15,7 +15,7 @@
 并发的关键约定：
 - 所有设备命令、反馈采集和句柄生命周期均经有界请求队列交唯一设备线程；
   驱动的命令锁及共享总线锁继续保护单次事务，端口断言禁止外部线程访问；
-- ``_motor_lifecycle_lock`` 保护连接/使能/失能/置零等生命周期迁移，
+- ``ControllerLifecycle.lock`` 保护连接/使能/失能/置零等生命周期迁移，
   与运动命令互斥；
 - ``_gripper_lock`` 保护夹爪状态机；``_feedback_lock`` 保护已验证反馈样本。
 
@@ -39,7 +39,7 @@ import numpy as np
 from .configuration import HardwareSettings, default_config, load_configuration
 from .feedback_acquisition import FeedbackAcquisition, _FeedbackValidationError, _JOINT_POSITION_LIMITS_RAD
 from .gripper_execution import GripperExecution
-from .lifecycle import ControllerLifecycle
+from .lifecycle import ControllerLifecycle, LifecyclePorts
 from .controller_contracts import (VerifiedFeedbackSample as _VerifiedFeedbackSample,
                                CachedMotorFeedback as _CachedMotorFeedback)
 from .controller_kinematics import ArmKinematics
@@ -143,7 +143,7 @@ class HardwareManager:
     并发的回调模型：运动、生命周期与透传均跑在 ``ControllerRuntime`` 的唯一
     设备线程；同步公共入口在生命周期锁外排队等待结果。ROS 定时器线程只读
     已验证缓存，即使失能也不得同步刷新总线。
-    因此任何跨线程状态都由 ``_motor_lifecycle_lock`` / ``_gripper_lock`` /
+    因此任何跨线程状态都由 ``ControllerLifecycle.lock`` / ``_gripper_lock`` /
     ``_feedback_lock`` 保护。
     """
 
@@ -179,6 +179,7 @@ class HardwareManager:
         self._backend = ControllerRuntime(self._configuration, ArmKinematics(self._gravity_model.model))
         self._backend.idle_callback = self._runtime_feedback_tick
         self._arm_trajectory = ArmTrajectory(self._backend.execution)
+        self._lifecycle = self._assemble_lifecycle()
         self._backend.on_error = lambda exc: self._protective_disable_from_hardware_loop(str(exc),category="CONTROLLER")
         # 重力补偿用的动力学模型：pinocchio 模型 + 数据缓冲 + 末端帧 id，
         # 计算函数和数据缓冲来自同一个权威模型，不再使用 SDK 的另一份 URDF。
@@ -238,13 +239,7 @@ class HardwareManager:
         self._feedback_force_refresh_active = False
         self._arm_feedback_updated_monotonic: float | None = None
         self._arm_feedback_error: str | None = None
-        self._motor_lifecycle_lock = threading.RLock()
 
-        self._connected = False
-        self._enabled = False
-        self._lifecycle_state = "DISCONNECTED"
-        self._state_machine = "IDLE"
-        self._error_codes: list[str] = []
         # 重力补偿运行态：目标关节角、误差积分（抗漂移）、锁定计数与上一帧角度。
         self._gravity_comp_active = False
         self._gravity_comp_q_target: np.ndarray | None = None
@@ -275,11 +270,11 @@ class HardwareManager:
 
     @property
     def enabled(self) -> bool:
-        return self._enabled
+        return self._lifecycle.enabled
 
     @property
     def connected(self) -> bool:
-        return self._connected
+        return self._lifecycle.connected
 
     @property
     def control_loop_active(self) -> bool:
@@ -291,20 +286,20 @@ class HardwareManager:
 
     @property
     def state_machine(self) -> str:
-        return self._state_machine
+        return self._lifecycle.execution
 
     @property
     def lifecycle_state(self) -> str:
-        return self._lifecycle_state
+        return self._lifecycle.state
 
     @property
     def ready_for_motion(self) -> bool:
         # 只有"已连接 + 已使能 + 位于保持或轨迹执行状态"才允许运动；
         # 上层必须以此为准，不得只看 enabled。
         return bool(
-            self._connected
-            and self._enabled
-            and self._lifecycle_state in ("ENABLED_HOLD", "TRAJECTORY_RUNNING")
+            self._lifecycle.connected
+            and self._lifecycle.enabled
+            and self._lifecycle.state in ("ENABLED_HOLD", "TRAJECTORY_RUNNING")
         )
 
     @property
@@ -330,7 +325,7 @@ class HardwareManager:
         """一次只读快照生成 ArmStatus 的状态码与诊断，避免恢复帧混用旧错误。"""
         with self._feedback_lock, self._gripper_lock:
             now = time.monotonic()
-            codes = list(self._error_codes)
+            codes = list(self._lifecycle.errors)
             failure = self._arm_feedback_failure_reason(now=now)
             statuses = [
                 self._cached_motor_feedback_locked(
@@ -418,51 +413,82 @@ class HardwareManager:
     def _gravity_comp_hold_feedforward(self, value):
         self._gravity_execution.hold_feedforward = value
 
-    @property
-    def _lifecycle_owner(self):
-        # 正常构造在线程启动前完成，惰性创建兼容 __new__ 测试夹具。
-        owner = self.__dict__.get('_lifecycle_component')
-        if owner is None:
-            owner = ControllerLifecycle()
-            self.__dict__['_lifecycle_component'] = owner
-        return owner
 
-    @property
-    def _lifecycle_state(self):
-        return self._lifecycle_owner.state
+    def _assemble_lifecycle(self):
+        """只装配明确的组件能力；事务不能反向访问整个 manager。"""
+        return ControllerLifecycle(LifecyclePorts(
+            device=self._backend,
+            joint_feedback=lambda **kw: self._validated_joint_feedback(**kw),
+            gripper_status=lambda status: self._validated_gripper_status(status),
+            gripper_feedback_status=lambda: (None if self._gripper_mot is None else
+                                            int(self._refresh_gripper_feedback().status_code)),
+            gripper_motor=lambda: self._gripper_mot,
+            gripper_coordinate_failure=self._lifecycle_gripper_coordinate_failure,
+            prepare_gripper_enable=self._prepare_gripper_enable,
+            clear_gripper_transport_error=lambda: setattr(self, '_gripper_transport_error', None),
+            reset_session=self._reset_device_session,
+            initialize_gripper=lambda: self.init_gripper(str(self._gripper_cfg_path)),
+            stop_gripper=lambda: self._stop_gripper_loop(),
+            stop_control=lambda: self._stop_control_loop(),
+            stop_gravity=lambda: self.stop_gravity_compensation(),
+            clear_passthrough=self._clear_passthrough,
+            hold=lambda: self.hold_current_position(),
+            start_position=lambda **kw: self._start_pos_vel_loop(**kw),
+            zero_gripper=lambda: self._set_gripper_zero(),
+            confirm_disabled=lambda: self._command_guard.confirm_disabled(),
+            protect=lambda *args, **kw: self._protective_disable_from_hardware_loop(*args, **kw),
+        ))
 
-    @_lifecycle_state.setter
-    def _lifecycle_state(self, value):
-        self._lifecycle_owner.set_state(value)
+    def _lifecycle_gripper_coordinate_failure(self):
+        if self._gripper_mot is not None:
+            with self._gripper_lock:
+                return self._gripper_coordinate_failure_reason_locked()
+        return None
 
-    @property
-    def _state_machine(self):
-        return self._lifecycle_owner.execution
+    def _prepare_gripper_enable(self):
+        if self._gripper_mot is not None:
+            from motorbridge import Mode
+            self._gripper_mot.ensure_mode(Mode.MIT, 1000)
 
-    @_state_machine.setter
-    def _state_machine(self, value):
-        self._lifecycle_owner.set_execution(value, enabled=False)
+    def _clear_passthrough(self, *, arm_only=False):
+        self._arm_passthrough_until = None
+        if not arm_only:
+            self._gripper_passthrough_until = None
+
+    def _reset_device_session(self):
+        """会话装配协调；旧缓存与旧夹爪代次不得跨重连复用。"""
+        with self._feedback_lock:
+            self._verified_feedback_by_label.clear()
+            self._feedback_request_baseline_by_label.clear()
+            self._feedback_request_deadline_by_label.clear()
+            self._feedback_error_by_label.clear()
+            self._feedback_next_refresh_monotonic = None
+            self._arm_feedback_updated_monotonic = None
+            self._arm_feedback_error = None
+            self._gripper_feedback_updated_monotonic = None
+            self._gripper_feedback_error = None
+        with self._gripper_lock:
+            self._gripper_execution.supersede_locked()
+            self._gripper_active = False
+            self._gripper_mode = "idle"
+            self._gripper_neutral_pending = None
+            self._gripper_hold_deadline = None
+            self._gripper_target_deadline_monotonic = None
+            self._gripper_transport_error = None
+
 
     def set_state_machine(self, state: str) -> None:
         """更新执行状态并同步生命周期；禁用过渡期间不能重新标记为保持。"""
-        self._lifecycle_owner.set_execution(state, enabled=self._enabled)
+        self._lifecycle.set_execution(state, enabled=self._lifecycle.enabled)
 
-    def _set_lifecycle_state(self, state: str) -> None:
-        self._lifecycle_owner.set_state(state)
 
     def _require_connected(self) -> None:
-        if not self._connected:
-            raise RuntimeError("hardware is not connected")
+        """读取生命周期准入，拒绝尚未连接的设备会话。"""
+        return self._lifecycle.require_connected()
 
     def _require_enabled(self) -> None:
-        """运动类命令的统一安全门：未连接或未显式使能一律拒绝。"""
-        self._require_connected()
-        if self._lifecycle_state == "DISABLING":
-            raise RuntimeError("hardware state is unconfirmed; verify disable before enabling again")
-        if not self._enabled:
-            raise RuntimeError(
-                "hardware is disabled; call explicit /rebotarm/enable first"
-            )
+        """运动入口须已显式使能，且不处于失能状态未知的过渡。"""
+        return self._lifecycle.require_enabled()
 
     def _refresh_all_feedback(self) -> None:
         self.refresh_feedback_if_due(force=True)
@@ -970,124 +996,15 @@ class HardwareManager:
                 f"gripper status_code={status}, expected {expected_status}"
             )
 
-    def _disable_all_motors(self) -> None:
-        """失能机械臂与夹爪；逐个收集错误后统一抛出，保证两边都尝试过。"""
-        errors: list[str] = []
-        try:
-            self._backend.disable()
-        except Exception as exc:
-            errors.append(f"arm disable: {exc}")
-        if self._gripper_mot is not None:
-            try:
-                self._gripper_mot.disable()
-            except Exception as exc:
-                errors.append(f"gripper disable: {exc}")
-        if errors:
-            raise RuntimeError("; ".join(errors))
-
     @device_request(priority=5, ttl=10., invalidate=('device',))
     def connect(self) -> None:
-        """连接硬件并停留在"已连接但失能"状态。
-
-        顺序：机械臂连接 -> 初始化夹爪 -> 校验全部关节与夹爪反馈。若发现任何
-        电机状态码非 0（即上电后仍处于使能态），先显式失能再重新校验，绝不带着
-        未知的使能状态进入后续流程。任一步失败都会走 ``_disconnect_after_failed_connect``
-        清理，避免留下半开的串口或后台线程。
-        """
-        if self._connected:
-            return
-        try:
-            self._arm_passthrough_until = self._gripper_passthrough_until = None
-            self._backend.connect()
-            with self._feedback_lock:
-                self._verified_feedback_by_label.clear()
-                self._feedback_request_baseline_by_label.clear()
-                self._feedback_request_deadline_by_label.clear()
-                self._feedback_error_by_label.clear()
-                self._feedback_next_refresh_monotonic = None
-                self._arm_feedback_updated_monotonic = None
-                self._arm_feedback_error = None
-                self._gripper_feedback_updated_monotonic = None
-                self._gripper_feedback_error = None
-            with self._gripper_lock:
-                self._gripper_execution.supersede_locked()
-                self._gripper_active = False
-                self._gripper_mode = "idle"
-                self._gripper_neutral_pending = None
-                self._gripper_hold_deadline = None
-                self._gripper_target_deadline_monotonic = None
-                self._gripper_transport_error = None
-            self._connected = True
-            self.init_gripper(str(self._gripper_cfg_path))
-            _positions, _velocities, _torques, statuses = (
-                self._validated_joint_feedback()
-            )
-            gripper_status = None
-            if self._gripper_mot is not None:
-                gripper_state = self._refresh_gripper_feedback()
-                gripper_status = int(gripper_state.status_code)
-            if any(status != 0 for status in statuses) or gripper_status not in (None, 0):
-                self._disable_all_motors()
-                self._validated_joint_feedback(expected_status=0)
-                self._validated_gripper_status(expected_status=0)
-            self._enabled = False
-            self._command_guard.confirm_disabled()
-            self._set_lifecycle_state("CONNECTED_DISABLED")
-        except Exception:
-            self._disconnect_after_failed_connect()
-            raise
-
-    def _disconnect_after_failed_connect(self) -> None:
-        """连接失败后的尽力清理；每一步单独吞掉异常，只为把状态复位。"""
-        try:
-            self._stop_gripper_loop()
-        except Exception:
-            pass
-        try:
-            self._stop_control_loop()
-        except Exception:
-            pass
-        try:
-            self._disable_all_motors()
-        except Exception:
-            pass
-        try:
-            self._backend.disconnect()
-        except Exception:
-            pass
-        self._connected = False
-        self._enabled = False
-        self._set_lifecycle_state("DISCONNECTED")
+        """建立新会话并确认默认失能，不启动运动输出。"""
+        return self._lifecycle.connect()
 
     @device_request(priority=5, ttl=10., invalidate=('device',))
     def shutdown(self) -> None:
-        """已失能时停止线程并释放设备；使能状态必须先经显式失能。"""
-        if not self._connected:
-            return
-        with self._motor_lifecycle_lock:
-            # 此检查与使能操作持同一把锁，关闭请求不能与新的使能交错。
-            if self._enabled:
-                raise RuntimeError("shutdown requires explicit disable first")
-            self._stop_gripper_loop()
-            self.stop_gravity_compensation()
-            # 先移除周期输出回调；本请求仍由唯一设备线程执行，释放后才退出线程。
-            self._stop_control_loop()
-            try:
-                self._validated_joint_feedback(expected_status=0)
-                self._validated_gripper_status(expected_status=0)
-            except Exception as exc:
-                # 状态不明时保留连接供人工恢复；不能假定已失能并关闭设备。
-                self._enabled = True
-                self._set_lifecycle_state("DISABLING")
-                self._error_codes.append(f"SHUTDOWN_STATE_UNCONFIRMED: {exc}")
-                raise RuntimeError(f"shutdown disabled-state verification: {exc}") from exc
-            try:
-                self._backend.release_disabled()
-            except Exception as exc:
-                self._error_codes.append(f"SHUTDOWN_RELEASE_FAILED: {exc}")
-                raise RuntimeError(f"shutdown release: {exc}") from exc
-            self._connected = False
-            self._set_lifecycle_state("DISCONNECTED")
+        """关闭已确认失能的会话；仍使能或状态未知时保留设备连接。"""
+        return self._lifecycle.shutdown()
 
     def get_joint_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """返回 (位置, 速度, 力矩)；未连接时拒绝伪造首帧。
@@ -1095,10 +1012,10 @@ class HardwareManager:
         已连接时要求状态码与使能状态一致（使能 -> 1，失能 -> 0）。正式运行时
         的采集始终归唯一设备线程，本入口只读取缓存。
         """
-        with self._motor_lifecycle_lock:
-            if not self._connected:
+        with self._lifecycle.lock:
+            if not self._lifecycle.connected:
                 raise RuntimeError('hardware is not connected; waiting for verified first frame')
-            expected_status = 1 if self._enabled else 0
+            expected_status = 1 if self._lifecycle.enabled else 0
             positions, velocities, torques, _statuses = self._validated_joint_feedback(
                 expected_status=expected_status,
                 refresh=False,
@@ -1107,10 +1024,10 @@ class HardwareManager:
 
     def get_cached_joint_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """与 ``get_joint_state`` 相同，但不触发新的总线事务（只读缓存）。"""
-        with self._motor_lifecycle_lock:
-            if not self._connected:
+        with self._lifecycle.lock:
+            if not self._lifecycle.connected:
                 raise RuntimeError('hardware is not connected; waiting for verified first frame')
-            expected_status = 1 if self._enabled else 0
+            expected_status = 1 if self._lifecycle.enabled else 0
             positions, velocities, torques, _statuses = self._validated_joint_feedback(
                 expected_status=expected_status,
                 refresh=False,
@@ -1163,13 +1080,13 @@ class HardwareManager:
         active = None if owner is None else owner.task
         if task is not None and (active is not task or task.event.is_set()):
             return
-        with self._motor_lifecycle_lock:
+        with self._lifecycle.lock:
             self._backend.requests.invalidate('arm')
             if active is not None:
                 owner.stopping(active)
             self._backend.cancel_trajectory()
             self._arm_passthrough_until = None
-            if self._enabled:
+            if self._lifecycle.enabled:
                 self.stop_gravity_compensation()
                 self.ensure_pos_vel_control()
                 current = self.hold_current_position()
@@ -1317,196 +1234,23 @@ class HardwareManager:
 
     @device_request(priority=5, ttl=5., invalidate=('device',))
     def enable(self) -> None:
-        """显式使能：真机运动的唯一入口。
-
-        前置条件（全部满足才继续）：已连接、反馈状态码为 0（失能）、夹爪坐标
-        合法。随后把当前角度写成保持目标 -> 进入位置-速度模式 -> 使能电机 ->
-        校验状态码为 1 -> 启动统一控制循环。任何一步失败都会执行
-        ``_rollback_failed_enable``；回滚本身也失败时保留 _enabled=True 并追加
-        ENABLE_ROLLBACK_FAILED，绝不谎报"已安全失能"。
-        """
-        from motorbridge import Mode
-
-        with self._motor_lifecycle_lock:
-            self._require_connected()
-            if self._enabled:
-                if self._lifecycle_state == "DISABLING":
-                    raise RuntimeError("verify disable before enabling again")
-                self.hold_current_position()
-                self._set_lifecycle_state("ENABLED_HOLD")
-                return
-
-            self._set_lifecycle_state("ENABLING")
-            try:
-                positions, _velocities, _torques, _statuses = (
-                    self._validated_joint_feedback(expected_status=0)
-                )
-                self._validated_gripper_status(expected_status=0)
-                if self._gripper_mot is not None:
-                    with self._gripper_lock:
-                        coordinate_failure = self._gripper_coordinate_failure_reason_locked()
-                    if coordinate_failure is not None:
-                        raise RuntimeError(coordinate_failure)
-                # 先把目标设为当前角度，使能瞬间不会产生位置阶跃。
-                self._backend.set_target(positions)
-                if self._backend.mode_pos_vel() is False:
-                    raise RuntimeError("failed to enter position-velocity control mode")
-                if self._gripper_mot is not None:
-                    self._gripper_mot.ensure_mode(Mode.MIT, 1000)
-                self._backend.enable()
-                if self._gripper_mot is not None:
-                    self._gripper_mot.enable()
-                self._validated_joint_feedback(expected_status=1)
-                self._validated_gripper_status(expected_status=1)
-                self._enabled = True
-                self._gripper_transport_error = None
-                self.set_state_machine("IDLE")
-                self._set_lifecycle_state("ENABLED_HOLD")
-                self._start_pos_vel_loop(target=positions)
-            except Exception as exc:
-                rollback_error = self._rollback_failed_enable()
-                if rollback_error is not None:
-                    raise RuntimeError(
-                        f"enable failed: {exc}; rollback verification failed: "
-                        f"{rollback_error}"
-                    ) from exc
-                raise RuntimeError(f"enable failed and was rolled back: {exc}") from exc
-
-    def _rollback_failed_enable(self) -> str | None:
-        """使能失败后的回滚：停循环、失能、并验证状态码确为 0。
-
-        返回 None 表示已确认失能；返回字符串表示回滚未完成——此时保持
-        _enabled=True(宁可以为仍在使能,也不要误判为已失能),追加
-        ENABLE_ROLLBACK_FAILED 并把生命周期置为 DISABLING。
-        """
-        rollback_errors: list[str] = []
-        try:
-            self._stop_gripper_loop()
-        except Exception as exc:
-            rollback_errors.append(f"stop gripper loop: {exc}")
-        try:
-            self._stop_control_loop()
-        except Exception as exc:
-            rollback_errors.append(f"stop arm loop: {exc}")
-        try:
-            self._disable_all_motors()
-        except Exception as exc:
-            rollback_errors.append(f"disable command: {exc}")
-        if not rollback_errors:
-            # 只有失能命令本身没报错才值得校验反馈；否则反馈可能已经不可信。
-            try:
-                self._validated_joint_feedback(expected_status=0)
-                self._validated_gripper_status(expected_status=0)
-            except Exception as exc:
-                rollback_errors.append(f"disabled feedback: {exc}")
-        self._state_machine = "IDLE"
-        if rollback_errors:
-            self._enabled = True
-            self._error_codes.append("ENABLE_ROLLBACK_FAILED")
-            self._set_lifecycle_state("DISABLING")
-            return "; ".join(rollback_errors)
-        self._enabled = False
-        self._command_guard.confirm_disabled()
-        self._set_lifecycle_state("CONNECTED_DISABLED" if self._connected else "DISCONNECTED")
-        return None
+        """显式使能并以当前位置保持；失败由生命周期组件验证回滚。"""
+        return self._lifecycle.enable()
 
     @device_request(priority=1, ttl=10., invalidate=('device',))
     def disable(self) -> None:
-        """失能：先标记未使能（阻止新的运动命令），再停循环并验证状态码为 0。
-
-        验证失败时恢复 _enabled 原值并追加 DISABLE_VERIFICATION_FAILED,让上层
-        知道"可能仍在使能"，而不是假装已经安全停下。
-        """
-        with self._motor_lifecycle_lock:
-            self._require_connected()
-            self._set_lifecycle_state("DISABLING")
-            was_enabled = self._enabled
-            self._enabled = False
-            self._arm_passthrough_until = self._gripper_passthrough_until = None
-            try:
-                self.stop_gravity_compensation()
-                self._stop_gripper_loop()
-                self._stop_control_loop()
-                self._disable_all_motors()
-                self._validated_joint_feedback(expected_status=0)
-                self._validated_gripper_status(expected_status=0)
-            except Exception:
-                self._enabled = was_enabled
-                self._error_codes.append("DISABLE_VERIFICATION_FAILED")
-                raise
-            else:
-                self._enabled = False
-                self._state_machine = "IDLE"
-                self._command_guard.confirm_disabled()
-                self._set_lifecycle_state("CONNECTED_DISABLED")
+        """显式失能并验证新反馈，验证失败不谎报已安全失能。"""
+        return self._lifecycle.disable()
 
     @device_request(priority=5, ttl=5., invalidate=('device',))
     def set_mode(self, mode: str) -> bool:
-        """切换电机控制模式："mit" / "pos_vel" / "vel"（大小写与空格不敏感）。
-
-        切模式前必须先停循环并退出重力补偿；若目标模式与当前模式相同，仅在
-        pos_vel 且已使能时确保控制循环在跑（或保持当前位置）。
-        """
-        with self._motor_lifecycle_lock:
-            self._require_connected()
-            if self._lifecycle_state == "DISABLING":
-                raise RuntimeError("verify disable before changing mode")
-            mode = mode.strip().lower()
-            if mode not in ("mit", "pos_vel", "vel"):
-                raise ValueError(f"unsupported mode: {mode}")
-            self._arm_passthrough_until = None
-            self.stop_gravity_compensation()
-
-            if mode == self.mode:
-                if mode == "pos_vel" and self._enabled:
-                    if self.control_loop_active:
-                        self.hold_current_position()
-                    else:
-                        self._start_pos_vel_loop()
-                self.set_state_machine("IDLE")
-                return True
-
-            try:
-                self._stop_control_loop()
-                if mode == "mit":
-                    ok = self._backend.mode_mit()
-                elif mode == "pos_vel":
-                    ok = self._backend.mode_pos_vel()
-                    if self._enabled:
-                        self._start_pos_vel_loop()
-                else:
-                    ok = self._backend.mode_vel()
-            except CommandTransportError as exc:
-                self._protective_disable_from_hardware_loop(str(exc),category="MODE")
-                raise
-            self.set_state_machine("IDLE")
-            return bool(ok)
+        """串行交接 mit、pos_vel 或 vel 模式，传输故障进入保护。"""
+        return self._lifecycle.set_mode(mode)
 
     @device_request(priority=5, ttl=5., invalidate=('device',))
     def set_zero(self, joint_name: str = "") -> bool:
-        """标定零点。空字符串表示全部关节，``"gripper"`` 表示夹爪。
-
-        必须处于"已连接未使能"状态——标定期间电机不得带电运动。整个标定与
-        使能/失能/置零共用 ``_motor_lifecycle_lock`` 串行化。
-        """
-        # 标定需与使能/失能串行化。即使当前坐标非法也继续采集原始反馈，
-        # 以便显式置零可以修复它。
-        with self._motor_lifecycle_lock:
-            self._require_connected()
-            if self._enabled:
-                raise RuntimeError("set_zero requires CONNECTED_DISABLED state")
-            self._stop_control_loop()
-            joint_name = str(joint_name).strip()
-            if joint_name == "gripper":
-                return self._set_gripper_zero()
-            if joint_name:
-                ok = self._backend.set_zero_single(joint_name)
-            else:
-                self._backend.set_zero()
-                ok = True
-            self._enabled = False
-            self.set_state_machine("IDLE")
-            return bool(ok)
+        """仅失能时允许置零；空名称为六轴，gripper 为夹爪。"""
+        return self._lifecycle.set_zero(joint_name)
 
     def _set_gripper_zero(self) -> bool:
         """夹爪置零并验证：要求在超时内连续若干帧都接近零位。
@@ -1548,7 +1292,7 @@ class HardwareManager:
                     if consecutive >= _G_ZERO_VERIFY_SAMPLES:
                         with self._gripper_lock:
                             self._gripper_zero_error = None
-                        self._enabled = False
+                        self._lifecycle.enabled = False
                         self.set_state_machine("IDLE")
                         return True
                     time.sleep(_FEEDBACK_RETRY_INTERVAL_SEC)
@@ -1568,7 +1312,7 @@ class HardwareManager:
     @device_request(resource='arm', priority=5)
     def ensure_pos_vel_control(self) -> None:
         """确保处于位置-速度模式且统一控制循环在运行（否则保持当前位置）。"""
-        with self._motor_lifecycle_lock:
+        with self._lifecycle.lock:
             self._require_enabled()
             if self.mode != "pos_vel":
                 self._stop_control_loop()
@@ -1591,7 +1335,7 @@ class HardwareManager:
         送入后状态机切到 LOWLEVEL_STREAMING，提示上层这不是轨迹跟踪。
         mode：0 = MIT，1 = 位置-速度，2 = 速度（需电机支持 send_vel）。
         """
-        with self._motor_lifecycle_lock:
+        with self._lifecycle.lock:
             self._require_enabled()
             if joint_name not in self.joint_names:
                 raise KeyError(f"unknown joint: {joint_name}")
@@ -1651,7 +1395,7 @@ class HardwareManager:
 
     @device_request(resource='arm', priority=5, invalidate=('arm',))
     def start_gravity_compensation(self) -> None:
-        with self._motor_lifecycle_lock:
+        with self._lifecycle.lock:
             self._start_gravity_compensation_locked()
 
     def _start_gravity_compensation_locked(self) -> None:
@@ -1727,7 +1471,7 @@ class HardwareManager:
 
     @device_request(resource='arm', priority=5, invalidate=('arm',))
     def stop_gravity_compensation(self) -> None:
-        with self._motor_lifecycle_lock:
+        with self._lifecycle.lock:
             self._stop_gravity_compensation_locked()
 
     def _stop_gravity_compensation_locked(self) -> None:
@@ -1740,7 +1484,7 @@ class HardwareManager:
         self._gravity_comp_integral = None
         self._gravity_comp_lock_counter = 0
         self._gravity_comp_q_last = None
-        if self._enabled:
+        if self._lifecycle.enabled:
             try:
                 self._refresh_arm_feedback()
                 hold_target = self._read_gravity_comp_positions()
@@ -1879,7 +1623,7 @@ class HardwareManager:
             self._gravity_comp_q_target = q.copy()
             self._gravity_comp_integral.fill(0.)
             self._gravity_comp_hold_feedforward = self._gravity_comp_last_total.copy()
-            self._error_codes.append(f'GRAVITY_HOLD: {reason}')
+            self._lifecycle.errors.append(f'GRAVITY_HOLD: {reason}')
             _LOG.error('gravity compensation stopped; enabled guarded hold: %s', reason)
 
     def gravity_compensation_diagnostics(self):
@@ -2287,9 +2031,9 @@ class HardwareManager:
 
     def _runtime_feedback_tick(self):
         """设备事务等待和失能期间只采集；发布线程不再轮询总线。"""
-        if self._connected and not self._feedback_force_refresh_active:
+        if self._lifecycle.connected and not self._feedback_force_refresh_active:
             self.refresh_feedback_if_due()
-        if self._enabled and not self._backend._waiting:
+        if self._lifecycle.enabled and not self._backend._waiting:
             failure = self._arm_feedback_failure_reason()
             if failure is not None:
                 self._protective_disable_from_hardware_loop(failure)
@@ -2372,7 +2116,7 @@ class HardwareManager:
                     self._fail_active_gripper_command_locked(message)
                 if self._gripper_neutral_pending is not None:
                     if not self._emit_pending_gripper_neutral_locked():
-                        self._error_codes.append("FEEDBACK_PROTECTIVE_NEUTRAL_FAILED")
+                        self._lifecycle.errors.append("FEEDBACK_PROTECTIVE_NEUTRAL_FAILED")
         except Exception as exc:
             preparation_errors.append(f'gripper stop: {exc}')
         owner = getattr(self, '_arm_trajectory', None)
@@ -2383,13 +2127,13 @@ class HardwareManager:
         self._gravity_comp_active = False
         self._gravity_comp_q_target = None
         self._gravity_comp_integral = None
-        self._state_machine = "IDLE"
-        self._set_lifecycle_state("DISABLING")
+        self._lifecycle.execution = "IDLE"
+        self._lifecycle.set_state("DISABLING")
         code = f'{category}_PROTECTIVE_DISABLE'
-        if code not in self._error_codes:
-            self._error_codes.append(code)
+        if code not in self._lifecycle.errors:
+            self._lifecycle.errors.append(code)
         if preparation_errors:
-            self._error_codes.append(f'{category}_PROTECTIVE_PREPARE_FAILED: ' + '; '.join(preparation_errors))
+            self._lifecycle.errors.append(f'{category}_PROTECTIVE_PREPARE_FAILED: ' + '; '.join(preparation_errors))
 
         controllers: list[object] = []
         disable_errors: list[str] = []
@@ -2413,7 +2157,7 @@ class HardwareManager:
             except Exception as exc:
                 disable_errors.append(f"{type(controller).__name__}: {exc}")
         if disable_errors:
-            self._error_codes.append(
+            self._lifecycle.errors.append(
                 f"{category}_PROTECTIVE_DISABLE_FAILED: " + "; ".join(disable_errors)
             )
         _LOG.error(
