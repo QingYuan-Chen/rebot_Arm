@@ -31,6 +31,9 @@ ROS 通过 manager 的提交、取消和只读进度接口交互，不推进执�
 置零准入和关闭验证事务，以及生命周期状态和关闭策略；通过 `LifecyclePorts`
 注入设备、反馈及执行器接口，不接收整个 manager。夹爪零位连续新帧验证仍由夹爪接口提供。
 `arm_controller.py` 负责六轴准入、保持、停靠与透传，`arm_stop.py` 按周期确认停止；
+`stationary_evidence.py` 提供独立新帧、位置极差及固定锚点证据，重复停止加入同一
+确认，稳定位置保持才可沿用原目标。量化导数、同步审计及待实机验证的策略见
+[量化反馈判定](features/quantized_feedback_safety.md)。
 停止请求等待时，运行时继续处理失能请求，旧代次的续体不能发送命令。
 重力补偿状态与计算归 `gravity_control.py`，启停、模式交接与诊断归
 `gravity_controller.py`。`controller_cycle.py` 分发采集和执行，

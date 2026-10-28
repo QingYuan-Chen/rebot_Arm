@@ -5,6 +5,7 @@
 ## 当前范围
 
 用于系统 Python 的 MotorBridge bootstrap；已有补丁版本时不要重复覆盖。安装后仍需按部署说明安装并检查反馈序号补丁。
+可选反馈审计的串口/PTY 转发使用同一解释器中的 pyserial；普通生产控制仍由 MotorBridge 访问设备。
 
 ## 依赖版本
 
@@ -15,6 +16,7 @@
 # Bootstrap package only. The controller additionally requires the reviewed
 # feedback-sequence patch installed by scripts/setup_motorbridge_fresh_feedback.py.
 motorbridge==0.4.7
+pyserial==3.5
 ```
 
 ## 安装入口

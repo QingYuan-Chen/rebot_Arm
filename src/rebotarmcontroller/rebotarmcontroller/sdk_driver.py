@@ -17,9 +17,12 @@
 from __future__ import annotations
 import threading
 import time
+import logging
 import numpy as np
 from .controller_contracts import CommandReceipt, MotorFeedback
 from .gravity_control import vector, POSITION_LIMITS
+
+_AUDIT = logging.getLogger('rebotarm.audit')
 
 class CommandTransportError(RuntimeError):
     """携带实际发送回执的设备命令错误。"""
@@ -33,6 +36,7 @@ class MotorPort:
         self.name, self._handle, self._lock = name, handle, bus_lock
         self._owner = owner
         self._closed = False
+        self._audit_sequence = None
 
     def _call(self, method, *args):
         if self._owner is not None:
@@ -40,7 +44,23 @@ class MotorPort:
         with self._lock:
             if self._closed:
                 raise RuntimeError(f'{self.name}: motor handle is closed')
-            return getattr(self._handle, method)(*args)
+            try:
+                result = getattr(self._handle, method)(*args)
+            except Exception as exc:
+                _AUDIT.info('motor_call_error', extra={'audit': dict(name=self.name,
+                    method=method, args=args, error=str(exc))})
+                raise
+            if _AUDIT.isEnabledFor(logging.INFO):
+                if method == 'get_state_with_sequence':
+                    state, sequence = result
+                    if state is not None and sequence != self._audit_sequence:
+                        _AUDIT.info('motor_state', extra={'audit': dict(name=self.name,
+                            sequence=int(sequence), position=float(state.pos), velocity=float(state.vel),
+                            torque=float(state.torq), status=int(state.status_code))})
+                        self._audit_sequence = sequence
+                else:
+                    _AUDIT.info('motor_call', extra={'audit': dict(name=self.name, method=method, args=args)})
+            return result
 
     def _send(self, method, *args):
         try:
@@ -84,7 +104,13 @@ class BusPort:
             self._owner()
         with self.bus_lock:
             if self._closed: raise RuntimeError('controller handle is closed')
-            return getattr(self._handle, method)()
+            try:
+                result = getattr(self._handle, method)()
+            except Exception as exc:
+                _AUDIT.info('bus_call_error', extra={'audit': dict(method=method, error=str(exc))})
+                raise
+            _AUDIT.info('bus_call', extra={'audit': dict(method=method)})
+            return result
 
     def poll_feedback_once(self): return self._call('poll_feedback_once')
     def enable_all(self): return self._call('enable_all')

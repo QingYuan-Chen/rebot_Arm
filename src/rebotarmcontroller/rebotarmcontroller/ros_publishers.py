@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import threading
 import time
+import logging
 
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from builtin_interfaces.msg import Time
@@ -128,6 +129,9 @@ class JointStatePublisher:
         if identity != self._last_feedback_identity:
             self._last_feedback_identity = identity
             self._last_feedback_stamp = self._feedback_stamp(observed_at)
+            logging.getLogger('rebotarm.audit').info('joint_source', extra={'audit': dict(
+                sequences=sequences, observed_at=observed_at,
+                stamp_ns=self._last_feedback_stamp.sec * 1_000_000_000 + self._last_feedback_stamp.nanosec)})
         # 同一批已校验反馈被重复发布时，不应看起来像一份新样本。
         msg.header.stamp = self._last_feedback_stamp
         msg.name = self._hardware.joint_names

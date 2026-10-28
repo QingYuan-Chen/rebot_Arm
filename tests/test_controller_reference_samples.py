@@ -77,7 +77,11 @@ def test_partial_send_retains_cursor_and_protection_decision():
         driver.close()
 
 
-@pytest.mark.parametrize('case', DATA['stop'], ids=lambda case: case['name'])
+# v1 停止样本作为历史协议保留；当前策略使用 v2，不能改写旧预期。
+STOP_V2 = json.loads((Path(__file__).parent / 'fixtures/controller_stop_reference_v2.json').read_text())
+
+
+@pytest.mark.parametrize('case', STOP_V2['stop'], ids=lambda case: case['name'])
 def test_stop_reference(case):
     clock = [0.]
     stop = ArmStop(clock=lambda: clock[0])

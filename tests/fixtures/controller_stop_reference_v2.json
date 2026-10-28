@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "position_span_rad": 0.0011444266422522317,
+  "window_sec": 0.2,
+  "velocity_limit_rad_s": 0.05,
+  "stop": [
+    {
+      "name": "confirmed",
+      "feedback_times": [
+        0.01,
+        0.06,
+        0.11,
+        0.16,
+        0.21
+      ],
+      "clock_times": [
+        0.01,
+        0.06,
+        0.11,
+        0.16,
+        0.21
+      ],
+      "velocity": 0,
+      "state": "confirmed",
+      "decision": null
+    },
+    {
+      "name": "cache_does_not_confirm",
+      "feedback_times": [
+        0.01,
+        0.01
+      ],
+      "clock_times": [
+        0.01,
+        2.1
+      ],
+      "velocity": 0,
+      "state": "timeout",
+      "decision": "stop_hold"
+    },
+    {
+      "name": "moving_does_not_confirm",
+      "feedback_times": [
+        0.01,
+        0.11,
+        0.21,
+        0.31
+      ],
+      "clock_times": [
+        0.01,
+        0.11,
+        0.21,
+        2.1
+      ],
+      "velocity": 0.06,
+      "state": "timeout",
+      "decision": "stop_hold"
+    }
+  ]
+}

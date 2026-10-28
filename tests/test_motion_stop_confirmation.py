@@ -22,7 +22,7 @@ def sample(t, position=0., velocity=0.):
 
 def test_stop_requires_distinct_fresh_stationary_samples_after_terminal():
     feedback = StopFeedback()
-    for t in (10., 10.1, 10.2, 10.4):
+    for t in (10., 10.1, 10.2, 10.3, 10.4):
         feedback.update(sample(t), t, int(t*1e9))
     assert feedback.stationary(10., 10.4, int(10.4e9))
     assert not feedback.stationary(10.2, 10.4, int(10.4e9))
@@ -35,7 +35,7 @@ def test_stop_requires_distinct_fresh_stationary_samples_after_terminal():
 @pytest.mark.parametrize('position,velocity', [(0., .1), (float('nan'), 0.)])
 def test_invalid_or_moving_feedback_breaks_quiet_window(position, velocity):
     feedback = StopFeedback()
-    for t in (10., 10.1, 10.2, 10.4):
+    for t in (10., 10.1, 10.2, 10.3, 10.4):
         feedback.update(sample(t), t, int(t*1e9))
     feedback.update(sample(10.5, position, velocity), 10.5, int(10.5e9))
     assert not feedback.stationary(10., 10.5, int(10.5e9))
@@ -58,7 +58,7 @@ def motion_stub():
     node = NS(_motion_lock=threading.RLock(), _stop_lock=threading.Lock(),
               _request_active=False, _stopping=False, _generation=0,
               _send_future=None, _result_future=None, _active_goal_handle=None,
-              _stop_feedback=NS(stationary=lambda *_: True),
+              _stop_feedback=NS(stationary=lambda *_: True, ready=lambda *_: True),
               get_clock=lambda: NS(now=lambda: NS(nanoseconds=int(time.time()*1e9))),
               get_parameter=lambda _: NS(value=.2),
               _trajectory_stop_client=NS(wait_for_service=lambda **_: True,

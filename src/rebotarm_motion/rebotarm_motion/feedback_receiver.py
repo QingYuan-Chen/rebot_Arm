@@ -56,10 +56,12 @@ class MotionFeedbackStore:
             value = replace(value, maximum_joint_age=max(value.maximum_joint_age, age))
             if lost and not self.joint_lost:
                 value = replace(value, epoch=value.epoch + 1, joint_gaps=value.joint_gaps + 1)
+                self.stop_feedback.invalidate(received)
             self.joint_lost = lost
         lost = value.status is not None and received - value.status_at > .6
         if lost and not self.status_lost:
             value = replace(value, epoch=value.epoch + 1)
+            self.stop_feedback.invalidate(received)
         self.status_lost = lost
         self.value = value
 
@@ -78,6 +80,8 @@ class MotionFeedbackStore:
                 old = value.status
                 changed = old is not None and (old.mode, old.enabled, old.control_loop_active) != (
                     msg.mode, msg.enabled, msg.control_loop_active)
+                if changed or msg.error_codes:
+                    self.stop_feedback.invalidate(received)
                 self.value = replace(value, status=msg, status_at=received,
                                      epoch=value.epoch + int(changed))
                 self.status_lost = False

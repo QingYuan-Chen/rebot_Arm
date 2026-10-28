@@ -7,19 +7,22 @@ def test_stop_requires_successful_send_and_new_stationary_window():
     stop = ArmStop(clock=lambda: clock[0])
     stop.begin([0.] * 6, 3)
     def update(stamp, speed=0., generation=3, enabled=True):
+        clock[0] = max(clock[0], stamp)
         return stop.update([0.] * 6, [speed] * 6, stamp,
                            generation=generation, enabled=enabled)
     assert update(10.01).state == 'stopping'
     stop.sent(2)
     assert stop.result.sent_at is None
+    clock[0] = 10.
     stop.sent(3)
     assert update(10.).quiet_since is None
     assert update(10.01).quiet_since == 10.01
-    clock[0] = 10.5
+    clock[0] = 10.01
     assert update(10.01).state == 'stopping'  # 重读缓存不累计静止窗口。
     assert update(10.06, speed=.06).quiet_since is None
     assert update(10.07).state == 'stopping'
-    assert update(10.18).state == 'confirmed'
+    assert update(10.17).state == 'stopping'
+    assert update(10.27).state == 'confirmed'
 
 
 def test_stop_timeout_and_generation_change_never_confirm():

@@ -246,6 +246,11 @@ class FeedbackAcquisition:
             observed_at=float(observed_at),
         )
         self._verified_feedback_by_label[label] = sample
+        # 与原始字节和运动守卫源时间关联；不改变采样时间或接收序号。
+        logging.getLogger('rebotarm.audit').info('verified_feedback', extra={'audit': dict(
+            name=label, sequence=sample.sequence, observed_at=sample.observed_at,
+            position=sample.state.pos, velocity=sample.state.vel, torque=sample.state.torq,
+            status=sample.state.status_code)})
         self._feedback_error_by_label.pop(label, None)
         if label == "gripper":
             self._record_gripper_feedback(state, observed_at=observed_at)

@@ -516,7 +516,10 @@ class PoseExecutionNode(Node):
                         # 任一前提失效都重新开始观察，不能沿用此前累计的静止证据。
                         quiet_since = None
                     elif quiet_since is None:
-                        quiet_since = now
+                        # 新显式停止可等待健康流后建立新证据；已开始的观察若断流，
+                        # 保留原起点并超时，不能用恢复帧把同一次失败变成成功。
+                        if self._stop_feedback.ready(now, self.get_clock().now().nanoseconds):
+                            quiet_since = now
                     elif self._stop_feedback.stationary(quiet_since, now, self.get_clock().now().nanoseconds):
                         # 只接受观察起点之后的新鲜静止样本，确认成功后才解除停止门控。
                         self._stopping = False

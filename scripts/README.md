@@ -15,6 +15,10 @@
 | `run_ubuntu_vision.sh` | 启动相机与 YOLO 感知链路 |
 | `check_ubuntu_graspnet_env.py` | 检查 GraspNet 依赖、CUDA 和模型路径 |
 | `check_rgbd_camera_info.py` | 订阅并检查图像与 CameraInfo，不自行启动相机 |
+| `audit_feedback_session.py` | 有界异步记录控制器与守卫；可选串口/PTY 字节审计，实机须另行授权 |
+| `replay_feedback_policy.py` | 只读回放既有缓存并记录摘要，不访问硬件或重评历史验收 |
+
+反馈量化策略、命令及证据限制见[量化反馈判定](../docs/implemented/features/quantized_feedback_safety.md)。
 
 依赖清单位于 [依赖文档](../docs/setup/dependencies/README.md)，由 `install_python_dependencies.py` 读取安装。
 GraspNet 推理实现属于 `src/rebotarm_vision/rebotarm_vision/backends/`；

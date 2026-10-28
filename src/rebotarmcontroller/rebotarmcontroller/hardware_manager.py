@@ -148,6 +148,7 @@ class HardwareManager:
             feedback_transaction=lambda *args, **kw: self.gripper.feedback_transaction(*args, **kw),
         )
         arm_cycle_port = ArmCyclePort(
+            reset_session=self.arm.reset_session,
             clear_passthrough=lambda *args, **kw: self.arm.clear_passthrough(*args, **kw),
             expire_passthrough=lambda *args, **kw: self.arm.expire_passthrough(*args, **kw),
             check_task_generation=lambda *args, **kw: self.arm.check_task_generation(*args, **kw),

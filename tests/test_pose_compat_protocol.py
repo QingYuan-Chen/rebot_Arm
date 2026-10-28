@@ -113,6 +113,68 @@ def test_canceled_planning_does_not_submit_late_solution():
         node._prepare(run, pose, 0., False)
 
 
+def test_monitor_uses_source_time_and_audits_actual_quantized_samples(monkeypatch, caplog):
+    import logging
+    import numpy as np
+    from rebotarm_motion.trajectory_runtime_limits import JointRuntimeLimit, TrajectoryRuntimeLimitGuard
+    from rebotarm_motion.paired_trajectory_protocol import sample_command
+    node, run = monitor_node()
+    run.dispatched, run.dispatched_ns = 100., int(10e9)
+    run.guard = TrajectoryRuntimeLimitGuard({f'joint{i}': JointRuntimeLimit(
+        max_velocity=1., max_effort=2., max_acceleration=5., max_jerk=20.) for i in range(1, 7)},
+        derivative_policy='diagnostic')
+    handle = NS(accepted=True, get_result_async=lambda: Future(), cancel_goal_async=lambda: Future())
+    run.send = Future(handle, ready=True)
+    monkeypatch.setattr(module.time, 'monotonic', lambda: 100.5)
+    # 到达时间固定为调度起点后 .5 s，源时间只有 .10/.12/.14 s。
+    with caplog.at_level(logging.INFO, logger='rebotarm.audit'):
+        for k, velocity in enumerate([-.0024423599243164062, .0024423599243164062, -.0024423599243164062]):
+            elapsed = .1+k*.02
+            stamp = run.dispatched_ns+round(elapsed*1e9)
+            sec, ns = divmod(stamp, 10**9)
+            desired = sample_command(run.command, elapsed)
+            node.feedback = NS(header=NS(stamp=NS(sec=sec, nanosec=ns)),
+                name=[f'joint{i}' for i in range(1, 7)], velocity=[velocity]+[0.]*5, effort=[0.]*6)
+            node._ready = lambda: np.asarray(desired)
+            node._monitor()
+            assert not run.cancel and not run.error
+    rows = [record.audit for record in caplog.records if record.msg == 'pose_guard_sample']
+    assert [row['elapsed'] for row in rows] == pytest.approx([.1, .12, .14])
+    assert rows[-1]['tracking_error'] == 0.
+    assert rows[-1]['jerk']['joint1'] == pytest.approx(-24.423599, rel=.001)
+    assert rows[-1]['derivative_diagnostics'][0]['kind'] == 'jerk'
+
+
+def test_canceled_old_epoch_finishes_as_failure_only_after_terminal_and_new_hold_window(monkeypatch):
+    import numpy as np
+    from rebotarm_motion.stop_feedback import StopFeedback
+    from test_motion_stop_confirmation import sample
+    node, run = monitor_node()
+    run.cancel, run.error = True, 'feedback continuity lost'
+    run.dispatched = 10.
+    node.epoch = 1
+    node._ready = lambda: np.zeros(6)
+    node.stop_feedback = StopFeedback()
+    now = [10.4]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: now[0])
+    node.get_clock = lambda: NS(now=lambda: NS(nanoseconds=round(now[0]*1e9)))
+    result = Future()
+    handle = NS(accepted=True, get_result_async=lambda: result,
+                cancel_goal_async=lambda: Future(ready=True))
+    run.send = Future(handle, ready=True)
+    node.stop_feedback.invalidate(10.3)
+    for k in range(21):
+        now[0] = 10.4+k*.02
+        node.stop_feedback.update(sample(now[0]), now[0], round(now[0]*1e9))
+        if k == 1:
+            result.value, result.ready = NS(status=5, result=NS(error_code=-1)), True
+        node._monitor()
+        if k < 16:
+            assert not run.done.is_set()
+    assert run.done.is_set() and node.active is None
+    assert run.error == 'feedback continuity lost'
+
+
 @pytest.mark.parametrize('status,code', [(4, 0), (6, -1)])
 def test_pose_action_cannot_succeed_without_measured_final_pose(status, code):
     node, run = monitor_node()

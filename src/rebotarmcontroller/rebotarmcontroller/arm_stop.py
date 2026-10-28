@@ -2,8 +2,8 @@
 
 职责：记录保持目标、目标代次和首次成功发送时间，按新的反馈时间戳累计静止
 窗口。对外接口为 ``begin/sent/update/abort`` 和只读 ``result``；运行时每周期
-调用一次，不轮询设备或睡眠。默认位置误差 0.03 rad、速度 0.05 rad/s、
-持续静止 0.10 s、总预算 2 s，沿用原停止确认条件。
+调用一次，不轮询设备或睡眠。默认速度 0.05 rad/s、
+持续静止 0.20 s、总预算 2 s；位置窗口和固定锚点位移均不超过三个编码。
 
 约束：保持发送失败不能开始确认；反馈必须晚于发送。重复缓存不增加静止时间；
 目标代次变化、失能或会话结束时结束旧确认，禁止旧取消覆盖新目标。健康设备
@@ -12,7 +12,7 @@
 from dataclasses import dataclass, replace
 import time
 
-import numpy as np
+from .stationary_evidence import StationaryEvidence
 from .command_guard import SafetyDecision, failure_decision
 
 
@@ -36,6 +36,7 @@ class ArmStop:
         self.clock = clock
         self.result = StopResult()
         self.deadline = 0.
+        self.evidence = StationaryEvidence()
 
     @property
     def pending(self):
@@ -45,29 +46,37 @@ class ArmStop:
         self.result = StopResult("stopping", generation=generation,
                                  target=tuple(float(v) for v in target))
         self.deadline = self.clock() + 2.
+        self.evidence.reset(target)
 
     def sent(self, generation):
         if self.pending and generation == self.result.generation and self.result.sent_at is None:
             self.result = replace(self.result, sent_at=self.clock())
+            self.evidence.last_stamp = self.result.sent_at
 
     def abort(self, message):
         if self.pending:
             self.result = replace(self.result, state="aborted", message=message)
 
-    def update(self, positions, velocities, observed_at, *, generation, enabled):
+    def update(self, positions, velocities, observed_at, *, generation, enabled, sequences=None):
         if not self.pending:
             return self.result
         if not enabled or generation != self.result.generation:
             self.abort("stop superseded by lifecycle or target generation")
             return self.result
+        if self.clock() >= self.deadline:
+            decision = failure_decision('fresh stationary hold feedback not confirmed', 'STOP')
+            self.result = replace(self.result, state="timeout", message=decision.reason, decision=decision)
+            return self.result
         sent = self.result.sent_at
-        quiet = (sent is not None and observed_at > sent
-                 and np.max(np.abs(np.asarray(positions) - self.result.target)) <= .03
-                 and np.max(np.abs(velocities)) <= .05)
-        since = (self.result.quiet_since if self.result.quiet_since is not None
-                 else observed_at) if quiet else None
+        reason = 'waiting_send'
+        if sent is not None and observed_at > sent:
+            reason = self.evidence.observe(positions, velocities, observed_at, self.clock(), sequences=sequences)
+        if reason in ('invalid_or_stale', 'source_regressed', 'source_gap'):
+            self.abort('stop feedback continuity lost: ' + reason)
+            return self.result
+        since = self.evidence.quiet_since
         self.result = replace(self.result, quiet_since=since)
-        if since is not None and observed_at - since >= .10:
+        if self.evidence.confirmed():
             self.result = replace(self.result, state="confirmed", message="stop/hold confirmed")
         elif self.clock() >= self.deadline:
             decision = failure_decision('fresh stationary hold feedback not confirmed', 'STOP')

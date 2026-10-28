@@ -4,6 +4,11 @@
 `tests/test_controller_reference_samples.py` 直接驱动生产的执行器、命令生成、MotorBridge
 适配驱动、生命周期和停止组件；设备句柄为内存替身，不打开真实串口。
 
+量化反馈修复后，停止组件使用 `controller_stop_reference_v2.json`：窗口改为
+0.20 s，增加三个位置编码的全极差和固定锚点约束、150 ms 连续性检查。
+v1 的停止片段保留为历史数据，当前停止测试读取 v2，其他 v1 场景继续执行。
+该策略及独立负例见[量化反馈判定与审计](quantized_feedback_safety.md)。
+
 批次 6.5 另增 `tests/fixtures/controller_fault_reference_v1.json`，由
 `tests/test_controller_fault_reference.py` 驱动生命周期回滚、失能验证失败、保护锁存、
 透传仲裁和重力补偿交接。故障样本只比较跨语言可表达的设备操作、发送次数、状态迁移和

@@ -38,6 +38,7 @@ class ControllerCycle:
     def reset_session(self):
         """会话重置委托状态所有者，旧缓存和代次不得跨连接复用。"""
         self.feedback.reset_session()
+        self.arm.reset_session()
         self.gripper.reset_session()
 
     def _expire_passthrough(self):

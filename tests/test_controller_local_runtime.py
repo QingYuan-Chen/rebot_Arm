@@ -577,15 +577,17 @@ def test_valid_passthrough_preempt_uses_feedback_after_stop_confirmation(monkeyp
         [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., 10.])
     command = SimpleNamespace(mode=1,
         **{f'use_{key}': False for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')})
-    original = manager.arm._stop.update
-    def stopped(*args, **kwargs):
-        result = original(*args, **kwargs)
+    from rebotarmcontroller.arm_stop import ArmStop
+    original = ArmStop.update
+    def stopped(owner, *args, **kwargs):
+        result = original(owner, *args, **kwargs)
         # 模拟停止确认后才收到的位置变化；未显式指定的位置不得沿用抢占前快照。
         if result.state == 'confirmed':
             bus.motors[0].state.pos = .012
             manager.refresh_feedback_if_due(force=True)
         return result
-    monkeypatch.setattr(manager.arm._stop, 'update', stopped)
+    # 每个停止事务独立持有状态机，故在类入口注入确认后的新设备反馈。
+    monkeypatch.setattr(ArmStop, 'update', stopped)
     try:
         manager.send_joint_motor_cmd('joint1', command, arbitration='preempt')
         assert task.event.is_set() and manager.arm_execution_status(task).state == 'canceled'

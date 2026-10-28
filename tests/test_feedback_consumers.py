@@ -46,7 +46,7 @@ def test_duplicate_source_stamps_age_and_outage_is_latched_once():
 
 def test_mode_round_trip_and_status_gap_cannot_reuse_old_plan():
     store = MotionFeedbackStore()
-    status = lambda enabled: NS(mode='pos_vel', enabled=enabled, control_loop_active=enabled)
+    status = lambda enabled: NS(mode='pos_vel', enabled=enabled, control_loop_active=enabled, error_codes=[])
     store.receive('status', status(True), 10., 10_000_000_000)
     store.receive('status', status(False), 10.1, 10_100_000_000)
     store.receive('status', status(True), 10.2, 10_200_000_000)

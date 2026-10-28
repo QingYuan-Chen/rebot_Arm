@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 import math
+import logging
 import threading
 import time
 from .sdk_driver import SdkMotorDriver
@@ -19,6 +20,8 @@ from .arm_execution import ArmExecution
 from .arm_position_control import ArmPositionControl
 from .device_requests import DeviceRequests, RequestRejected
 from .arm_stop import CycleResult
+
+_AUDIT = logging.getLogger('rebotarm.audit')
 
 class ControllerRuntime:
     """管理唯一周期线程和六轴执行状态；可注入驱动以进行离线验证。"""
@@ -119,7 +122,17 @@ class ControllerRuntime:
         with self.execution.lock:
             target = self.execution.sample(time.monotonic())
             command = self.position.command(target)
-            self.driver.send_positions(command)
+            try:
+                receipt = self.driver.send_positions(command)
+            except Exception as exc:
+                receipt = getattr(exc, 'receipt', None)
+                _AUDIT.info('position_receipt', extra={'audit': dict(generation=target.generation,
+                    positions=command.positions, velocity_limits=command.velocity_limits,
+                    sent=() if receipt is None else receipt.sent, success=False, error=str(exc))})
+                raise
+            _AUDIT.info('position_receipt', extra={'audit': dict(generation=target.generation,
+                positions=command.positions, velocity_limits=command.velocity_limits,
+                sent=receipt.sent, success=receipt.success)})
             self.execution.acknowledge(target)
 
     def assert_writer(self):

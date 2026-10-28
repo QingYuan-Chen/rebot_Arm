@@ -9,6 +9,8 @@ from __future__ import annotations
 from .component_ports import CyclePort, ArmFeedbackPort, GravityArmPort, ProtectionPort
 from .arm_stop import ArmStop, CycleResult
 from .arm_trajectory import ArmTrajectory
+from .stationary_evidence import StationaryEvidence, POSITION_SPAN
+import logging
 from .sdk_driver import CommandTransportError
 from typing import Optional
 from typing import Sequence
@@ -34,6 +36,17 @@ class ArmController:
         self._arm_trajectory = ArmTrajectory(runtime.execution)
         self._arm_passthrough_until = None
         self._stop = ArmStop()
+        self._hold_evidence = StationaryEvidence()
+        self._hold_generation = None
+        self._hold_confirmed_at = None
+        self._stop_wait = None
+
+    def reset_session(self):
+        """失能/重连不能复用上一会话的静止证据或停止续体。"""
+        self._hold_evidence.reset()
+        self._hold_generation = None
+        self._hold_confirmed_at = None
+        self._stop.abort('controller session reset')
 
     def bind(self, *, cycle: CyclePort, feedback: ArmFeedbackPort, gravity: GravityArmPort, protection: ProtectionPort):
         """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
@@ -81,6 +94,26 @@ class ArmController:
         task = self._arm_trajectory.task
         if task is not None and task.event.is_set() and self._lifecycle.execution == 'TRAJ_RUNNING':
             self._lifecycle.set_execution_state('IDLE')
+        stable_mode = (self._lifecycle.enabled and self._lifecycle.execution == 'IDLE'
+                       and all(code == 1 for code in sample.statuses)
+                       and self._backend.mode == 'pos_vel' and not self._backend.trajectory_moving
+                       and not self.passthrough_active() and not self.gravity.gravity_compensation_active()
+                       and (task is None or task.event.is_set()))
+        if not stable_mode:
+            self._hold_generation = None
+            self._hold_confirmed_at = None
+            self._hold_evidence.reset()
+        else:
+            if self._hold_generation != self._backend.target_generation:
+                self._hold_evidence.reset(self._backend.target())
+                self._hold_generation = self._backend.target_generation
+                self._hold_confirmed_at = None
+            reason = self._hold_evidence.observe(sample.positions, sample.velocities, sample.observed_at,
+                                                 time.monotonic(), sequences=sample.sequences)
+            if reason in ('invalid_or_stale', 'source_regressed', 'source_gap', 'anchor_displacement'):
+                self._hold_confirmed_at = None
+            elif self._hold_evidence.confirmed():
+                self._hold_confirmed_at = sample.observed_at
 
     @device_request(resource='arm', priority=0, invalidate=('arm',))
     def hold_current_position(self) -> np.ndarray:
@@ -91,11 +124,11 @@ class ArmController:
         return current
 
 
-    @device_request(resource='arm', priority=0, ttl=5.)
+    @device_request(priority=0, ttl=5.)
     def stop_active_motion(self, task=None) -> None:
         """撤销当前任务并确认保持；旧任务的取消不能停止接替任务。
 
-        只有保持命令成功发送且后续新帧持续静止 0.1 s 才返回成功。超时报告
+        只有保持命令成功发送且后续新帧持续静止 0.2 s 才返回成功。超时报告
         未确认，保留使能和保持目标；这里绝不把普通取消变成自动失能。
         """
         owner = self._arm_trajectory
@@ -103,8 +136,29 @@ class ArmController:
         if task is not None and (active is not task or task.event.is_set()):
             return
         if self._stop.pending:
-            raise RuntimeError('stop/hold confirmation already pending')
+            # 加入同一确认，不递增资源代次、不重设目标，也不共享可变的续体。
+            poll, _ = self._stop_wait
+            return CycleResult(poll)
         with self._lifecycle.lock:
+            previous = self._backend.target()
+            evidence = self._hold_evidence
+            known_hold = self._hold_generation == self._backend.target_generation
+            # 孤立速度峰只使新的停止确认延后；只要上一份已确认保持仍在
+            # 150 ms 内且当前位置仍接近原目标，不因该峰重新锚定量化位置。
+            recently_confirmed = (self._hold_confirmed_at is not None
+                                  and time.monotonic()-self._hold_confirmed_at <= .15)
+            if (self._stop.result.state == 'confirmed'
+                    and self._stop.result.generation == self._backend.target_generation):
+                evidence, known_hold = self._stop.evidence, True
+            preserve = (known_hold and (evidence.confirmed() or recently_confirmed)
+                        and evidence.last_stamp is not None
+                        and time.monotonic()-evidence.last_stamp <= .15
+                        and self._lifecycle.execution == 'IDLE' and self._backend.mode == 'pos_vel'
+                        and self._backend.control_loop_active and not self._backend.trajectory_moving
+                        and (active is None or active.event.is_set())
+                        and not self.passthrough_active() and not self.gravity.gravity_compensation_active()
+                        and self.feedback.arm_failure() is None
+                        and np.max(np.abs(previous-self.feedback.joint_snapshot().positions)) <= POSITION_SPAN)
             self._backend.requests.invalidate('arm')
             if active is not None:
                 owner.stopping(active)
@@ -112,14 +166,24 @@ class ArmController:
             self._arm_passthrough_until = None
             if self._lifecycle.enabled:
                 self.gravity.stop_gravity_compensation()
-                self.ensure_pos_vel_control()
-                current = self.hold_current_position()
-                self._stop.begin(current, self._backend.target_generation)
+                if preserve:
+                    current = previous
+                else:
+                    # 活动轨迹、重力和透传交接必须重新取当前值，不能保留远处目标。
+                    self.ensure_pos_vel_control()
+                    current = self.hold_current_position()
+                # 续体捕获本次状态机；旧会话清理不得终止后继停止事务。
+                stop = ArmStop()
+                self._stop = stop
+                stop.begin(current, self._backend.target_generation)
+                logging.getLogger('rebotarm.audit').info('stop_target', extra={'audit': dict(
+                    previous=previous.tolist(), target=list(current), preserved=bool(preserve),
+                    generation=self._backend.target_generation)})
 
                 def cancel(reason):
-                    self._stop.abort(reason)
+                    stop.abort(reason)
                     if (self._lifecycle.enabled
-                            and self._backend.target_generation == self._stop.result.generation):
+                            and self._backend.target_generation == stop.result.generation):
                         self._lifecycle.set_execution_state('IDLE')
                     if active is not None:
                         owner.finish(active, 'aborted', f'stop/hold unconfirmed: {reason}')
@@ -127,14 +191,21 @@ class ArmController:
                 def poll():
                     # 所有读取均来自已验证缓存；这里不发送、不睡眠、不持锁等新帧。
                     if (not self._lifecycle.enabled
-                            or self._backend.target_generation != self._stop.result.generation):
-                        self._stop.abort('stop superseded by lifecycle or target generation')
-                    if self._stop.pending:
+                            or self._backend.target_generation != stop.result.generation):
+                        stop.abort('stop superseded by lifecycle or target generation')
+                    if stop.pending:
                         sample = self.feedback.joint_snapshot()
-                        self._stop.update(sample.positions, sample.velocities, sample.observed_at,
-                                          generation=self._backend.target_generation,
-                                          enabled=self._lifecycle.enabled)
-                    result = self._stop.result
+                        if any(code != 1 for code in sample.statuses):
+                            stop.abort('enabled holding status not confirmed')
+                        else:
+                            stop.update(sample.positions, sample.velocities, sample.observed_at,
+                                              generation=self._backend.target_generation,
+                                              enabled=self._lifecycle.enabled, sequences=sample.sequences)
+                        logging.getLogger('rebotarm.audit').info('stop_evidence', extra={'audit': dict(
+                            sequences=sample.sequences, observed_at=sample.observed_at,
+                            state=stop.result.state, reason=stop.evidence.reason,
+                            quiet_since=stop.result.quiet_since)})
+                    result = stop.result
                     if result.state == 'stopping':
                         return False, None
                     if result.state != 'confirmed':
@@ -144,6 +215,7 @@ class ArmController:
                         owner.finish(active, 'canceled', result.message)
                     return True, None
 
+                self._stop_wait = (poll, cancel)
                 return CycleResult(poll, cancel=cancel)
             self._lifecycle.set_execution_state('IDLE')
             if active is not None:
@@ -215,7 +287,7 @@ class ArmController:
         return self._backend.target()
 
 
-    @device_request(resource='arm', priority=0, invalidate=('arm',))
+    @device_request(priority=0)
     def cancel_arm_trajectory(self) -> None:
         return self.stop_active_motion()
 
@@ -291,8 +363,6 @@ class ArmController:
                 self._lifecycle.set_mode("pos_vel")
             if not self._backend.control_loop_active:
                 self.start_position_loop()
-            else:
-                self.hold_current_position()
 
 
     @staticmethod

@@ -1,27 +1,9 @@
-"""轨迹运行时限位守卫：按采样检查实测力矩/速度，并用差分校验加速度/加加速度。
+"""运行期速度/力矩限位与反馈差分诊断。
 
-用途与位置
-    规划期通过的轨迹不代表运行期安全（负载变化、跟踪误差、外部扰动都会让实际速度与力矩
-    超出预期）。本模块提供执行阶段的软件限位：设计用途是由执行/回放监控按控制周期把关节名、
-    实测速度、实测力矩与运行时间喂给 :class:`TrajectoryRuntimeLimitGuard`，一旦越限就拿到一条
-    :class:`RuntimeLimitViolation`，据此停机或降级。
-
-数值方法
-    速度与力矩来自反馈，此处不做估计；加速度与加加速度没有直接测量值，用相邻采样的一阶差分
-    （后向差分，即当前采样减去上一次采样）估计：``a_k = (v_k - v_{k-1}) / dt``、
-    ``j_k = (a_k - a_{k-1}) / dt``。因此结果对采样周期与反馈噪声敏感：``dt`` 由调用方给出，
-    必须单调递增且严格大于 0（零或负间隔会放大噪声甚至除零，按调用错误处理）；加加速度从第三个
-    采样点起才有值。
-
-状态与安全语义
-    守卫持有上一次的时间、速度和加速度历史，是有状态对象：每次回放/执行开始前必须调用
-    :meth:`TrajectoryRuntimeLimitGuard.reset`，否则会拿上一轮的残值做差分。
-    越限时返回违规描述，``None`` 表示本次采样全部通过；输入不合法（未知关节、时间倒退、
-    采样间隔不为正、非有限值）一律抛异常，绝不静默放过——安全路径上"没报错"必须等于"查过了"。
-
-限位来源
-    规划侧的速度/加速度/加加速度上限从 MoveIt 的关节限位 YAML 读取
-    （:func:`load_joint_runtime_limits`）；力矩上限不在这份 YAML 里，需要调用方另行给出。
+对外提供 JointRuntimeLimit、加载器和 TrajectoryRuntimeLimitGuard。规划限位
+保持原值；默认 enforce 用于具有可信导数的样本，量化电机反馈显式选择 diagnostic：
+速度与力矩仍可中止，差分加速度/jerk 只留诊断，不能单独证明实际动态超限。
+每段执行独立持有历史，非有限值、未知关节和不递增时间均拒绝。
 """
 
 from __future__ import annotations
@@ -78,15 +60,14 @@ class RuntimeLimitViolation:
 
 
 class TrajectoryRuntimeLimitGuard:
-    """按采样检查实测力矩/速度，并用差分估计的加速度/加加速度做越限判定。
+    """按策略处理反馈导数；诊断属性保留每个关节的本次导数及越限值。
 
-    每次 :meth:`observe` 只报告第一条违规（同一采样的多项越限不聚合），因为调用方的动作都一样
-    ——立即停车或降级；这样也避免在安全路径上做多余计算。
-    检查顺序：先遍历所有关节查力矩，再查速度（这两项是直接测量值，最可信），最后才用差分结果
-    查加速度与加加速度。
+    返回第一条需处置的违规；每轴先检查力矩再检查速度，之后处理差分导数。
+    diagnostic 策略只把导数放入 derivative_diagnostics，不作为返回违规。
+    accelerations/jerks 保存本次完整结果，避免短路导致多轴历史不一致。
     """
 
-    def __init__(self, limits: Mapping[str, JointRuntimeLimit]) -> None:
+    def __init__(self, limits: Mapping[str, JointRuntimeLimit], *, derivative_policy="enforce") -> None:
         """构造守卫。
 
         ``limits`` 是 ``{关节名: 关节限位}`` 映射，至少要有一个关节；守卫只认识映射里出现过的
@@ -98,6 +79,9 @@ class TrajectoryRuntimeLimitGuard:
             raise ValueError("at least one joint runtime limit is required")
         if any(not isinstance(limit, JointRuntimeLimit) for limit in self._limits.values()):
             raise TypeError("limits must contain JointRuntimeLimit values")
+        if derivative_policy not in ('enforce', 'diagnostic'):
+            raise ValueError('unknown derivative policy')
+        self.derivative_policy = derivative_policy
         self.reset()
 
     def reset(self) -> None:
@@ -106,6 +90,9 @@ class TrajectoryRuntimeLimitGuard:
         必须在每次执行开始前调用：残留的上一次速度与加速度会被当成"上一采样"，使第一个采样点
         算出错误的加速度/加加速度。
         """
+        self.derivative_diagnostics = ()
+        self.accelerations = {}
+        self.jerks = {}
         self._previous_elapsed: float | None = None
         self._previous_velocities: dict[str, float] = {}
         self._previous_accelerations: dict[str, float] = {}
@@ -150,54 +137,34 @@ class TrajectoryRuntimeLimitGuard:
         current_velocities = {name: _finite(value, "velocity") for name, value in zip(names, velocities)}
         current_efforts = {name: _finite(value, "effort") for name, value in zip(names, efforts)}
 
+        # 先完整计算本次历史，避免第一项越限导致其余轴的导数混用不同采样。
+        accelerations, jerks, direct, derivatives = {}, {}, [], []
         for name in names:
             limit = self._limits[name]
-            violation = _check_absolute("effort", name, current_efforts[name], limit.max_effort)
-            if violation is not None:
-                self._remember(current_time, current_velocities)
-                return violation
-            violation = _check_absolute("velocity", name, current_velocities[name], limit.max_velocity)
-            if violation is not None:
-                self._remember(current_time, current_velocities)
-                return violation
-
-        if dt is not None:
-            for name in names:
-                # 加速度由相邻速度差商估计；dt 已在上面保证为正。
+            for kind, value, bound in (("effort", current_efforts[name], limit.max_effort),
+                                       ("velocity", current_velocities[name], limit.max_velocity)):
+                violation = _check_absolute(kind, name, value, bound)
+                if violation is not None:
+                    direct.append(violation)
+            if dt is not None and name in self._previous_velocities:
                 acceleration = (current_velocities[name] - self._previous_velocities[name]) / dt
-                limit = self._limits[name]
+                accelerations[name] = acceleration
                 violation = _check_absolute("acceleration", name, acceleration, limit.max_acceleration)
                 if violation is not None:
-                    self._remember(current_time, current_velocities, {name: acceleration})
-                    return violation
+                    derivatives.append(violation)
                 if name in self._previous_accelerations:
-                    # 加加速度需要连续两次加速度，因此从第三个采样点起才检查。
                     jerk = (acceleration - self._previous_accelerations[name]) / dt
+                    jerks[name] = jerk
                     violation = _check_absolute("jerk", name, jerk, limit.max_jerk)
                     if violation is not None:
-                        self._remember(current_time, current_velocities, {name: acceleration})
-                        return violation
-                # 只在成功算出该关节加速度时更新它的历史。
-                self._previous_accelerations[name] = acceleration
+                        derivatives.append(violation)
+        self._previous_elapsed = current_time
+        self._previous_velocities = current_velocities
+        self._previous_accelerations = accelerations
+        self.accelerations, self.jerks = accelerations, jerks
+        self.derivative_diagnostics = tuple(derivatives)
+        return next(iter(direct or (derivatives if self.derivative_policy == 'enforce' else [])), None)
 
-        self._remember(current_time, current_velocities)
-        return None
-
-    def _remember(
-        self,
-        elapsed: float,
-        velocities: Mapping[str, float],
-        accelerations: Mapping[str, float] | None = None,
-    ) -> None:
-        """记录本次采样，供下一次差分使用。
-
-        ``accelerations`` 为空或 ``None`` 时保留上一次的加速度历史：越限返回时只有越限关节带
-        新加速度，其余关节的历史不能被清掉（此时调用方通常会停机，未补算的值也不再使用）。
-        """
-        self._previous_elapsed = elapsed
-        self._previous_velocities = dict(velocities)
-        if accelerations:
-            self._previous_accelerations.update(accelerations)
 
 
 def load_joint_runtime_limits(

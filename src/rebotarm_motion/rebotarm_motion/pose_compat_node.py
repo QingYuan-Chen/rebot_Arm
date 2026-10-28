@@ -10,6 +10,7 @@ IK/笛卡尔采样、动态限位重定时和 MoveIt 碰撞检查，再提交唯
 新请求。取消要求 FJT 终态及新鲜静止反馈，不能把已发送取消当作已经停住。
 """
 import math
+import logging
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -42,6 +43,7 @@ class PoseRun:
     deadline: float
     cancel: bool = False
     dispatched: float = 0.
+    dispatched_ns: int = 0
     command: object = None
     send: object = None
     handle: object = None
@@ -52,6 +54,7 @@ class PoseRun:
     guard: object = None
     observed_stamp: int = 0
     stopping_since: float | None = None
+    stop_epoch: int | None = None
     done: threading.Event = field(default_factory=threading.Event)
 
 
@@ -136,7 +139,7 @@ class PoseCompatNode(Node):
             if self.status.state_machine != 'IDLE':
                 raise RuntimeError('arm resource is not idle')
             run = PoseRun(self.epoch, time.monotonic()+30.)
-            run.guard = TrajectoryRuntimeLimitGuard(self.runtime_limits)
+            run.guard = TrajectoryRuntimeLimitGuard(self.runtime_limits, derivative_policy='diagnostic')
             self.active = run
             return run
 
@@ -211,6 +214,7 @@ class PoseCompatNode(Node):
         with self.lock:
             self._check_run(run, canceled)
             run.command, run.dispatched = command, time.monotonic()
+            run.dispatched_ns = self.get_clock().now().nanoseconds
             run.send = self.action.send_goal_async(goal)
         return path[-1]
 
@@ -239,19 +243,32 @@ class PoseCompatNode(Node):
                         return
                 if run.handle is None and now-run.dispatched > 3.:
                     run.cancel, run.error = True, 'FJT acceptance timeout; draining late goal'
+                feedback_ready = False
                 try:
                     current = self._ready()
+                    feedback_ready = True
                     stamp = self.feedback.header.stamp.sec*1_000_000_000 + self.feedback.header.stamp.nanosec
                     if run.handle is not None and stamp > run.observed_stamp and not run.cancel:
-                        elapsed = max(0., now-run.dispatched)
+                        # 源时间与指令起点同属 ROS 时钟，不能用到达时刻比较旧反馈。
+                        elapsed = max(0., (stamp-run.dispatched_ns)/1e9)
                         desired = sample_command(run.command, elapsed)
-                        if np.max(np.abs(current-desired)) > .2:
-                            raise RuntimeError('pose execution tracking error exceeds 0.20 rad')
+                        tracking_error = float(np.max(np.abs(current-desired)))
                         indices = [list(self.feedback.name).index(n) for n in JOINT_NAMES]
                         violation = run.guard.observe(joint_names=JOINT_NAMES,
                             velocities=[self.feedback.velocity[i] for i in indices],
                             efforts=[self.feedback.effort[i] for i in indices], elapsed=stamp/1e9)
                         run.observed_stamp = stamp
+                        logging.getLogger('rebotarm.audit').info('pose_guard_sample', extra={'audit': dict(
+                            epoch=run.epoch, stamp_ns=stamp, dispatched_ns=run.dispatched_ns,
+                            elapsed=elapsed, positions=current.tolist(), desired=list(desired),
+                            velocities=[float(self.feedback.velocity[i]) for i in indices],
+                            efforts=[float(self.feedback.effort[i]) for i in indices],
+                            tracking_error=tracking_error, acceleration=run.guard.accelerations,
+                            jerk=run.guard.jerks, derivative_policy=run.guard.derivative_policy,
+                            derivative_diagnostics=[vars(value) for value in run.guard.derivative_diagnostics],
+                            violation=None if violation is None else vars(violation))})
+                        if tracking_error > .2:
+                            raise RuntimeError('pose execution tracking error exceeds 0.20 rad')
                         if violation is not None:
                             raise RuntimeError(f'pose execution dynamic limit: {violation}')
                     if run.epoch != self.epoch:
@@ -262,12 +279,18 @@ class PoseCompatNode(Node):
                     run.cancel = True
                     run.error = run.error or str(exc)
                 if run.cancel:
-                    if run.stopping_since is None:
-                        run.stopping_since = now
                     if run.handle is not None and run.cancel_future is None:
                         run.cancel_future = run.handle.cancel_goal_async()
-                    if run.terminal is not None and self.stop_feedback.stationary(
-                            run.stopping_since, now, self.get_clock().now().nanoseconds):
+                    # 已知动作终态后才建立停止证据。若反馈代次再变化，旧动作
+                    # 错误保持锁存，另建保持确认；不能把旧动作恢复为成功。
+                    if run.terminal is not None and feedback_ready and run.stop_epoch != self.epoch:
+                        logging.getLogger('rebotarm.audit').info('pose_stop_observation', extra={'audit': dict(
+                            run_epoch=run.epoch, stop_epoch=self.epoch, previous_stop_epoch=run.stop_epoch,
+                            since=now, error=run.error)})
+                        run.stopping_since, run.stop_epoch = now, self.epoch
+                    if (run.terminal is not None and run.stopping_since is not None
+                            and self.stop_feedback.stationary(
+                            run.stopping_since, now, self.get_clock().now().nanoseconds)):
                         self._finish(run, run.error or 'canceled; stationary feedback confirmed')
             except Exception as exc:
                 # 不丢弃未知状态的目标；下一轮继续排空，入口保持阻断。

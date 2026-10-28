@@ -65,6 +65,7 @@ class GripperAcquisitionPort:
 @dataclass(frozen=True)
 class ArmCyclePort:
     """周期对六轴任务和透传租约的推进，不暴露任务对象或锁。"""
+    reset_session: Callable[[], None]
     clear_passthrough: Callable[[], None]
     expire_passthrough: Callable[[float], None]
     check_task_generation: Callable[[], None]
