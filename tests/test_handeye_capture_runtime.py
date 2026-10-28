@@ -139,10 +139,10 @@ try:
                                  image_topic='/alternate/color',camera_info_topic='/alternate/info')},session_id=alternate_id)
     alternate=call('capture',{'split':'training'},'alternate-one',session_id=alternate_id)
     assert alternate['training_samples'][0]['provenance']['capture_settings']['image_topic']=='/alternate/color'
-    assert node._active_topics==('/alternate/color','/alternate/info')
+    assert node._inputs.topics==('/alternate/color','/alternate/info')
     camera_enabled=False
-    with node.lock:
-        node.frames.clear();node.infos.clear()
+    with node._inputs.lock:
+        node._inputs.frames.clear();node._inputs.infos.clear()
     tcp_id='c'*32
     call('create',{'metadata':dict(mode='tcp',base_frame='base',end_link_frame='end')},session_id=tcp_id)
     tcp=call('capture',{'split':'training'},'tcp-one',session_id=tcp_id)

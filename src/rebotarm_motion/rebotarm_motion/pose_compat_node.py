@@ -24,17 +24,14 @@ from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalRespons
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
 from rebotarm_msgs.action import MoveToPose
-from rebotarm_msgs.msg import ArmStatus, JointMotorState
 from rebotarm_msgs.srv import MoveToPoseIK
-from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectoryPoint
 from builtin_interfaces.msg import Duration
 from .pose_kinematics import JOINT_NAMES, PoseKinematics, model_resource
 from .cartesian_trajectory import plan_cartesian, retime_path
 from .collision_precheck import CollisionPrechecker, CollisionPrecheckConfig
-from .stop_feedback import StopFeedback
+from .feedback_receiver import MotionFeedbackReceiver
 from .paired_trajectory_protocol import sample_command
 from .trajectory_runtime_limits import TrajectoryRuntimeLimitGuard, load_joint_runtime_limits
 
@@ -77,13 +74,6 @@ class PoseCompatNode(Node):
         self.status_at = 0.
         self.epoch = 0
         self.active = None
-        self.stop_feedback = StopFeedback()
-        self.create_subscription(JointState, f'/{self.namespace}/joint_states', self._on_joints,
-                                 qos_profile_sensor_data, callback_group=self.group)
-        self.create_subscription(JointMotorState, f'/{self.namespace}/gripper/state', self._on_gripper,
-                                 qos_profile_sensor_data, callback_group=self.group)
-        self.create_subscription(ArmStatus, f'/{self.namespace}/arm_status', self._on_status,
-                                 10, callback_group=self.group)
         self.action_name = f'/{self.namespace}/follow_joint_trajectory'
         self.action = ActionClient(self, FollowJointTrajectory, self.action_name, callback_group=self.group)
         self.validity = self.create_client(GetStateValidity,
@@ -95,24 +85,18 @@ class PoseCompatNode(Node):
         self.create_service(MoveToPoseIK, f'/{self.namespace}/move_to_pose_ik', self._ik,
                             callback_group=self.group)
         self.create_timer(.02, self._monitor, callback_group=self.group)
+        # 接收线程不获取 self.lock；同步规划和动作等待不能阻塞反馈缓存。
+        self._feedback_receiver = MotionFeedbackReceiver(self, self.namespace, gripper=True)
+        self.stop_feedback = self._feedback_receiver.stop_feedback
 
-    def _on_joints(self, msg):
-        with self.lock:
-            self.feedback = msg
-            self.stop_feedback.update(msg, time.monotonic(), self.get_clock().now().nanoseconds)
+    def _refresh_feedback(self):
+        snapshot = self._feedback_receiver.snapshot()
+        self.feedback, self.gripper = snapshot.joints, snapshot.gripper
+        self.status, self.status_at, self.epoch = snapshot.status, snapshot.status_at, snapshot.epoch
 
-    def _on_gripper(self, msg):
-        with self.lock:
-            self.gripper = msg
-
-    def _on_status(self, msg):
-        with self.lock:
-            old = self.status
-            # 模式或使能变化使尚未下发的规划失效，即使随后又恢复也不能复用旧规划。
-            if old is not None and (old.mode, old.enabled, old.control_loop_active) != (
-                    msg.mode, msg.enabled, msg.control_loop_active):
-                self.epoch += 1
-            self.status, self.status_at = msg, time.monotonic()
+    def destroy_node(self):
+        self._feedback_receiver.close()
+        return super().destroy_node()
 
     def _fresh(self, msg, age=.15):
         if msg is None:
@@ -127,6 +111,7 @@ class PoseCompatNode(Node):
         return self.kinematics.joints([self.feedback.position[i] for i in indices])
 
     def _ready(self):
+        self._refresh_feedback()
         status = self.status
         if (status is None or time.monotonic()-self.status_at > .6 or not status.enabled
                 or not status.control_loop_active or status.error_codes
@@ -157,11 +142,12 @@ class PoseCompatNode(Node):
 
     def _check_run(self, run, canceled=lambda: False):
         with self.lock:
+            current = self._ready()
             if (run.cancel or canceled() or run.epoch != self.epoch
                     or time.monotonic() > run.deadline or self.active is not run):
                 run.cancel = True
                 raise RuntimeError('pose request canceled, expired or controller state changed')
-            return self._ready()
+            return current
 
     @staticmethod
     def _target(msg):
@@ -190,6 +176,7 @@ class PoseCompatNode(Node):
             count = max(1, math.ceil(float(np.max(np.abs(current-previous)))/.02))
             samples.extend(tuple(previous+(current-previous)*i/count) for i in range(1, count+1))
         with self.lock:
+            self._refresh_feedback()
             if not self._fresh(self.gripper):
                 raise RuntimeError('fresh gripper feedback required for collision state')
             opening = float(self.gripper.position)
@@ -244,6 +231,10 @@ class PoseCompatNode(Node):
                 if run.result is not None and run.result.done():
                     run.terminal = run.result.result()
                     if not run.cancel:
+                        # 终态送达前的反馈空档仍使旧请求失效，不能被恢复后的新帧覆盖。
+                        self._ready()
+                        if run.epoch != self.epoch:
+                            raise RuntimeError('controller state or feedback continuity changed')
                         self._finish(run)
                         return
                 if run.handle is None and now-run.dispatched > 3.:
@@ -315,6 +306,7 @@ class PoseCompatNode(Node):
         return response
 
     def _pose_message(self):
+        self._refresh_feedback()
         transform = self.kinematics.pose(self._positions())
         msg = Pose()
         msg.position.x, msg.position.y, msg.position.z = map(float, transform.translation)
@@ -334,6 +326,7 @@ class PoseCompatNode(Node):
                         run.cancel = True
                 feedback = MoveToPose.Feedback()
                 with self.lock:
+                    self._refresh_feedback()
                     if not self._fresh(self.feedback):
                         continue
                     feedback.current_pose = self._pose_message()

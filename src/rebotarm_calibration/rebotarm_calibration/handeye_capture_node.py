@@ -1,11 +1,12 @@
-"""Read-only ROS hand-eye acquisition. Never calls a motor service/action."""
-from collections import deque
+"""只读手眼采集服务：独立接收图像/内参与 TF，业务线程执行检测和会话落盘。
+
+接收快照保留源时间，采集仍要求请求后的新帧及连续稳定窗口；不调用电机服务或动作。
+"""
 import json
 import base64
 import cv2
 import math
 from pathlib import Path
-import threading
 import time
 
 import numpy as np
@@ -14,10 +15,9 @@ from rclpy.node import Node
 from rclpy.validate_full_topic_name import validate_full_topic_name
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.qos import qos_profile_sensor_data
 from cv_bridge import CvBridge
-from sensor_msgs.msg import Image, CameraInfo
-from tf2_ros import Buffer, TransformListener, TransformException
+from tf2_ros import TransformException
+from .capture_input_receiver import CaptureInputReceiver
 from rebotarm_msgs.srv import CalibrationCommand
 
 from .aruco_pose import detect_aruco_pose
@@ -55,19 +55,18 @@ class HandeyeCaptureNode(Node):
             self.settings[key] = value
         self.provenance = runtime_provenance(self.settings)
         self.store = SessionStore(self.settings['session_directory'])
-        self.lock = threading.Lock()
-        self.frames = deque(maxlen=40)
-        self.infos = deque(maxlen=40)
         self.bridge = CvBridge()
-        self.buffer = Buffer()
-        self.listener = TransformListener(self.buffer, self)
-        self._camera_subscriptions = []
-        self._topic_generation = 0
-        self._active_topics = None
-        self.configure_topics({})
-        self.commands = MutuallyExclusiveCallbackGroup()
-        self.service = self.create_service(CalibrationCommand, '~/command', self.command,
-                                           callback_group=self.commands)
+        self._inputs = CaptureInputReceiver(self)
+        self.buffer = self._inputs.buffer
+        try:
+            self.configure_topics({})
+            self.commands = MutuallyExclusiveCallbackGroup()
+            self.service = self.create_service(CalibrationCommand, '~/command', self.command,
+                                               callback_group=self.commands)
+        except Exception:
+            self._inputs.close()
+            super().destroy_node()
+            raise
 
     def configure_topics(self, metadata):
         topics = tuple(metadata.get(key, self.settings[key]) for key in ('image_topic', 'camera_info_topic'))
@@ -75,46 +74,22 @@ class HandeyeCaptureNode(Node):
             if not isinstance(topic, str):
                 raise ValueError('camera topics must be absolute ROS topic names')
             validate_full_topic_name(topic)
-        if topics == self._active_topics:
-            return
-        # Generation tags discard callbacks already queued on old subscriptions.
-        with self.lock:
-            self._topic_generation += 1
-            generation = self._topic_generation
-            self.frames.clear()
-            self.infos.clear()
-        for subscription in self._camera_subscriptions:
-            self.destroy_subscription(subscription)
-        self._camera_subscriptions = []
-        def receive(message, destination):
-            with self.lock:
-                if generation == self._topic_generation:
-                    destination.append(message)
-        self._camera_subscriptions.append(self.create_subscription(Image, topics[0],
-            lambda message: receive(message, self.frames), qos_profile_sensor_data))
-        self._camera_subscriptions.append(self.create_subscription(CameraInfo, topics[1],
-            lambda message: receive(message, self.infos), qos_profile_sensor_data))
-        self._active_topics = topics
+        self._inputs.configure(topics)
         effective = dict(self.settings, image_topic=topics[0], camera_info_topic=topics[1])
         self.provenance = runtime_provenance(effective)
 
-    def on_image(self, message):
-        with self.lock:
-            self.frames.append(message)
-
-    def on_info(self, message):
-        with self.lock:
-            self.infos.append(message)
+    def destroy_node(self):
+        self._inputs.close()
+        return super().destroy_node()
 
     def observation(self, metadata, after_ns, checks=None):
         if checks:
             checks.start('image')
-        with self.lock:
-            if not self.frames:
-                raise WaitingObservation('waiting for Image')
-            image = self.frames[-1]
-            stamp = stamp_ns(image.header.stamp)
-            infos = list(self.infos)
+        snapshot = self._inputs.snapshot()
+        image, infos = snapshot.image, snapshot.infos
+        if image is None:
+            raise WaitingObservation('waiting for Image')
+        stamp = stamp_ns(image.header.stamp)
         age = (self.get_clock().now().nanoseconds - stamp) / 1e9
         if stamp <= after_ns:
             raise WaitingObservation('waiting for advancing image')
@@ -235,8 +210,7 @@ class HandeyeCaptureNode(Node):
                 'scope': 'latest base-to-end only; not a hand-eye accuracy check'}
 
     def preview(self):
-        with self.lock:
-            image = self.frames[-1] if self.frames else None
+        image = self._inputs.snapshot().image
         if image is None:
             raise ValueError('no camera image')
         age = (self.get_clock().now().nanoseconds - stamp_ns(image.header.stamp)) / 1e9

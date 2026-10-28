@@ -20,6 +20,7 @@ class Future:
 def monitor_node():
     node = PoseCompatNode.__new__(PoseCompatNode)
     node.lock = threading.RLock()
+    node._refresh_feedback = lambda: None
     node.epoch = 0
     node._ready = lambda: (0.,)*6
     node.feedback = NS(header=NS(stamp=NS(sec=0, nanosec=1)))

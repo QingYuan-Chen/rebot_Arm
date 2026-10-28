@@ -250,6 +250,7 @@ def test_visual_execute_reports_plan_expired_on_arrival(monkeypatch):
     warnings = []
     node = SimpleNamespace(
         _latest_plan=None, _last_plan_rejection="", _plan_revision=0,
+        _sync_inputs=lambda: None,
         _max_plan_age_sec=10.0,
         get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=112_000_000_000)),
         get_logger=lambda: SimpleNamespace(warn=warnings.append),

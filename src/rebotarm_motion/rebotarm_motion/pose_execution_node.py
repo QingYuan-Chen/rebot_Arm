@@ -47,9 +47,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import JointState
-from rclpy.qos import qos_profile_sensor_data
-from rebotarm_msgs.msg import ArmStatus
-from .stop_feedback import StopFeedback
+from .feedback_receiver import MotionFeedbackReceiver
 
 from rebotarm_msgs.srv import ExecutePose, PublishTrajectoryPreview
 
@@ -115,13 +113,6 @@ class PoseExecutionNode(Node):
         self._generation = 0
         self._send_future = None
         self._result_future = None
-        self._stop_feedback = StopFeedback()
-        self._arm_status = None
-        self.create_subscription(JointState, f"/{self._arm_namespace}/joint_states",
-                                 self._on_stop_feedback, qos_profile_sensor_data,
-                                 callback_group=self._callback_group)
-        self.create_subscription(ArmStatus, f"/{self._arm_namespace}/arm_status",
-                                 self._on_arm_status, 10, callback_group=self._callback_group)
         self._preview_publisher = (
             self.create_publisher(DisplayTrajectory, "/display_planned_path", 10)
             if bool(self.get_parameter("publish_plan_only_preview").value)
@@ -173,17 +164,15 @@ class PoseExecutionNode(Node):
             self._stop,
             callback_group=self._callback_group,
         )
+        self._feedback_receiver = MotionFeedbackReceiver(self, self._arm_namespace)
+        self._stop_feedback = self._feedback_receiver.stop_feedback
         self.get_logger().info(
             f"pose motion execution ready: /{self._arm_namespace}/motion_execution/execute_pose"
         )
 
-    def _on_stop_feedback(self, msg):
-        # 单调时钟记录本地接收时间，ROS 时钟用于校验消息源时间戳的新鲜度。
-        self._stop_feedback.update(msg, time.monotonic(), self.get_clock().now().nanoseconds)
-
-    def _on_arm_status(self, msg):
-        with self._motion_lock:
-            self._arm_status = (time.monotonic(), msg)
+    def destroy_node(self):
+        self._feedback_receiver.close()
+        return super().destroy_node()
 
     def _execute_pose(self, request, response):
         """串行接纳位姿请求，并在异常后要求重新确认停止。"""
@@ -477,9 +466,10 @@ class PoseExecutionNode(Node):
         """真机需有新鲜、无故障的控制器空闲状态；仿真由动作和关节反馈确认停止。"""
         if not bool(self.get_parameter("use_hardware").value):
             return True
-        if self._arm_status is None:
+        snapshot = self._feedback_receiver.snapshot()
+        if snapshot.status is None:
             return False
-        received, status = self._arm_status
+        received, status = snapshot.status_at, snapshot.status
         stamp = status.header.stamp.sec * 1_000_000_000 + status.header.stamp.nanosec
         age = (self.get_clock().now().nanoseconds-stamp)/1e9
         # 同时检查本地接收年龄和消息源时间戳；状态码 0/1 均可接受，不要求失能。

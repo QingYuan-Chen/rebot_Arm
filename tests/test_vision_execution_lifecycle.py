@@ -333,7 +333,7 @@ def test_live_expired_plan_revokes_old_cache_and_wait_accepts_new_input(monkeypa
     state.latest_plan = old
     state.latest_candidates = object()
     node = SimpleNamespace(
-        _state=state, _service_timeout_sec=.2, _max_plan_age_sec=4.,
+        _state=state, _sync_inputs=lambda: None, _service_timeout_sec=.2, _max_plan_age_sec=4.,
         get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=now)),
     )
     node._plan_is_fresh = lambda p: VisualGraspExecutorNode._plan_is_fresh(node, p)
@@ -354,7 +354,7 @@ def test_fresh_plan_wait_is_stoppable_and_preserves_stop_latch(monkeypatch):
     from rebotarm_vision.nodes import visual_grasp_executor_node as module
     state = VisualGraspState()
     state.begin_run()
-    node = SimpleNamespace(_state=state, _service_timeout_sec=.2)
+    node = SimpleNamespace(_state=state, _sync_inputs=lambda: None, _service_timeout_sec=.2)
     monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
     monkeypatch.setattr(module.time, 'sleep', lambda _: state.request_stop('operator stop'))
     ok, reason = VisualGraspExecutorNode._wait_for_fresh_plan(node)
@@ -369,7 +369,7 @@ def test_plan_rejection_during_wait_is_reported_at_timeout(monkeypatch):
     from rebotarm_vision.nodes import visual_grasp_executor_node as module
     state = VisualGraspState(last_plan_rejection='invalid grasp plan: target out of workspace')
     state.begin_run()
-    node = SimpleNamespace(_state=state, _service_timeout_sec=0.)
+    node = SimpleNamespace(_state=state, _sync_inputs=lambda: None, _service_timeout_sec=0.)
     monkeypatch.setattr(module.rclpy, 'ok', lambda: True)
     ok, reason = VisualGraspExecutorNode._wait_for_fresh_plan(node)
     assert not ok and 'target out of workspace' in reason
@@ -387,7 +387,7 @@ def test_repeated_execute_waits_for_new_plan_without_ready_motion(monkeypatch):
     fresh.valid = True
     fresh.header.stamp.sec = 100
     node = SimpleNamespace(
-        _state=state, _service_timeout_sec=.2, _max_plan_age_sec=4.,
+        _state=state, _sync_inputs=lambda: None, _service_timeout_sec=.2, _max_plan_age_sec=4.,
         _refresh_config=lambda: None, _config=None, _io_gateway=SimpleNamespace(stop_pending=False), _tf_buffer=None,
         get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=now[0])),
         get_logger=lambda: None,

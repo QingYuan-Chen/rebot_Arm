@@ -9,7 +9,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallb
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from std_srvs.srv import Trigger
-from tf2_ros import Buffer, TransformListener
+from ..grasp_input_receiver import GraspInputReceiver
 
 from rebotarm_msgs.msg import GraspCandidateArray, GraspPlan
 from rebotarm_msgs.srv import ExecutePose, GraspGripper, PublishTrajectoryPreview, SetGripper
@@ -65,7 +65,7 @@ def _parameter(node, name: str):
 #      只有"允许自动重试 + 该阶段可重试 + 还有剩余候选"三者同时成立才会换候选继续。
 #   5. 闭合后立即做抓取验证（接触 + 闭合行程），通过后才沿接近路径反向撤退。
 #
-# 线程模型：全部回调注册在可重入回调组上，主函数使用三线程执行器。执行服务回调会长时间
+# 线程模型：计划/候选/TF 使用独立单线程接收器；服务和交接定时器使用三线程执行器。执行回调会长时间
 # 阻塞（内部用 `rclpy.ok()` 与 `_running` 标志轮询等待），停止服务可在另一个线程里打断它。
 # 坐标系：`target_frame`（默认 `base_link`）是下发给运动层的目标坐标系；计划消息里
 # `header.frame_id` 与它不一致时用 TF 换算，查询超时 0.2 s、取最新可用变换。
@@ -113,7 +113,7 @@ class VisualGraspExecutorNode(Node):
     节点本身不保存"机械臂状态"，只保存最近一次有效计划与候选，以及本轮执行过程的
     快照（最近夹爪到位位置、是否检出接触、闭合行程），供失败诊断使用。
 
-    回调模型：所有订阅与服务都在同一个可重入回调组，主线程池为三线程。抓取序列在
+    回调模型：输入由独立单线程接收；服务使用三线程执行器。抓取序列在
     `/visual_grasp/execute` 的回调里同步执行，期间由 `_running` 标志与 `rclpy.ok()`
     控制所有等待循环；`/visual_grasp/stop` 只需把该标志置假即可让序列在下一个检查点退出。
 
@@ -342,8 +342,6 @@ class VisualGraspExecutorNode(Node):
 
         # ── 运行状态 ───────────────────────────────────────────────────────
         self._state = VisualGraspState()
-        self._tf_buffer = Buffer()
-        self._tf_listener = TransformListener(self._tf_buffer, self)
 
         # ── 下游服务客户端（全部挂在可重入回调组上）────────────────────────
         self._execute_pose_client = self.create_client(
@@ -395,15 +393,9 @@ class VisualGraspExecutorNode(Node):
             cancelled=lambda: not _state_for(self).is_running(),
             on_timeout=lambda name: self._handle_io_timeout(name),
         )
-        # 队列深度 10：计划/候选都是"最新值优先"语义，积压没有意义，_on_plan 会自行丢弃过期消息
-        self.create_subscription(GraspPlan, self._input_topic, self._on_plan, 10, callback_group=self._callback_group)
-        self.create_subscription(
-            GraspCandidateArray,
-            self._candidates_topic,
-            self._on_candidates,
-            10,
-            callback_group=self._callback_group,
-        )
+        self._input_receiver = GraspInputReceiver(self, self._input_topic, self._candidates_topic)
+        self._tf_buffer = self._input_receiver.buffer
+        self.create_timer(.02, self._sync_inputs, callback_group=self._callback_group)
         self.create_service(Trigger, f"/{self._arm_namespace}/visual_grasp/execute", self._execute_visual_grasp, callback_group=self._callback_group)
         self.create_service(Trigger, f"/{self._arm_namespace}/visual_grasp/stop", self._stop_visual_grasp, callback_group=self._stop_callback_group)
         self.create_timer(0.05, self._poll_stop_confirmation, callback_group=self._callback_group)
@@ -448,6 +440,27 @@ class VisualGraspExecutorNode(Node):
             return super().get_parameter(name)
         except AttributeError:
             return self.get_parameter(name)
+
+    def destroy_node(self):
+        self._input_receiver.close()
+        return super().destroy_node()
+
+    def _sync_inputs(self):
+        # 接收路径不拿执行锁；业务侧短事务按接收次序处理撤销及最新快照。
+        state = _state_for(self)
+        with state.lock:
+            try:
+                events = self._input_receiver.mailbox.take()
+            except RuntimeError as exc:
+                if state.abort_reason != str(exc):
+                    self.get_logger().error(str(exc))
+                state.mark_aborting(str(exc))
+                return
+            for _, kind, message in events:
+                if kind == 'plan':
+                    self._on_plan(message)
+                else:
+                    self._on_candidates(message)
 
     def _refresh_config(self) -> None:
         """在每次执行前建立一致的参数快照，并刷新本地派生值。"""
@@ -538,6 +551,7 @@ class VisualGraspExecutorNode(Node):
             workflow = VisualGraspWorkflow(
                 state=state, config=self._config, io_gateway=self._io_gateway,
                 tf_buffer=self._tf_buffer, clock=self.get_clock(), logger=self.get_logger(),
+                refresh_inputs=self._sync_inputs,
             )
             self._runtime = VisualGraspRuntime(workflow)
             return self._runtime.execute(_request, response, admitted=True)
@@ -562,6 +576,7 @@ class VisualGraspExecutorNode(Node):
         timeout = max(float(self._service_timeout_sec), 0.0)
         deadline = time.monotonic() + timeout
         while rclpy.ok():
+            self._sync_inputs()
             with state.lock:
                 if not state.running or state.plans_blocked:
                     return False, state.abort_reason or "stopped while waiting for a fresh plan"
@@ -588,10 +603,12 @@ class VisualGraspExecutorNode(Node):
             if state.run_callback_active or not self._io_gateway.stop_pending:
                 return
             if not state.plans_blocked:
+                self._input_receiver.mailbox.block(True)
                 state.request_stop("waiting for motion stop confirmation")
             ok, message = self._io_gateway.poll_stop_confirmation()
             if ok:
                 state.confirm_stop()
+                self._input_receiver.mailbox.block(False)
                 self.get_logger().info("visual grasp stop confirmed; waiting for a new plan")
             elif ok is False:
                 if state.abort_reason != message:
@@ -602,6 +619,7 @@ class VisualGraspExecutorNode(Node):
         """停止并保持当前位置；成功表示已确认停止，不附带自动回位。"""
         state = _state_for(self)
         with state.lock:
+            self._input_receiver.mailbox.block(True)
             state.request_stop("operator stop; waiting for confirmation")
             self._request_stop()
         deadline = time.monotonic() + 16.0

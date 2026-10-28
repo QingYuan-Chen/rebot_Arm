@@ -106,7 +106,7 @@ def test_hardware_fault_or_stale_status_cannot_confirm_stop():
     node.get_clock = lambda: NS(now=lambda: NS(nanoseconds=int(10e9)))
     status = NS(header=NS(stamp=NS(sec=10,nanosec=0)), error_codes=[],
                 state_machine='IDLE', per_joint_status_code=[1]*6)
-    node._arm_status = (10., status)
+    node._feedback_receiver = NS(snapshot=lambda: NS(status_at=10., status=status))
     assert PoseExecutionNode._hardware_idle(node, 10.)
     status.error_codes = ['ARM_FEEDBACK: stale']
     assert not PoseExecutionNode._hardware_idle(node, 10.)

@@ -58,7 +58,7 @@ class VisualGraspWorkflow:
     所有服务请求均通过注入的 I/O 网关分发。
     """
 
-    def __init__(self, *, state, config, io_gateway, tf_buffer, clock, logger, monotonic=time.monotonic, sleep=time.sleep, context_ok=rclpy.ok):
+    def __init__(self, *, state, config, io_gateway, tf_buffer, clock, logger, monotonic=time.monotonic, sleep=time.sleep, context_ok=rclpy.ok, refresh_inputs=lambda: None):
         self._state = state
         self._config = config
         self._io_gateway = io_gateway
@@ -68,6 +68,7 @@ class VisualGraspWorkflow:
         self._monotonic = monotonic
         self._sleep = sleep
         self._context_ok = context_ok
+        self._refresh_inputs = refresh_inputs
         self._tf_cache: dict[tuple[str, str, int], object] = {}
         self._services = VisualGraspServiceGateway(state=state, config=config, io_gateway=io_gateway)
         self._input_topic = config.input_topic
@@ -197,6 +198,7 @@ class VisualGraspWorkflow:
         等价于"只执行一次"。
         """
 
+        self._refresh_inputs()
         state = _state_for(self)
         with state.lock:
             plan = deepcopy(state.latest_plan)
@@ -261,6 +263,8 @@ class VisualGraspWorkflow:
             if not _state_for(self).is_running():
                 return False, "stopped", stages[stage_index].name
             stage = stages[stage_index]
+            # 在记录阶段起点前交接已有输入，不能把旧积压算成阶段开始后的新观测。
+            self._refresh_inputs()
             state = _state_for(self)
             with state.lock:
                 stage_start_revision = state.plan_revision
@@ -376,6 +380,7 @@ class VisualGraspWorkflow:
         timeout_sec = float(_parameter(self, "refresh_plan_timeout_sec").value)
         deadline = self._monotonic() + max(0.0, timeout_sec)
         while self._context_ok() and _state_for(self).is_running() and self._monotonic() < deadline:
+            self._refresh_inputs()
             state = _state_for(self)
             with state.lock:
                 revision = state.plan_revision
@@ -457,6 +462,7 @@ class VisualGraspWorkflow:
         last_error = 0.0
         require_fresh_plan = bool(_parameter(self, "approach_visual_servo_require_fresh_plan").value)
         for iteration in range(max_iterations):
+            self._refresh_inputs()
             state = _state_for(self)
             with state.lock:
                 plan_revision = state.plan_revision
