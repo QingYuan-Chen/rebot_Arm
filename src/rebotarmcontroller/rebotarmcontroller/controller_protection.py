@@ -1,11 +1,12 @@
 """设备故障的保护失能与任务清理协调。
 
-对外接口：_protective_disable_from_hardware_loop 首次故障先锁存、停止输出、
+对外接口：protect 首次故障先锁存、停止输出、
 清理任务再尝试所有控制器失能；清理失败也不能跳过首个失能发送。
 约束：只由唯一设备线程调用；CommandGuard 拥有去重锁存。保持 DISABLING
 直到显式失能通过新鲜反馈确认；反馈恢复不自动清锁存，不周期重复失能。
 """
 from __future__ import annotations
+from .component_ports import ArmProtectionPort, GravityProtectionPort, GripperProtectionPort
 from .command_guard import CommandGuard
 from .controller_parameters import (
     _LOG
@@ -22,7 +23,7 @@ class ControllerProtection:
         self._bound = False
         self._command_guard = CommandGuard()
 
-    def bind(self, *, arm, gravity, gripper):
+    def bind(self, *, arm: ArmProtectionPort, gravity: GravityProtectionPort, gripper: GripperProtectionPort):
         """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
         if self._bound:
             raise RuntimeError("component already bound")
@@ -31,7 +32,16 @@ class ControllerProtection:
         self.gripper = gripper
         self._bound = True
 
-    def _protective_disable_from_hardware_loop(self, reason: str, *, category: str = 'FEEDBACK') -> None:
+    def confirm_disabled(self):
+        """显式失能以新帧确认后解除故障锁存；反馈恢复本身不得调用。"""
+        self._command_guard.confirm_disabled()
+
+    @property
+    def decision(self):
+        """不可变的当前保护决策；供诊断及跨语言样本读取，不提供复位写入口。"""
+        return self._command_guard.protection
+
+    def protect(self, reason: str, *, category: str = 'FEEDBACK') -> None:
         """每个故障会话只请求一次保护失能；确认失能前保留未知状态。
 
         先锁存，避免空闲采集或重入错误路径每周期重复写总线。即使发送失败也不
@@ -72,10 +82,11 @@ class ControllerProtection:
                     controllers.append(controller)
         except Exception as exc:
             disable_errors.append(f'controller lookup: {exc}')
-        if self.gripper._gripper_ctrl is not None and all(
-            self.gripper._gripper_ctrl is not controller for controller in controllers
+        gripper_controller, _ = self.gripper.feedback_binding()
+        if gripper_controller is not None and all(
+            gripper_controller is not controller for controller in controllers
         ):
-            controllers.append(self.gripper._gripper_ctrl)
+            controllers.append(gripper_controller)
         for controller in controllers:
             disable_all = getattr(controller, "disable_all", None)
             if not callable(disable_all):

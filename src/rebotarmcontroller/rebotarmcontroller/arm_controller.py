@@ -6,6 +6,7 @@
 健康任务失败交回当前位置保持，设备错误交给保护组件。IK 与路径生成归 motion。
 """
 from __future__ import annotations
+from .component_ports import CyclePort, ArmFeedbackPort, GravityArmPort, ProtectionPort
 from .arm_stop import ArmStop, CycleResult
 from .arm_trajectory import ArmTrajectory
 from .sdk_driver import CommandTransportError
@@ -34,7 +35,7 @@ class ArmController:
         self._arm_passthrough_until = None
         self._stop = ArmStop()
 
-    def bind(self, *, cycle, feedback, gravity, protection):
+    def bind(self, *, cycle: CyclePort, feedback: ArmFeedbackPort, gravity: GravityArmPort, protection: ProtectionPort):
         """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
         if self._bound:
             raise RuntimeError("component already bound")
@@ -62,6 +63,25 @@ class ArmController:
         if task is not None:
             self._arm_trajectory.finish(task, 'aborted', message)
 
+    def passthrough_active(self):
+        return self._arm_passthrough_until is not None
+
+    def check_task_generation(self):
+        """空闲周期结束过期任务；停止中的任务交给停止状态机收尾。"""
+        task = self._arm_trajectory.task
+        if (task is not None and task.result.state != 'stopping'
+                and task.generation != self._backend.target_generation):
+            self._arm_trajectory.finish(task, 'aborted', 'execution canceled or superseded')
+
+    def update_task(self, sample):
+        """发送后以新鲜快照推进任务，超差保持目标仍由六轴所有者设置。"""
+        hold = self._arm_trajectory.update(sample.positions, sample.observed_at)
+        if hold is not None:
+            self._backend.set_target(hold)
+        task = self._arm_trajectory.task
+        if task is not None and task.event.is_set() and self._lifecycle.execution == 'TRAJ_RUNNING':
+            self._lifecycle.set_execution_state('IDLE')
+
     @device_request(resource='arm', priority=0, invalidate=('arm',))
     def hold_current_position(self) -> np.ndarray:
         """把当前关节角写成保持目标，使机械臂停在原地。"""
@@ -78,7 +98,7 @@ class ArmController:
         只有保持命令成功发送且后续新帧持续静止 0.1 s 才返回成功。超时报告
         未确认，保留使能和保持目标；这里绝不把普通取消变成自动失能。
         """
-        owner = getattr(self, '_arm_trajectory', None)
+        owner = self._arm_trajectory
         active = None if owner is None else owner.task
         if task is not None and (active is not task or task.event.is_set()):
             return
@@ -160,7 +180,7 @@ class ArmController:
         active = self._arm_trajectory.task
         if active is not None and not active.event.is_set():
             raise RuntimeError('arm resource busy')
-        if getattr(self, '_arm_passthrough_until', None) is not None:
+        if self._arm_passthrough_until is not None:
             raise RuntimeError('arm resource owned by passthrough')
         current, _, _ = self.feedback.get_joint_state()
         if np.max(np.abs(np.asarray(ordered[0])-current)) > .10:
@@ -267,10 +287,10 @@ class ArmController:
             self._lifecycle.require_enabled()
             self.require_available()
             if self._backend.mode != "pos_vel":
-                self._stop_control_loop()
+                self.stop_control_loop()
                 self._lifecycle.set_mode("pos_vel")
             if not self._backend.control_loop_active:
-                self._start_pos_vel_loop()
+                self.start_position_loop()
             else:
                 self.hold_current_position()
 
@@ -295,17 +315,17 @@ class ArmController:
             if joint_name not in self._backend.joint_names:
                 raise KeyError(f"unknown joint: {joint_name}")
 
-            task = getattr(getattr(self, '_arm_trajectory', None), 'task', None)
+            task = self._arm_trajectory.task
             busy = ((task is not None and not task.event.is_set())
                     or self.gravity.gravity_compensation_active())
             if busy and arbitration != 'preempt':
                 raise RuntimeError('arm resource busy')
             mot = self._backend.joint_device(joint_name)
             jc = self._backend.joint_configuration(joint_name)
-            feedback_failure = self.feedback._arm_feedback_failure_reason()
+            feedback_failure = self.feedback.arm_failure()
             if feedback_failure is not None:
                 raise RuntimeError(feedback_failure)
-            state = self.feedback._verified_feedback_sample(joint_name).state
+            state = self.feedback.verified_sample(joint_name).state
 
             def values_from(sample):
                 return (float(cmd.pos) if cmd.use_pos else float(sample.pos),
@@ -318,7 +338,7 @@ class ArmController:
             values = values_from(state)
             passthrough_decision(*values,
                 _JOINT_POSITION_LIMITS_RAD[joint_name], jc.vlim,
-                float(self.gravity._gc_torque_limits[self._backend.joint_names.index(joint_name)]),
+                self.gravity.effort_limit(joint_name),
                 int(cmd.mode), device_mode='pos_vel' if busy else self._backend.mode).require_allowed()
             if busy:
                 # 无效命令不得取消原任务；完成准入后才交接资源并确认保持。
@@ -329,10 +349,10 @@ class ArmController:
                         joint_name, cmd, arbitration="reject")
                     return stopping
                 # 停止可能耗时且切回 POS_VEL；默认反馈值须取停止后的新快照。
-                values = values_from(self.feedback._verified_feedback_sample(joint_name).state)
+                values = values_from(self.feedback.verified_sample(joint_name).state)
                 passthrough_decision(*values,
                     _JOINT_POSITION_LIMITS_RAD[joint_name], jc.vlim,
-                    float(self.gravity._gc_torque_limits[self._backend.joint_names.index(joint_name)]),
+                    self.gravity.effort_limit(joint_name),
                     int(cmd.mode), device_mode=self._backend.mode).require_allowed()
             pos, vel, kp, kd, tau, vlim = values
             try:
@@ -347,7 +367,7 @@ class ArmController:
                 else:
                     raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
             except CommandTransportError as exc:
-                self.protection._protective_disable_from_hardware_loop(str(exc),category="COMMAND")
+                self.protection.protect(str(exc),category="COMMAND")
                 raise
             # 一次透传租约最长 0.25 s；后续周期不覆盖它，断流后在当前位置保持。
             self._arm_passthrough_until = time.monotonic() + .25
@@ -361,7 +381,7 @@ class ArmController:
         return fk_to_pose(position, rotation)
 
 
-    def _start_pos_vel_loop(self, target: np.ndarray | None = None) -> None:
+    def start_position_loop(self, target: np.ndarray | None = None) -> None:
         """启动统一硬件控制循环（位置-速度跟踪），并把控制器标记为运行中。
 
         ``target`` 为空时以当前角度为目标（保持不动）。
@@ -384,12 +404,12 @@ class ArmController:
         def send(runtime, period):
             self._backend.position_tick(runtime, period)
             self._stop.sent(self._backend.target_generation)
-        self.cycle._hardware_control_tick(arm, dt, send)
+        self.cycle.control_tick(arm, dt, send)
 
 
-    def _stop_control_loop(self) -> None:
+    def stop_control_loop(self) -> None:
         self._backend.stop_control_loop()
         self._backend.set_execution_running(False)
-        owner = getattr(self, '_arm_trajectory', None)
+        owner = self._arm_trajectory
         if owner is not None and owner.task is not None:
             owner.finish(owner.task, 'aborted', 'control mode or lifecycle changed')

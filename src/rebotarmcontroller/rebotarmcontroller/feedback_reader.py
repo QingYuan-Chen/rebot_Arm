@@ -6,6 +6,7 @@ get_cached_joint_sample 保留旧查询形式并提供数组副本，不触发�
 bind 在装配时一次注入夹爪能力，不接收 manager，不从发布线程访问设备。
 """
 from __future__ import annotations
+from .component_ports import GripperAcquisitionPort
 from .controller_values import JointSnapshot
 from .feedback_acquisition import FeedbackAcquisition
 from .feedback_acquisition import _JOINT_POSITION_LIMITS_RAD
@@ -22,7 +23,7 @@ class FeedbackReader:
         self.settings = settings
         self._bound = False
 
-    def bind(self, *, gripper):
+    def bind(self, *, gripper: GripperAcquisitionPort):
         """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
         if self._bound:
             raise RuntimeError("component already bound")
@@ -34,10 +35,10 @@ class FeedbackReader:
         """构造时一次装配组件，运行期间不惰性补建状态。"""
         return FeedbackAcquisition(
             groups=self._feedback_controller_groups, joint_names=lambda: self._backend.joint_names,
-            gripper_motor=lambda: self.gripper._gripper_mot,
-            gripper_values=self.gripper._validated_gripper_feedback_values,
-            gripper_sample=self.gripper._record_gripper_feedback,
-            gripper_error=self.gripper._record_gripper_feedback_error,
+            gripper_motor=lambda: self.gripper.feedback_binding()[1],
+            gripper_values=self.gripper.feedback_values,
+            gripper_sample=self.gripper.record_feedback,
+            gripper_error=self.gripper.record_feedback_error,
             period=lambda: (1. / self.settings.hardware_feedback_rate_hz),
             stale_timeout=lambda: self.settings.gripper_feedback_stale_timeout_sec,
             backend=lambda: self._backend, loop_active=lambda: self._backend.control_loop_active,
@@ -55,10 +56,44 @@ class FeedbackReader:
             cache._arm_feedback_updated_monotonic = None
             cache._arm_feedback_error = None
 
+    def transaction(self):
+        """成套查询的上下文；必须先于夹爪执行事务进入，可重入且不得等待 ROS。"""
+        return self._feedback_component._feedback_lock
+
+    def refresh_active(self):
+        """强制刷新在途时禁止空闲回调重入；不暴露采集组件。"""
+        return self._feedback_component._feedback_force_refresh_active
+
+    def arm_failure(self, *, now=None):
+        """只读健康原因，不改变观测时间或采集错误。"""
+        return self._arm_feedback_failure_reason(now=now)
+
+    def verified_sample(self, name):
+        """返回复制后的单电机值；首帧缺失或样本失效时抛错。"""
+        return self._verified_feedback_sample(name)
+
+    def verified_samples(self, names):
+        """一次事务内读取同组电机样本，保留各自接收序号。"""
+        return self._verified_feedback_samples(names)
+
+    def validate_sample(self, name, state):
+        return self._validate_feedback_sample(name, state)
+
+    def failure_reason(self, name, **options):
+        return self._feedback_failure_reason(name, **options)
+
+    def cached_motor(self, name, **options):
+        """允许无首帧的只读诊断；失败返回未知状态，不伪造新时间。"""
+        with self.transaction():
+            return self._cached_motor_feedback_locked(name, **options)
+
+    def validated_joints(self, **options):
+        return self._validated_joint_feedback(**options)
+
 
     def get_feedback_status(self) -> tuple[list[int], list[str]]:
         """一次只读快照生成 ArmStatus 的状态码与诊断，避免恢复帧混用旧错误。"""
-        with self._feedback_component._feedback_lock, self.gripper._gripper_execution._gripper_lock:
+        with self.transaction(), self.gripper.feedback_transaction():
             now = time.monotonic()
             codes = list(self._lifecycle.errors)
             failure = self._arm_feedback_failure_reason(now=now)
@@ -70,8 +105,8 @@ class FeedbackReader:
             ]
             if failure is not None:
                 codes.append(f"ARM_FEEDBACK: {failure}")
-            if self.gripper._gripper_mot is not None:
-                failure = self.gripper._cached_gripper_feedback(now=now).failure_reason
+            if self.gripper.feedback_binding()[1] is not None:
+                failure = self.gripper.cached_feedback(now=now).failure_reason
                 if failure is not None:
                     codes.append(f"GRIPPER_FEEDBACK: {failure}")
             return statuses, codes
@@ -95,10 +130,11 @@ class FeedbackReader:
 
         for ctrl, entries in self._backend.feedback_groups():
             for label,motor in entries: add(ctrl,label,motor)
-        if self.gripper._gripper_mot is not None and self.gripper._gripper_ctrl is None:
+        controller, motor = self.gripper.feedback_binding()
+        if motor is not None and controller is None:
             raise RuntimeError("gripper feedback controller unavailable")
-        if self.gripper._gripper_mot is not None:
-            add(self.gripper._gripper_ctrl, "gripper", self.gripper._gripper_mot)
+        if motor is not None:
+            add(controller, "gripper", motor)
         if not groups:
             raise RuntimeError("hardware feedback controller map unavailable")
         return groups

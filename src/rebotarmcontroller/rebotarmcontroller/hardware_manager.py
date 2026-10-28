@@ -20,6 +20,9 @@ from .gravity_control import GravitySettings, load_gravity_model, package_file
 from .lifecycle import ControllerLifecycle, LifecyclePorts
 from .device_requests import device_request
 from .arm_controller import ArmController
+from .component_ports import (
+    ArmFeedbackPort, GripperFeedbackPort, GravityFeedbackPort, CycleFeedbackPort, GripperAcquisitionPort, ArmCyclePort, GripperCyclePort, ArmProtectionPort, GripperProtectionPort, GravityProtectionPort, GravityArmPort, ArmGravityPort, CyclePort, ProtectionPort
+)
 from .gripper_controller import GripperController
 from .feedback_reader import FeedbackReader
 from .gravity_controller import GravityController
@@ -109,36 +112,113 @@ class HardwareManager:
         self.gravity = GravityController(self._backend, self._lifecycle, settings, model)
         self.cycle = ControllerCycle(self._backend, self._lifecycle, settings)
         self.protection = ControllerProtection(self._backend, self._lifecycle, settings)
-        self.feedback.bind(gripper=self.gripper)
-        self.gripper.bind(arm=self.arm, feedback=self.feedback, protection=self.protection)
-        self.arm.bind(cycle=self.cycle, feedback=self.feedback, gravity=self.gravity, protection=self.protection)
-        self.gravity.bind(arm=self.arm, cycle=self.cycle, feedback=self.feedback, protection=self.protection)
-        self.cycle.bind(arm=self.arm, feedback=self.feedback, gripper=self.gripper, protection=self.protection)
-        self.protection.bind(arm=self.arm, gravity=self.gravity, gripper=self.gripper)
+        arm_feedback_port = ArmFeedbackPort(
+            arm_failure=lambda *args, **kw: self.feedback.arm_failure(*args, **kw),
+            get_joint_state=lambda *args, **kw: self.feedback.get_joint_state(*args, **kw),
+            joint_snapshot=lambda *args, **kw: self.feedback.joint_snapshot(*args, **kw),
+            verified_sample=lambda *args, **kw: self.feedback.verified_sample(*args, **kw),
+        )
+        gripper_feedback_port = GripperFeedbackPort(
+            cached_motor=lambda *args, **kw: self.feedback.cached_motor(*args, **kw),
+            failure_reason=lambda *args, **kw: self.feedback.failure_reason(*args, **kw),
+            refresh_feedback_if_due=lambda *args, **kw: self.feedback.refresh_feedback_if_due(*args, **kw),
+            transaction=lambda *args, **kw: self.feedback.transaction(*args, **kw),
+            verified_sample=lambda *args, **kw: self.feedback.verified_sample(*args, **kw),
+        )
+        gravity_feedback_port = GravityFeedbackPort(
+            arm_failure=lambda *args, **kw: self.feedback.arm_failure(*args, **kw),
+            refresh_feedback_if_due=lambda *args, **kw: self.feedback.refresh_feedback_if_due(*args, **kw),
+            transaction=lambda *args, **kw: self.feedback.transaction(*args, **kw),
+            validate_sample=lambda *args, **kw: self.feedback.validate_sample(*args, **kw),
+            verified_samples=lambda *args, **kw: self.feedback.verified_samples(*args, **kw),
+        )
+        cycle_feedback_port = CycleFeedbackPort(
+            arm_failure=lambda *args, **kw: self.feedback.arm_failure(*args, **kw),
+            joint_snapshot=lambda *args, **kw: self.feedback.joint_snapshot(*args, **kw),
+            refresh_active=lambda *args, **kw: self.feedback.refresh_active(*args, **kw),
+            refresh_feedback_if_due=lambda *args, **kw: self.feedback.refresh_feedback_if_due(*args, **kw),
+            reset_session=lambda *args, **kw: self.feedback.reset_session(*args, **kw),
+        )
+        gripper_acquisition_port = GripperAcquisitionPort(
+            feedback_binding=lambda *args, **kw: self.gripper.feedback_binding(*args, **kw),
+            feedback_values=lambda *args, **kw: self.gripper.feedback_values(*args, **kw),
+            record_feedback=lambda *args, **kw: self.gripper.record_feedback(*args, **kw),
+            record_feedback_error=lambda *args, **kw: self.gripper.record_feedback_error(*args, **kw),
+            cached_feedback=lambda *args, **kw: self.gripper.cached_feedback(*args, **kw),
+            feedback_transaction=lambda *args, **kw: self.gripper.feedback_transaction(*args, **kw),
+        )
+        arm_cycle_port = ArmCyclePort(
+            clear_passthrough=lambda *args, **kw: self.arm.clear_passthrough(*args, **kw),
+            expire_passthrough=lambda *args, **kw: self.arm.expire_passthrough(*args, **kw),
+            check_task_generation=lambda *args, **kw: self.arm.check_task_generation(*args, **kw),
+            passthrough_active=lambda *args, **kw: self.arm.passthrough_active(*args, **kw),
+            update_task=lambda *args, **kw: self.arm.update_task(*args, **kw),
+        )
+        gripper_cycle_port = GripperCyclePort(
+            clear_passthrough=lambda *args, **kw: self.gripper.clear_passthrough(*args, **kw),
+            expire_passthrough=lambda *args, **kw: self.gripper.expire_passthrough(*args, **kw),
+            reset_session=lambda *args, **kw: self.gripper.reset_session(*args, **kw),
+            tick=lambda *args, **kw: self.gripper.tick(*args, **kw),
+            transport_error=lambda *args, **kw: self.gripper.transport_error(*args, **kw),
+        )
+        arm_protection_port = ArmProtectionPort(
+            clear_passthrough=lambda *args, **kw: self.arm.clear_passthrough(*args, **kw),
+            abort_task=lambda *args, **kw: self.arm.abort_task(*args, **kw),
+        )
+        gripper_protection_port = GripperProtectionPort(
+            clear_passthrough=lambda *args, **kw: self.gripper.clear_passthrough(*args, **kw),
+            prepare_protection=lambda *args, **kw: self.gripper.prepare_protection(*args, **kw),
+            feedback_binding=lambda *args, **kw: self.gripper.feedback_binding(*args, **kw),
+        )
+        gravity_protection_port = GravityProtectionPort(
+            clear_execution=lambda *args, **kw: self.gravity.clear_execution(*args, **kw),
+        )
+        gravity_arm_port = GravityArmPort(
+            stop_gravity_compensation=lambda *args, **kw: self.gravity.stop_gravity_compensation(*args, **kw),
+            gravity_compensation_active=lambda *args, **kw: self.gravity.gravity_compensation_active(*args, **kw),
+            effort_limit=lambda *args, **kw: self.gravity.effort_limit(*args, **kw),
+        )
+        arm_gravity_port = ArmGravityPort(
+            clear_passthrough=lambda *args, **kw: self.arm.clear_passthrough(*args, **kw),
+            require_available=lambda *args, **kw: self.arm.require_available(*args, **kw),
+            start_position_loop=lambda *args, **kw: self.arm.start_position_loop(*args, **kw),
+            stop_control_loop=lambda *args, **kw: self.arm.stop_control_loop(*args, **kw),
+        )
+        cycle_port = CyclePort(
+            control_tick=lambda *args, **kw: self.cycle.control_tick(*args, **kw),
+        )
+        protection_port = ProtectionPort(
+            protect=lambda *args, **kw: self.protection.protect(*args, **kw),
+        )
+        self.feedback.bind(gripper=gripper_acquisition_port)
+        self.gripper.bind(feedback=gripper_feedback_port, protection=protection_port)
+        self.arm.bind(cycle=cycle_port, feedback=arm_feedback_port, gravity=gravity_arm_port, protection=protection_port)
+        self.gravity.bind(arm=arm_gravity_port, cycle=cycle_port, feedback=gravity_feedback_port, protection=protection_port)
+        self.cycle.bind(arm=arm_cycle_port, feedback=cycle_feedback_port, gripper=gripper_cycle_port, protection=protection_port)
+        self.protection.bind(arm=arm_protection_port, gravity=gravity_protection_port, gripper=gripper_protection_port)
         self._lifecycle.ports = LifecyclePorts(
             device=self._backend,
-            joint_feedback=lambda **kw: self.feedback._validated_joint_feedback(**kw),
-            gripper_status=lambda status: self.gripper._validated_gripper_status(status),
-            gripper_feedback_status=lambda: (None if self.gripper._gripper_mot is None else
-                                            int(self.gripper._refresh_gripper_feedback().status_code)),
-            gripper_motor=lambda: self.gripper._gripper_mot,
-            gripper_coordinate_failure=self.gripper._lifecycle_gripper_coordinate_failure,
-            prepare_gripper_enable=self.gripper._prepare_gripper_enable,
+            joint_feedback=lambda **kw: self.feedback.validated_joints(**kw),
+            gripper_status=lambda status: self.gripper.validate_status(status),
+            gripper_feedback_status=self.gripper.feedback_status,
+            gripper_motor=lambda: self.gripper.feedback_binding()[1],
+            gripper_coordinate_failure=self.gripper.coordinate_failure,
+            prepare_gripper_enable=self.gripper.prepare_enable,
             clear_gripper_transport_error=self.gripper.clear_transport_error,
-            reset_session=self.cycle._reset_device_session,
-            initialize_gripper=lambda: self.gripper.init_gripper(str(self.gripper._gripper_cfg_path)),
-            stop_gripper=lambda: self.gripper._stop_gripper_loop(),
-            stop_control=lambda: self.arm._stop_control_loop(),
+            reset_session=self.cycle.reset_session,
+            initialize_gripper=self.gripper.initialize,
+            stop_gripper=lambda: self.gripper.stop_loop(),
+            stop_control=lambda: self.arm.stop_control_loop(),
             stop_gravity=lambda: self.gravity.stop_gravity_compensation(),
-            clear_passthrough=self.cycle._clear_passthrough,
+            clear_passthrough=self.cycle.clear_passthrough,
             hold=lambda: self.arm.hold_current_position(),
-            start_position=lambda **kw: self.arm._start_pos_vel_loop(**kw),
-            zero_gripper=lambda: self.gripper._set_gripper_zero(),
-            confirm_disabled=lambda: self.protection._command_guard.confirm_disabled(),
-            protect=lambda *args, **kw: self.protection._protective_disable_from_hardware_loop(*args, **kw),
+            start_position=lambda **kw: self.arm.start_position_loop(**kw),
+            zero_gripper=lambda: self.gripper.set_zero(),
+            confirm_disabled=self.protection.confirm_disabled,
+            protect=lambda *args, **kw: self.protection.protect(*args, **kw),
         )
-        self._backend.idle_callback = self.cycle._runtime_feedback_tick
-        self._backend.on_error = lambda exc: self.protection._protective_disable_from_hardware_loop(
+        self._backend.idle_callback = self.cycle.feedback_tick
+        self._backend.on_error = lambda exc: self.protection.protect(
             str(exc), category="CONTROLLER")
 
     def default_arm_cfg(self) -> Path:

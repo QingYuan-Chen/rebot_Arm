@@ -57,3 +57,51 @@ def test_stop_confirmation_contains_no_device_polling_or_sleep():
 def test_safety_fixtures_use_formal_construction():
     for name in ('test_hardware_manager_p0_safety.py', 'controller_fake_backend.py'):
         assert 'HardwareManager.__new__' not in (ROOT / 'tests' / name).read_text()
+
+
+def test_peer_access_is_limited_to_declared_public_ports():
+    """不只检查门面：bind 的每条边必须是冻结端口，调用不得越过端口字段。"""
+    from dataclasses import fields, is_dataclass
+    import rebotarmcontroller.component_ports as ports
+    for name in ('arm_controller', 'gripper_controller', 'feedback_reader',
+                 'gravity_controller', 'controller_cycle', 'controller_protection'):
+        tree = ast.parse((PACKAGE / f'{name}.py').read_text())
+        owner = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+        bind = next(node for node in owner.body
+                    if isinstance(node, ast.FunctionDef) and node.name == 'bind')
+        contracts = {}
+        for argument in bind.args.kwonlyargs:
+            assert isinstance(argument.annotation, ast.Name), (name, argument.arg)
+            contract = getattr(ports, argument.annotation.id)
+            assert is_dataclass(contract) and contract.__dataclass_params__.frozen
+            contracts[argument.arg] = {field.name for field in fields(contract)}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
+                    and isinstance(node.value.value, ast.Name) and node.value.value.id == 'self'
+                    and node.value.attr in contracts):
+                assert node.attr in contracts[node.value.attr], (name, node.lineno, node.attr)
+                assert not node.attr.startswith('_')
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in ('getattr', 'setattr', 'hasattr')
+                    and node.args and isinstance(node.args[0], ast.Attribute)):
+                assert node.args[0].attr not in contracts, (name, node.lineno)
+
+
+def test_manager_never_pierces_component_private_state():
+    peers = {'arm', 'gripper', 'feedback', 'gravity', 'cycle', 'protection'}
+    tree = ast.parse((PACKAGE / 'hardware_manager.py').read_text())
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name) and node.value.value.id == 'self'
+                and node.value.attr in peers):
+            assert not node.attr.startswith('_'), (node.lineno, node.attr)
+
+
+def test_initialized_controller_fields_do_not_use_fixture_fallbacks():
+    for name in ('arm_controller', 'gripper_controller', 'gravity_controller'):
+        tree = ast.parse((PACKAGE / f'{name}.py').read_text())
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == 'getattr' and node.args):
+                assert not (isinstance(node.args[0], ast.Name)
+                            and node.args[0].id == 'self'), (name, node.lineno)

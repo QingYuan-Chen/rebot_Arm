@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "absolute_tolerance": 1e-9,
+  "units": {"position": "rad", "velocity": "rad/s", "torque": "N.m", "time": "monotonic_s"},
+  "lifecycle_faults": [
+    {"name": "enable_feedback_missing_rollback_verified", "initial": "disabled", "request": "enable", "fault": "enable_feedback", "state": "CONNECTED_DISABLED", "enabled": false, "operations": ["set_hold_target", "set_mode_pos_vel", "enable_arm", "disable_arm"], "error_code": null},
+    {"name": "enable_rollback_disable_failed", "initial": "disabled", "request": "enable", "fault": "enable_and_disable_write", "state": "DISABLING", "enabled": true, "operations": ["set_hold_target", "set_mode_pos_vel", "enable_arm", "disable_arm"], "error_code": "ENABLE_ROLLBACK_FAILED"},
+    {"name": "disable_feedback_missing", "initial": "enabled", "request": "disable", "fault": "disabled_feedback", "state": "DISABLING", "enabled": true, "operations": ["disable_arm"], "error_code": "DISABLE_VERIFICATION_FAILED"},
+    {"name": "disable_write_failed", "initial": "enabled", "request": "disable", "fault": "disable_write", "state": "DISABLING", "enabled": true, "operations": ["disable_arm"], "error_code": "DISABLE_VERIFICATION_FAILED"},
+    {"name": "shutdown_feedback_missing_preserves_handles", "initial": "disabled", "request": "shutdown", "fault": "disabled_feedback", "state": "DISABLING", "enabled": true, "operations": [], "error_code": "SHUTDOWN_STATE_UNCONFIRMED"}
+  ],
+  "lifecycle_success": [
+    {"request": "connect", "state": "CONNECTED_DISABLED", "enabled": false, "operations": ["open_device"]},
+    {"request": "enable", "state": "ENABLED_HOLD", "enabled": true, "operations": ["set_hold_target", "set_mode_pos_vel", "enable_arm"]},
+    {"request": "disable", "state": "CONNECTED_DISABLED", "enabled": false, "operations": ["disable_arm"]},
+    {"request": "shutdown", "state": "DISCONNECTED", "enabled": false, "operations": ["release_device"]}
+  ],
+  "protection": [
+    {"name": "persistent_fault_once", "disable_write_fails": false, "decision": "protective_disable"},
+    {"name": "failed_protection_requires_explicit_retry", "disable_write_fails": true, "decision": "protective_disable"}
+  ],
+  "protection_steps": [
+    {"request": "protect", "state": "DISABLING", "enabled": true, "disable_writes": 1},
+    {"request": "protect", "state": "DISABLING", "enabled": true, "disable_writes": 1},
+    {"request": "feedback_recovers", "state": "DISABLING", "enabled": true, "disable_writes": 1},
+    {"request": "enable_rejected", "state": "DISABLING", "enabled": true, "disable_writes": 1},
+    {"request": "disable", "state": "CONNECTED_DISABLED", "enabled": false, "disable_writes": 2},
+    {"request": "enable", "state": "ENABLED_HOLD", "enabled": true, "disable_writes": 2},
+    {"request": "protect", "state": "DISABLING", "enabled": true, "disable_writes": 3}
+  ],
+  "passthrough": [
+    {"name": "reject_busy_preserves_task", "arbitration": "reject", "position": 0.02, "accepted": false, "task_state": "running"},
+    {"name": "invalid_preempt_preserves_task", "arbitration": "preempt", "position": 9, "accepted": false, "task_state": "running"},
+    {"name": "preempt_after_fresh_stationary_hold", "arbitration": "preempt", "position": 0.02, "accepted": true, "task_state": "canceled"}
+  ],
+  "gravity": [
+    {"name": "mode_rejected_restores_hold", "fault": "mode_rejected", "active": false, "state": "ENABLED_HOLD", "enabled": true, "normal_control": true, "decision": null, "disable_writes": 0},
+    {"name": "healthy_model_fault_holds", "fault": "model", "active": true, "state": "ENABLED_HOLD", "enabled": true, "normal_control": false, "decision": "stop_hold", "disable_writes": 0},
+    {"name": "transport_fault_protects", "fault": "transport", "active": false, "state": "DISABLING", "enabled": true, "normal_control": false, "decision": "protective_disable", "disable_writes": 1},
+    {"name": "normal_exit_restores_position_hold", "fault": "none", "active": false, "state": "ENABLED_HOLD", "enabled": true, "normal_control": true, "decision": null, "disable_writes": 0}
+  ],
+  "gravity_input": {"positions": [0.2, -0.3, -0.4, 0.1, 0.2, -0.1], "velocities": [0, 0, 0, 0, 0, 0], "gravity_torque": [0, 0, 0, 0, 0, 0], "period": 0.002}
+}

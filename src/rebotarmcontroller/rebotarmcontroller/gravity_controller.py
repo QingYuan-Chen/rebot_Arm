@@ -6,6 +6,7 @@
 通信、发送或反馈故障才进入保护失能；不创建送点线程，不生成路径。
 """
 from __future__ import annotations
+from .component_ports import ArmGravityPort, CyclePort, GravityFeedbackPort, ProtectionPort
 from .command_guard import failure_decision
 from .sdk_driver import CommandTransportError
 from .gravity_control import GravityExecutionState
@@ -42,7 +43,7 @@ class GravityController:
         self._gravity_next_log = 0.
         self._hold_decision = None
 
-    def bind(self, *, arm, cycle, feedback, protection):
+    def bind(self, *, arm: ArmGravityPort, cycle: CyclePort, feedback: GravityFeedbackPort, protection: ProtectionPort):
         """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
         if self._bound:
             raise RuntimeError("component already bound")
@@ -57,6 +58,10 @@ class GravityController:
         self._gravity_execution.active = False
         self._gravity_execution.target = None
         self._gravity_execution.integral = None
+
+    def effort_limit(self, name):
+        """只返回指定关节的 N·m 标量，调用方不能修改模型限位数组。"""
+        return float(self._gc_torque_limits[self._backend.joint_names.index(name)])
 
     @device_request(resource='arm', priority=5, invalidate=('arm',))
     def start_gravity_compensation(self) -> None:
@@ -77,13 +82,13 @@ class GravityController:
         self.arm.clear_passthrough()
         timing = LoopTiming(float(self._backend.rate))
         self.stop_gravity_compensation()
-        self.arm._stop_control_loop()
+        self.arm.stop_control_loop()
         self._backend.cancel_trajectory()
         try:
             self._refresh_arm_feedback()
             self._gravity_execution.target = self._read_gravity_comp_positions()
         except Exception as exc:
-            self.protection._protective_disable_from_hardware_loop(str(exc))
+            self.protection.protect(str(exc))
             raise
         self._gravity_execution.last_position = self._gravity_execution.target.copy()
         # 切模式前先拒绝无法支撑当前姿态的模型计算结果。
@@ -93,7 +98,7 @@ class GravityController:
             if (np.abs(gravity) > self._gc_torque_limits).any():
                 raise RuntimeError('gravity torque exceeds model effort limits')
         except Exception:
-            self.arm._start_pos_vel_loop(target=self._gravity_execution.target)
+            self.arm.start_position_loop(target=self._gravity_execution.target)
             raise
         self._gravity_execution.fault = None
         self._hold_decision = None
@@ -108,7 +113,7 @@ class GravityController:
             # 模式交接可能持续数百毫秒，交接后必须重新取得新帧。
             self._refresh_arm_feedback()
             self._gravity_execution.target = self._read_gravity_comp_positions()
-            samples = self.feedback._verified_feedback_samples(self._backend.joint_names)
+            samples = self.feedback.verified_samples(self._backend.joint_names)
             self._gravity_execution.last_total = np.clip(
                 [float(s.state.torq) for s in samples],
                 -self._gc_torque_limits, self._gc_torque_limits)
@@ -116,7 +121,7 @@ class GravityController:
             self._gravity_comp_tick(self._backend, 1. / float(self._backend.rate))
         except (GravityCommandError, CommandTransportError) as exc:
             self._gravity_execution.active = False
-            self.protection._protective_disable_from_hardware_loop(str(exc),category="GRAVITY_COMMAND")
+            self.protection.protect(str(exc),category="GRAVITY_COMMAND")
             raise
         except Exception:
             self._gravity_execution.active = False
@@ -126,10 +131,10 @@ class GravityController:
                 target = self._read_gravity_comp_positions()
                 if not self._backend.mode_pos_vel():
                     raise GravityCommandError('POS_VEL restore failed')
-                self.arm._start_pos_vel_loop(target=target)
+                self.arm.start_position_loop(target=target)
                 self._lifecycle.set_execution_state('IDLE')
             except Exception as restore_error:
-                self.protection._protective_disable_from_hardware_loop(str(restore_error))
+                self.protection.protect(str(restore_error))
             raise
         self._gravity_timing = timing
         self._gravity_feedback_metrics = {}
@@ -148,7 +153,7 @@ class GravityController:
         """退出重力补偿：用最新验证角度接管位置-速度保持。"""
         if not self._gravity_execution.active:
             return
-        self.arm._stop_control_loop()
+        self.arm.stop_control_loop()
         self._gravity_execution.active = False
         self._gravity_execution.target = None
         self._gravity_execution.integral = None
@@ -160,9 +165,9 @@ class GravityController:
                 hold_target = self._read_gravity_comp_positions()
                 if not self._backend.mode_pos_vel():
                     raise GravityCommandError('gravity POS_VEL restore failed')
-                self.arm._start_pos_vel_loop(target=hold_target)
+                self.arm.start_position_loop(target=hold_target)
             except Exception as exc:
-                self.protection._protective_disable_from_hardware_loop(str(exc))
+                self.protection.protect(str(exc))
                 raise
         self._lifecycle.set_execution_state("IDLE")
 
@@ -216,16 +221,16 @@ class GravityController:
         角度会解到与上一帧最接近的分支，结果同时更新 ``_gravity_comp_q_last``。
         """
         joint_names = self._backend.joint_names
-        with self.feedback._feedback_component._feedback_lock:
-            feedback_failure = self.feedback._arm_feedback_failure_reason()
+        with self.feedback.transaction():
+            feedback_failure = self.feedback.arm_failure()
             if feedback_failure is not None:
                 raise RuntimeError(feedback_failure)
-            samples = self.feedback._verified_feedback_samples(joint_names)
+            samples = self.feedback.verified_samples(joint_names)
 
         positions: list[float] = []
         velocities: list[float] = []
         for name, sample in zip(joint_names, samples):
-            self.feedback._validate_feedback_sample(name, sample.state)
+            self.feedback.validate_sample(name, sample.state)
             status = int(sample.state.status_code)
             if status != 1:
                 raise RuntimeError(
@@ -309,14 +314,14 @@ class GravityController:
 
 
     def gravity_compensation_diagnostics(self):
-        timing = getattr(self, '_gravity_timing', None)
-        model = getattr(self, '_gravity_model', None)
-        settings = getattr(self, '_gc_settings', None)
+        timing = self._gravity_timing
+        model = self._gravity_model
+        settings = self._gc_settings
         return dict(timing=timing.snapshot() if timing else {},
                     safety_decision=self._hold_decision,
-                    feedback={k: dict(v) for k, v in getattr(self, '_gravity_feedback_metrics', {}).items()},
+                    feedback={k: dict(v) for k, v in self._gravity_feedback_metrics.items()},
                     configured_feedback_rate_hz=self.settings.hardware_feedback_rate_hz,
-                    fault=getattr(self._gravity_execution, 'fault', None),
+                    fault=self._gravity_execution.fault,
                     model_path=model.path if model else None,
                     model_sha256=model.sha256 if model else None,
                     gravity_xyz_m_s2=list(settings.gravity_xyz_m_s2) if settings else None,
@@ -325,15 +330,15 @@ class GravityController:
 
 
     def _gravity_hardware_tick(self, arm, dt: float) -> None:
-        timing = getattr(self, '_gravity_timing', None)
+        timing = self._gravity_timing
         if timing is None:
             timing = self._gravity_timing = LoopTiming(float(self._backend.rate))
         started = time.monotonic()
         actual_dt = timing.begin(started)
         try:
-            self.cycle._hardware_control_tick(arm, actual_dt, self._gravity_comp_tick)
+            self.cycle.control_tick(arm, actual_dt, self._gravity_comp_tick)
         except GravityCommandError as exc:
-            self.protection._protective_disable_from_hardware_loop(str(exc), category='GRAVITY_COMMAND')
+            self.protection.protect(str(exc), category='GRAVITY_COMMAND')
             return
         except Exception as exc:
             # 模型或计算异常不能直接终止唯一线程，让健康电机持续旧 MIT 目标。
@@ -343,7 +348,7 @@ class GravityController:
                 self._emit_bounded_gravity_command(
                     q, qd, self._gravity_execution.hold_feedforward, actual_dt)
             except Exception as hold_error:
-                self.protection._protective_disable_from_hardware_loop(str(hold_error))
+                self.protection.protect(str(hold_error))
                 return
         finally:
             timing.finish(time.monotonic())
@@ -351,9 +356,9 @@ class GravityController:
             return
         if timing.faulted:
             self._gravity_fault_hold('three consecutive control deadline misses')
-        metrics = getattr(self, '_gravity_feedback_metrics', {})
-        with self.feedback._feedback_component._feedback_lock:
-            for name, sample in zip(self._backend.joint_names, self.feedback._verified_feedback_samples(self._backend.joint_names)):
+        metrics = self._gravity_feedback_metrics
+        with self.feedback.transaction():
+            for name, sample in zip(self._backend.joint_names, self.feedback.verified_samples(self._backend.joint_names)):
                 entry = metrics.setdefault(name, dict(sequence=sample.sequence, first=sample.observed_at,
                                                        last=sample.observed_at, updates=0))
                 if sample.sequence != entry['sequence']:
@@ -363,6 +368,6 @@ class GravityController:
                 entry['effective_rate_hz'] = entry['updates'] / elapsed if elapsed > 0 else 0.
                 entry['age_sec'] = max(0., time.monotonic() - sample.observed_at)
         self._gravity_feedback_metrics = metrics
-        if started >= getattr(self, '_gravity_next_log', 0.):
+        if started >= self._gravity_next_log:
             _LOG.info('gravity diagnostics: %s', self.gravity_compensation_diagnostics())
             self._gravity_next_log = started + 5.

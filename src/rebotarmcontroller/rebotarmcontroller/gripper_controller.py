@@ -6,7 +6,9 @@
 反馈锁先于执行锁；设备写入经同一运行时，释放发送失败不得报告成功。
 """
 from __future__ import annotations
+from .component_ports import GripperFeedbackPort, ProtectionPort
 from .controller_values import GripperTarget
+from .command_guard import passthrough_decision
 from .sdk_driver import CommandTransportError
 from .gripper_control import GripperControl
 from .gripper_execution import GripperExecution
@@ -44,6 +46,36 @@ class GripperController:
     def clear_transport_error(self):
         """仅在显式使能成功后清除上个会话的发送错误。"""
         self._gripper_transport_error = None
+
+    def feedback_transaction(self):
+        """采集锁内查询夹爪的事务上下文；锁顺序固定为反馈 → 夹爪。"""
+        return self._gripper_execution._gripper_lock
+
+    def feedback_binding(self):
+        """仅供采集/生命周期/保护装配的设备绑定，不返回可变执行状态。"""
+        return self._gripper_ctrl, self._gripper_mot
+
+    def feedback_values(self, state):
+        return self._validated_gripper_feedback_values(state)
+
+    def record_feedback(self, state, **options):
+        return self._record_gripper_feedback(state, **options)
+
+    def record_feedback_error(self, reason):
+        return self._record_gripper_feedback_error(reason)
+
+    def cached_feedback(self, **options):
+        return self._cached_gripper_feedback(**options)
+
+    def transport_error(self):
+        return self._gripper_transport_error
+
+    def feedback_status(self):
+        return None if self._gripper_mot is None else int(self._refresh_gripper_feedback().status_code)
+
+    def initialize(self):
+        """使用构造时已经校验的配置建立夹爪绑定。"""
+        return self.init_gripper(str(self._gripper_cfg_path))
 
     def clear_passthrough(self):
         self._gripper_passthrough_until = None
@@ -97,11 +129,10 @@ class GripperController:
         self._gripper_loop_running = False
         self._gripper_execution = self._assemble_execution()
 
-    def bind(self, *, arm, feedback, protection):
+    def bind(self, *, feedback: GripperFeedbackPort, protection: ProtectionPort):
         """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
         if self._bound:
             raise RuntimeError("component already bound")
-        self.arm = arm
         self.feedback = feedback
         self.protection = protection
         self._bound = True
@@ -110,7 +141,7 @@ class GripperController:
         """构造时一次装配组件，运行期间不惰性补建状态。"""
         return GripperExecution(
             motor=lambda: self._gripper_mot,
-            verified=lambda: self.feedback._verified_feedback_sample('gripper').state,
+            verified=lambda: self.feedback.verified_sample('gripper').state,
             feedback_failure=lambda: self._gripper_feedback_failure_reason_locked(),
             record_feedback_error=lambda message: self._record_gripper_feedback_error(message),
             validate=lambda state: self._validated_gripper_feedback_values(state),
@@ -138,14 +169,14 @@ class GripperController:
             return str(self._gripper_execution._gripper_mode)
 
 
-    def _lifecycle_gripper_coordinate_failure(self):
+    def coordinate_failure(self):
         if self._gripper_mot is not None:
             with self._gripper_execution._gripper_lock:
                 return self._gripper_coordinate_failure_reason_locked()
         return None
 
 
-    def _prepare_gripper_enable(self):
+    def prepare_enable(self):
         if self._gripper_mot is not None:
             from motorbridge import Mode
             self._gripper_mot.ensure_mode(Mode.MIT, 1000)
@@ -218,7 +249,7 @@ class GripperController:
 
         依次检查：显式错误 -> 数据过期 -> 坐标合法性（置零错误或原始角越界）。
         """
-        return self.feedback._feedback_failure_reason(
+        return self.feedback.failure_reason(
             "gripper", error=self._gripper_feedback_error,
             updated=self._gripper_feedback_updated_monotonic, now=now,
         ) or self._gripper_coordinate_failure_reason_locked()
@@ -255,10 +286,10 @@ class GripperController:
         if self._gripper_mot is None or self._gripper_ctrl is None:
             raise RuntimeError("gripper feedback unavailable: motor/controller not initialized")
         self.feedback.refresh_feedback_if_due(force=True)
-        return self.feedback._verified_feedback_sample("gripper").state
+        return self.feedback.verified_sample("gripper").state
 
 
-    def _validated_gripper_status(self, expected_status: int) -> None:
+    def validate_status(self, expected_status: int) -> None:
         if self._gripper_mot is None:
             return
         state = self._refresh_gripper_feedback()
@@ -269,7 +300,7 @@ class GripperController:
             )
 
 
-    def _set_gripper_zero(self) -> bool:
+    def set_zero(self) -> bool:
         """夹爪置零并验证：要求在超时内连续若干帧都接近零位。
 
         验证必须基于"置零之后新到"的帧（``_refresh_gripper_feedback`` 会重建
@@ -279,9 +310,9 @@ class GripperController:
         """
         if self._gripper_mot is None:
             raise RuntimeError("gripper is not initialized")
-        self._stop_gripper_loop()
-        with self.feedback._feedback_component._feedback_lock:
-            self._validated_gripper_status(expected_status=0)
+        self.stop_loop()
+        with self.feedback.transaction():
+            self.validate_status(expected_status=0)
             with self._gripper_execution._gripper_lock:
                 self._gripper_zero_error = "gripper zero verification pending"
             try:
@@ -359,11 +390,11 @@ class GripperController:
             feedback_failure = self._gripper_feedback_failure_reason_locked()
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
-        state = self.feedback._verified_feedback_sample("gripper").state
+        state = self.feedback.verified_sample("gripper").state
         start_angle, _velocity, _torque, status = self._validated_gripper_feedback_values(state)
         if status != 1:
             raise RuntimeError(f"gripper status_code={status}, expected 1 before position command")
-        if getattr(self, '_gripper_passthrough_until', None) is not None:
+        if self._gripper_passthrough_until is not None:
             raise RuntimeError('gripper resource owned by passthrough')
         if not np.isfinite([position_m, max_effort]).all():
             raise ValueError('gripper target and effort must be finite')
@@ -477,7 +508,7 @@ class GripperController:
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
 
-        if getattr(self, '_gripper_passthrough_until', None) is not None:
+        if self._gripper_passthrough_until is not None:
             raise RuntimeError('gripper resource owned by passthrough')
         close_effort = float(np.clip(close_force, 0.05, _G_GRASP_CLOSE_FORCE_MAX))
         hold_effort = float(np.clip(hold_force, 0.05, _G_TAU_MAX))
@@ -512,14 +543,14 @@ class GripperController:
 
     def _cached_gripper_feedback(self, *, now: float | None = None) -> _CachedMotorFeedback:
         # 采集路径使用反馈锁 -> 夹爪锁；查询保持相同顺序，避免与控制循环互锁。
-        with self.feedback._feedback_component._feedback_lock, self._gripper_execution._gripper_lock:
+        with self.feedback.transaction(), self._gripper_execution._gripper_lock:
             now = time.monotonic() if now is None else now
-            sample = self.feedback._feedback_component._verified_feedback_by_label.get("gripper")
-            failure = self.feedback._feedback_failure_reason(
+            sample = self.feedback.cached_motor("gripper", now=now).sample
+            failure = self.feedback.failure_reason(
                 "gripper", error=self._gripper_feedback_error,
                 updated=sample.observed_at if sample is not None else None, now=now,
             )
-            feedback = self.feedback._cached_motor_feedback_locked(
+            feedback = self.feedback.cached_motor(
                 "gripper", failure_reason=failure, now=now,
             )
             if feedback.failure_reason is not None or feedback.values is None:
@@ -539,7 +570,7 @@ class GripperController:
 
         不可用时开口为 NaN;保留旧样本身份和时间,不把错误查询当作新反馈。
         """
-        with self.feedback._feedback_component._feedback_lock, self._gripper_execution._gripper_lock:
+        with self.feedback.transaction(), self._gripper_execution._gripper_lock:
             feedback = self._cached_gripper_feedback()
             values = feedback.values or (self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel, self._gripper_execution._gripper_torque)
             distance = float("nan") if feedback.failure_reason is not None else float(
@@ -560,7 +591,7 @@ class GripperController:
         读取不刷新总线、不登记错误、不改变反馈时间。无样本时沿用最后缓存数值，
         这些回退数值必须结合 255 解读，不能视为当前有效反馈。
         """
-        with self.feedback._feedback_component._feedback_lock:
+        with self.feedback.transaction():
             feedback = self._cached_gripper_feedback()
             values = feedback.values
             if values is None:
@@ -608,7 +639,7 @@ class GripperController:
             feedback_failure = self._gripper_feedback_failure_reason_locked()
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
-        state = self.feedback._verified_feedback_sample("gripper").state
+        state = self.feedback.verified_sample("gripper").state
         pos = float(cmd.pos) if cmd.use_pos else float(state.pos if state is not None else 0.0)
         vel = float(cmd.vel) if cmd.use_vel else float(state.vel if state is not None else 0.0)
         kp = float(cmd.kp) if cmd.use_kp else float(self._gripper_cfg.kp)
@@ -621,8 +652,8 @@ class GripperController:
             raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
         if mode == 2 and not hasattr(self._gripper_mot, "send_vel"):
             raise RuntimeError("gripper does not support send_vel")
-        self.arm._validate_passthrough_values(pos, vel, kp, kd, tau, vlim,
-            (_G_ANGLE_OPEN, 0.), self._gripper_cfg.vlim, _G_TAU_MAX, mode)
+        passthrough_decision(pos, vel, kp, kd, tau, vlim,
+            (_G_ANGLE_OPEN, 0.), self._gripper_cfg.vlim, _G_TAU_MAX, mode).require_allowed()
         with self._gripper_execution._gripper_lock:
             if (self._gripper_execution._gripper_active or self._gripper_execution._gripper_neutral_pending is not None) and arbitration != 'preempt':
                 raise RuntimeError('gripper resource busy')
@@ -647,7 +678,7 @@ class GripperController:
                 else:
                     self._gripper_mot.send_vel(vel)
             except Exception as exc:
-                self.protection._protective_disable_from_hardware_loop(str(exc), category='COMMAND')
+                self.protection.protect(str(exc), category='COMMAND')
                 raise
             self._gripper_passthrough_until = time.monotonic() + .25
 
@@ -735,6 +766,10 @@ class GripperController:
     def _gripper_tick(self, *args, **kwargs):
         return self._gripper_execution._gripper_tick(*args, **kwargs)
 
+    def tick(self):
+        """统一设备周期推进夹爪；不允许 ROS 等待者调用设备发送。"""
+        return self._gripper_tick()
+
 
     def _start_gripper_loop(self) -> None:
         """夹爪命令的入口校验：夹爪没有独立循环，必须依赖统一硬件循环。"""
@@ -744,7 +779,7 @@ class GripperController:
             )
 
 
-    def _stop_gripper_loop(self) -> None:
+    def stop_loop(self) -> None:
         # 使能/连接会话结束时使旧目标和等待者失效，防止重启循环后续发旧命令。
         # 此处不发送命令；调用方负责随后停止周期线程并执行生命周期设备操作。
         with self._gripper_execution._gripper_lock:

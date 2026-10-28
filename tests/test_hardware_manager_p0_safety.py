@@ -176,7 +176,7 @@ def make_manager(
     )
     manager.test_arm = arm
     manager.gripper.init_gripper = lambda _path: None
-    manager.gripper._stop_gripper_loop = lambda: None
+    manager.gripper.stop_loop = lambda: None
     manager.gripper._start_gripper_loop = lambda: None
     return manager
 
@@ -457,7 +457,7 @@ def test_cached_joint_sample_exposes_verified_identity_without_serial_reads() ->
     assert_verified_feedback_unchanged(manager, before)
 
 
-def test_validated_gripper_status_uses_verified_cache_after_refresh(
+def testvalidate_status_uses_verified_cache_after_refresh(
     monkeypatch,
 ) -> None:
     manager = make_manager()
@@ -473,7 +473,7 @@ def test_validated_gripper_status_uses_verified_cache_after_refresh(
     forbid_raw_feedback_reads(manager)
     monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **_kwargs: False)
 
-    manager.gripper._validated_gripper_status(expected_status=1)
+    manager.gripper.validate_status(expected_status=1)
 
     assert_verified_feedback_unchanged(manager, before)
 
@@ -834,7 +834,7 @@ def test_outer_hardware_tick_protects_when_scheduler_raises_feedback_error(
     monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', fail_feedback_refresh)
     callback_calls: list[int] = []
 
-    manager.cycle._hardware_control_tick(
+    manager.cycle.control_tick(
         manager.test_arm,
         1.0 / 500.0,
         lambda _arm, _dt: callback_calls.append(1),
@@ -856,7 +856,7 @@ def test_outer_hardware_tick_reraises_non_feedback_callback_failure(
     monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **_kwargs: True)
 
     with pytest.raises(RuntimeError, match="controller bug"):
-        manager.cycle._hardware_control_tick(
+        manager.cycle.control_tick(
             manager.test_arm,
             1.0 / 500.0,
             lambda _arm, _dt: (_ for _ in ()).throw(RuntimeError("controller bug")),
@@ -871,7 +871,7 @@ def test_outer_hardware_tick_reraises_non_feedback_callback_failure(
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("scheduler bug")),
     )
     with pytest.raises(RuntimeError, match="scheduler bug"):
-        manager.cycle._hardware_control_tick(
+        manager.cycle.control_tick(
             manager.test_arm,
             1.0 / 500.0,
             lambda _arm, _dt: None,
@@ -895,7 +895,7 @@ def test_outer_hardware_tick_orders_feedback_before_arm_and_gripper(
     )
     monkeypatch.setattr(manager.gripper, '_gripper_tick', lambda: events.append("gripper"))
 
-    manager.cycle._hardware_control_tick(
+    manager.cycle.control_tick(
         manager.test_arm,
         1.0 / 500.0,
         lambda _arm, _dt: events.append("arm"),
@@ -1360,7 +1360,7 @@ def test_arm_control_callback_also_emits_active_gripper_command() -> None:
     manager._lifecycle.enabled = True
     seed_verified_feedback(manager, arm_status=1)
 
-    manager.arm._start_pos_vel_loop(target=np.zeros(6))
+    manager.arm.start_position_loop(target=np.zeros(6))
     assert manager.test_arm.control_callback is not None
     manager.test_arm.control_callback(manager.test_arm, 1.0 / 500.0)
 
@@ -2738,7 +2738,7 @@ def test_coordinate_jump_stops_gripper_without_disabling_healthy_arm(mode) -> No
     arm_ticks = []
     manager.gripper._gripper_cfg = SimpleNamespace()
 
-    manager.cycle._hardware_control_tick(manager.test_arm, 0.002, lambda *_: arm_ticks.append(True))
+    manager.cycle.control_tick(manager.test_arm, 0.002, lambda *_: arm_ticks.append(True))
 
     assert arm_ticks == [True]
     assert manager._lifecycle.enabled is True

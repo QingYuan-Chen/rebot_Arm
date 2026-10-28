@@ -491,7 +491,7 @@ def test_persistent_stale_feedback_requests_protection_once_until_verified_disab
     try:
         wait_until(lambda: bus.disables == 1)
         # 在真实唯一设备线程推进多个空闲周期，不让一次暂时恢复掩盖重复失能。
-        manager._backend.call(lambda: [manager.cycle._runtime_feedback_tick() for _ in range(30)])
+        manager._backend.call(lambda: [manager.cycle.feedback_tick() for _ in range(30)])
         assert bus.disables == 1
         assert manager._lifecycle.enabled and manager._lifecycle.state == 'DISABLING'
         assert not manager.control_loop_active
@@ -525,7 +525,7 @@ def test_protection_cleanup_failure_cannot_skip_disable(monkeypatch):
         raise RuntimeError('injected cancellation failure')
     monkeypatch.setattr(manager._backend, 'cancel_trajectory', fail)
     try:
-        manager._backend.call(lambda: manager.protection._protective_disable_from_hardware_loop('fault'))
+        manager._backend.call(lambda: manager.protection.protect('fault'))
         assert bus.disables == 1 and manager._lifecycle.state == 'DISABLING'
         assert not manager.control_loop_active
         assert any('PROTECTIVE_PREPARE_FAILED' in code for code in manager.error_codes)
@@ -717,7 +717,7 @@ def test_pure_math_uses_canonical_model_and_cannot_write_hardware(monkeypatch):
 
 def test_initial_gravity_send_failure_protects_instead_of_resuming_normal_output(monkeypatch):
     manager,opened=make_local_manager(monkeypatch);manager.connect();manager.enable()
-    bus=opened[0];manager.arm._stop_control_loop()
+    bus=opened[0];manager.arm.stop_control_loop()
     bus.events.clear();bus.failure=(3,'mit')
     with pytest.raises(RuntimeError,match='joint3'): manager.start_gravity_compensation()
     assert manager._lifecycle.state=='DISABLING' and not manager.control_loop_active
@@ -730,13 +730,13 @@ def test_initial_gravity_send_failure_protects_instead_of_resuming_normal_output
 def test_disable_writer_stop_failure_keeps_enabled_state(monkeypatch):
     manager, opened = make_local_manager(monkeypatch)
     manager.connect(); manager.enable()
-    original = manager.arm._stop_control_loop
-    monkeypatch.setattr(manager.arm, '_stop_control_loop', lambda: (_ for _ in ()).throw(RuntimeError('join failed')))
+    original = manager.arm.stop_control_loop
+    monkeypatch.setattr(manager.arm, 'stop_control_loop', lambda: (_ for _ in ()).throw(RuntimeError('join failed')))
     with pytest.raises(RuntimeError, match='join failed'):
         manager.disable()
     assert manager._lifecycle.enabled and manager._lifecycle.state == 'DISABLING'
     assert 'DISABLE_VERIFICATION_FAILED' in manager.error_codes
-    monkeypatch.setattr(manager.arm, '_stop_control_loop', original)
+    monkeypatch.setattr(manager.arm, 'stop_control_loop', original)
     manager.disable(); manager.shutdown()
 
 
