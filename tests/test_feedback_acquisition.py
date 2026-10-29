@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from rebotarmcontroller.feedback_acquisition import FeedbackAcquisition
+import rebotarmcontroller.feedback_acquisition as acquisition
 
 
 VECTORS = json.loads((Path(__file__).parent / 'fixtures/controller_feedback_vectors.json').read_text())
@@ -60,3 +61,43 @@ def test_new_invalid_frame_preserves_old_sample_but_marks_failure():
     assert recovered.status_code == 0
     assert recovered.sample.sequence == 12
     assert recovered.sample.observed_at == 1.2
+
+
+@pytest.mark.parametrize('reply_at,oversleep', [(.11, False), (None, False), (.16, False), (.11, True)])
+def test_force_refresh_waits_for_last_request_inside_existing_deadline(monkeypatch, reply_at, oversleep):
+    """第三次请求的延迟应答可用；缺路或原有 150 ms 窗口外的应答仍失败。"""
+    clock = [0.]
+    monkeypatch.setattr(acquisition.time, 'monotonic', lambda: clock[0])
+    def sleep(delay):
+        clock[0] += .06 if oversleep and delay < .01 else delay
+    monkeypatch.setattr(acquisition.time, 'sleep', sleep)
+    feedback = component()
+    motors = []
+    for index in range(7):
+        motor = SimpleNamespace(sequence=0, requests=0)
+        motor.state = SimpleNamespace(pos=0., vel=0., torq=0., status_code=0)
+        def request(motor=motor):
+            motor.requests += 1
+        motor.request_feedback = request
+        motor.get_state_with_sequence = lambda motor=motor: (motor.state, motor.sequence)
+        motors.append(motor)
+    def poll():
+        for index, motor in enumerate(motors):
+            due = .001 if index != 3 else reply_at
+            if due is not None and clock[0] >= due:
+                motor.sequence = index+1
+    controller = SimpleNamespace(poll_feedback_once=poll)
+    labels = [f'joint{i}' for i in range(1, 7)]+['gripper']
+    feedback._feedback_controller_groups = lambda: [(controller, list(zip(labels, motors)))]
+    feedback._joint_names = lambda: labels[:6]
+    feedback._gripper_motor = lambda: motors[-1]
+    if reply_at == .11 and not oversleep:
+        feedback._force_feedback_refresh()
+        assert set(feedback._verified_feedback_by_label) == set(labels)
+        assert not feedback._feedback_error_by_label
+    else:
+        with pytest.raises(RuntimeError, match='joint4.*sequence'):
+            feedback._force_feedback_refresh()
+        assert 'joint4' in feedback._feedback_error_by_label
+    assert all(motor.requests == 3 for motor in motors)
+    assert clock[0] <= (.16 if oversleep else .15) + 1e-9

@@ -76,18 +76,39 @@ class AuditWriter(logging.Handler):
 
 
 class SerialRelay:
-    """仅转发字节的单串口所有者；转发失败原样断流，不伪造反馈或命令。"""
+    """DM 串口单所有者；TX 保留完整 30 字节帧及间隔，RX 原样转发。
+
+    PTY 是字节流，读取边界不能当作 SDK 的写入边界。不能把多条 SDK 命令
+    合成一次 USB 写入或转发半帧；不识别的 TX 格式立即断流并使审计无效。
+    此类不改载荷、不补帧、不重试；Python 调度和 USB 分包仍需实机测量。
+    """
+
+    _TX_HEADER = bytes.fromhex('55aa1e03')
+    _TX_LENGTH = 30
+    _TX_GAP_SEC = .000120  # 与 MotorBridge 默认多电机发送间隔一致。
 
     def __init__(self, channel, baud):
         import serial
         self.serial = serial.Serial(channel, baudrate=baud, timeout=0, exclusive=True,
                                     write_timeout=.05)
-        self.master, self.slave = os.openpty()
-        tty.setraw(self.slave)
-        os.set_blocking(self.master, False)
+        try:
+            self.master, self.slave = os.openpty()
+            try:
+                tty.setraw(self.slave)
+                os.set_blocking(self.master, False)
+            except BaseException:
+                os.close(self.master)
+                os.close(self.slave)
+                raise
+        except BaseException:
+            self.serial.close()
+            raise
         self.channel = os.ttyname(self.slave)
         self.stop = threading.Event()
         self.error = ''
+        self._closed = False
+        self._tx_pending = bytearray()
+        self._next_tx = 0.
         self.worker = threading.Thread(target=self._run, name='audit-serial-relay', daemon=True)
         self.worker.start()
 
@@ -100,30 +121,70 @@ class SerialRelay:
                     data = os.read(fd, 4096)
                     if not data:
                         raise RuntimeError('serial relay EOF')
+                    read_ns = time.monotonic_ns()
                     direction = 'tx' if fd == self.master else 'rx'
-                    logger.info('raw_serial', extra={'audit': dict(direction=direction, hex=data.hex())})
+                    logger.info('raw_serial', extra={'audit': dict(
+                        direction=direction, hex=data.hex(), read_ns=read_ns)})
                     if direction == 'tx':
-                        if self.serial.write(data) != len(data):
-                            raise RuntimeError('partial serial write')
+                        self._tx_pending.extend(data)
+                        while self._tx_pending:
+                            prefix = self._tx_pending[:len(self._TX_HEADER)]
+                            if not self._TX_HEADER.startswith(prefix):
+                                raise RuntimeError('unsupported DM serial TX header')
+                            if len(self._tx_pending) < self._TX_LENGTH:
+                                break
+                            frame = bytes(self._tx_pending[:self._TX_LENGTH])
+                            delay = self._next_tx - time.monotonic()
+                            if delay > 0:
+                                time.sleep(delay)
+                            started_ns = time.monotonic_ns()
+                            if self.serial.write(frame) != len(frame):
+                                raise RuntimeError('partial serial write; not retried')
+                            self.serial.flush()
+                            self._next_tx = time.monotonic() + self._TX_GAP_SEC
+                            del self._tx_pending[:self._TX_LENGTH]
+                            self._forwarded(logger, direction, frame, read_ns, started_ns)
                     else:
                         # 保留分段/粘包的原始字节；不能用解码后的值代替原始帧。
+                        started_ns = time.monotonic_ns()
                         view = memoryview(data)
                         while view:
                             if not select.select([], [self.master], [], .05)[1]:
                                 raise RuntimeError('PTY relay backpressure')
                             view = view[os.write(self.master, view):]
+                        self._forwarded(logger, direction, data, read_ns, started_ns)
         except Exception as exc:
             self.error = str(exc)
             logger.info('relay_error', extra={'audit': dict(error=self.error)})
 
+    @staticmethod
+    def _forwarded(logger, direction, data, read_ns, started_ns):
+        logger.info('relay_forward', extra={'audit': dict(direction=direction, hex=data.hex(),
+                    read_ns=read_ns, started_ns=started_ns, completed_ns=time.monotonic_ns())})
+
     def close(self):
+        if self._closed:
+            return
         self.stop.set()
         self.worker.join(1.)
         if self.worker.is_alive():
             raise RuntimeError('serial relay did not stop')
+        # 关闭不补发命令。SDK 已写入 PTY、代理尚未读取的字节也不能静默丢弃。
+        try:
+            unsent = os.read(self.master, 4096)
+        except BlockingIOError:
+            unsent = b''
+        if unsent:
+            logging.getLogger('rebotarm.audit').info('relay_unsent', extra={'audit': dict(hex=unsent.hex())})
+            if not self.error:
+                self.error = 'unforwarded PTY TX at relay close'
+        if self._tx_pending and not self.error:
+            self.error = f'incomplete DM serial TX: {len(self._tx_pending)} bytes not forwarded'
+        logging.getLogger('rebotarm.audit').info('relay_closed', extra={'audit': dict(error=self.error)})
         os.close(self.master)
         os.close(self.slave)
         self.serial.close()
+        self._closed = True
 
 
 def main(argv=None):
@@ -139,6 +200,7 @@ def main(argv=None):
         parser.error('--serial requires {audit_serial} in node arguments')
     writer = AuditWriter(options.output, options.session)
     logger = logging.getLogger('rebotarm.audit')
+    previous_level, previous_propagate = logger.level, logger.propagate
     logger.addHandler(writer)
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -160,11 +222,21 @@ def main(argv=None):
                     motorbridge_version=motorbridge_version)})
         module.main(args=args)
     finally:
-        if relay:
-            relay.close()
-        logger.removeHandler(writer)
-        summary = writer.finish()
-        print(json.dumps(summary, ensure_ascii=False), file=sys.stderr)
+        # 代理清理异常也必须排空日志，留下“不完整”的证据及原始异常。
+        try:
+            if relay:
+                relay.close()
+        except Exception as exc:
+            logger.info('relay_cleanup_error', extra={'audit': dict(error=str(exc))})
+            raise
+        finally:
+            logger.removeHandler(writer)
+            try:
+                summary = writer.finish()
+                print(json.dumps(summary, ensure_ascii=False), file=sys.stderr)
+            finally:
+                logger.setLevel(previous_level)
+                logger.propagate = previous_propagate
         if summary['dropped'] or writer.errors or (relay and relay.error):
             raise RuntimeError('audit incomplete; inspect dropped/errors/relay_error')
 

@@ -390,6 +390,7 @@ class FeedbackAcquisition:
         *,
         observed_at: float,
         inspect_after_poll: bool = False,
+        request_new_feedback: bool = True,
     ) -> None:
         """执行一轮共享总线反馈事务：先结算旧请求，再请求新帧。
 
@@ -398,6 +399,7 @@ class FeedbackAcquisition:
         poll_feedback_once。``inspect_after_poll`` 为真时在轮询结束后立即再读一次
         并结算（用于强制刷新），否则只结算轮询前的观测。任一控制器组失败都会
         记录该组电机错误，并在最后以异常抛出，绝不静默继续。
+        ``request_new_feedback`` 为假时仅轮询并结算已有请求，不建立新截止时间。
         """
         groups = self._feedback_controller_groups()
         self._require_feedback_sequence_api(groups)
@@ -418,16 +420,17 @@ class FeedbackAcquisition:
                         label, f"shared feedback batch failed before request: {message}"
                     )
 
-        self._inspect_pending_feedback(observations, observed_at=observed_at)
-        response_window = self._feedback_response_window_sec()
-        for _ctrl, entries in readable_groups:
-            for label, _motor in entries:
-                if label not in self._feedback_request_baseline_by_label:
-                    _state, sequence = observations[label]
-                    self._feedback_request_baseline_by_label[label] = sequence
-                    self._feedback_request_deadline_by_label[label] = (
-                        observed_at + response_window
-                    )
+        if request_new_feedback:
+            self._inspect_pending_feedback(observations, observed_at=observed_at)
+            response_window = self._feedback_response_window_sec()
+            for _ctrl, entries in readable_groups:
+                for label, _motor in entries:
+                    if label not in self._feedback_request_baseline_by_label:
+                        _state, sequence = observations[label]
+                        self._feedback_request_baseline_by_label[label] = sequence
+                        self._feedback_request_deadline_by_label[label] = (
+                            observed_at + response_window
+                        )
 
         successful_groups = []
         for ctrl, entries in readable_groups:
@@ -436,8 +439,9 @@ class FeedbackAcquisition:
             def transaction() -> None:
                 # 同一控制器上的"请求 + 轮询"必须在一次持锁事务内完成，
                 # 否则别的线程可能在两者之间插入自己的帧，导致错配。
-                for _label, motor in entries:
-                    motor.request_feedback()
+                if request_new_feedback:
+                    for _label, motor in entries:
+                        motor.request_feedback()
                 ctrl.poll_feedback_once()
 
             try:
@@ -488,7 +492,8 @@ class FeedbackAcquisition:
         用于使能、置零、夹爪命令等需要当下真实状态的场合。先记录每个标签的
         基线序号与上一份样本，再最多重试 ``_FEEDBACK_REFRESH_RETRIES`` 次，
         直到样本对象被替换且序号相对基线前进；全部失败时抛出最后一个错误或
-        汇总缺失原因。
+        汇总缺失原因。最后一轮非阻塞轮询之后，在原有响应窗口剩余时间内
+        只轮询、不追加请求；不能把“请求已写出”当作“应答已接收”。
         """
         groups = self._feedback_controller_groups()
         self._require_feedback_sequence_api(groups)
@@ -534,6 +539,10 @@ class FeedbackAcquisition:
             self._feedback_request_deadline_by_label.pop(label, None)
 
         last_error: Exception | None = None
+        refresh_deadline = time.monotonic() + min(
+            self._feedback_response_window_sec(),
+            _FEEDBACK_REFRESH_RETRIES * _FEEDBACK_RETRY_INTERVAL_SEC,
+        )
         self._feedback_force_refresh_active = True
         try:
             for attempt in range(_FEEDBACK_REFRESH_RETRIES):
@@ -553,6 +562,28 @@ class FeedbackAcquisition:
                     return
                 if attempt + 1 < _FEEDBACK_REFRESH_RETRIES:
                     time.sleep(_FEEDBACK_RETRY_INTERVAL_SEC)
+            # 三轮请求约在 0/50/100 ms 发出，原来在第三次立即轮询后就失败。
+            # 剩余最多 50 ms 留给在途应答；总线错误沿用既有失败路径，不用迟到
+            # 缓存冲掉异常。固定次数也约束测试时钟停滞或底层轮询异常的等待。
+            if last_error is None and not self._feedback_error_by_label:
+                for _ in range(10):
+                    remaining = refresh_deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    time.sleep(min(.005, remaining))
+                    if time.monotonic() > refresh_deadline:
+                        break
+                    try:
+                        self._refresh_feedback_batch(
+                            observed_at=time.monotonic(), inspect_after_poll=True,
+                            request_new_feedback=False,
+                        )
+                    except Exception as exc:
+                        last_error = exc
+                        break
+                    if all(forced_sample_satisfies(label, baseline)
+                           for label, baseline in required_baselines.items()):
+                        return
         finally:
             self._feedback_force_refresh_active = False
 
