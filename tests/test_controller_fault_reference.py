@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from controller_fake_backend import inject_feedback_refresh
 from rebotarmcontroller.sdk_driver import CommandTransportError
 from rebotarmcontroller.controller_contracts import CommandReceipt
 from test_lifecycle_transactions import lifecycle
@@ -64,8 +65,8 @@ def test_lifecycle_success_uses_semantic_operations():
 @pytest.mark.parametrize('case', DATA['protection'], ids=lambda case: case['name'])
 def test_protection_latch_and_explicit_recovery(case, monkeypatch):
     manager, opened = make_local_manager(monkeypatch)
-    manager.connect()
-    manager.enable()
+    manager.lifecycle.connect()
+    manager.lifecycle.enable()
     bus = opened[0]
     baseline = bus.disables
     bus.fail_disable = case['disable_write_fails']
@@ -73,63 +74,63 @@ def test_protection_latch_and_explicit_recovery(case, monkeypatch):
         for step in DATA['protection_steps']:
             request = step['request']
             if request == 'protect':
-                manager._backend.call(lambda: manager.protection.protect('injected fault'))
+                manager.runtime.call(lambda: manager.protection.protect('injected fault'))
             elif request == 'feedback_recovers':
                 bus.fail_disable = False
-                manager._backend.call(lambda: manager.feedback.refresh_feedback_if_due(force=True))
+                manager.runtime.call(lambda: manager.feedback.refresh_feedback_if_due(force=True))
             elif request == 'enable_rejected':
                 with pytest.raises(RuntimeError):
-                    manager.enable()
+                    manager.lifecycle.enable()
             else:
-                getattr(manager, request)()
-            assert manager.lifecycle_state == step['state'] and manager.enabled == step['enabled']
+                getattr(manager.lifecycle, request)()
+            assert manager.lifecycle.state == step['state'] and manager.lifecycle.enabled == step['enabled']
             assert bus.disables - baseline == step['disable_writes']
-            assert not manager.control_loop_active if step['state'] == 'DISABLING' else True
+            assert not manager.runtime.control_loop_active if step['state'] == 'DISABLING' else True
             if request == 'protect':
                 assert manager.protection.decision.action.value == case['decision']
             if request == 'disable':
                 assert manager.protection.decision is None
     finally:
         bus.fail_disable = False
-        manager.disable()
-        manager.shutdown()
+        manager.lifecycle.disable()
+        manager.lifecycle.shutdown()
 
 
 @pytest.mark.parametrize('case', DATA['passthrough'], ids=lambda case: case['name'])
 def test_passthrough_arbitration_result(case, monkeypatch):
     manager, opened = make_local_manager(monkeypatch)
-    manager.connect()
-    manager.enable()
+    manager.lifecycle.connect()
+    manager.lifecycle.enable()
     bus = opened[0]
-    task = manager.submit_arm_trajectory(manager.joint_names,
+    task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
         [(0.,) * 6, (.01, -.01, -.01, 0., 0., 0.)], [0., 10.])
-    generation = manager._backend.target_generation
+    generation = manager.runtime.target_generation
     command = SimpleNamespace(mode=1, pos=case['position'], vel=0., kp=1., kd=.1, tau=0., vlim=.3,
         **{f'use_{key}': True for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')})
     before = bus.disables
     try:
         if case['accepted']:
-            manager.send_joint_motor_cmd('joint1', command, arbitration=case['arbitration'])
-            assert manager.state_machine == 'LOWLEVEL_STREAMING'
-            assert manager._backend.target_generation != generation
+            manager.arm.send_joint_motor_cmd('joint1', command, arbitration=case['arbitration'])
+            assert manager.lifecycle.execution == 'LOWLEVEL_STREAMING'
+            assert manager.runtime.target_generation != generation
             writes = [args for number, name, args in bus.events if number == 1 and name == 'position']
             assert writes[-1][0] == pytest.approx(case['position'], abs=DATA['absolute_tolerance'])
         else:
             with pytest.raises((RuntimeError, ValueError)):
-                manager.send_joint_motor_cmd('joint1', command, arbitration=case['arbitration'])
-            assert manager._backend.target_generation == generation
-        assert manager.arm_execution_status(task).state == case['task_state']
-        assert manager.enabled and bus.disables == before
+                manager.arm.send_joint_motor_cmd('joint1', command, arbitration=case['arbitration'])
+            assert manager.runtime.target_generation == generation
+        assert manager.arm.arm_execution_status(task).state == case['task_state']
+        assert manager.lifecycle.enabled and bus.disables == before
     finally:
-        manager.disable()
-        manager.shutdown()
+        manager.lifecycle.disable()
+        manager.lifecycle.shutdown()
 
 
 @pytest.mark.parametrize('case', DATA['gravity'], ids=lambda case: case['name'])
 def test_gravity_handoff_and_fault_decisions(case, monkeypatch):
     values = DATA['gravity_input']
     manager = make_manager()
-    manager._lifecycle.set_state('ENABLED_HOLD')
+    manager.lifecycle.set_state('ENABLED_HOLD')
     q = np.array(values['positions'])
     commands = configure_gravity_compensation_test(
         manager, positions=q, velocities=np.array(values['velocities']))
@@ -140,16 +141,16 @@ def test_gravity_handoff_and_fault_decisions(case, monkeypatch):
     if case['fault'] == 'mode_rejected':
         manager.test_arm.mode_mit = lambda **kw: False
         with pytest.raises(RuntimeError):
-            manager.start_gravity_compensation()
+            manager.gravity.start_gravity_compensation()
     else:
-        manager.start_gravity_compensation()
+        manager.gravity.start_gravity_compensation()
         if case['fault'] == 'none':
-            manager.stop_gravity_compensation()
+            manager.gravity.stop_gravity_compensation()
         else:
-            monkeypatch.setattr(manager.feedback, 'refresh_feedback_if_due', lambda **kw: False)
+            inject_feedback_refresh(monkeypatch, manager, lambda **kw: False)
             def fail(**kw):
                 if case['fault'] == 'transport':
-                    raise CommandTransportError(CommandReceipt((), 'joint1', tuple(manager.joint_names[1:])))
+                    raise CommandTransportError(CommandReceipt((), 'joint1', tuple(manager.runtime.joint_names[1:])))
                 raise RuntimeError('injected model failure')
             if case['fault'] == 'transport':
                 # 回执由设备批次返回，协调组件不得将其当作健康计算失败恢复输出。
@@ -160,12 +161,12 @@ def test_gravity_handoff_and_fault_decisions(case, monkeypatch):
             else:
                 monkeypatch.setattr(manager.gravity, '_gc_compute_generalized_gravity', fail)
             manager.gravity._gravity_hardware_tick(manager.test_arm, values['period'])
-    assert manager.enabled == case['enabled'] and manager.lifecycle_state == case['state']
-    assert manager.gravity_compensation_active() == case['active']
+    assert manager.lifecycle.enabled == case['enabled'] and manager.lifecycle.state == case['state']
+    assert manager.gravity.gravity_compensation_active() == case['active']
     assert len(disables) == case['disable_writes']
     if case['normal_control']:
-        assert manager.control_loop_active
-        np.testing.assert_allclose(manager.joint_target(), q, atol=DATA['absolute_tolerance'], rtol=0)
+        assert manager.runtime.control_loop_active
+        np.testing.assert_allclose(manager.arm.joint_target(), q, atol=DATA['absolute_tolerance'], rtol=0)
     decision = manager.protection.decision or manager.gravity.gravity_compensation_diagnostics()['safety_decision']
     assert (None if decision is None else decision.action.value) == case['decision']
     if commands:

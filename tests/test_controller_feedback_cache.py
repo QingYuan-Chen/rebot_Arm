@@ -49,7 +49,7 @@ class _CacheOnlyHardware:
         self.mode = "mit"
         self.enabled = False
         self.control_loop_active = False
-        self.state_machine = "IDLE"
+        self.execution = "IDLE"
         self.codes = [0] * 6
         self.error_codes = []
         self.observed_at = 100.0
@@ -90,10 +90,11 @@ def test_joint_state_publisher_reads_validated_cache_without_serial_io() -> None
     publisher._last_gripper_identity = None
     publisher._last_gripper_stamp = Time()
     publisher._node = _Node()
-    publisher._hardware = _CacheOnlyHardware()
+    publisher._feedback = _CacheOnlyHardware()
+    publisher._runtime = publisher._lifecycle = publisher._gripper = publisher._feedback
     publisher._publisher = _Recorder()
     publisher._joint_state_publishers = {
-        name: _Recorder() for name in publisher._hardware.joint_names
+        name: _Recorder() for name in publisher._feedback.joint_names
     }
     publisher._gripper_state_publisher = _Recorder()
     status_calls: list[int] = []
@@ -101,7 +102,7 @@ def test_joint_state_publisher_reads_validated_cache_without_serial_io() -> None
 
     publisher.publish()
 
-    assert publisher._hardware.refresh_calls == 0
+    assert publisher._feedback.refresh_calls == 0
     assert len(publisher._publisher.messages) == 1
     assert len(publisher._gripper_state_publisher.messages) == 1
     assert status_calls == [{"force": False}]
@@ -112,14 +113,14 @@ def test_joint_state_publisher_reads_validated_cache_without_serial_io() -> None
     )
     publisher.publish()
     assert publisher._publisher.messages[-1].header.stamp == first_stamp
-    publisher._hardware.identity = (2,) * 6
+    publisher._feedback.identity = (2,) * 6
     publisher.publish()
     assert publisher._publisher.messages[-1].header.stamp.sec == 2
     assert status_calls == [{"force": False}] * 3
     with publisher._publish_lock:
-        before = publisher._hardware.refresh_calls
+        before = publisher._feedback.refresh_calls
         publisher.publish()
-        assert publisher._hardware.refresh_calls == before
+        assert publisher._feedback.refresh_calls == before
         assert status_calls == [{"force": False}] * 3
 
 
@@ -130,13 +131,14 @@ def test_joint_state_publisher_reports_status_when_feedback_cache_is_invalid() -
     publisher._last_gripper_identity = None
     publisher._last_gripper_stamp = Time()
     publisher._node = _Node()
-    publisher._hardware = _CacheOnlyHardware()
-    publisher._hardware.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
+    publisher._feedback = _CacheOnlyHardware()
+    publisher._runtime = publisher._lifecycle = publisher._gripper = publisher._feedback
+    publisher._feedback.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
         RuntimeError("arm feedback stale")
     )
     publisher._publisher = _Recorder()
     publisher._joint_state_publishers = {
-        name: _Recorder() for name in publisher._hardware.joint_names
+        name: _Recorder() for name in publisher._feedback.joint_names
     }
     publisher._gripper_state_publisher = _Recorder()
     status_calls: list[int] = []
@@ -157,22 +159,23 @@ def test_joint_state_publisher_refreshes_latched_status_after_feedback_recovers(
     publisher._last_gripper_stamp = Time()
     publisher._last_feedback_stamp = None
     publisher._node = _Node()
-    publisher._hardware = _CacheOnlyHardware()
+    publisher._feedback = _CacheOnlyHardware()
+    publisher._runtime = publisher._lifecycle = publisher._gripper = publisher._feedback
     publisher._publisher = _Recorder()
     publisher._joint_state_publishers = {
-        name: _Recorder() for name in publisher._hardware.joint_names
+        name: _Recorder() for name in publisher._feedback.joint_names
     }
     publisher._gripper_state_publisher = _Recorder()
     status_calls: list[str] = []
     publisher.publish_status = lambda **kwargs: status_calls.append(kwargs)
 
-    original_get_sample = publisher._hardware.get_cached_joint_sample
-    publisher._hardware.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
+    original_get_sample = publisher._feedback.get_cached_joint_sample
+    publisher._feedback.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
         RuntimeError("arm feedback stale")
     )
     publisher.publish()
 
-    publisher._hardware.get_cached_joint_sample = original_get_sample
+    publisher._feedback.get_cached_joint_sample = original_get_sample
     publisher.publish()
 
     assert status_calls == [{"force": False}] * 2
@@ -182,7 +185,8 @@ def test_joint_state_publisher_refreshes_latched_status_after_feedback_recovers(
 def test_arm_status_change_is_immediate_with_five_hz_heartbeat(monkeypatch) -> None:
     publisher = JointStatePublisher.__new__(JointStatePublisher)
     publisher._node = _Node()
-    publisher._hardware = _CacheOnlyHardware()
+    publisher._feedback = _CacheOnlyHardware()
+    publisher._runtime = publisher._lifecycle = publisher._gripper = publisher._feedback
     publisher._status_publisher = _Recorder()
     publisher._status_lock = threading.Lock()
     publisher._last_status_identity = None
@@ -197,15 +201,15 @@ def test_arm_status_change_is_immediate_with_five_hz_heartbeat(monkeypatch) -> N
     publisher.publish_status(force=False)
     assert len(publisher._status_publisher.messages) == 1
 
-    publisher._hardware.codes = [255] * 6
-    publisher._hardware.error_codes = ["ARM_FEEDBACK: arm feedback stale"]
+    publisher._feedback.codes = [255] * 6
+    publisher._feedback.error_codes = ["ARM_FEEDBACK: arm feedback stale"]
     publisher.publish_status(force=False)
     assert list(publisher._status_publisher.messages[-1].per_joint_status_code) == [255] * 6
     assert len(publisher._status_publisher.messages) == 2
 
     clock[0] = 0.11
-    publisher._hardware.codes = [0] * 6
-    publisher._hardware.error_codes = []
+    publisher._feedback.codes = [0] * 6
+    publisher._feedback.error_codes = []
     publisher.publish_status(force=False)
     assert list(publisher._status_publisher.messages[-1].per_joint_status_code) == [0] * 6
     assert list(publisher._status_publisher.messages[-1].error_codes) == []
@@ -217,7 +221,7 @@ def test_arm_status_change_is_immediate_with_five_hz_heartbeat(monkeypatch) -> N
     clock[0] = 0.31
     publisher.publish_status(force=False)
     assert len(publisher._status_publisher.messages) == 4
-    publisher._hardware.enabled = True
+    publisher._feedback.enabled = True
     publisher.publish_status(force=False)
     assert publisher._status_publisher.messages[-1].enabled is True
     publisher.publish_status()
@@ -231,10 +235,11 @@ def _feedback_publisher():
     publisher._last_gripper_identity = None
     publisher._last_gripper_stamp = Time()
     publisher._node = _Node()
-    publisher._hardware = _CacheOnlyHardware()
+    publisher._feedback = _CacheOnlyHardware()
+    publisher._runtime = publisher._lifecycle = publisher._gripper = publisher._feedback
     publisher._publisher = _Recorder()
     publisher._joint_state_publishers = {
-        name: _Recorder() for name in publisher._hardware.joint_names
+        name: _Recorder() for name in publisher._feedback.joint_names
     }
     publisher._gripper_state_publisher = _Recorder()
     publisher.publish_status = lambda **kwargs: None
@@ -243,7 +248,7 @@ def _feedback_publisher():
 
 def test_gripper_timestamp_tracks_its_own_feedback_and_preserves_age(monkeypatch) -> None:
     publisher = _feedback_publisher()
-    hardware = publisher._hardware
+    hardware = publisher._feedback
     hardware.observed_at = 99.75
     hardware.gripper_observed_at = 99.5
     publisher.publish()
@@ -275,7 +280,7 @@ def test_gripper_timestamp_tracks_its_own_feedback_and_preserves_age(monkeypatch
 
 def test_gripper_still_publishes_when_arm_cache_is_unavailable() -> None:
     publisher = _feedback_publisher()
-    publisher._hardware.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
+    publisher._feedback.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
         RuntimeError("joint3 [INVALID_COORDINATE]")
     )
     publisher.publish()
@@ -285,9 +290,9 @@ def test_gripper_still_publishes_when_arm_cache_is_unavailable() -> None:
 
 def test_gripper_waiting_for_first_frame_has_no_fabricated_timestamp() -> None:
     publisher = _feedback_publisher()
-    publisher._hardware.gripper_identity = None
-    publisher._hardware.gripper_observed_at = None
-    publisher._hardware.gripper_status = 255
+    publisher._feedback.gripper_identity = None
+    publisher._feedback.gripper_observed_at = None
+    publisher._feedback.gripper_status = 255
     publisher.publish()
     assert publisher._gripper_state_publisher.messages[-1].header.stamp == Time()
     assert publisher._gripper_state_publisher.messages[-1].status_code == 255
@@ -295,7 +300,7 @@ def test_gripper_waiting_for_first_frame_has_no_fabricated_timestamp() -> None:
 
 def test_motor_fault_codes_are_published_without_remapping() -> None:
     publisher = _feedback_publisher()
-    publisher._hardware.codes = [0, 1, 8, 9, 11, 14]
+    publisher._feedback.codes = [0, 1, 8, 9, 11, 14]
     publisher.publish()
     assert [publisher._joint_state_publishers[name].messages[-1].status_code
-            for name in publisher._hardware.joint_names] == [0, 1, 8, 9, 11, 14]
+            for name in publisher._feedback.joint_names] == [0, 1, 8, 9, 11, 14]

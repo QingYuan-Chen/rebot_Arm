@@ -1,10 +1,19 @@
-"""设备故障的保护失能与任务清理协调。
+"""设备故障的保护失能与任务清理协调.
 
-对外接口：protect 首次故障先锁存、停止输出、
-清理任务再尝试所有控制器失能；清理失败也不能跳过首个失能发送。
-约束：只由唯一设备线程调用；CommandGuard 拥有去重锁存。保持 DISABLING
-直到显式失能通过新鲜反馈确认；反馈恢复不自动清锁存，不周期重复失能。
+职责与位置
+    设备故障后的清理与保护失能协调; 业务状态仍由各执行组件拥有.
+
+对外接口
+    protect 先锁存再停止输出, 清理任务和尝试失能; confirm_disabled 在验证通过后清锁存.
+
+安全与并发约束
+    只能由设备线程执行; 某项清理失败也要继续尝试其他保护动作.
+    发送失能不等于状态已确认, 失败保留 DISABLING, 后续靠显式请求重试.
+
+文件结构(按定义顺序)
+    ControllerProtection: 持有保护决策锁存并协调各组件清理与失能; 不接管目标或反馈缓存.
 """
+
 from __future__ import annotations
 from .component_ports import ArmProtectionPort, GravityProtectionPort, GripperProtectionPort
 from .command_guard import CommandGuard
@@ -14,9 +23,10 @@ from .controller_parameters import (
 
 
 class ControllerProtection:
-    """拥有本职责的状态和事务；ROS 门面仅提交请求或读取结果。"""
+    """持有保护决策锁存并协调各组件清理与失能; 不接管目标或反馈缓存."""
 
     def __init__(self, runtime, lifecycle, settings):
+        """保存协调依赖并创建本组件的保护锁存; 不创建任务或反馈镜像."""
         self._backend = runtime
         self._lifecycle = lifecycle
         self.settings = settings
@@ -24,7 +34,7 @@ class ControllerProtection:
         self._command_guard = CommandGuard()
 
     def bind(self, *, arm: ArmProtectionPort, gravity: GravityProtectionPort, gripper: GripperProtectionPort):
-        """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
+        """装配阶段一次注入明确组件接口; 运行后不替换依赖."""
         if self._bound:
             raise RuntimeError("component already bound")
         self.arm = arm
@@ -33,28 +43,29 @@ class ControllerProtection:
         self._bound = True
 
     def confirm_disabled(self):
-        """显式失能以新帧确认后解除故障锁存；反馈恢复本身不得调用。"""
+        """显式失能以新帧确认后解除故障锁存; 反馈恢复本身不得调用."""
         self._command_guard.confirm_disabled()
 
     @property
     def decision(self):
-        """不可变的当前保护决策；供诊断及跨语言样本读取，不提供复位写入口。"""
+        """不可变的当前保护决策; 供诊断及跨语言样本读取, 不提供复位写入口."""
         return self._command_guard.protection
 
     def protect(self, reason: str, *, category: str = 'FEEDBACK') -> None:
-        """每个故障会话只请求一次保护失能；确认失能前保留未知状态。
+        """每个故障会话只请求一次保护失能; 确认失能前保留未知状态.
 
-        先锁存，避免空闲采集或重入错误路径每周期重复写总线。即使发送失败也不
-        自动重试；操作员可显式调用 disable 重试，只有新鲜失能反馈才解除锁存。
+        先锁存, 避免空闲采集或重入错误路径每周期重复写总线. 即使发送失败也不
+        自动重试; 操作员可显式调用 disable 重试, 只有新鲜失能反馈才解除锁存.
         """
         if not self._command_guard.begin_protection(reason, category):
             return
         message = str(reason)
         self.arm.clear_passthrough()
         self.gripper.clear_passthrough()
-        # 先停止输出。任务收尾出错也必须继续尝试失能，不能因锁存而漏发首个保护命令。
+        # 先停止输出. 任务收尾出错也必须继续尝试失能, 不能因锁存而漏发首个保护命令.
         preparation_errors = []
         def attempt(label, operation):
+            """逐项执行清理或失能动作, 收集异常后继续余下保护步骤."""
             try:
                 operation()
             except Exception as exc:

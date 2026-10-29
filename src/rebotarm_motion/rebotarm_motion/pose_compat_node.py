@@ -1,14 +1,21 @@
-"""旧位姿 ROS 接口的运动层所有者。
+"""旧位姿 ROS 接口的运动层所有者.
 
-职责：保留 move_to_pose Action 和 move_to_pose_ik Service，执行规范模型
-IK/笛卡尔采样、动态限位重定时和 MoveIt 碰撞检查，再提交唯一 FJT 服务端。
-服务 success 仅表示 FJT 已接纳；Action 等待 FJT 到位终态。这里不自动使能，
-不访问硬件实现。缺新鲜状态、碰撞结论未知、重复服务端均拒绝执行。
+职责与位置
+    兼容位姿协议的运动层实现; IK, 采样, 重定时及碰撞检查完成后提交 FJT.
 
-并发：一个兼容位姿请求占用本节点入口；规划、接纳、执行、停止均持有独立
-记录。超时的 send future 不能遗忘，迟到接纳会被取消，停止确认前继续阻断
-新请求。取消要求 FJT 终态及新鲜静止反馈，不能把已发送取消当作已经停住。
+对外接口
+    MoveToPose Action 等到执行终态; MoveToPoseIK Service 只确认 FJT 接纳.
+
+安全与并发约束
+    独立接收器更新快照, 业务 RLock 保护 PoseRun; 同步等待由多线程执行器提供响应能力.
+    未知接纳, 反馈空档或停止未确认时保留入口占用; 恢复帧不得将旧失败恢复为成功.
+
+文件结构(按定义顺序)
+    PoseRun: 单个位姿请求的身份及在途记录: 代次, 截止时间, FJT future, 停止证据和专属事件.
+    PoseCompatNode: 兼容位姿协议的规划/执行编排节点, 持有业务锁, 反馈由独立接收节点提供.
+    main: 启动四线程业务执行器, 独立反馈接收器自行自旋; 退出按顺序关闭执行器和节点.
 """
+
 import math
 import logging
 import threading
@@ -39,6 +46,8 @@ from .trajectory_runtime_limits import TrajectoryRuntimeLimitGuard, load_joint_r
 
 @dataclass
 class PoseRun:
+    """单个位姿请求的身份及在途记录: 代次, 截止时间, FJT future, 停止证据和专属事件."""
+
     epoch: int
     deadline: float
     cancel: bool = False
@@ -59,7 +68,10 @@ class PoseRun:
 
 
 class PoseCompatNode(Node):
+    """兼容位姿协议的规划/执行编排节点, 持有业务锁, 反馈由独立接收节点提供."""
+
     def __init__(self):
+        """装配规范模型, 限位, 碰撞客户端与兼容服务/Action, 另启独立反馈接收器."""
         super().__init__('pose_compat')
         self.declare_parameter('arm_namespace', 'rebotarm')
         self.declare_parameter('moveit_group_name', 'arm')
@@ -88,32 +100,37 @@ class PoseCompatNode(Node):
         self.create_service(MoveToPoseIK, f'/{self.namespace}/move_to_pose_ik', self._ik,
                             callback_group=self.group)
         self.create_timer(.02, self._monitor, callback_group=self.group)
-        # 接收线程不获取 self.lock；同步规划和动作等待不能阻塞反馈缓存。
+        # 接收线程不获取 self.lock; 同步规划和动作等待不能阻塞反馈缓存.
         self._feedback_receiver = MotionFeedbackReceiver(self, self.namespace, gripper=True)
         self.stop_feedback = self._feedback_receiver.stop_feedback
 
     def _refresh_feedback(self):
+        """取得接收器一致快照并更新本次业务读取视图, 不访问设备或重写源时间."""
         snapshot = self._feedback_receiver.snapshot()
         self.feedback, self.gripper = snapshot.joints, snapshot.gripper
         self.status, self.status_at, self.epoch = snapshot.status, snapshot.status_at, snapshot.epoch
 
     def destroy_node(self):
+        """先停止独立接收线程再销毁业务节点, 避免活线程访问已释放 ROS 句柄."""
         self._feedback_receiver.close()
         return super().destroy_node()
 
     def _fresh(self, msg, age=.15):
+        """按 ROS 源时间检查消息年龄, 并拒绝缺失时间和超出允许未来偏差的值."""
         if msg is None:
             return False
         stamp = msg.header.stamp.sec*1_000_000_000 + msg.header.stamp.nanosec
         return stamp > 0 and -.05 <= (self.get_clock().now().nanoseconds-stamp)/1e9 <= age
 
     def _positions(self):
+        """要求源时间新鲜, 按规范名称重排并校验六轴角度."""
         if not self._fresh(self.feedback):
             raise RuntimeError('fresh joint feedback required')
         indices = [list(self.feedback.name).index(n) for n in JOINT_NAMES]
         return self.kinematics.joints([self.feedback.position[i] for i in indices])
 
     def _ready(self):
+        """刷新快照后检查显式使能, 控制环, 状态年龄和六轴健康, 返回可用当前位置."""
         self._refresh_feedback()
         status = self.status
         if (status is None or time.monotonic()-self.status_at > .6 or not status.enabled
@@ -124,6 +141,7 @@ class PoseCompatNode(Node):
         return self._positions()
 
     def _goal(self, _request):
+        """在业务锁内执行第一层健康/独占检查; 真正开始请求时还会再次检查."""
         with self.lock:
             try:
                 self._ready()
@@ -132,6 +150,7 @@ class PoseCompatNode(Node):
                 return GoalResponse.REJECT
 
     def _begin(self):
+        """独占当前位姿入口并固定连续性代次, 截止时间及本次导数诊断守卫."""
         with self.lock:
             self._ready()
             if self.active is not None:
@@ -139,11 +158,13 @@ class PoseCompatNode(Node):
             if self.status.state_machine != 'IDLE':
                 raise RuntimeError('arm resource is not idle')
             run = PoseRun(self.epoch, time.monotonic()+30.)
+            # 量化速度的二阶差分只留诊断; 直接速度/力矩与跟踪误差检查仍保留.
             run.guard = TrajectoryRuntimeLimitGuard(self.runtime_limits, derivative_policy='diagnostic')
             self.active = run
             return run
 
     def _check_run(self, run, canceled=lambda: False):
+        """在业务锁内复核健康, 取消, 代次, 截止时间与请求身份, 失效即阻止继续规划或发送."""
         with self.lock:
             current = self._ready()
             if (run.cancel or canceled() or run.epoch != self.epoch
@@ -154,6 +175,7 @@ class PoseCompatNode(Node):
 
     @staticmethod
     def _target(msg):
+        """把有限位置和单位四元数转换为基座中的 SE(3), 不执行 TF 变换."""
         quaternion = np.array([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])
         position = np.array([msg.position.x, msg.position.y, msg.position.z])
         if not np.isfinite(quaternion).all() or not np.isfinite(position).all() or abs(np.linalg.norm(quaternion)-1.) > 1e-3:
@@ -161,6 +183,12 @@ class PoseCompatNode(Node):
         return pin.SE3(pin.Quaternion(quaternion/np.linalg.norm(quaternion)).matrix(), position)
 
     def _prepare(self, run, target_pose, duration, cartesian, canceled=lambda: False):
+        """从当前反馈准备并提交一条完整位姿运动, 返回最终关节解.
+
+        cartesian 为真时逐点 IK, 否则直接求终点 IK; 统一重定时后对输出点补密做碰撞查询.
+        查询显式加入新鲜夹爪开口, 未知碰撞结论拒绝; 发送前重新检查反馈, 起点与唯一 FJT 服务端.
+        send future 写入 PoseRun 后由监测器排空, 返回不表示控制器已接纳或物理到位.
+        """
         seed = self._check_run(run, canceled)
         target = self._target(target_pose)
         if cartesian:
@@ -172,7 +200,7 @@ class PoseCompatNode(Node):
             path, duration = [seed, solution.q], 1.
         self._check_run(run, canceled)
         command = retime_path(self.kinematics, path, duration)
-        # 检查全部输出点，并对稀疏关节段补齐不超过 0.02 rad 的碰撞采样。
+        # 检查全部输出点, 并对稀疏关节段补齐不超过 0.02 rad 的碰撞采样.
         samples = [tuple(command['points'][0]['positions'])]
         for point in command['points'][1:]:
             previous, current = np.asarray(samples[-1]), np.asarray(point['positions'])
@@ -191,6 +219,7 @@ class PoseCompatNode(Node):
             (('left_finger_joint', opening/2), ('right_finger_joint', -opening/2)))
         checked = self.checker.check_positions(joint_names=JOINT_NAMES,
             positions_list=samples, config=config)
+        # 服务未就绪, 未知或超时都不能放行; pass 也只覆盖采样点与当前规划场景.
         if checked['state'] != 'pass':
             raise RuntimeError(f"collision check {checked['state']}: {checked['message']}")
         current = self._check_run(run, canceled)
@@ -219,13 +248,14 @@ class PoseCompatNode(Node):
         return path[-1]
 
     def _monitor(self):
-        """处理接纳/结果及迟到取消；只有完成或确认停止才释放入口。"""
+        """处理接纳/结果及迟到取消; 只有完成或确认停止才释放入口."""
         with self.lock:
             run = self.active
             if run is None or run.send is None:
                 return
             now = time.monotonic()
             try:
+                # 即使调用者已超时也继续处理接纳响应, 迟到的已接纳目标仍需取消并等待终态.
                 if run.handle is None and run.send.done():
                     run.handle = run.send.result()
                     if run.handle is None or not run.handle.accepted:
@@ -235,7 +265,7 @@ class PoseCompatNode(Node):
                 if run.result is not None and run.result.done():
                     run.terminal = run.result.result()
                     if not run.cancel:
-                        # 终态送达前的反馈空档仍使旧请求失效，不能被恢复后的新帧覆盖。
+                        # 终态送达前的反馈空档仍使旧请求失效, 不能被恢复后的新帧覆盖.
                         self._ready()
                         if run.epoch != self.epoch:
                             raise RuntimeError('controller state or feedback continuity changed')
@@ -249,7 +279,7 @@ class PoseCompatNode(Node):
                     feedback_ready = True
                     stamp = self.feedback.header.stamp.sec*1_000_000_000 + self.feedback.header.stamp.nanosec
                     if run.handle is not None and stamp > run.observed_stamp and not run.cancel:
-                        # 源时间与指令起点同属 ROS 时钟，不能用到达时刻比较旧反馈。
+                        # 源时间与指令起点同属 ROS 时钟, 不能用到达时刻比较旧反馈.
                         elapsed = max(0., (stamp-run.dispatched_ns)/1e9)
                         desired = sample_command(run.command, elapsed)
                         tracking_error = float(np.max(np.abs(current-desired)))
@@ -281,8 +311,8 @@ class PoseCompatNode(Node):
                 if run.cancel:
                     if run.handle is not None and run.cancel_future is None:
                         run.cancel_future = run.handle.cancel_goal_async()
-                    # 已知动作终态后才建立停止证据。若反馈代次再变化，旧动作
-                    # 错误保持锁存，另建保持确认；不能把旧动作恢复为成功。
+                    # 已知动作终态后才建立停止证据. 若反馈代次再变化, 旧动作
+                    # 错误保持锁存, 另建保持确认; 不能把旧动作恢复为成功.
                     if run.terminal is not None and feedback_ready and run.stop_epoch != self.epoch:
                         logging.getLogger('rebotarm.audit').info('pose_stop_observation', extra={'audit': dict(
                             run_epoch=run.epoch, stop_epoch=self.epoch, previous_stop_epoch=run.stop_epoch,
@@ -293,17 +323,19 @@ class PoseCompatNode(Node):
                             run.stopping_since, now, self.get_clock().now().nanoseconds)):
                         self._finish(run, run.error or 'canceled; stationary feedback confirmed')
             except Exception as exc:
-                # 不丢弃未知状态的目标；下一轮继续排空，入口保持阻断。
+                # 不丢弃未知状态的目标; 下一轮继续排空, 入口保持阻断.
                 run.cancel = True
                 run.error = run.error or str(exc)
 
     def _finish(self, run, error=''):
+        """记录本请求结果, 唤醒等待者, 仅身份匹配时释放入口; 调用方已确认完成或停止."""
         run.error = error
         run.done.set()
         if self.active is run:
             self.active = None
 
     def _abandon(self, run, error):
+        """未发送时直接失败收尾; 已发送或接纳未知时锁存取消, 让监测器继续排空."""
         with self.lock:
             if run.send is None:
                 self._finish(run, str(error))
@@ -311,6 +343,7 @@ class PoseCompatNode(Node):
                 run.cancel, run.error = True, str(error)
 
     def _ik(self, request, response):
+        """兼容 IK 服务: 准备运动并等待 FJT 接纳, success 不代表到位; 失败保留在途目标跟踪."""
         run = None
         try:
             run = self._begin()
@@ -329,6 +362,7 @@ class PoseCompatNode(Node):
         return response
 
     def _pose_message(self):
+        """以新鲜规范反馈计算 FK 并封装当前末端 Pose, 不改变坐标系."""
         self._refresh_feedback()
         transform = self.kinematics.pose(self._positions())
         msg = Pose()
@@ -338,6 +372,7 @@ class PoseCompatNode(Node):
         return msg
 
     def _execute(self, goal):
+        """等待本次位姿任务完成, 发布估算进度; 只有 FJT 成功终态和成功结果码同时满足才成功."""
         result, run = MoveToPose.Result(), None
         try:
             run = self._begin()
@@ -381,6 +416,7 @@ class PoseCompatNode(Node):
 
 
 def main(args=None):
+    """启动四线程业务执行器, 独立反馈接收器自行自旋; 退出按顺序关闭执行器和节点."""
     rclpy.init(args=args)
     node = PoseCompatNode()
     executor = MultiThreadedExecutor(num_threads=4)

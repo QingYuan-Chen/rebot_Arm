@@ -8,14 +8,14 @@
 rebotarmcontroller/
 ├── rebotarmcontroller/
 │   ├── rebotarm_controller.py       # reBotArmController ROS 节点装配
-│   ├── hardware_manager.py           # 公共门面、准入和组件交接
+│   ├── hardware_manager.py           # 唯一运行时与职责组件的纯装配
 │   ├── configuration.py              # 配置解析、范围和资源定位
 │   ├── controller_contracts.py       # 不可变反馈与发送回执
 │   ├── sdk_driver.py                 # MotorBridge 唯一总线与句柄
-│   ├── device_requests.py            # 有界请求、优先级、有效期与资源代次
+│   ├── device_requests.py            # 集中请求策略、有界队列、优先级与资源代次
 │   ├── controller_runtime.py         # 唯一设备线程、反馈与周期调度
 │   ├── feedback_acquisition.py       # 序号采集、缓存和只读健康判断
-│   ├── lifecycle.py                  # 生命周期状态与关闭策略
+│   ├── lifecycle.py                  # 生命周期请求、状态、事务与关闭策略
 │   ├── arm_execution.py              # 六轴目标、速度覆盖和轨迹游标
 │   ├── arm_trajectory.py             # 六轴任务、到位与取消结果
 │   ├── arm_position_control.py       # 位置命令计算
@@ -23,6 +23,7 @@ rebotarmcontroller/
 │   ├── gravity_control.py            # 重力模型、补偿状态和积分计算
 │   ├── gripper_execution.py          # 独立夹爪任务与周期推进
 │   ├── gripper_control.py            # 夹爪斜坡和有界力矩
+│   ├── ros_ports.py                  # ROS 适配与关闭协调的职责端口声明
 │   ├── ros_services.py               # enable/disable/safe_home/stop/zero/夹爪等服务
 │   ├── ros_actions.py                # FJT、夹爪 Action 协议映射
 │   ├── ros_publishers.py              # joint_states、JointMotorState、ArmStatus
@@ -39,7 +40,8 @@ rebotarmcontroller/
 
 ## 模块职责
 
-- `HardwareManager` 是兼容门面，所有设备请求由 `ControllerRuntime` 的唯一线程串行执行；驱动独占串口和电机句柄。控制器与 motion 不再导入厂商 Python SDK，参考目录保留。
+- `HardwareManager` 只创建唯一运行时、生命周期及六个职责组件并接线，仅有构造函数，不提供业务转发。所有设备请求由 `ControllerRuntime` 的唯一线程串行执行；驱动独占串口和电机句柄。控制器与 motion 不再导入厂商 Python SDK，参考目录保留。
+- ROS 适配和关闭协调直接接收 `ros_ports.py` 声明的职责端口；接口由原所有者实现，查询实时读取原状态，发布器只拿只读能力。组件间以冻结端口和方法引用装配。`device_request` 在生命周期、六轴、夹爪和重力组件的命令入口调用，21 个入口的资源、优先级、TTL 和代次策略集中于 `device_requests.REQUEST_POLICIES`；生命周期显式接收同一运行时。含同步等待的停靠、夹爪位置和抓取流程由调用线程等待，设备子命令入队；关闭确认后由调用线程回收 worker。
 - `rebotarm_controller.py` 组合参数、硬件管理器、服务、动作和发布器，形成唯一真实 controller 节点。
 - `ros_publishers.py` 只发布已校验反馈；`ArmStatus` 用于通告 connected/enabled/control loop/error 状态。
 - `ros_services.py` / `ros_actions.py` 只适配协议和任务结果；到位、超时、取消保持由本地执行器及运行时处理。

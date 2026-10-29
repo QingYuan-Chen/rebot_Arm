@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from rebotarmcontroller.lifecycle import ControllerLifecycle, LifecyclePorts
+from controller_fake_backend import WriterRuntime
 
 
 class Session:
@@ -100,7 +101,7 @@ def lifecycle():
         confirm_disabled=lambda: device.record("confirmed_disabled"),
         protect=lambda *args, **kw: device.record("protect"),
     )
-    return ControllerLifecycle(ports), device
+    return ControllerLifecycle(WriterRuntime(), ports), device
 
 
 def test_session_enable_disable_and_release_have_verified_order():

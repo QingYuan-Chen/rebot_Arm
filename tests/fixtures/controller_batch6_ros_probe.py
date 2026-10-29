@@ -86,10 +86,10 @@ try:
               if name == '/rebotarm/follow_joint_trajectory']
     assert owners == [('reBotArmController', '/')], owners
     report['fjt_owners'] = owners
-    start = controller.hardware.get_joint_state()[0]
+    start = controller.hardware.feedback.get_joint_state()[0]
     def goal(target, duration=.2):
         value = FollowJointTrajectory.Goal()
-        value.trajectory.joint_names = controller.hardware.joint_names
+        value.trajectory.joint_names = controller.hardware.runtime.joint_names
         for q, t in ((start,0.), (target,duration)):
             p = JointTrajectoryPoint()
             p.positions = [float(x) for x in q]
@@ -105,7 +105,7 @@ try:
     completed = wait(handle.get_result_async())
     assert completed.status == 4 and completed.result.error_code == 0, completed
     report['fjt_execute'] = [completed.status, completed.result.error_code]
-    start = controller.hardware.get_joint_state()[0]
+    start = controller.hardware.feedback.get_joint_state()[0]
     target = start.copy(); target[0] += .02
     handle = wait(fjt.send_goal_async(goal(target, 2.)))
     assert handle.accepted
@@ -114,13 +114,13 @@ try:
     completed = wait(handle.get_result_async())
     assert completed.status == 5, completed
     report['fjt_cancel'] = completed.result.error_string
-    assert controller.hardware.enabled
+    assert controller.hardware.lifecycle.enabled
     planner = client.create_client(GetMotionPlan, '/plan_kinematic_path')
     assert planner.wait_for_service(timeout_sec=15.)
-    start = controller.hardware.get_joint_state()[0]
+    start = controller.hardware.feedback.get_joint_state()[0]
     target = start.copy(); target[0] += .02
     request = _build_motion_plan_request(service_type=GetMotionPlan,
-        joint_names=controller.hardware.joint_names, target_positions=target,
+        joint_names=controller.hardware.runtime.joint_names, target_positions=target,
         group_name='arm', start_positions=start)
     response = wait(planner.call_async(request))
     assert response.motion_plan_response.error_code.val == 1, response
@@ -139,7 +139,7 @@ try:
     ik = client.create_client(MoveToPoseIK, '/rebotarm/move_to_pose_ik')
     assert ik.wait_for_service(timeout_sec=5.)
     request = MoveToPoseIK.Request()
-    request.target_pose = controller.hardware.current_pose()
+    request.target_pose = controller.hardware.arm.current_pose()
     response = wait(ik.call_async(request), 35.)
     assert response.success, response.message
     report['ik_acceptance'] = response.message
@@ -150,7 +150,7 @@ try:
     pose = ActionClient(client, MoveToPose, '/rebotarm/move_to_pose')
     assert pose.wait_for_server(timeout_sec=5.)
     value = MoveToPose.Goal()
-    value.target_pose, value.duration = controller.hardware.current_pose(), .2
+    value.target_pose, value.duration = controller.hardware.arm.current_pose(), .2
     handle = wait(pose.send_goal_async(value))
     assert handle.accepted
     completed = wait(handle.get_result_async(), 35.)
@@ -162,9 +162,9 @@ try:
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
 finally:
     # 这里仅有内存假电机，不连接真实端口；显式恢复失能再释放本轮节点。
-    if controller.hardware.enabled:
-        controller.hardware.disable()
-    controller.hardware.shutdown()
+    if controller.hardware.lifecycle.enabled:
+        controller.hardware.lifecycle.disable()
+    controller.hardware.lifecycle.shutdown()
     executor.shutdown(timeout_sec=5.)
     for node in (client, compat, controller):
         node.destroy_node()

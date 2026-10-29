@@ -1,12 +1,20 @@
-"""旧位姿接口需要的 SE(3) 采样、连续 IK 跟踪与重定时。
+"""旧位姿接口需要的 SE(3) 采样, 连续 IK 跟踪与重定时.
 
-``plan_cartesian`` 用最小 jerk 进度在 SE(3) 上采样，每点以上一点关节解为
-初值做闭环 IK；任一点失败即拒绝整条路径。``retime_path`` 复用现有保路径
-重定时，按配置包限位检查速度、加速度及 jerk，必要时只拉长时间。
+职责与位置
+    运动层的笛卡尔路径生成与动态限位重定时, 不包含硬件发送.
 
-采样默认 20 ms，自动时长至少 1 s；首末点时间覆盖完整时长，末速度为零。
-本模块没有设备对象或 ROS 节点，输出仍需碰撞预检才能交给唯一 FJT 服务端。
+对外接口
+    plan_cartesian 返回关节路径和时长; retime_path 返回可交接的带时间轨迹字典.
+
+安全与并发约束
+    上一个 IK 解作为下一个种子; 任一点失败即拒绝. 重定时只延长时间, 不能替代碰撞检查.
+    规划导数限位仍用于理想轨迹, 不把量化反馈差分当成同等测量.
+
+文件结构(按定义顺序)
+    plan_cartesian: 在 SE(3) 上按五次进度采样, 以前一解为种子逐点 IK, 返回关节路径和时长.
+    retime_path: 校验路径后按速度, 加速度与 jerk 限位拉长时间, 返回带相对秒的轨迹字典.
 """
+
 import math
 import numpy as np
 import pinocchio as pin
@@ -16,6 +24,11 @@ from .trajectory_runtime_limits import load_joint_runtime_limits
 
 
 def plan_cartesian(kinematics, seed, target, duration=0., dt=.02):
+    """在 SE(3) 上按五次进度采样, 以前一解为种子逐点 IK, 返回关节路径和时长.
+
+    seed 为规范六轴 rad 向量, duration / dt 为秒; 自动时长由平移距离估算且至少一秒.
+    限制规划时长和采样预算, 任一点 IK 不收敛即整条失败; 输出尚未完成碰撞检查.
+    """
     if not math.isfinite(duration) or not math.isfinite(dt) or dt <= 0:
         raise ValueError('finite duration and positive sampling period required')
     start = kinematics.pose(seed)
@@ -38,6 +51,11 @@ def plan_cartesian(kinematics, seed, target, duration=0., dt=.02):
 
 
 def retime_path(kinematics, points, duration, cadence=.02):
+    """校验路径后按速度, 加速度与 jerk 限位拉长时间, 返回带相对秒的轨迹字典.
+
+    重新计算理想轨迹的离散导数, 按一/二/三阶时间缩放关系选择放慢倍率.
+    最多尝试十二轮且总时长不超过预算; 失败抛异常, 不放宽规划限位.
+    """
     path = [kinematics.joints(q) for q in points]
     if len(path) < 2 or not math.isfinite(duration) or duration <= 0:
         raise ValueError('path requires two points and positive duration')
@@ -62,6 +80,7 @@ def retime_path(kinematics, points, duration, cadence=.02):
         acceleration /= np.r_[dt[0]/2, (dt[1:]+dt[:-1])/2, dt[-1]/2][:, None]
         jerk = np.diff(acceleration, axis=0)/dt[:, None]
         factor = 1.
+        # 时间放慢 k 倍时, 一, 二, 三阶导数分别缩小 k, k², k³, 用对应开方求所需倍率.
         for index, name in enumerate(JOINT_NAMES):
             for derivative, limit, power in ((velocity, limits[name].max_velocity, 1),
                 (acceleration, limits[name].max_acceleration, 2), (jerk, limits[name].max_jerk, 3)):

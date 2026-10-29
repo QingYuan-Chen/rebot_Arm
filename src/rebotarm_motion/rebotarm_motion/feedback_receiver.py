@@ -1,11 +1,23 @@
-"""运动消费端的独立反馈接收与快照交接。
+"""运动消费端的独立反馈接收与快照交接.
 
-职责：专用单线程执行器只接收关节、夹爪与控制器状态，不执行运动请求。
-接口：snapshot 返回脱离接收缓存的消息副本，stop_feedback 提供原有停止证据。
-约束：接收锁不与规划/Action 的业务锁共享；保留默认 QoS 事件及原始源时间。
-关节反馈超过 150 ms 或状态中断/模式变化会递增代次，即使恢复后新帧很新鲜，
-已开始的位姿请求也不能跨过空档继续。关闭先唤醒并等待线程，再销毁 ROS 句柄。
+职责与位置
+    运动消费端的独立接收器, 让同步规划/Action 等待不占用反馈执行器.
+
+对外接口
+    MotionFeedbackStore 管消息与连续性代次; MotionFeedbackReceiver 持单线程执行器;
+    snapshot 返回消息深副本, stop_feedback 提供跨线程停止证据.
+
+安全与并发约束
+    锁序为接收缓存 -> 停止证据; 业务锁不能带入接收回调. 先检查旧帧再替换恢复帧.
+    源时间与本地接收时间分开使用; 关闭失败保留 ROS 句柄, 不在活线程下销毁节点.
+
+文件结构(按定义顺序)
+    stamp_ns: 读取消息原始源时间戳并换算为整数纳秒, 不改写时间.
+    MotionFeedbackSnapshot: 接收器的一致性快照: 消息, 状态接收时刻, 连续性代次和历史年龄诊断.
+    MotionFeedbackStore: 只保存接收器拥有的消息; 快照副本不允许调用方改写缓存.
+    MotionFeedbackReceiver: 只接收状态的独立 ROS 节点; 自有单线程执行器与线程, 不执行业务请求.
 """
+
 from copy import deepcopy
 from dataclasses import dataclass, replace
 import threading
@@ -22,11 +34,14 @@ from .stop_feedback import StopFeedback
 
 
 def stamp_ns(msg):
+    """读取消息原始源时间戳并换算为整数纳秒, 不改写时间."""
     return msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
 
 
 @dataclass(frozen=True)
 class MotionFeedbackSnapshot:
+    """接收器的一致性快照: 消息, 状态接收时刻, 连续性代次和历史年龄诊断."""
+
     joints: object = None
     gripper: object = None
     status: object = None
@@ -37,9 +52,10 @@ class MotionFeedbackSnapshot:
 
 
 class MotionFeedbackStore:
-    """只保存接收器拥有的消息；快照副本不允许调用方改写缓存。"""
+    """只保存接收器拥有的消息; 快照副本不允许调用方改写缓存."""
 
     def __init__(self):
+        """建立短事务缓存锁, 连续性标记与停止证据; 不创建 ROS 句柄."""
         self.lock = threading.Lock()
         self.value = MotionFeedbackSnapshot()
         self.joint_lost = False
@@ -48,11 +64,12 @@ class MotionFeedbackStore:
         self.stop_feedback = StopFeedback()
 
     def inspect(self, received, now_ns):
-        """调用方持接收锁；替换旧帧前检查，避免恢复新帧掩盖接收空档。"""
+        """调用方持接收锁; 替换旧帧前检查, 避免恢复新帧掩盖接收空档."""
         value = self.value
         if value.joints is not None:
-            age = (now_ns - stamp_ns(value.joints)) / 1e9
-            lost = not -.05 <= age <= .15
+            stamp = stamp_ns(value.joints)
+            age = (now_ns - stamp) / 1e9
+            lost = stamp <= 0 or not -.05 <= age <= .15
             value = replace(value, maximum_joint_age=max(value.maximum_joint_age, age))
             if lost and not self.joint_lost:
                 value = replace(value, epoch=value.epoch + 1, joint_gaps=value.joint_gaps + 1)
@@ -66,14 +83,25 @@ class MotionFeedbackStore:
         self.value = value
 
     def receive(self, kind, msg, received, now_ns):
+        """在接收锁内检查旧缓存及新帧连续性; 模式变化也会作废旧停止证据."""
         with self.lock:
             self.inspect(received, now_ns)
+            # 检查旧缓存发生在替换前, 才能让恢复后的新帧保留此前空档带来的代次失效.
             value = self.value
             if kind == 'joints':
-                # 消息由 ROS 回调移交，之后只读；StopFeedback 有自己的短事务锁。
+                # 消息由 ROS 回调移交, 之后只读; StopFeedback 有自己的短事务锁.
                 self.stop_feedback.update(msg, received, now_ns)
-                self.value = replace(value, joints=msg)
-                self.joint_lost = not -.05 <= (now_ns-stamp_ns(msg))/1e9 <= .15
+                stamp = stamp_ns(msg)
+                age = (now_ns - stamp) / 1e9
+                regressed = value.joints is not None and stamp < stamp_ns(value.joints)
+                lost = stamp <= 0 or not -.05 <= age <= .15 or regressed
+                # 新帧本身也能破坏连续性; 即使业务只看到恢复帧, 旧动作仍必须失效.
+                if lost and not self.joint_lost:
+                    value = replace(value, epoch=value.epoch + 1, joint_gaps=value.joint_gaps + 1)
+                    self.stop_feedback.invalidate(received)
+                self.value = replace(value, joints=msg,
+                                     maximum_joint_age=max(value.maximum_joint_age, age))
+                self.joint_lost = lost
             elif kind == 'gripper':
                 self.value = replace(value, gripper=msg)
             elif kind == 'status':
@@ -89,6 +117,7 @@ class MotionFeedbackStore:
                 raise ValueError(kind)
 
     def snapshot(self, received, now_ns):
+        """检查接收线程错误与源年龄后取得一致状态, 锁外深复制消息以免业务修改缓存."""
         with self.lock:
             if self.error:
                 raise RuntimeError('feedback receiver failed: ' + self.error)
@@ -98,7 +127,10 @@ class MotionFeedbackStore:
 
 
 class MotionFeedbackReceiver(Node):
+    """只接收状态的独立 ROS 节点; 自有单线程执行器与线程, 不执行业务请求."""
+
     def __init__(self, owner, namespace, *, gripper=False):
+        """复制父节点时间与话题配置, 注册状态订阅并启动专用接收执行器; 不共用业务回调锁."""
         super().__init__(owner.get_name() + '_feedback', context=owner.context,
                          namespace=owner.get_namespace(), use_global_arguments=False,
                          cli_args=['--ros-args', '-r', '/clock:=' + owner.resolve_topic_name('/clock')],
@@ -107,7 +139,7 @@ class MotionFeedbackReceiver(Node):
         self.store = MotionFeedbackStore()
         self.stop_feedback = self.store.stop_feedback
         self._closed = False
-        # 仿真时钟也由本接收执行器推进，不能读取可能被同步业务等待阻塞的父节点时钟。
+        # 仿真时钟也由本接收执行器推进, 不能读取可能被同步业务等待阻塞的父节点时钟.
         self._now_ns = lambda: self.get_clock().now().nanoseconds
         prefix = '/' + namespace
         for kind, message, topic, qos in (
@@ -123,11 +155,14 @@ class MotionFeedbackReceiver(Node):
         self.thread.start()
 
     def _callback(self, kind):
+        """生成按消息类型分类的短回调, 源时间保留在消息内, 另记本地接收时刻."""
         def receive(msg):
+            """仅把消息及两类时间交给缓存, 不运行规划, Action 等待或设备命令."""
             self.store.receive(kind, msg, time.monotonic(), self._now_ns())
         return receive
 
     def _spin(self):
+        """自旋专用单线程执行器; 异常保存到缓存, 后续查询必须能观察到接收器失败."""
         try:
             self._feedback_executor.spin()
         except ExternalShutdownException:
@@ -138,9 +173,11 @@ class MotionFeedbackReceiver(Node):
             self.get_logger().error('反馈接收线程退出：' + str(exc))
 
     def snapshot(self):
+        """从接收缓存取得独立副本, 并按接收器自身时钟检查连续性."""
         return self.store.snapshot(time.monotonic(), self._now_ns())
 
     def close(self):
+        """先关闭执行器并等待线程退出, 再移除节点和释放 ROS 句柄; 线程未停则拒绝销毁."""
         if self._closed:
             return
         self._feedback_executor.shutdown(timeout_sec=2.)

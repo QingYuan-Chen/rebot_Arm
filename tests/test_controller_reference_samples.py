@@ -1,6 +1,7 @@
 """固定数值样本驱动生产组件；C++ 应复用 JSON 输入、输出和同一容差。"""
 import json
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,10 +15,70 @@ from rebotarmcontroller.command_guard import CommandGuard
 from rebotarmcontroller.controller_values import GripperTarget
 from rebotarmcontroller.gripper_execution import GripperExecution
 from rebotarmcontroller.sdk_driver import CommandTransportError
-from test_controller_local_runtime import make_driver
+from test_controller_local_runtime import make_driver, make_local_manager, wait_until
 from test_lifecycle_transactions import lifecycle
 
 DATA = json.loads((Path(__file__).parent / 'fixtures/controller_reference_v1.json').read_text())
+
+
+@pytest.mark.parametrize('velocity', [[0.] * 6, [-.1] * 6, [.1] * 5,
+                                      [float('nan')] * 6, [float('inf')] * 6])
+def test_rejected_velocity_preserves_hold_and_allows_valid_retry(velocity):
+    driver, bus, _ = make_driver()
+    driver.connect()
+    execution = ArmExecution()
+    execution.running = True
+    execution.set_speed_override([.1] * 6)
+    generation = execution.generation
+    trajectory = ArmTrajectory(execution, clock=lambda: 10.)
+    control = ArmPositionControl(j.vlim for j in driver.config.joints)
+    points = [[0.] * 6, [.01, 0., 0., 0., 0., 0.]]
+    try:
+        with pytest.raises(ValueError, match='velocity override'):
+            trajectory.submit(points, [0., 1.], np.zeros(6), velocity=velocity)
+        assert trajectory.task is None and not execution.moving
+        assert execution.generation == generation
+        # 即使已过被拒轨迹的末点, 发送也必须沿用旧保持目标与速度覆盖.
+        command = control.command(execution.sample(12.))
+        driver.send_positions(command)
+        assert command.positions == (0.,) * 6 and command.velocity_limits == (.1,) * 6
+        assert all(args[0] == 0. for _, method, args in bus.events if method == 'position')
+        task = trajectory.submit(points, [0., 1.], np.zeros(6), velocity=[.2] * 6)
+        target = execution.sample(11.)
+        assert target.positions == tuple(points[-1]) and target.velocity_override == (.2,) * 6
+        assert task.generation == target.generation == generation + 1
+    finally:
+        driver.close()
+
+
+def test_rejected_trajectory_never_reaches_fake_device_and_valid_retry_completes(monkeypatch):
+    manager, opened = make_local_manager(monkeypatch)
+    manager.lifecycle.connect()
+    try:
+        manager.lifecycle.enable()
+        current = manager.feedback.get_joint_state()[0].tolist()
+        goal = list(current)
+        goal[0] += .01
+        generation = manager.runtime.target_generation
+        with pytest.raises(ValueError, match='velocity override'):
+            manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
+                [current, goal], [0., .01], velocity=[0.] * 6)
+        assert manager.runtime.target_generation == generation
+        assert manager.arm._arm_trajectory.task is None
+        # 经过被拒请求的末点后, 唯一运行时仍只能发送原保持目标.
+        after = time.monotonic() + .02
+        wait_until(lambda: manager.feedback.get_cached_joint_sample()[-1] > after)
+        assert all(args[0] == current[0] for number, method, args in opened[0].events
+                   if number == 1 and method == 'position')
+        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
+            [current, goal], [0., .01], velocity=[.2] * 6)
+        assert task.event.wait(1.)
+        assert manager.arm.arm_execution_status(task).state == 'succeeded'
+        assert opened[0].motors[0].state.pos == goal[0]
+        assert manager.lifecycle.enabled and opened[0].disables == 0
+    finally:
+        manager.lifecycle.disable()
+        manager.lifecycle.shutdown()
 
 
 @pytest.mark.parametrize('case', DATA['arm'], ids=lambda case: case['name'])

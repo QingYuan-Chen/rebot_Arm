@@ -1,17 +1,27 @@
-"""提供控制器反馈位姿所需的正运动学适配。
+"""提供控制器反馈位姿所需的正运动学适配.
 
-``ArmKinematics(model)`` 检查约化模型的六轴名称、维度及末端帧；
-``pose(q)`` 接收六个关节值，返回末端平移向量和旋转矩阵的数值副本。
-计算依赖 Pinocchio 与传入的规范模型，不访问电机、ROS 消息或 SDK 运动线程。
+职责与位置
+    控制器状态发布需要的纯数值 FK 适配, 使用已校验的规范六轴模型.
 
-此处只计算正运动学，不负责逆运动学、路径生成或碰撞校验。每次计算创建
-独立的数据对象，返回数组不暴露模型内部的可变缓存。
+对外接口
+    ArmKinematics.pose 接收关节角, 返回 end_link 在模型基座中的位置与旋转矩阵副本.
+
+安全与并发约束
+    每次计算创建独立 Data; 不负责 IK, 路径或碰撞, 不根据 FK 结果许可运动.
+
+文件结构(按定义顺序)
+    ArmKinematics: 规范六轴模型的 FK 适配, 只返回数值副本, 不提供 IK 或运动发送.
 """
+
 import numpy as np
 from .gravity_control import JOINT_NAMES, vector
 
+
 class ArmKinematics:
+    """规范六轴模型的 FK 适配, 只返回数值副本, 不提供 IK 或运动发送."""
+
     def __init__(self, model):
+        """校验模型维数, 关节固定顺序及 end_link, 保存只用于 FK 的模型引用."""
         if tuple(model.names)[1:]!=JOINT_NAMES or model.nq!=6 or model.nv!=6:
             raise ValueError('kinematics requires the canonical six-axis reduced model')
         self.model = model
@@ -19,7 +29,7 @@ class ArmKinematics:
         if self.frame_id >= model.nframes: raise ValueError('end_link is missing')
 
     def pose(self,q):
-        """按规范关节顺序计算 ``end_link`` 位姿并复制返回值。"""
+        """按规范关节顺序计算 ``end_link`` 位姿并复制返回值."""
         import pinocchio as pin
         data = self.model.createData()
         pin.forwardKinematics(self.model,data,vector(q,6,'FK joints'))

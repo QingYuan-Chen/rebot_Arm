@@ -243,23 +243,23 @@ def test_installed_sdk_seven_motor_startup_on_virtual_serial(through_relay):
 def test_stable_idle_stop_preserves_actual_old_target_and_audits_receipts(monkeypatch, caplog):
     manager, _ = make_local_manager(monkeypatch)
     with caplog.at_level(logging.INFO, logger='rebotarm.audit'):
-        manager.connect()
-        manager.enable()
+        manager.lifecycle.connect()
+        manager.lifecycle.enable()
         try:
             wait_until(lambda: manager.arm._hold_evidence.confirmed())
-            original = manager.joint_target().copy()
+            original = manager.arm.joint_target().copy()
             writes = []
-            set_target = manager._backend.set_target
-            monkeypatch.setattr(manager._backend, 'set_target', lambda value: writes.append(value) or set_target(value))
-            generation = manager._backend.target_generation
-            manager.stop_active_motion()
+            set_target = manager.runtime.set_target
+            monkeypatch.setattr(manager.runtime, 'set_target', lambda value: writes.append(value) or set_target(value))
+            generation = manager.runtime.target_generation
+            manager.arm.stop_active_motion()
             assert not writes
-            assert manager._backend.target_generation == generation+1
-            assert list(manager.joint_target()) == list(original)
-            assert manager.enabled
+            assert manager.runtime.target_generation == generation+1
+            assert list(manager.arm.joint_target()) == list(original)
+            assert manager.lifecycle.enabled
         finally:
-            manager.disable()
-            manager.shutdown()
+            manager.lifecycle.disable()
+            manager.lifecycle.shutdown()
     assert any(row.msg == 'stop_target' and row.audit['preserved'] for row in caplog.records)
     assert any(row.msg == 'position_receipt' and row.audit['success'] for row in caplog.records)
     assert any(row.msg == 'motor_state' and row.audit['sequence'] > 0 for row in caplog.records)
@@ -267,49 +267,49 @@ def test_stable_idle_stop_preserves_actual_old_target_and_audits_receipts(monkey
 
 def test_duplicate_stop_joins_one_transaction_and_moving_cancel_retargets(monkeypatch):
     manager, opened = make_local_manager(monkeypatch)
-    manager.connect()
-    manager.enable()
+    manager.lifecycle.connect()
+    manager.lifecycle.enable()
     errors, results = [], []
     def stop():
         try:
-            manager.cancel_arm_trajectory()
+            manager.arm.cancel_arm_trajectory()
             results.append(True)
         except Exception as exc:
             errors.append(str(exc))
     workers = [threading.Thread(target=stop) for _ in range(2)]
     try:
         # 正在运动的轨迹不能保留远处目标。
-        task = manager.submit_arm_trajectory(manager.joint_names,
+        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
             [(0.,)*6, (.1, -.1, -.1, 0., 0., 0.)], [0., 10.])
         for motor in opened[0].motors[:6]:
             motor.state.vel = .2
         workers[0].start()
         wait_until(lambda: manager.arm._stop.pending)
-        generation = manager._backend.target_generation
+        generation = manager.runtime.target_generation
         workers[1].start()
         time.sleep(.04)
         assert workers[1].is_alive()
-        assert generation == manager._backend.target_generation
+        assert generation == manager.runtime.target_generation
         for motor in opened[0].motors[:6]:
             motor.state.vel = 0.
         for worker in workers:
             worker.join(1.)
             assert not worker.is_alive()
         assert results == [True, True] and not errors
-        assert manager.arm_execution_status(task).state == 'canceled'
-        assert list(manager.joint_target()) == [0.]*6
+        assert manager.arm.arm_execution_status(task).state == 'canceled'
+        assert list(manager.arm.joint_target()) == [0.]*6
     finally:
         for worker in workers:
             if worker.ident is not None:
                 worker.join(3.)
-        manager.disable()
-        manager.shutdown()
+        manager.lifecycle.disable()
+        manager.lifecycle.shutdown()
 
 
 def test_obsolete_stop_cleanup_cannot_abort_successor_transaction(monkeypatch):
     manager, _ = make_local_manager(monkeypatch)
-    manager.connect()
-    manager.enable()
+    manager.lifecycle.connect()
+    manager.lifecycle.enable()
     try:
         def transactions():
             first = manager.arm.stop_active_motion()
@@ -321,17 +321,17 @@ def test_obsolete_stop_cleanup_cannot_abort_successor_transaction(monkeypatch):
             first.cancel('obsolete deferred request')
             assert current.pending
             second.cancel('test cleanup')
-        manager._backend.call(transactions)
-        assert manager.enabled
+        manager.runtime.call(transactions)
+        assert manager.lifecycle.enabled
     finally:
-        manager.disable()
-        manager.shutdown()
+        manager.lifecycle.disable()
+        manager.lifecycle.shutdown()
 
 
 def test_isolated_velocity_peak_does_not_reanchor_recently_confirmed_idle_hold(monkeypatch, caplog):
     manager, opened = make_local_manager(monkeypatch)
-    manager.connect()
-    manager.enable()
+    manager.lifecycle.connect()
+    manager.lifecycle.enable()
     timer = None
     try:
         wait_until(lambda: manager.arm._hold_evidence.confirmed())
@@ -339,19 +339,19 @@ def test_isolated_velocity_peak_does_not_reanchor_recently_confirmed_idle_hold(m
         motor.state.vel = -.10988998413085938
         wait_until(lambda: manager.arm._hold_evidence.reason == 'velocity')
         writes = []
-        original = manager._backend.set_target
-        monkeypatch.setattr(manager._backend, 'set_target', lambda value: writes.append(value) or original(value))
+        original = manager.runtime.set_target
+        monkeypatch.setattr(manager.runtime, 'set_target', lambda value: writes.append(value) or original(value))
         timer = threading.Timer(.08, lambda: setattr(motor.state, 'vel', 0.))
         timer.start()
         started = time.monotonic()
         with caplog.at_level(logging.INFO, logger='rebotarm.audit'):
-            manager.stop_active_motion()
+            manager.arm.stop_active_motion()
         assert time.monotonic()-started >= .20
         assert not writes
         assert any(row.msg == 'stop_target' and row.audit['preserved'] for row in caplog.records)
-        assert manager.enabled
+        assert manager.lifecycle.enabled
     finally:
         if timer is not None:
             timer.join(1.)
-        manager.disable()
-        manager.shutdown()
+        manager.lifecycle.disable()
+        manager.lifecycle.shutdown()

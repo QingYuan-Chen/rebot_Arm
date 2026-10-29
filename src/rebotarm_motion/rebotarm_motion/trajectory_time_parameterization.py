@@ -1,21 +1,21 @@
-"""示教采样点的轨迹时间参数化（重定时）策略选择。
+"""示教采样点的轨迹时间参数化(重定时)策略选择.
 
-作用是决定「用哪种方法把示教采样点变成带时间戳、且满足速度/加速度/加加速度上限
-的轨迹点」，本身不实现重定时算法：真正的计算由调用方以 ``fallback_retime`` 回调
-传入（当前实现为保持路径点的 jerk 感知重定时）。
+职责与位置
+    运动层的重定时策略选择与降级报告; 计算实现通过回调注入.
 
-方法取值语义：
+对外接口
+    parameterize_teach_samples 返回 TimeParameterizationResult.
+    requested_method 与 used_method 分别记录请求方法和实际方法.
 
-- ``auto``：若运行环境装有 ruckig 的 Python 模块**且**适配器可用，则走 ruckig；
-  否则回落到当前的重定时实现；
-- ``ruckig``：显式要求 ruckig，但同样要求适配器可用，否则回落并在 ``message``
-  中说明回落原因；
-- ``current_jerk_retime``：直接使用当前的重定时实现。
+安全与并发约束
+    模块可导入不代表保路径适配器已实现; 必须报告真实采用的方法. 这里只生成数据, 不执行.
 
-截至当前版本 :func:`ruckig_waypoint_adapter_available` 恒为 ``False``，即「保路径点
-的 ruckig 适配器」尚未落地，因此三条分支最终都执行同一个 ``fallback_retime``；本模
-块的价值在于**如实回报**请求方法与实际使用方法，让状态面板能显示降级原因，而不是
-静默改变运动时间特性。
+文件结构(按定义顺序)
+    TimeParameterizationResult: 时间参数化结果与"请求/实际"方法记录.
+    normalize_time_parameterization_method: 把外部传入的方法名归一化为三种合法取值之一.
+    ruckig_python_available: 探测运行环境是否可导入 ruckig 的 Python 模块(不抛异常, 仅返回布尔值).
+    ruckig_waypoint_adapter_available: 探测"保持示教路径点"的 ruckig 适配器是否可用.
+    parameterize_teach_samples: 按策略选择时间参数化方法并产出轨迹点.
 """
 
 from __future__ import annotations
@@ -26,14 +26,14 @@ from typing import Callable, Sequence
 
 @dataclass(frozen=True)
 class TimeParameterizationResult:
-    """时间参数化结果与「请求/实际」方法记录。
+    """时间参数化结果与"请求/实际"方法记录.
 
-    - ``points``：重定时后的轨迹点列表，元素类型由 ``fallback_retime`` 决定（通常带
-      ``positions``/``velocities``/``time_from_start``）；
-    - ``requested_method``：归一化后的请求方法，取值 ``auto``/``current_jerk_retime``/
-      ``ruckig``；
-    - ``used_method``：实际生效的方法，取值 ``current_jerk_retime`` 或 ``ruckig``；
-    - ``message``：降级/选择原因，直接透传到状态面板供运维判断。
+    - ``points``: 重定时后的轨迹点列表, 元素类型由 ``fallback_retime`` 决定(通常带
+      ``positions``/``velocities``/``time_from_start``);
+    - ``requested_method``: 归一化后的请求方法, 取值 ``auto``/``current_jerk_retime``/
+      ``ruckig``;
+    - ``used_method``: 实际生效的方法, 取值 ``current_jerk_retime`` 或 ``ruckig``;
+    - ``message``: 降级/选择原因, 直接透传到状态面板供运维判断.
     """
 
     points: list
@@ -43,11 +43,11 @@ class TimeParameterizationResult:
 
 
 def normalize_time_parameterization_method(method: str | None) -> str:
-    """把外部传入的方法名归一化为三种合法取值之一。
+    """把外部传入的方法名归一化为三种合法取值之一.
 
-    规则：``None``/空串/``"default"`` 以及任何无法识别的取值都回落为 ``"auto"``，
-    不抛异常——参数来自 YAML 或 launch，非法值不应让节点启动失败。比较前会去掉首尾
-    空白并转小写，因此 ``"Auto"``、``" RUCKIG "`` 均能正确识别。
+    规则: ``None``/空串/``"default"`` 以及任何无法识别的取值都回落为 ``"auto"``,
+    不抛异常; 参数来自 YAML 或 launch, 非法值不应让节点启动失败. 比较前会去掉首尾
+    空白并转小写, 因此 ``"Auto"``, ``" RUCKIG "`` 均能正确识别.
     """
     value = str(method or "auto").strip().lower()
     if value in ("", "default"):
@@ -58,7 +58,7 @@ def normalize_time_parameterization_method(method: str | None) -> str:
 
 
 def ruckig_python_available() -> bool:
-    """探测运行环境是否可导入 ruckig 的 Python 模块（不抛异常，仅返回布尔值）。"""
+    """探测运行环境是否可导入 ruckig 的 Python 模块(不抛异常, 仅返回布尔值)."""
     try:
         import ruckig  # noqa: F401
     except Exception:
@@ -67,10 +67,10 @@ def ruckig_python_available() -> bool:
 
 
 def ruckig_waypoint_adapter_available() -> bool:
-    """探测「保持示教路径点」的 ruckig 适配器是否可用。
+    """探测"保持示教路径点"的 ruckig 适配器是否可用.
 
-    当前恒为 ``False``：适配器尚未实现，缺少它时不能用 ruckig 重定时，否则会改变原
-    始路径点、破坏示教复现精度。等适配器落地后再返回真实探测结果。
+    当前恒为 ``False``: 适配器尚未实现, 缺少它时不能用 ruckig 重定时, 否则会改变原
+    始路径点, 破坏示教复现精度. 等适配器落地后再返回真实探测结果.
     """
     return False
 
@@ -87,23 +87,23 @@ def parameterize_teach_samples(
     initial_delay_sec: float = 0.0,
     boundary_zero_velocity: bool = True,
 ) -> TimeParameterizationResult:
-    """按策略选择时间参数化方法并产出轨迹点。
+    """按策略选择时间参数化方法并产出轨迹点.
 
-    参数：
-    - ``samples``：已平滑/滤波/重采样后的示教采样点序列，仅作为数据输入；
-    - ``method``：请求的方法名，先经 :func:`normalize_time_parameterization_method`
-      归一化；
-    - ``fallback_retime``：实际重定时实现，以关键字参数接收 ``samples``（列表副本）、
-      ``replay_speed``、三个上限、``initial_delay_sec``、``boundary_zero_velocity``；
-    - ``replay_speed``：回放速度倍率，时间轴缩放系数（无量纲，1.0 表示按录制速度）；
-    - ``max_velocity_rad_s``：关节速度上限（rad/s）；
-    - ``max_acceleration_rad_s2``：关节加速度上限（rad/s²）；
-    - ``max_jerk_rad_s3``：关节加加速度上限（rad/s³）；
-    - ``initial_delay_sec``：轨迹起点前的静止延时（秒），用于等待控制器进入跟踪状态；
-    - ``boundary_zero_velocity``：是否强制首末点速度为 0，保证起停平滑且终点可控。
+    参数:
+    - ``samples``: 已平滑/滤波/重采样后的示教采样点序列, 仅作为数据输入;
+    - ``method``: 请求的方法名, 先经 :func:`normalize_time_parameterization_method`
+      归一化;
+    - ``fallback_retime``: 实际重定时实现, 以关键字参数接收 ``samples``(列表副本),
+      ``replay_speed``, 三个上限, ``initial_delay_sec``, ``boundary_zero_velocity``;
+    - ``replay_speed``: 回放速度倍率, 时间轴缩放系数(无量纲, 1.0 表示按录制速度);
+    - ``max_velocity_rad_s``: 关节速度上限(rad/s);
+    - ``max_acceleration_rad_s2``: 关节加速度上限(rad/s²);
+    - ``max_jerk_rad_s3``: 关节加加速度上限(rad/s³);
+    - ``initial_delay_sec``: 轨迹起点前的静止延时(秒), 用于等待控制器进入跟踪状态;
+    - ``boundary_zero_velocity``: 是否强制首末点速度为 0, 保证起停平滑且终点可控.
 
-    无论走哪条分支，都不会原地修改调用方的 ``samples``（每次都传 ``list(samples)``
-    副本）。返回 :class:`TimeParameterizationResult`；不会因为 ruckig 缺失而失败。
+    无论走哪条分支, 都不会原地修改调用方的 ``samples``(每次都传 ``list(samples)``
+    副本). 返回 :class:`TimeParameterizationResult`; 不会因为 ruckig 缺失而失败.
     """
     requested = normalize_time_parameterization_method(method)
     use_ruckig = (
@@ -136,8 +136,8 @@ def parameterize_teach_samples(
         initial_delay_sec=initial_delay_sec,
         boundary_zero_velocity=boundary_zero_velocity,
     )
-    # 三条 message 分支按优先级：显式请求 ruckig 但适配器缺失（区分 ruckig 模块是否
-    # 装上，便于运维定位）→ 其余情况按当前重定时实现执行。
+    # 三条 message 分支按优先级: 显式请求 ruckig 但适配器缺失(区分 ruckig 模块是否
+    # 装上, 便于运维定位) -> 其余情况按当前重定时实现执行.
     message = (
         "python ruckig waypoint adapter not implemented; used current jerk-aware retime"
         if requested == "ruckig" and ruckig_python_available()

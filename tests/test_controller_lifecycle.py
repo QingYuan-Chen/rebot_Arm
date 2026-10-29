@@ -6,6 +6,7 @@ import pytest
 
 from rebotarmcontroller.arm_execution import ArmExecution
 from rebotarmcontroller.lifecycle import ControllerLifecycle, shutdown_policy
+from controller_fake_backend import WriterRuntime
 
 
 class Hardware:
@@ -28,7 +29,7 @@ def test_safe_home_failure_retains_enabled_control():
     hardware = Hardware()
     log, messages = logger()
     def fail(): raise TimeoutError('cannot reach target')
-    assert not shutdown_policy(hardware, safe_home=fail, logger=log)
+    assert not shutdown_policy(hardware, arm=hardware, gravity=hardware, safe_home=fail, logger=log)
     assert hardware.enabled
     assert hardware.calls == ['gravity_stop', 'position_hold', 'stop']
     assert any('cannot reach target' in message for message in messages)
@@ -37,10 +38,10 @@ def test_safe_home_failure_retains_enabled_control():
 def test_successful_parking_still_requires_explicit_disable():
     hardware = Hardware()
     log, _ = logger()
-    assert not shutdown_policy(hardware, safe_home=lambda: hardware.calls.append('park'), logger=log)
+    assert not shutdown_policy(hardware, arm=hardware, gravity=hardware, safe_home=lambda: hardware.calls.append('park'), logger=log)
     assert hardware.calls == ['park', 'gravity_stop', 'position_hold', 'stop']
     hardware.enabled = False
-    assert shutdown_policy(hardware, safe_home=None, logger=log)
+    assert shutdown_policy(hardware, arm=hardware, gravity=hardware, safe_home=None, logger=log)
     assert hardware.calls[-1] == 'shutdown'
 
 
@@ -48,13 +49,13 @@ def test_stop_failure_does_not_disable_healthy_arm():
     hardware = Hardware()
     hardware.stop_active_motion = lambda: (_ for _ in ()).throw(RuntimeError('stop failed'))
     log, messages = logger()
-    assert not shutdown_policy(hardware, safe_home=None, logger=log)
+    assert not shutdown_policy(hardware, arm=hardware, gravity=hardware, safe_home=None, logger=log)
     assert hardware.enabled and 'shutdown' not in hardware.calls
     assert any('stop failed' in message for message in messages)
 
 
 def test_lifecycle_does_not_hide_unconfirmed_disable():
-    state = ControllerLifecycle()
+    state = ControllerLifecycle(WriterRuntime())
     state.set_state('DISABLING')
     state.set_execution('IDLE', enabled=True)
     assert state.state == 'DISABLING'
@@ -135,7 +136,7 @@ def test_gravity_and_lifecycle_fixed_vectors():
         assert result == pytest.approx([case['integral']] * 6)
         assert gravity.target == pytest.approx([case['position'] if case['follow'] else case['target']] * 6)
     for case in vectors['lifecycle']:
-        lifecycle = ControllerLifecycle()
+        lifecycle = ControllerLifecycle(WriterRuntime())
         lifecycle.set_state(case['initial'])
         lifecycle.set_execution(case['execution'], enabled=case['enabled'])
         assert lifecycle.state == case['expected']

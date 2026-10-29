@@ -81,7 +81,7 @@ def test_mujoco_keyframe_matches_the_srdf_safe_home_state():
 
 
 def test_driver_safe_home_does_not_delegate_to_the_vendor_zero_homing():
-    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/hardware_manager.py")
+    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/arm_controller.py")
     services = _read("src/rebotarmcontroller/rebotarmcontroller/ros_services.py")
     controller = _read("src/rebotarmcontroller/rebotarmcontroller/rebotarm_controller.py")
 
@@ -91,8 +91,8 @@ def test_driver_safe_home_does_not_delegate_to_the_vendor_zero_homing():
     assert "self._endpos_ctrl.end()" not in hardware
 
     assert "def safe_home(" in hardware
-    assert "self._hardware.safe_home(" in services
-    assert "self.hardware.safe_home(" in controller
+    assert "self._arm.safe_home(" in services
+    assert "self.hardware.arm.safe_home(" in controller
 
 
 def test_configured_safe_home_target_is_validated_against_joint_limits():
@@ -116,9 +116,9 @@ def test_safe_home_never_exceeds_the_vendor_homing_speed():
     from _pytest.monkeypatch import MonkeyPatch
     with MonkeyPatch.context() as patch:
         manager, _ = make_local_manager(patch)
-        manager.connect(); manager.enable()
+        manager.lifecycle.connect(); manager.lifecycle.enable()
         try:
             with pytest.raises(ValueError, match='velocity'):
-                manager.safe_home(vlim=.31)
+                manager.arm.safe_home(vlim=.31)
         finally:
-            manager.disable(); manager.shutdown()
+            manager.lifecycle.disable(); manager.lifecycle.shutdown()

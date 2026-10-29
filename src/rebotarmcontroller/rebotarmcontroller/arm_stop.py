@@ -1,14 +1,22 @@
-"""六轴受控停止的周期确认状态机。
+"""六轴受控停止的周期确认状态机.
 
-职责：记录保持目标、目标代次和首次成功发送时间，按新的反馈时间戳累计静止
-窗口。对外接口为 ``begin/sent/update/abort`` 和只读 ``result``；运行时每周期
-调用一次，不轮询设备或睡眠。默认速度 0.05 rad/s、
-持续静止 0.20 s、总预算 2 s；位置窗口和固定锚点位移均不超过三个编码。
+职责与位置
+    设备周期中的受控停止状态机, 等待静止反馈时不占住设备线程.
 
-约束：保持发送失败不能开始确认；反馈必须晚于发送。重复缓存不增加静止时间；
-目标代次变化、失能或会话结束时结束旧确认，禁止旧取消覆盖新目标。健康设备
-确认超时交回保持，不自动失能。时钟由调用方注入，便于 Python/C++ 共用样本。
+对外接口
+    ArmStop.begin/sent/update/abort 维护 StopResult; CycleResult 将轮询与后续交接交给运行时.
+
+安全与并发约束
+    先确认本代保持已发送, 再累计其后的新鲜连续证据; 超时不等于已经停稳.
+    停止轮询只读缓存且不睡眠; 确认后可在同一设备线程继续交接.
+    旧任务和失效代次不能撤销新任务.
+
+文件结构(按定义顺序)
+    StopResult: 停止确认的值结果; 不包含线程, 事件或设备句柄.
+    ArmStop: 唯一设备线程拥有的停止确认; 等待由请求运行时负责.
+    CycleResult: 请求的周期续体; 设备线程推进后再完成原请求, 等待方不占设备线程.
 """
+
 from dataclasses import dataclass, replace
 import time
 
@@ -18,7 +26,7 @@ from .command_guard import SafetyDecision, failure_decision
 
 @dataclass(frozen=True)
 class StopResult:
-    """停止确认的值结果；不包含线程、事件或设备句柄。"""
+    """停止确认的值结果; 不包含线程, 事件或设备句柄."""
 
     state: str = "idle"
     message: str = ""
@@ -30,9 +38,10 @@ class StopResult:
 
 
 class ArmStop:
-    """唯一设备线程拥有的停止确认；等待由请求运行时负责。"""
+    """唯一设备线程拥有的停止确认; 等待由请求运行时负责."""
 
     def __init__(self, clock=time.monotonic):
+        """注入单调时钟并创建静止证据; 构造不发停止命令."""
         self.clock = clock
         self.result = StopResult()
         self.deadline = 0.
@@ -40,24 +49,34 @@ class ArmStop:
 
     @property
     def pending(self):
+        """查询本次停止是否仍处于等待发送或静止确认阶段."""
         return self.result.state == "stopping"
 
     def begin(self, target, generation):
+        """固定本代保持目标与两秒预算, 清空上一轮证据; 不直接发送."""
         self.result = StopResult("stopping", generation=generation,
                                  target=tuple(float(v) for v in target))
         self.deadline = self.clock() + 2.
         self.evidence.reset(target)
 
     def sent(self, generation):
+        """仅为匹配代次记录首次成功发送时间, 之后的新帧才可用于确认."""
         if self.pending and generation == self.result.generation and self.result.sent_at is None:
             self.result = replace(self.result, sent_at=self.clock())
             self.evidence.last_stamp = self.result.sent_at
 
     def abort(self, message):
+        """终结尚在等待的停止事务, 保留明确失败原因, 不执行失能."""
         if self.pending:
             self.result = replace(self.result, state="aborted", message=message)
 
     def update(self, positions, velocities, observed_at, *, generation, enabled, sequences=None):
+        """以已验证反馈推进本代停止确认, 返回新的 StopResult.
+
+        positions / velocities 按六轴排列; observed_at 和 clock 使用同一单调秒.
+        失能, 代次变化, 断流或源回退终止旧确认; 重复帧不累计静止窗口.
+        超时仅记录保持未确认, 具体恢复由上层处理, 不在这里改变设备状态.
+        """
         if not self.pending:
             return self.result
         if not enabled or generation != self.result.generation:
@@ -67,6 +86,7 @@ class ArmStop:
             decision = failure_decision('fresh stationary hold feedback not confirmed', 'STOP')
             self.result = replace(self.result, state="timeout", message=decision.reason, decision=decision)
             return self.result
+        # 停止请求的接纳时刻不足以证明保持生效; 必须观察本代保持实际送出之后的新反馈.
         sent = self.result.sent_at
         reason = 'waiting_send'
         if sent is not None and observed_at > sent:
@@ -86,14 +106,16 @@ class ArmStop:
 
 
 class CycleResult:
-    """请求的周期续体；设备线程推进后再完成原请求，等待方不占设备线程。"""
+    """请求的周期续体; 设备线程推进后再完成原请求, 等待方不占设备线程."""
 
     def __init__(self, poll, *, cancel=None, continuation=None):
+        """保存无阻塞轮询, 失效清理和可选后续操作, 供唯一运行时推进."""
         self.poll = poll
         self.cancel = cancel or (lambda reason: None)
         self.continuation = continuation
 
     def advance(self):
+        """推进一拍; 轮询确认完成后才执行后续交接, 返回是否完成及原请求结果."""
         done, result = self.poll()
         if done and self.continuation is not None:
             result = self.continuation()
