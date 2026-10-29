@@ -1594,7 +1594,7 @@
     document.getElementById('joint-sliders').innerHTML = sliderNames.map(makeSlider).join('');
     document.getElementById('preview-sliders').innerHTML = sliderNames.map((name) => makeSlider(name, 'preview')).join('');
     // 3D 视图初始化：建场景、相机、渲染器与 OrbitControls，加载 URDF，
-    // 并把左右夹爪的手指网格单独收集起来以便按开口量做平移。
+    // 通过左右手指关节带动整侧传动件、安装座和软指。
     // 关节值来自实时电机反馈或预览目标，两种数据源共用同一套渲染入口。
     const robotViewer = {
       scene: null,
@@ -1603,43 +1603,21 @@
       controls: null,
       grid: null,
       robot: null,
-      gripperVisuals: null,
+      gripperJoints: null,
       ready: false,
       renderPending: false,
     };
-    const objectNamePath = (object) => {
-      const names = [];
-      let cursor = object;
-      while (cursor) {
-        if (cursor.name) names.push(String(cursor.name).toLowerCase());
-        cursor = cursor.parent;
-      }
-      return names.join('/');
-    };
-    const markGripperDebug = (gripperVisuals, opening = 0) => {
+    const markGripperDebug = (gripperJoints, opening = 0) => {
       window.__rebotGripperDebug = {
-        leftCount: gripperVisuals.left.length,
-        rightCount: gripperVisuals.right.length,
-        leftNames: gripperVisuals.left.map(({ object }) => objectNamePath(object)),
-        rightNames: gripperVisuals.right.map(({ object }) => objectNamePath(object)),
+        leftJoint: gripperJoints.left.name,
+        rightJoint: gripperJoints.right.name,
         lastOpening: opening,
-        lastLeftY: gripperVisuals.left.map(({ object }) => object.position.y),
-        lastRightY: gripperVisuals.right.map(({ object }) => object.position.y),
+        leftPosition: gripperJoints.left.jointValue[0],
+        rightPosition: gripperJoints.right.jointValue[0],
       };
-      document.body.dataset.gripperLeftCount = String(gripperVisuals.left.length);
-      document.body.dataset.gripperRightCount = String(gripperVisuals.right.length);
       document.body.dataset.gripperOpening = String(opening);
-      document.body.dataset.gripperLeftY = gripperVisuals.left.map(({ object }) => object.position.y.toFixed(6)).join(',');
-      document.body.dataset.gripperRightY = gripperVisuals.right.map(({ object }) => object.position.y.toFixed(6)).join(',');
-    };
-    const addGripperVisual = (gripperVisuals, side, object) => {
-      if (!object) return;
-      const list = gripperVisuals[side];
-      if (list.some((entry) => entry.object === object)) return;
-      list.push({ object, base: object.position.clone() });
-    };
-    const namedRobotObject = (robot, name) => {
-      return robot?.visual?.[name] || robot?.frames?.[name] || robot?.links?.[name] || null;
+      document.body.dataset.gripperLeftPosition = String(gripperJoints.left.jointValue[0]);
+      document.body.dataset.gripperRightPosition = String(gripperJoints.right.jointValue[0]);
     };
     const viewerStatus = (message) => {
       const el = document.getElementById('robot-view-status');
@@ -1703,23 +1681,17 @@
           }
         }
       });
-      const gripperVisuals = {
-        left: [],
-        right: [],
+      const gripperJoints = {
+        left: robot.joints.left_finger_joint,
+        right: robot.joints.right_finger_joint,
       };
-      addGripperVisual(gripperVisuals, 'left', namedRobotObject(robot, 'left_finger'));
-      addGripperVisual(gripperVisuals, 'right', namedRobotObject(robot, 'right_finger'));
-      if (!gripperVisuals.left.length || !gripperVisuals.right.length) {
-        robot.traverse((object) => {
-          const name = objectNamePath(object);
-          if (!gripperVisuals.left.length && name.includes('left_finger')) addGripperVisual(gripperVisuals, 'left', object);
-          if (!gripperVisuals.right.length && name.includes('right_finger')) addGripperVisual(gripperVisuals, 'right', object);
-        });
+      if (!gripperJoints.left || !gripperJoints.right) {
+        throw new Error('模型缺少夹爪关节 left_finger_joint / right_finger_joint');
       }
       scene.add(robot);
       robotViewer.robot = robot;
-      robotViewer.gripperVisuals = gripperVisuals;
-      markGripperDebug(gripperVisuals);
+      robotViewer.gripperJoints = gripperJoints;
+      markGripperDebug(gripperJoints);
       // 画布尺寸跟随容器变化：按 CSS 像素设置绘图缓冲，
       // aspect 用 max(height, 1) 兜底，避免容器隐藏时高度为 0 导致投影矩阵出现 NaN。
       const resize = () => {
@@ -1744,9 +1716,8 @@
       });
       return result;
     };
-    // 夹爪开口量的“半个行程”换算：夹爪位置是两指间距，
-    // 左右手指各走一半才能在视觉上保持对称。位置先按限位夹紧再减去闭合端偏移，
-    // 这样即使反馈值超出行程，模型也不会被拉成怪形状。
+    // 历史开口接口映射为双侧总行程，左右关节各走一半；新软指净开口尚待标定。
+    // 先钳位并减去闭合端偏移，再驱动整个 link，避免只移动其中一份网格。
     const updateRobotViewer = (joints) => {
       if (!robotViewer.ready) return;
       armJointNames.forEach((name) => {
@@ -1758,19 +1729,13 @@
       });
       const gripper = joints.gripper;
       const gripperPosition = motorPosition(gripper);
-      if (Number.isFinite(gripperPosition) && robotViewer.gripperVisuals) {
+      if (Number.isFinite(gripperPosition) && robotViewer.gripperJoints) {
         const [closed, open] = jointLimits.gripper || [0.0, 0.09];
         const opening = clamp(gripperPosition, closed, open) - Number(closed);
         const halfTravel = opening * 0.5;
-        robotViewer.gripperVisuals.left.forEach(({ object, base }) => {
-          object.position.copy(base);
-          object.position.y += halfTravel;
-        });
-        robotViewer.gripperVisuals.right.forEach(({ object, base }) => {
-          object.position.copy(base);
-          object.position.y -= halfTravel;
-        });
-        markGripperDebug(robotViewer.gripperVisuals, opening);
+        robotViewer.gripperJoints.left.setJointValue(halfTravel);
+        robotViewer.gripperJoints.right.setJointValue(-halfTravel);
+        markGripperDebug(robotViewer.gripperJoints, opening);
       }
       scheduleRobotRender();
     };

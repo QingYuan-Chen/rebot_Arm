@@ -1530,6 +1530,83 @@ const fetch = () => {fetchCalls++; throw Error('Unexpected request');};
     assert result.returncode == 0, result.stderr
 
 
+def test_dashboard_gripper_view_drives_whole_finger_joints_without_drift():
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        raise unittest.SkipTest("Node.js required for dashboard behavior test")
+    html = (ROOT / "src/rebotarm_dashboard/rebotarm_dashboard/status_panel_assets/index.html").read_text()
+
+    def section(start, end):
+        return html[html.index(start):html.index(end, html.index(start))]
+
+    helpers = section("    const motorPosition =", "    const deg =")
+    viewer = section("    const robotViewer =", "    const viewerStatus =")
+    update = section("    const jointsFromTargets =", "    initRobotViewer().catch")
+    script = r'''
+const assert = require('node:assert/strict');
+const document = {body: {dataset: {}}};
+const window = {};
+const jointLimits = {gripper: [0, 0.09]};
+const armJointNames = ['joint1'];
+const sliderNames = [...armJointNames, 'gripper'];
+const clamp = (x, low, high) => Math.max(low, Math.min(high, x));
+const scheduleRobotRender = () => {};
+function joint(name) {
+  return {name, jointValue: [0], calls: 0, setJointValue(value) {
+    this.jointValue[0] = value;
+    this.calls++;
+  }};
+}
+''' + helpers + viewer + update + r'''
+const left = joint('left_finger_joint');
+const right = joint('right_finger_joint');
+const arm = joint('joint1');
+robotViewer.robot = {joints: {joint1: arm, left_finger_joint: left, right_finger_joint: right}};
+robotViewer.gripperJoints = {left, right};
+const feedback = position => updateRobotViewer({joint1: {position: 0.2}, gripper: {position}});
+const check = half => {
+  assert.ok(Math.abs(left.jointValue[0] - half) < 1e-12);
+  assert.ok(Math.abs(right.jointValue[0] + half) < 1e-12);
+};
+feedback(0.06);
+assert.equal(left.calls, 0); // 加载完成前不更新模型。
+robotViewer.ready = true;
+for (const [position, half] of [[0, 0], [0.06, 0.03], [0.09, 0.045], [-1, 0], [1, 0.045]]) {
+  feedback(position);
+  check(half);
+}
+assert.equal(arm.jointValue[0], 0.2);
+jointLimits.gripper = [0.01, 0.08];
+for (const [position, half] of [[0.01, 0], [0.05, 0.02], [0.08, 0.035]]) {
+  feedback(position);
+  check(half);
+}
+const calls = left.calls;
+for (const position of [null, undefined, NaN, Infinity, -Infinity, '0.02']) {
+  feedback(position);
+  check(0.035);
+}
+assert.equal(left.calls, calls);
+assert.equal(right.calls, calls);
+jointLimits.gripper = [0, 0.09];
+for (let i = 0; i < 100; i++) {
+  updateRobotViewer(jointsFromTargets({joint1: 0.4, gripper: 0.06}));
+  check(0.03);
+  feedback(0);
+  check(0);
+}
+assert.equal(window.__rebotGripperDebug.leftJoint, 'left_finger_joint');
+assert.equal(window.__rebotGripperDebug.rightJoint, 'right_finger_joint');
+assert.equal(window.__rebotGripperDebug.leftPosition, 0);
+assert.equal(Math.abs(window.__rebotGripperDebug.rightPosition), 0);
+'''
+    result = subprocess.run([node, "-e", script], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_dashboard_robot_view_uses_horizontal_ground_grid_and_above_ground_camera():
     html = (
         ROOT
