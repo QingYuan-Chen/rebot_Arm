@@ -1,7 +1,7 @@
 """夹爪现场回归客户端：单一监测与目标所有者、独立接收和分项授权请求。
 失败停止保持，不自动失能；显式失能仅允许本轮基线新鲜且连续静止一秒后。
 """
-import argparse, fcntl, json, math, os, threading, time
+import argparse, fcntl, json, math, os, queue, threading, time
 from pathlib import Path
 import numpy as np
 import rclpy
@@ -35,12 +35,31 @@ if not 0. <= base['gripper'] <= .085:
     raise ValueError('夹爪基线必须允许在 0–90 mm 行程内张开 5 mm')
 audit=Audit(ROOT/'received.jsonl');events=Audit(ROOT/'test_events.jsonl')
 rclpy.init();node=rclpy.create_node('guarded_hardware_regression')
+feedback_node=rclpy.create_node('guarded_hardware_regression_feedback')
 executor=SingleThreadedExecutor();executor.add_node(node)
+feedback_executor=SingleThreadedExecutor();feedback_executor.add_node(feedback_node)
 lock=threading.RLock();latest={};status=None;phase='discovery';closed=False
 handles=[];names=list(JOINT_NAMES)+['gripper'];stop_monitor=threading.Event()
 raw_lock=threading.RLock();raw_latest={};raw_errors=[];raw_stop=threading.Event()
+feedback_error=[];command_error=[]
+critical_events=queue.SimpleQueue();critical_audit_failed=threading.Event()
 transition_holder={'value':None}
 speed_history=SustainedSpeed(.07, _G_POSITION_MAX_SPEED_RAD_S)
+def critical_audit_writer():
+    try:
+        while True:
+            item=critical_events.get()
+            if item is None:return
+            event,event_phase,at_mono,values=item
+            events.record(event,phase=event_phase,at_mono=at_mono,**values)
+    except Exception:
+        critical_audit_failed.set()
+critical_writer=threading.Thread(target=critical_audit_writer,name='critical-audit',daemon=True)
+critical_writer.start()
+def record_critical(event,**values):
+    # 本轮只产生有限次故障交接记录；审计排队不能等待写盘或阻塞停止/取消。
+    try:critical_events.put((event,phase,time.monotonic(),values))
+    except Exception:critical_audit_failed.set()
 def emit(event,**v):
     events.record(event,phase=phase,**v)
     print(json.dumps(dict(event=event,phase=phase,mono=time.monotonic(),**v),ensure_ascii=False),flush=True)
@@ -102,21 +121,36 @@ def arm(msg,info):
         codes=list(msg.per_joint_status_code),errors=list(msg.error_codes))
     with lock:status=value
     audit.record('status',phase=phase,**value)
-subscriptions=[node.create_subscription(JointMotorState,'/rebotarm/gripper/state' if n=='gripper'
+subscriptions=[feedback_node.create_subscription(JointMotorState,'/rebotarm/gripper/state' if n=='gripper'
     else '/rebotarm/joints/'+n+'/state',motor(n),qos_profile_sensor_data) for n in names]
-subscriptions.append(node.create_subscription(ArmStatus,'/rebotarm/arm_status',arm,
+subscriptions.append(feedback_node.create_subscription(ArmStatus,'/rebotarm/arm_status',arm,
     QoSProfile(depth=10,reliability=ReliabilityPolicy.RELIABLE,durability=DurabilityPolicy.TRANSIENT_LOCAL)))
 services={n:node.create_client(Trigger,'/rebotarm/'+n) for n in ('enable','disable','trajectory_stop')}
 validity=node.create_client(GetStateValidity,'/check_state_validity')
 gripper=ActionClient(node,GripperCommand,'/rebotarm/gripper/command')
-spin=threading.Thread(target=executor.spin,name='single-feedback-receiver',daemon=True);spin.start()
+def spin_feedback():
+    try:feedback_executor.spin()
+    except Exception as exc:
+        with lock:feedback_error.append(str(exc))
+        events.record('feedback_executor_error',phase=phase,error=str(exc))
+def spin_commands():
+    try:executor.spin()
+    except Exception as exc:
+        with lock:command_error.append(str(exc))
+        events.record('command_executor_error',phase=phase,error=str(exc))
+spin=threading.Thread(target=spin_commands,name='regression-commands',daemon=True);spin.start()
+feedback_spin=threading.Thread(target=spin_feedback,name='regression-feedback',daemon=True);feedback_spin.start()
 def snap(gripper_active=None, inspect_speed=False):
     if gripper_active is None:gripper_active=gate.gripper_motion
-    with lock:v,s=dict(latest),None if status is None else dict(status)
-    now=time.monotonic();wall=node.get_clock().now().nanoseconds
+    with lock:
+        v,s=dict(latest),None if status is None else dict(status)
+        receiver_error,commands_error=list(feedback_error),list(command_error)
+    now=time.monotonic();wall=feedback_node.get_clock().now().nanoseconds
     ages={n:(wall-x['stamp'])/1e9 for n,x in v.items()}
     issues=[]
     if len(v)!=7 or s is None:issues.append('incomplete')
+    if receiver_error or not feedback_spin.is_alive():issues.append('feedback_executor_failed')
+    if commands_error or not spin.is_alive():issues.append('command_executor_failed')
     if any(not -.02<=a<=.15 for a in ages.values()):issues.append('source_stale')
     if s is not None and (now-s['received']>.6 or s['errors']):issues.append('status_stale_or_error')
     with raw_lock:
@@ -124,7 +158,8 @@ def snap(gripper_active=None, inspect_speed=False):
         else:
             try:raw_snapshot_locked()
             except RuntimeError:issues.append('raw_feedback_incomplete_or_stale')
-    if audit.failed or events.failed:issues.append('client_audit_failed')
+    if (audit.failed or events.failed or critical_audit_failed.is_set()
+            or not critical_writer.is_alive()):issues.append('client_audit_failed')
     for n,x in v.items():
         if x['code'] not in (0,1) or not all(math.isfinite(x[k]) for k in ('position','velocity','torque')):
             issues.append('invalid_'+n)
@@ -145,15 +180,17 @@ def health(code=None,history=True):
     return np.array([v[n]['position'] for n in JOINT_NAMES])
 def request_hold():
     # 无论异常发生在动作接纳前后均只请求停止保持，迟到夹爪句柄由 gate 取消。
+    record_critical('monitor_failure',issues=gate.fault,fault_mono=gate.fault_at)
+    record_critical('monitor_stop_call_start')
     try:
         future=services['trajectory_stop'].call_async(Trigger.Request())
+        events.record('monitor_stop_call_return',phase=phase)
         def done(f):
             try:
                 result=f.result();events.record('monitor_stop_response',phase=phase,success=result.success,message=result.message)
             except Exception as exc:events.record('monitor_stop_error',phase=phase,error=str(exc))
         future.add_done_callback(done)
     except Exception as exc:events.record('monitor_stop_error',phase=phase,error=str(exc))
-    events.record('monitor_failure',phase=phase,issues=gate.fault)
 
 def record_cancel(future, error):
     if error is not None:
@@ -168,7 +205,10 @@ def record_cancel(future, error):
         except Exception as exc:events.record('monitor_cancel_error',phase=phase,error=str(exc))
     future.add_done_callback(done)
 
-gate=RegressionGate(request_hold,on_cancel=record_cancel)
+def record_cancel_start():
+    record_critical('monitor_cancel_call_start')
+
+gate=RegressionGate(request_hold,on_cancel=record_cancel,on_cancel_start=record_cancel_start)
 old_names={'current_workspace_hardware_regression','hardware_regression_recovery'}
 
 def observe_faults():
@@ -377,4 +417,11 @@ while True:
 stop_monitor.set();monitor.join(3.);watch.join(3.)
 raw_stop.set();raw_thread.join(3.)
 executor.shutdown(timeout_sec=3.);spin.join(3.)
-node.destroy_node();rclpy.try_shutdown();audit.close();events.close()
+feedback_executor.shutdown(timeout_sec=3.);feedback_spin.join(3.)
+if spin.is_alive() or feedback_spin.is_alive():
+    raise RuntimeError('回归执行器未退出，保留 ROS 句柄')
+feedback_node.destroy_node();node.destroy_node();rclpy.try_shutdown()
+critical_events.put(None);critical_writer.join(3.)
+if critical_writer.is_alive() or critical_audit_failed.is_set():
+    raise RuntimeError('故障交接审计线程未退出或发生异常')
+audit.close();events.close()

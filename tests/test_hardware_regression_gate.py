@@ -12,12 +12,14 @@ class Handle:
         self.accepted = True
         self.result = concurrent.futures.Future()
         self.cancels = 0
+        self.cancelled = threading.Event()
 
     def get_result_async(self):
         return self.result
 
     def cancel_goal_async(self):
         self.cancels += 1
+        self.cancelled.set()
         return concurrent.futures.Future()
 
 
@@ -40,7 +42,7 @@ def test_fault_before_late_acceptance_cancels_and_blocks_return_goal():
         gate.submit(lambda: pytest.fail('不能发送返程目标'), gripper=True)
     handle = Handle()
     pending.set_result(handle)
-    assert handle.cancels == 1
+    assert handle.cancelled.wait(1) and handle.cancels == 1
     handle.result.set_result('cancelled')
     assert not gate.gripper_motion
     assert gate.fault == ('source_stale',)
@@ -56,7 +58,7 @@ def test_accepted_goal_fault_cancels_and_fault_survives_recovered_feedback():
     pending.set_result(handle)
     assert gate.result_for(pending) == (handle, handle.result)
     gate.monitor_check(lambda active: ['unexpected_position'])
-    assert handle.cancels == 1 and stops == ['hold']
+    assert handle.cancelled.wait(1) and handle.cancels == 1 and stops == ['hold']
     gate.monitor_check(lambda active: [])
     handle.result.set_result('cancelled')
     assert gate.fault == ('unexpected_position',)
@@ -113,7 +115,7 @@ def test_watchdog_stops_if_monitor_is_stuck_inside_check():
         threading.Event().wait(.001)
     assert stops == ['hold']
     assert gate.fault == ('monitor_stale',)
-    assert handle.cancels == 1
+    assert handle.cancelled.wait(1) and handle.cancels == 1
     release.set()
     thread.join(1); watchdog.join(1)
     assert not thread.is_alive() and not watchdog.is_alive()
@@ -208,6 +210,10 @@ def test_cancel_request_is_reported_separately_from_terminal():
     handle = Handle()
     pending.set_result(handle)
     gate.trip('test_fault')
+    assert handle.cancelled.wait(1)
+    for _ in range(1000):
+        if calls: break
+        threading.Event().wait(.001)
     assert len(calls) == 1 and calls[0][0] is not None and calls[0][1] is None
     assert gate.has_pending and not handle.result.done()
 
@@ -220,5 +226,138 @@ def test_late_rclpy_future_acceptance_is_cancelled_without_ros_or_hardware():
     gate.trip('simulated_fault')
     handle = Handle()
     pending.set_result(handle)
-    assert handle.cancels == 1 and stops == ['hold']
+    assert handle.cancelled.wait(1) and handle.cancels == 1 and stops == ['hold']
     assert gate.has_pending
+
+
+def test_watchdog_stop_block_does_not_delay_accepted_gripper_cancel():
+    stop_entered, release_stop = threading.Event(), threading.Event()
+    def blocked_stop():
+        stop_entered.set()
+        assert release_stop.wait(2)
+    gate = RegressionGate(blocked_stop)
+    gate.monitor_check(lambda active: [])
+    pending = concurrent.futures.Future()
+    gate.submit(lambda: pending, gripper=True)
+    handle = Handle()
+    pending.set_result(handle)
+    thread = threading.Thread(target=lambda: gate.trip('monitor_stale'))
+    thread.start()
+    try:
+        assert stop_entered.wait(1)
+        assert handle.cancelled.wait(1)
+        assert gate.fault == ('monitor_stale',) and gate.fault_at is not None
+        with pytest.raises(MonitorFault):
+            gate.submit(lambda: pytest.fail('故障时不能继续发送'))
+    finally:
+        release_stop.set()
+        thread.join(2)
+    assert not thread.is_alive()
+
+
+def test_slow_cancel_does_not_delay_stop_or_keep_monitor_gate_locked():
+    cancel_entered, release_cancel, stop_called = threading.Event(), threading.Event(), threading.Event()
+    cancel_start = threading.Event()
+    class SlowHandle(Handle):
+        def cancel_goal_async(self):
+            cancel_entered.set()
+            assert release_cancel.wait(2)
+            return super().cancel_goal_async()
+    gate = RegressionGate(stop_called.set, on_cancel_start=cancel_start.set)
+    gate.monitor_check(lambda active: [])
+    pending = concurrent.futures.Future()
+    gate.submit(lambda: pending, gripper=True)
+    handle = SlowHandle()
+    pending.set_result(handle)
+    try:
+        gate.monitor_check(lambda active: ['source_stale'])
+        assert cancel_entered.wait(1) and cancel_start.is_set() and stop_called.is_set()
+        with pytest.raises(MonitorFault):
+            gate.submit(lambda: pytest.fail('故障时不能继续发送'))
+    finally:
+        release_cancel.set()
+        assert handle.cancelled.wait(1)
+
+
+def test_blocked_goal_send_does_not_block_watchdog_or_late_cancel():
+    send_entered, release_send, stop_called = threading.Event(), threading.Event(), threading.Event()
+    gate = RegressionGate(stop_called.set)
+    gate.monitor_check(lambda active: [])
+    pending = concurrent.futures.Future()
+    def blocked_send():
+        send_entered.set()
+        assert release_send.wait(2)
+        return pending
+    send_thread = threading.Thread(target=lambda: gate.submit(blocked_send, gripper=True))
+    send_thread.start()
+    assert send_entered.wait(1)
+    fault_thread = threading.Thread(target=lambda: gate.trip('monitor_stale'))
+    fault_thread.start()
+    try:
+        assert stop_called.wait(1)
+        assert gate.fault == ('monitor_stale',)
+    finally:
+        release_send.set()
+        send_thread.join(2)
+        fault_thread.join(2)
+    assert not send_thread.is_alive() and not fault_thread.is_alive()
+    handle = Handle()
+    pending.set_result(handle)
+    assert handle.cancelled.wait(1) and handle.cancels == 1
+    with pytest.raises(MonitorFault):
+        gate.submit(lambda: pytest.fail('故障锁存后不能准入新目标'))
+
+
+def test_blocked_enable_send_does_not_block_watchdog():
+    send_entered, release_send, stop_called = threading.Event(), threading.Event(), threading.Event()
+    gate = RegressionGate(stop_called.set)
+    gate.monitor_check(lambda active: [])
+    def blocked_send():
+        send_entered.set()
+        assert release_send.wait(2)
+    send_thread = threading.Thread(target=lambda: gate.guarded_call(blocked_send))
+    send_thread.start()
+    assert send_entered.wait(1)
+    fault_thread = threading.Thread(target=lambda: gate.trip('monitor_stale'))
+    fault_thread.start()
+    try:
+        assert stop_called.wait(1)
+        assert gate.fault == ('monitor_stale',)
+    finally:
+        release_send.set()
+        send_thread.join(2)
+        fault_thread.join(2)
+    assert not send_thread.is_alive() and not fault_thread.is_alive()
+    with pytest.raises(MonitorFault):
+        gate.guarded_call(lambda: pytest.fail('故障锁存后不能准入使能'))
+
+
+def test_cancel_in_flight_blocks_shutdown_even_after_action_terminal():
+    cancel_entered, release_cancel, cancel_returned = threading.Event(), threading.Event(), threading.Event()
+    cancel_response = concurrent.futures.Future()
+    class SlowHandle(Handle):
+        def cancel_goal_async(self):
+            cancel_entered.set()
+            assert release_cancel.wait(2)
+            return cancel_response
+    gate = RegressionGate(lambda: None, on_cancel=lambda future, error: cancel_returned.set())
+    gate.monitor_check(lambda active: [])
+    pending = concurrent.futures.Future()
+    gate.submit(lambda: pending, gripper=True)
+    handle = SlowHandle()
+    pending.set_result(handle)
+    gate.result_for(pending)
+    gate.trip('monitor_stale')
+    try:
+        assert cancel_entered.wait(1)
+        handle.result.set_result('terminal')
+        assert gate.has_pending  # Action 虽已结束，取消调用仍未返回。
+    finally:
+        release_cancel.set()
+    assert cancel_returned.wait(1)
+    assert gate.has_pending  # 调用返回后仍要等待取消结果。
+    cancel_response.set_result('cancel response')
+    for _ in range(1000):
+        if not gate.has_pending: break
+        threading.Event().wait(.001)
+    assert not gate.has_pending
