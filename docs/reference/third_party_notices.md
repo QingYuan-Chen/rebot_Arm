@@ -3,7 +3,7 @@
 本文件记录项目使用的第三方代码和资源来源，不替代各上游的许可条款。
 根目录 `LICENSE` 保留 Apache License 2.0 正式英文文本；第三方材料应分别核对其许可。
 
-## 当前本机依赖
+## 可选历史参考
 
 ### reBotArm 控制 SDK
 
@@ -11,8 +11,10 @@
 - 固定版本：`6a49302804f25e624995e771acb6d61896d1856d`。
 - 版本清单：`third_party/rebotarm_dependencies.repos`。
 - 本机目录：`third_party/reBotArm_control_py`，不纳入主仓库版本管理。
-- 用途：保留来源及历史设备、位姿数值对照；生产控制器与运动包已退出该 Python SDK 依赖。按上游许可获取和使用。
+- 用途：可选的来源追溯及显式历史模型对照；正常构建、测试和部署不依赖该目录。默认 FK/IK 回归只读取项目固定数值样本。按上游许可获取和使用。
 - 固定树未含 LICENSE/COPYING/NOTICE，pyproject 无 license 字段，仅 README 声明 MIT；上游许可文本尚未取得。本地配置、窄驱动、运行时及位姿计算均独立实现，使用项目规范模型与 Pinocchio，不复制许可未明确的 SDK 源码。若将来复制源码，仍须先核实许可及归属。
+
+## 当前运行依赖
 
 ### MotorBridge
 

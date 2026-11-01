@@ -599,11 +599,12 @@ def test_valid_passthrough_preempt_uses_feedback_after_stop_confirmation(monkeyp
         manager.lifecycle.disable(); manager.lifecycle.shutdown()
 
 
-def test_fk_canonical_matches_legacy_at_identical_inputs():
+def test_fk_canonical_matches_frozen_legacy_at_identical_inputs():
     root=Path(__file__).resolve().parents[1]
     spec=importlib.util.spec_from_file_location('controller_fk_probe',root/'scripts/check_controller_fk.py')
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     result=module.compare()
+    assert result['reference']['kind']=='fixed_reference'
     assert result['max_position_error_m']<1e-12
     assert result['max_rotation_error_rad']<1e-12
     assert result['canonical_joints'][2]=='joint3' and result['legacy_joints'][2]=='join3'

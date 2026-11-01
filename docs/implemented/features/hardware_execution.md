@@ -182,10 +182,87 @@ ROS 发布使用原子快照：数值、状态码、接收序号和反馈观测�
 保留的进程、核对串口释放，重新启动并获取新鲜默认失能反馈。普通退出拒绝时 ROS 仍可用，
 应优先在确认基线后使用显式失能服务。强制终止无法由该软件流程拦截。
 
-`controller_kinematics.py` 使用规范六轴约化模型提供纯数值 FK；ROS Pose 转换保留在门面。
-`python3 scripts/check_controller_fk.py` 可复现相同输入对照：四组输入的位置差均为
-0 m，姿态差最大 2.29e-16 rad，属于数值舍入；本次未发现可观测的发布数值漂移。
+`controller_kinematics.py` 使用规范六轴约化模型提供纯数值 FK; ROS Pose 转换归发布和适配层。
+此前相同输入的新旧模型对照得到四组位置差均为 0 m, 姿态差最大 2.29e-16 rad,
+属于数值舍入。默认检查现使用固定样本, 不再依赖旧 URDF; 命令及边界见下节。
 规范 `joint3` 命名和 J2/J3 `+0.02 rad` 限位保持不变。
+
+### SDK 退出的离线验收
+
+`tests/fixtures/controller_fk_reference_v1.json` 的四组输入与旧 FK 对照一致。期望值由
+Pinocchio 4.1.0 直接读取固定 SDK 提交 `6a49302804f25e624995e771acb6d61896d1856d` 的
+历史 URDF 计算, 没有导入旧 SDK 实现。样本记录相对来源路径、URDF SHA-256、
+`base_link` / `end_link`、rad / m 单位, 以及旧 `join3` 到规范 `joint3` 的映射。
+只提取数值, 不复制旧模型。
+
+```bash
+# 默认检查只读取项目规范模型与固定 JSON, 不需要旧目录
+python3 scripts/check_controller_fk.py
+
+# 可选人工核验: 必须显式提供历史 URDF 路径
+python3 scripts/check_controller_fk.py --legacy-urdf /absolute/path/to/legacy.urdf
+```
+
+两种模式均报告逐样本及最大误差; 显式模式另报告实际路径和 SHA-256。位置与旋转
+误差均须严格小于 `1e-12`, 超差退出 1, 输入错误退出 2。缺样本、损坏样本或模型缺失
+都直接失败, 不回退到旧目录, 不自动生成或改写期望值。更新样本需单独评审来源与数值差异。
+
+退出验收使用 HEAD 加本轮差异组成的独立副本, 排除既有未提交内容和旧 build/install。
+在 `bwrap` 命名空间内隐藏原工作区, `/dev` 使用独立设备视图, 不暴露真实电机或串口。
+完整软件回归需要离屏仿真时只映射图形设备。原目录和设备状态不变。
+在未加载旧 overlay 的环境执行非软链接构建, 然后只加载 ROS Jazzy 及新安装区:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+/usr/bin/python3 -m colcon build --base-paths src --executor sequential
+source install/setup.bash
+REBOTARM_VERIFY_INSTALL_PREFIX="$PWD/install" \
+  python3 tests/fixtures/controller_sdk_exit_probe.py
+```
+
+安装探针运行时还须在该命名空间中隐藏副本 `src/`, 通过真实文件路径确认 controller、
+motion 模块、arm/gripper/gravity YAML 和两层 URDF 全部来自新安装区。探针拦截旧 SDK
+及 MotorBridge 导入, 只构造组件和执行 FK/IK/路径计算, 检查未连接及无设备线程。
+缺少规范资源的失败路径由 `test_pose_sdk_exit.py` 单独覆盖。上述命令本身不创建命名空间;
+必须配合该隔离步骤, 单纯从 `/tmp` 运行或阻断 Python 导入不能证明无旧文件依赖。
+
+例如, 已完成非软链接构建后, 在独立副本根目录执行以下安装探针。原工作区路径需按本机
+实际位置填写, 不得与副本相同; 所有挂载只在子进程生效:
+
+```bash
+SDK_CHECK_ROOT="$PWD"
+SDK_ORIGINAL_ROOT=/home/a/project/rebot_Arm
+test "$SDK_CHECK_ROOT" != "$SDK_ORIGINAL_ROOT" && \
+bwrap --ro-bind / / --tmpfs /tmp --bind "$SDK_CHECK_ROOT" "$SDK_CHECK_ROOT" \
+  --tmpfs "$SDK_ORIGINAL_ROOT" --tmpfs "$SDK_CHECK_ROOT/src" \
+  --dev /dev --proc /proc --unshare-pid --die-with-parent --chdir "$SDK_CHECK_ROOT" \
+  env -u PYTHONPATH -u AMENT_PREFIX_PATH -u COLCON_PREFIX_PATH \
+      -u CMAKE_PREFIX_PATH -u LD_LIBRARY_PATH \
+  bash --noprofile --norc -c 'source /opt/ros/jazzy/setup.bash &&
+    source install/setup.bash &&
+    REBOTARM_VERIFY_INSTALL_PREFIX="$PWD/install" python3 tests/fixtures/controller_sdk_exit_probe.py'
+```
+
+假设备 ROS 集成复用 `controller_batch6_ros_probe.py`, 只在空闲隔离域启动无 RViz、
+无假关节源的 MoveIt, 验证唯一 FJT、默认失能拒绝、显式使能、执行、取消保持、
+MoveIt Execute、IK 服务和位姿 Action。MoveIt 与探针需要同时启动, 不能先等待规划服务
+再启动探针: MoveIt 初始化本身需要该假控制器提供新鲜关节状态。先用 ROS 图确认域为空闲,
+再在上述设备隔离环境中执行, 安装区须来自本轮独立构建:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=189 ROS_LOCALHOST_ONLY=1
+ros2 launch rebotarm_bringup moveit_demo.launch.py use_rviz:=false use_fake_joint_states:=false &
+SDK_MOVEIT_LAUNCH_PID=$!
+python3 tests/fixtures/controller_batch6_ros_probe.py
+SDK_PROBE_RESULT=$?
+kill -INT "$SDK_MOVEIT_LAUNCH_PID"
+wait "$SDK_MOVEIT_LAUNCH_PID"
+test "$SDK_PROBE_RESULT" -eq 0
+```
+
+收尾只处理本轮启动进程, 并检查无残留。软件通过不证明反馈实时时延或新增实机验收。
 
 文件归属及唯一批次编号见[重构规划](../../design/controller_refactor_plan.md#分批交付与完成条件)。
 

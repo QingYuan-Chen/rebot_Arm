@@ -344,7 +344,8 @@ python3 -m rebotarm_simulation.diagnostics.mujoco_moveit_acceptance --timeout 30
 检查 robot.xml 是否重新生成，STL 路径是否存在。
 
 joint4-6 力矩仍是 7：
-检查 rebotarm.urdf、reBot-DevArm_fixend.urdf、robot.xml 是否都已更新到 12.5。
+检查规范 rebotarm.urdf 和由它生成的 robot.xml 是否都已更新到 12.5。
+旧 SDK 的 reBot-DevArm_fixend.urdf 仅为可选历史参考, 不参与当前仿真部署, 不要求修改。
 
 机械臂软绵绵：
 这是控制标定问题，优先看 motor_control_calibration.yaml 的 firmware_to_torque_scale、积分限幅和 effort 是否打满。

@@ -3,6 +3,7 @@ import ast
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import numpy as np
@@ -68,35 +69,49 @@ def test_any_cartesian_sample_failure_rejects_whole_path(monkeypatch):
 
 def test_no_sdk_imports_or_path_injection_in_controller_and_motion():
     for package in ('rebotarmcontroller', 'rebotarm_motion'):
-        for path in (ROOT/'src'/package/package).glob('*.py'):
-            source = path.read_text()
-            assert 'reBotArm_control_py' not in source, path
-            tree = ast.parse(source)
-            assert not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                and ast.unparse(n.func) in ('sys.path.insert', 'sys.path.append') for n in ast.walk(tree)), path
+        for path in (ROOT/'src'/package).rglob('*.py'):
+            tree = ast.parse(path.read_text())
+            docstrings = {ast.get_docstring(node, clean=False) for node in ast.walk(tree)
+                          if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    assert all(alias.name.split('.')[0] != 'reBotArm_control_py' for alias in node.names), path
+                if isinstance(node, ast.ImportFrom):
+                    assert (node.module or '').split('.')[0] != 'reBotArm_control_py', path
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    if node.value not in docstrings:
+                        assert 'reBotArm_control_py' not in node.value, path
+                if isinstance(node, ast.Call):
+                    assert ast.unparse(node.func) not in ('sys.path.insert', 'sys.path.append'), path
     assert not (ROOT/'src/rebotarmcontroller/rebotarmcontroller/legacy_backend.py').exists()
 
 
+def test_active_scripts_and_manifests_have_no_implicit_legacy_resource_path():
+    # 来源文档和固定数值元数据不参与执行依赖检查; 禁止名单中的纯模块名也不是资源读取.
+    paths = [p for folder in ('src', 'scripts') for p in (ROOT/folder).rglob('*')
+             if p.suffix in {'.py', '.sh', '.xml', '.yaml', '.cfg', '.toml', '.repos'}]
+    for path in paths:
+        text = path.read_text()
+        if path.suffix == '.py':
+            tree = ast.parse(text)
+            docstrings = {ast.get_docstring(node, clean=False) for node in ast.walk(tree)
+                          if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+            strings = [node.value for node in ast.walk(tree)
+                       if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                       and node.value not in docstrings]
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    assert all(alias.name.split('.')[0] != 'reBotArm_control_py' for alias in node.names), path
+                if isinstance(node, ast.ImportFrom):
+                    assert (node.module or '').split('.')[0] != 'reBotArm_control_py', path
+        else:
+            strings = [text]
+        assert not any(re.search(r'(?:[/\\]reBotArm_control_py|reBotArm_control_py[/\\])',
+                                 value) for value in strings), path
+
+
 def test_source_imports_and_computation_with_sdk_blocked_in_fresh_process():
-    script = '''
-import importlib.abc, sys
-class Block(importlib.abc.MetaPathFinder):
-    def find_spec(self, name, *args):
-        if name.split('.')[0] == 'reBotArm_control_py':
-            raise AssertionError('SDK import attempted: '+name)
-sys.meta_path.insert(0, Block())
-from rebotarmcontroller.hardware_manager import HardwareManager
-from rebotarm_motion.pose_preview_solver import PosePreviewSolver
-from rebotarm_motion.cartesian_trajectory import plan_cartesian
-from rebotarm_motion.pose_compat_node import PoseCompatNode
-manager = HardwareManager()
-assert not manager.lifecycle.connected
-solver = PosePreviewSolver()
-q = (0., -1., -1., 0., .3, 0.)
-target = solver.kinematics.pose(q)
-assert solver.kinematics.solve(target, q).success
-assert plan_cartesian(solver.kinematics, q, target, .1)[0]
-'''
+    script = (ROOT/'tests/fixtures/controller_sdk_exit_probe.py').read_text()
     env = dict(os.environ)
     env['PYTHONPATH'] = ':'.join(str(ROOT/'src'/p) for p in ('rebotarmcontroller', 'rebotarm_motion')) + ':' + env.get('PYTHONPATH','')
     subprocess.run([sys.executable, '-c', script], cwd='/tmp', env=env, check=True, timeout=20)
@@ -111,3 +126,25 @@ def test_fixed_sdk_comparison_vectors(case):
     assert result.error == pytest.approx(case['new_error'], abs=1e-8)
     if result.success:
         assert result.q == pytest.approx(case['old_q'], abs=1e-7)
+
+
+@pytest.mark.parametrize('package,relative', [
+    ('rebotarmcontroller', 'config/arm.yaml'),
+    ('rebotarmcontroller', 'config/gripper.yaml'),
+    ('rebotarmcontroller', 'config/gravity_compensation.yaml'),
+    ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
+])
+def test_missing_owned_resource_fails_without_legacy_fallback(tmp_path, monkeypatch, package, relative):
+    import ament_index_python.packages
+    from rebotarmcontroller import gravity_control
+    from rebotarm_motion import pose_kinematics
+    monkeypatch.setattr(ament_index_python.packages, 'get_package_share_directory',
+                        lambda name: str(tmp_path/'install/share'/name))
+    # 同时隔离源码回退, 否则当前机器的正常资源会掩盖缺失安装文件.
+    for module in (gravity_control, pose_kinematics):
+        monkeypatch.setattr(module, '__file__', str(tmp_path/'missing/src/pkg/module.py'))
+    with pytest.raises(FileNotFoundError):
+        gravity_control.package_file(package, relative)
+    if package == 'rebotarm_moveit_config':
+        with pytest.raises(FileNotFoundError):
+            pose_kinematics.PoseKinematics()

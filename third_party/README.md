@@ -1,6 +1,6 @@
-# 本机第三方依赖目录
+# 本机第三方依赖与可选参考
 
-本目录用于厂商 SDK 和视觉推理所需的第三方源码。
+本目录保存视觉运行依赖及旧厂商 SDK 的可选历史参考。
 主仓库保留本说明、`COLCON_IGNORE` 和 `rebotarm_dependencies.repos`；
 本机依赖源码由部署准备，不随主仓库发布。
 
@@ -8,7 +8,7 @@
 
 | 目录或文件 | 用途与引用 | 维护方式 |
 | --- | --- | --- |
-| `reBotArm_control_py/` | 历史设备行为及位姿计算参考，生产路径不再导入 | 保留；固定版本由 `rebotarm_dependencies.repos` 声明 |
+| `reBotArm_control_py/` | 可选历史参考，正常构建、测试和部署不需要 | 本机参考树保留；固定版本由 `rebotarm_dependencies.repos` 声明 |
 | `graspnet-baseline/` | 视觉后端加载网络、工具模块及 PointNet2 扩展 | 保留部署实际使用的源码、模型和许可证 |
 | `graspnetAPI/` | 视觉后端使用的 `GraspGroup` 数据结构 | 与所选 GraspNet 版本配套 |
 | `rebotarm_dependencies.repos` | 固定 reBotArm SDK 地址和提交 | 变更前核对兼容性，不随目录整理升级 |

@@ -167,7 +167,9 @@ python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed
 保护失能策略不变。构建保留旧版本 wheel 以便回退。
 重复安装 bootstrap 清单后也必须重新安装审查补丁并检查；不要把原始 0.4.7 用作真机运行版本。
 
-厂商 SDK 仅供历史行为和数值对照，生产控制器与 motion 无需导入或注入其路径。
+旧厂商 Python SDK 是可选历史参考，正常构建、完整测试和部署均不需要下载、安装或
+设置其路径。默认 FK 回归使用固定数值样本，只有显式模型对照会读取用户提供的旧 URDF，
+命令见[硬件执行说明](../implemented/features/hardware_execution.md#sdk-退出的离线验收)。
 需保留参考树时，使用 `third_party/rebotarm_dependencies.repos` 固定版本：
 
 ```bash

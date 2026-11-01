@@ -4,6 +4,12 @@
 `tests/test_controller_reference_samples.py` 直接驱动生产的执行器、命令生成、MotorBridge
 适配驱动、生命周期和停止组件；设备句柄为内存替身，不打开真实串口。
 
+`controller_fk_reference_v1.json` 另保存四组历史模型 FK 的位置和旋转矩阵,
+含固定 SDK 提交、URDF SHA-256、Pinocchio 版本、关节映射、坐标系与单位。默认回归
+不读取旧 SDK 目录, 不自动重写期望值; 位置及旋转误差均严格小于 `1e-12`。
+既有 `controller_pose_vectors.json` 的 IK 对照继续保留, 提取方式与显式模型对照见
+[SDK 退出验收](hardware_execution.md#sdk-退出的离线验收)。
+
 量化反馈修复后，停止组件使用 `controller_stop_reference_v2.json`：窗口改为
 0.20 s，增加三个位置编码的全极差和固定锚点约束、150 ms 连续性检查。
 v1 的停止片段保留为历史数据，当前停止测试读取 v2，其他 v1 场景继续执行。

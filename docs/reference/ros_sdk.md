@@ -129,6 +129,8 @@ python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed
 
 ### Step 3. 保留参考 SDK（可选）
 
+正常构建、完整测试和部署可以跳过此步。参考目录仅供人工追溯及显式旧模型对照，
+默认数值回归不读取它，见[SDK 退出验收](../implemented/features/hardware_execution.md#sdk-退出的离线验收)。
 
 ```bash
 # 在当前仓库根目录执行
