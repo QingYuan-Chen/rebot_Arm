@@ -89,7 +89,12 @@ class TeleopKeyboardNode(Node):
             [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159],
         )
         self.declare_parameter("joint_step_rad", 0.02)
-        self.declare_parameter("trajectory_duration", 0.2)
+        self.declare_parameter("trajectory_execution_mode", 'legacy')
+        from .trajectory_capability import TrajectoryCapability
+        self._capability = TrajectoryCapability(self.get_parameter('trajectory_execution_mode').value)
+        self.declare_parameter("trajectory_duration", .4 if self._capability.expected == 'prepared_v1' else .2)
+        self._busy = False
+        self._feedback_at = 0.
         self.declare_parameter("poll_period", 0.05)
         self.declare_parameter("input_timeout", 0.5)
         self.declare_parameter("deadman_required", False)
@@ -130,6 +135,9 @@ class TeleopKeyboardNode(Node):
             f"/{self._arm_namespace}/teleop/status",
             10,
         )
+        from rclpy.qos import DurabilityPolicy
+        self.create_subscription(String, f'/{self._arm_namespace}/trajectory_execution_mode',
+            self._capability.update, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         # 传感器数据用 BEST_EFFORT：与控制器发布端 QoS 匹配，宁可丢帧也不要阻塞。
         sensor_qos_spec = sensor_qos_kwargs()
         sensor_qos = QoSProfile(
@@ -160,6 +168,8 @@ class TeleopKeyboardNode(Node):
         for name, position in zip(msg.name, msg.position):
             if name in self._current_positions:
                 self._current_positions[str(name)] = float(position)
+        if set(self._joint_names).issubset(msg.name) and len(msg.position) >= len(msg.name):
+            self._feedback_at = time.monotonic()
 
     def _poll_key(self) -> None:
         """定时器回调：读取一个按键并完成「死锁检查 → 映射 → 限位 → 下发」流程。"""
@@ -220,6 +230,16 @@ class TeleopKeyboardNode(Node):
         不排队、不阻塞定时器，避免按键积压成突然的大幅运动。
         状态发布挂在 future 回调上：目标被接受即视为 active（不等待执行完成）。
         """
+        if self._busy:
+            self._publish_status('rejected', 'keyboard step busy; input discarded', key=key)
+            return
+        try:
+            self._capability.require()
+            if time.monotonic()-self._feedback_at > .15:
+                raise ValueError('fresh joint feedback required')
+        except ValueError as exc:
+            self._publish_status('rejected', str(exc), key=key)
+            return
         if not self._action_client.wait_for_server(timeout_sec=0.05):
             self._publish_status("unavailable", "follow_joint_trajectory action unavailable")
             return
@@ -229,10 +249,41 @@ class TeleopKeyboardNode(Node):
         point.positions = [float(v) for v in positions]
         _set_duration(point.time_from_start, self._trajectory_duration)
         trajectory.points = [point]
+        if self._capability.expected == 'prepared_v1':
+            from rebotarm_motion.trajectory_messages import point_to_point_message
+            trajectory = point_to_point_message(joint_names,
+                tuple(self._current_positions[name] for name in joint_names), positions,
+                self._trajectory_duration, trajectory_factory=JointTrajectory,
+                point_factory=JointTrajectoryPoint)
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = trajectory
-        future = self._action_client.send_goal_async(goal)
-        future.add_done_callback(lambda _future: self._publish_status("active", message, key=key))
+        self._busy = True
+        try:
+            future = self._action_client.send_goal_async(goal)
+            future.add_done_callback(lambda value: self._goal_response(value, message, key))
+        except Exception as exc:
+            self._busy = False
+            self._publish_status('failed', str(exc), key=key)
+
+    def _goal_response(self, future, message, key):
+        try:
+            handle = future.result()
+            if handle is None or not handle.accepted:
+                raise ValueError('keyboard trajectory goal rejected')
+            self._publish_status('active', message, key=key)
+            handle.get_result_async().add_done_callback(lambda value: self._goal_result(value, key))
+        except Exception as exc:
+            self._busy = False
+            self._publish_status('rejected', str(exc), key=key)
+
+    def _goal_result(self, future, key):
+        self._busy = False
+        try:
+            response = future.result()
+            state = 'done' if response.status == 4 and response.result.error_code == 0 else 'failed'
+            self._publish_status(state, response.result.error_string, key=key)
+        except Exception as exc:
+            self._publish_status('failed', str(exc), key=key)
 
     def _publish_status(self, state: str, message: str, *, key: str | None = None) -> None:
         """发布一条 JSON 状态；字典键名与 state 取值都是面板依赖的对外契约。"""

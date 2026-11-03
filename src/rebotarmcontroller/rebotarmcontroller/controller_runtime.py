@@ -129,6 +129,11 @@ class ControllerRuntime:
         """读取数值执行器当前目标代次."""
         return self.execution.generation
 
+    @property
+    def arm_resource_reserved(self):
+        """准备、轨迹和停止确认共用的夹爪排他标记，由六轴所有者释放。"""
+        return self.execution.reservation is not None
+
     def target(self):
         """返回执行器当前目标数组副本, 不读取电机反馈."""
         return self.execution.target()

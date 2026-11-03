@@ -10,6 +10,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src/rebotarm_motion'))
+sys.path.insert(0, str(ROOT / 'src/rebotarm_trajectory'))
 from rebotarm_motion.polynomial_trajectory import TrajectoryPoint
 from rebotarm_motion.trajectory_preparation import (
     PreparationContext, analyze_trajectory, load_reference_limits,

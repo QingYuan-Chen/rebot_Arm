@@ -27,6 +27,11 @@ class RuntimeStatePort(Protocol):
     """设备会话的只读元数据, 不暴露驱动, 请求队列或线程操作."""
 
     @property
+    def arm_resource_reserved(self) -> bool:
+        """约定只读准备、轨迹及停止确认的资源占用。"""
+        ...
+
+    @property
     def joint_names(self) -> list[str]:
         """约定返回六轴名称, 顺序必须与控制器数值向量一致."""
         ...
@@ -124,6 +129,26 @@ class ArmCommandPort(Protocol):
 
     def stop_active_motion(self, task=None):
         """约定停止匹配任务并等待保持确认, 旧任务取消不能覆盖新目标."""
+        ...
+
+    def reserve_arm_preparation(self, deadline):
+        """约定在设备线程预留空闲静止资源并颁发不可变身份。"""
+        ...
+
+    def decode_prepared_arm_trajectory(self, payload):
+        """约定在调用线程解码冻结系数，不访问设备。"""
+        ...
+
+    def admit_prepared_arm_trajectory(self, token, handoff):
+        """约定设备线程原子复核身份后接纳同一份系数。"""
+        ...
+
+    def cancel_arm_preparation(self, token):
+        """约定撤销本身份并等待停止保持确认。"""
+        ...
+
+    def update_trajectory_scene(self, revision):
+        """约定交接已观察到的碰撞环境版本。"""
         ...
 
     def submit_arm_trajectory(self, joint_names, points, times, *, home=False, velocity=None, timeout=2.):

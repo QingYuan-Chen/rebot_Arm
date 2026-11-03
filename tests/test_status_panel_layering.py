@@ -234,7 +234,7 @@ class _PreparedReplay:
         self.after_quality = _ReplayQuality()
         self.retimed_points = [
             _RetimedPoint(time_from_start=0.0, positions=(0.1, -0.1), velocities=(0.0, 0.0)),
-            _RetimedPoint(time_from_start=0.5, positions=(0.2, -0.2), velocities=(0.1, -0.1)),
+            _RetimedPoint(time_from_start=0.5, positions=(0.2, -0.2), velocities=(0.0, 0.0)),
         ]
 
 
@@ -941,6 +941,7 @@ def test_teach_replay_trajectory_builder_calls_moveit_alignment_with_keywords() 
         calls.append((trajectory, current_positions, first_positions))
         point = _TrajectoryPoint()
         point.positions = list(first_positions)
+        point.velocities = [0.]*len(first_positions)
         trajectory.points.append(point)
         return 0.25
 

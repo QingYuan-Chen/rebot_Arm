@@ -89,6 +89,8 @@ class GravityController:
         停止时再回到位置-速度保持.
         """
         self._lifecycle.require_enabled()
+        if self._backend.arm_resource_reserved:
+            raise RuntimeError('arm resource reserved by prepared trajectory')
         self.arm.clear_passthrough()
         timing = LoopTiming(float(self._backend.rate))
         self.stop_gravity_compensation()

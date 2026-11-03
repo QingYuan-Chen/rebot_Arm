@@ -36,7 +36,7 @@ GraspNet 与 MuJoCo 的 PyYAML 固定版本分别为6.0.1和6.0.3；直接合并
 sudo apt update
 sudo apt install build-essential git python3-venv python3-pip \
   python3-colcon-common-extensions python3-vcstool python3-rosdep python3-pytest \
-  ros-jazzy-moveit ros-jazzy-moveit-simple-controller-manager \
+  ros-jazzy-moveit ros-jazzy-moveit-simple-controller-manager ros-jazzy-moveit-py \
   ros-jazzy-pinocchio ros-jazzy-cv-bridge
 source /opt/ros/jazzy/setup.bash
 # 仅在本机从未初始化rosdep时执行 sudo rosdep init

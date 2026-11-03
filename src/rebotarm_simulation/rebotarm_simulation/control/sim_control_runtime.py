@@ -144,7 +144,8 @@ class SimControlRuntime:
             self._raw_torque_command.fill(0.0)
             self._raw_torque_requested.fill(0.0)
             self._raw_torque_deadline = float(data.time) + 0.1
-        if mode in ("gravity_comp", "hold"):
+        # position 与 hold 共用位置控制器；交接时保留积分和支撑力矩，避免重力下坠。
+        if mode == "gravity_comp" or (mode == "hold" and self._control_mode != "position"):
             self._arm_controller.reset()
         self._control_mode = mode
         self._apply_motor_control(model, data)
@@ -176,14 +177,16 @@ class SimControlRuntime:
         else:
             current = list(_finite_vector(targets, len(ARM_JOINT_NAMES), "joint targets"))
 
-        reached = []
+        # 整批通过后才修改目标；越界不得截断后伪报成功或留下部分更新。
         for index, joint_id in enumerate(self._joint_ids[:6]):
             lower, upper = (float(value) for value in model.jnt_range[joint_id])
-            value = min(max(current[index], lower), upper)
-            self._position_targets[index] = value
-            reached.append(value)
-        self.set_mode(model, data, "position")
-        return tuple(reached)
+            if not lower <= current[index] <= upper:
+                raise ValueError(f"joint target outside limits: {ARM_JOINT_NAMES[index]}")
+        self._position_targets[:6] = current
+        # 高频参考只更新目标，不能额外积分或突破配置控制频率；模式切入仍按原路径执行。
+        if self._control_mode != 'position':
+            self.set_mode(model, data, "position")
+        return tuple(current)
 
 
     def set_joint_position_targets(

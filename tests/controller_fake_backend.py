@@ -63,6 +63,8 @@ class FakeBackend:
     def trajectory_moving(self): return self.execution.moving
     @property
     def trajectory_progress(self): return self.execution.progress
+    @property
+    def arm_resource_reserved(self): return self.execution.reservation is not None
     def position_tick(self, runtime, dt): self.position_callback(runtime, dt)
     def current_pose_values(self, q): return self.kinematics.pose(q)
     def device_wait(self, duration): time.sleep(duration)

@@ -17,6 +17,7 @@ class ActiveTrajectory:
         self._lock = lock or threading.RLock()
         self._token: object | None = None
         self._cancel_requested = False
+        self.prepared = None
 
     @property
     def busy(self) -> bool:
@@ -40,6 +41,7 @@ class ActiveTrajectory:
                 return False
             self._token = token
             self._cancel_requested = False
+            self.prepared = None
             return True
 
     def stop(self) -> bool:
@@ -56,6 +58,7 @@ class ActiveTrajectory:
             if self._token is token:
                 self._token = None
                 self._cancel_requested = False
+                self.prepared = None
 
 
 
@@ -157,6 +160,7 @@ class TrajectoryCommandGate:
             succeed()
             self._active._token = None
             self._active._cancel_requested = False
+            self._active.prepared = None
             return GateOutcome.SUCCEEDED
 
 

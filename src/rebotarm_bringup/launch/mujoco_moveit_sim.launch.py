@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -52,6 +53,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_rviz = LaunchConfiguration("use_rviz")
     use_mujoco_viewer = LaunchConfiguration("use_mujoco_viewer")
+    trajectory_mode = LaunchConfiguration('trajectory_execution_mode')
     # 桌面场景：机器人在原点，附带桌面与可被抓取的物体代理，便于验证抓取流程。
     upstream_model = PathJoinSubstitution(
         [simulation_share, "models", "rebotarm", "scene.xml"]
@@ -61,6 +63,12 @@ def generate_launch_description():
         [
             # 命名空间：关节状态、动作与服务名都带该前缀，必须与规划侧一致。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
+            # 软件及物理操作链验收通过；仅仿真日常默认切换，实机仍为 legacy。
+            DeclareLaunchArgument('trajectory_execution_mode', default_value='prepared_v1',
+                choices=['legacy', 'prepared_v1']),
+            DeclareLaunchArgument('use_dashboard', default_value='false'),
+            DeclareLaunchArgument('dashboard_port', default_value='8080'),
+            DeclareLaunchArgument('trajectory_trace_path', default_value=''),
             # 可视化开关：仅影响是否打开 RViz，不改变控制链路。
             DeclareLaunchArgument("use_rviz", default_value="true"),
             # 统一使用仿真时钟；仿真推进与墙钟解耦，必须为 true。
@@ -101,6 +109,8 @@ def generate_launch_description():
                         "model_path": upstream_model,
                         "arm_namespace": arm_namespace,
                         "publish_rate_hz": publish_rate_hz,
+                        'trajectory_execution_mode': trajectory_mode,
+                        'trajectory_trace_path': LaunchConfiguration('trajectory_trace_path'),
                     }
                 ],
             ),
@@ -115,7 +125,16 @@ def generate_launch_description():
                     "arm_namespace": arm_namespace,
                     "use_fake_joint_states": "false",
                     "use_sim_time": use_sim_time,
+                    'prepare_trajectories': "true",
                 }.items(),
             ),
+            Node(package='rebotarm_dashboard', executable='TeleopStatusPanelNode',
+                name='teleop_status_panel_node', output='screen',
+                condition=IfCondition(LaunchConfiguration('use_dashboard')),
+                parameters=[{'arm_namespace': arm_namespace, 'use_sim_time': use_sim_time,
+                    'simulation_backend': 'mujoco', 'use_hardware': False,
+                    'trajectory_execution_mode': trajectory_mode,
+                    'execution_mode': 'execute', 'web_execute_enabled': True,
+                    'port': LaunchConfiguration('dashboard_port')}]),
         ]
     )

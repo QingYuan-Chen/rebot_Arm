@@ -99,6 +99,8 @@ class WebTeleopClient:
         follow_goal_factory: Callable[[], Any],
         gripper_action_client: Any | None = None,
         gripper_goal_factory: Callable[[], Any] | None = None,
+        trajectory_execution_mode: str = 'legacy',
+        require_trajectory_capability: Callable[[], None] = lambda: None,
     ) -> None:
         """注入动作客户端与消息工厂（全部为关键字参数）。
 
@@ -121,6 +123,8 @@ class WebTeleopClient:
         self._follow_goal_factory = follow_goal_factory
         self._gripper_action_client = gripper_action_client
         self._gripper_goal_factory = gripper_goal_factory
+        self._trajectory_mode = trajectory_execution_mode
+        self._require_trajectory_capability = require_trajectory_capability
 
     def execute(
         self,
@@ -170,6 +174,12 @@ class WebTeleopClient:
                 "status": {"state": "rejected", "message": decision.message},
                 "goal_future": None,
             }
+        try:
+            self._require_trajectory_capability()
+        except ValueError as exc:
+            return dict(accepted=False, decision=decision, goal_future=None,
+                response=dict(accepted=False, message=str(exc)),
+                status=dict(state='rejected', message=str(exc)))
         # 只等 0.1 s：Web 命令背后是人在等反馈，宁可快速失败也不要阻塞面板线程
         if not self._action_client.wait_for_server(timeout_sec=0.1):
             message = "follow_joint_trajectory action unavailable"
@@ -185,16 +195,13 @@ class WebTeleopClient:
         trajectory.joint_names = list(decision.joint_names)
         # 起点必须与决策里的关节顺序对齐，否则位置会挂到错误的关节上
         current = tuple(current_positions[name] for name in decision.joint_names)
-        for elapsed, positions in interpolate_joint_points(
-            current=current,
-            target=decision.positions,
-            duration=decision.duration,
-        ):
-            point = self._trajectory_point_factory()
-            point.positions = [float(v) for v in positions]
-            # time_from_start 是相对轨迹起点的时刻（s），由插值函数按步长给出
-            set_duration(point.time_from_start, elapsed)
-            trajectory.points.append(point)
+        if self._trajectory_mode == 'prepared_v1':
+            from rebotarm_motion.trajectory_messages import point_to_point_message
+            trajectory = point_to_point_message(decision.joint_names, current,
+                decision.positions, decision.duration, trajectory_factory=self._trajectory_factory,
+                point_factory=self._trajectory_point_factory)
+        else:
+            self._append_legacy_points(trajectory, current, decision)
         goal = self._follow_goal_factory()
         goal.trajectory = trajectory
         future = self._action_client.send_goal_async(goal)
@@ -214,6 +221,18 @@ class WebTeleopClient:
             "goal_future": future,
             "trajectory": trajectory,
         }
+
+    def _append_legacy_points(self, trajectory, current, decision):
+        for elapsed, positions in interpolate_joint_points(
+            current=current,
+            target=decision.positions,
+            duration=decision.duration,
+        ):
+            point = self._trajectory_point_factory()
+            point.positions = [float(v) for v in positions]
+            # time_from_start 是相对轨迹起点的时刻（s），由插值函数按步长给出
+            set_duration(point.time_from_start, elapsed)
+            trajectory.points.append(point)
 
     def stop(self, goal_handle: Any | None, *, trajectory_stop_client: Any) -> dict:
         """停止 Web 触发的运动：先请求控制器级停止，再取消动作目标。

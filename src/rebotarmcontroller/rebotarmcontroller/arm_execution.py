@@ -24,6 +24,7 @@ import threading
 import time
 import numpy as np
 from .gravity_control import vector, POSITION_LIMITS
+from rebotarm_trajectory.sampling import step_index, validate_samples
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,9 @@ class ArmExecution:
         self._times = ()
         self._cursor = 0
         self._started = 0.
+        self._curve = None
+        self.last_sent_target = None
+        self.reservation = None
         self.running = False
         self.moving = False
 
@@ -110,6 +114,7 @@ class ArmExecution:
             # 代次变化使取消前产生的轨迹和待发送快照失效.
             self._generation += 1
             self._points = self._times = ()
+            self._curve = None
             self._override = None
             self._cursor = 0
             self.moving = False
@@ -117,12 +122,8 @@ class ArmExecution:
 
     def submit(self, points, times, generation, *, now=None, velocity=None):
         """先校验轨迹及速度覆盖, 再在同一事务内接纳; 代次失效或未运行时返回 False."""
-        values = tuple(self.validate_target(q) for q in points)
-        stamps = tuple(float(t) for t in times)
-        if not values or len(values)!=len(stamps) or not all(math.isfinite(t) and t>=0 for t in stamps):
-            raise ValueError('trajectory needs finite nonnegative times and joint targets')
-        if any(b<=a for a,b in zip(stamps,stamps[1:])):
-            raise ValueError('trajectory times must increase')
+        values, stamps = validate_samples(points, times)
+        values = tuple(self.validate_target(q) for q in values)
         override = None if velocity is None else tuple(vector(velocity, 6, 'velocity override'))
         if override is not None and min(override) <= 0:
             raise ValueError('velocity override must be positive')
@@ -131,9 +132,24 @@ class ArmExecution:
             # 校验失败不能留下无任务轨迹; 目标, 速度覆盖及代次在同一锁内一起接替.
             self._generation += 1
             self._override = override
+            self._curve = None
             self._points,self._times = values,stamps
             self._cursor = 0
             self._started = time.monotonic() if now is None else float(now)
+            self.moving = True
+            return True
+
+    def submit_prepared(self, curve, generation, *, now):
+        """接纳原样系数；不再次规范化起点、合并节点或拟合。"""
+        self.validate_target(curve.points[0].positions)
+        self.validate_target(curve.points[-1].positions)
+        with self.lock:
+            if generation != self._generation or not self.running:
+                return False
+            self._generation += 1
+            self._curve = curve
+            self._points, self._times = curve.positions, curve.times
+            self._cursor, self._started, self._override = 0, float(now), None
             self.moving = True
             return True
 
@@ -141,10 +157,16 @@ class ArmExecution:
         """取指定单调时间已到期的最新目标; 游标仍等待发送确认."""
         with self.lock:
             index = self._cursor
+            if self._curve is not None and self.moving:
+                elapsed = now-self._started
+                q = self._curve.sample(elapsed)[0]
+                return ArmTarget(q, self._override, self._generation,
+                                 step_index(self._times, elapsed))
             # 一个周期内若多个点已到期, 只输出其中最新目标; 不在此处确认发送.
-            while self.moving and index<len(self._points) and self._times[index]<=now-self._started:
-                self._target = self._points[index]
-                index += 1
+            if self.moving:
+                index = step_index(self._times, now-self._started, index)
+                if index:
+                    self._target = self._points[index-1]
             return ArmTarget(self._target,self._override,self._generation,index)
 
     def acknowledge(self, target):
@@ -152,6 +174,9 @@ class ArmExecution:
         with self.lock:
             # 只有当前代次的命令成功发送后才能推进游标.
             if target.generation!=self._generation: return
+            self.last_sent_target = tuple(target.positions)
+            if self._curve is not None:
+                self._target = self.last_sent_target
             self._cursor = target.cursor
             if self._points and self._cursor==len(self._points): self.moving = False
 

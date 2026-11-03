@@ -155,6 +155,14 @@ def generate_launch_description():
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             DeclareLaunchArgument("use_fake_joint_states", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument('prepare_trajectories', default_value='false'),
+            Node(
+                package='rebotarm_motion', executable='TrajectoryPreparationNode',
+                name='trajectory_preparation', output='screen',
+                condition=IfCondition(LaunchConfiguration('prepare_trajectories')),
+                parameters=[moveit_config.to_dict(), sensors_3d,
+                    {'arm_namespace': arm_namespace, 'use_sim_time': use_sim_time}],
+            ),
             # 启动时把实际生效的 OMPL 规划参数打到终端，便于排查「规划失败但看不出原因」。
             LogInfo(msg="move_group planning params:\n" + planning_debug_summary),
             # 固定基座变换：world -> base_link。SRDF 里的 world_joint 描述的是同一段关系，

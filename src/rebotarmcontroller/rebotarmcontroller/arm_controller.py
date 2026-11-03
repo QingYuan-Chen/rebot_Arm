@@ -16,9 +16,10 @@
 """
 
 from __future__ import annotations
-from .component_ports import CyclePort, ArmFeedbackPort, GravityArmPort, ProtectionPort
+from .component_ports import CyclePort, ArmFeedbackPort, GravityArmPort, ProtectionPort, ArmGripperPort
 from .arm_stop import ArmStop, CycleResult
 from .arm_trajectory import ArmTrajectory
+from .arm_execution import ArmExecution
 from .stationary_evidence import StationaryEvidence, POSITION_SPAN
 import logging
 from .sdk_driver import CommandTransportError
@@ -51,6 +52,8 @@ class ArmController:
         self._hold_generation = None
         self._hold_confirmed_at = None
         self._stop_wait = None
+        self._scene_revision = ''
+        self.gripper = None
 
     def reset_session(self):
         """失能/重连不能复用上一会话的静止证据或停止续体."""
@@ -58,8 +61,11 @@ class ArmController:
         self._hold_generation = None
         self._hold_confirmed_at = None
         self._stop.abort('controller session reset')
+        self._backend.execution.reservation = None
+        self._backend.execution.last_sent_target = None
 
-    def bind(self, *, cycle: CyclePort, feedback: ArmFeedbackPort, gravity: GravityArmPort, protection: ProtectionPort):
+    def bind(self, *, cycle: CyclePort, feedback: ArmFeedbackPort, gravity: GravityArmPort,
+             protection: ProtectionPort, gripper: ArmGripperPort=None):
         """装配阶段一次注入明确组件接口; 运行后不替换依赖."""
         if self._bound:
             raise RuntimeError("component already bound")
@@ -67,6 +73,7 @@ class ArmController:
         self.feedback = feedback
         self.gravity = gravity
         self.protection = protection
+        self.gripper = gripper
         self._bound = True
 
     def clear_passthrough(self):
@@ -99,6 +106,27 @@ class ArmController:
                 and task.generation != self._backend.target_generation):
             self._arm_trajectory.finish(task, 'aborted', 'execution canceled or superseded')
 
+    def check_prepared_context(self):
+        """固定夹爪变化或保护性释放先停止六轴，不能继续使用已检查的碰撞曲线。"""
+        token = self._backend.execution.reservation
+        if token is None or self._stop.pending:
+            return
+        try:
+            state = self.gripper.snapshot()
+            valid = (state['generation'] == token.gripper_generation
+                and abs(state['raw_position']-token.gripper_raw_position) <= POSITION_SPAN)
+        except RuntimeError:
+            valid = False
+        if valid:
+            return
+        stopping = self.stop_active_motion()
+        if isinstance(stopping, CycleResult):
+            # 保持已立即接管；确认交回请求运行时，周期不能等待或保护性失能健康机械臂。
+            try:
+                self._backend.requests.submit(lambda: stopping, resource='device', priority=0)
+            except RuntimeError as exc:
+                self._lifecycle.errors.append(f'PREPARED_STOP_UNCONFIRMED: {exc}')
+
     def update_task(self, sample):
         """发送后以新鲜快照推进任务, 超差保持目标仍由六轴所有者设置."""
         hold = self._arm_trajectory.update(sample.positions, sample.observed_at)
@@ -107,7 +135,9 @@ class ArmController:
         task = self._arm_trajectory.task
         if task is not None and task.event.is_set() and self._lifecycle.execution == 'TRAJ_RUNNING':
             self._lifecycle.set_execution_state('IDLE')
-        stable_mode = (self._lifecycle.enabled and self._lifecycle.execution == 'IDLE'
+            if task.result.state == 'succeeded':
+                self._backend.execution.reservation = None
+        stable_mode = (self._lifecycle.enabled and self._lifecycle.execution in ('IDLE', 'TRAJ_PREPARING')
                        and all(code == 1 for code in sample.statuses)
                        and self._backend.mode == 'pos_vel' and not self._backend.trajectory_moving
                        and not self.passthrough_active() and not self.gravity.gravity_compensation_active()
@@ -230,6 +260,7 @@ class ArmController:
                     if result.state != 'confirmed':
                         raise RuntimeError(result.message)
                     self._lifecycle.set_execution_state('IDLE')
+                    self._backend.execution.reservation = None
                     if active is not None:
                         owner.finish(active, 'canceled', result.message)
                     return True, None
@@ -237,6 +268,7 @@ class ArmController:
                 self._stop_wait = (poll, cancel)
                 return CycleResult(poll, cancel=cancel)
             self._lifecycle.set_execution_state('IDLE')
+            self._backend.execution.reservation = None
             if active is not None:
                 owner.finish(active, 'canceled', 'stop/hold confirmed')
 
@@ -245,12 +277,105 @@ class ArmController:
         if self._stop.pending:
             raise RuntimeError('arm stop/hold confirmation pending')
 
+    def _prepared_snapshot(self):
+        """设备线程读取原静止证据和已发送保持值，不借单帧制造静止。"""
+        self._lifecycle.require_enabled()
+        execution = self._backend.execution
+        now = time.monotonic()
+        sample = self.feedback.joint_snapshot()
+        hold = execution.last_sent_target
+        if (hold is None or self._backend.mode != 'pos_vel'
+                or self.passthrough_active() or self.gravity.gravity_compensation_active()
+                or self._hold_generation != execution.generation
+                or not self._hold_evidence.confirmed(now)
+                or any(code != 1 for code in sample.statuses)
+                or not -.005 <= now-sample.observed_at <= .15
+                or np.max(np.abs(np.asarray(hold)-sample.positions)) > POSITION_SPAN):
+            raise RuntimeError('fresh stationary acknowledged hold required')
+        if self.gripper is None:
+            raise RuntimeError('fixed gripper snapshot port unavailable')
+        return sample, tuple(hold), self.gripper.snapshot()
+
+    @device_request
+    def reserve_arm_preparation(self, deadline):
+        """先预留资源，再让 ROS 调用方离开设备线程执行耗时校验。"""
+        from .controller_values import ArmPreparation
+        self.require_available()
+        execution = self._backend.execution
+        task = self._arm_trajectory.task
+        if execution.reservation is not None or (task is not None and not task.event.is_set()):
+            raise RuntimeError('arm resource busy')
+        if not np.isfinite(deadline) or time.monotonic() >= deadline or not self._scene_revision:
+            raise RuntimeError('preparation deadline expired or scene unavailable')
+        sample, hold, gripper = self._prepared_snapshot()
+        token = ArmPreparation(self._backend.requests.generations['device'], execution.generation,
+            hold, sample.positions, sample.observed_at, tuple(gripper['positions']),
+            gripper['generation'], gripper['raw_position'], self._scene_revision, deadline)
+        execution.reservation = token
+        self._lifecycle.set_execution_state('TRAJ_PREPARING')
+        return token
+
+    @staticmethod
+    def decode_prepared_arm_trajectory(payload):
+        """在调用线程完成线性规模的数值解码，禁止占用设备周期。"""
+        from rebotarm_trajectory.polynomial import curve_from_payload
+        from .controller_values import PreparedArmHandoff
+        curve = curve_from_payload(payload['curve'])
+        for point in curve.points:
+            ArmExecution.validate_target(point.positions)
+        context = payload['context']
+        return PreparedArmHandoff(curve, context['session'], context['generation'],
+            tuple(context['hold']), tuple(payload['gripper_positions']),
+            payload['gripper_generation'], payload['scene_revision'])
+
+    @device_request
+    def admit_prepared_arm_trajectory(self, token, handoff):
+        """同一设备事务内复核身份与反馈并接纳原系数，不再改点或时间。"""
+        execution = self._backend.execution
+        if (execution.reservation is not token or self._stop.pending
+                or time.monotonic() >= token.deadline
+                or self._backend.requests.generations['device'] != token.session
+                or execution.generation != token.generation
+                or self._scene_revision != token.scene_revision):
+            raise RuntimeError('prepared trajectory superseded or expired')
+        sample, hold, gripper = self._prepared_snapshot()
+        if (hold != token.hold or handoff.hold != token.hold
+                or handoff.session != token.session or handoff.generation != token.generation
+                or handoff.scene_revision != token.scene_revision
+                or handoff.gripper_generation != token.gripper_generation
+                or handoff.gripper_positions != token.gripper_positions
+                or gripper['generation'] != token.gripper_generation
+                or abs(gripper['raw_position']-token.gripper_raw_position) > POSITION_SPAN):
+            raise RuntimeError('prepared trajectory context changed')
+        curve = handoff.curve
+        if curve.points[0].positions != token.hold:
+            raise ValueError('prepared initial hold mismatch')
+        task = self._arm_trajectory.submit_prepared(curve, token.generation)
+        self._lifecycle.set_execution_state('TRAJ_RUNNING')
+        return task
+
+    @device_request
+    def cancel_arm_preparation(self, token):
+        """仅撤销本令牌，停止确认之前继续占用固定夹爪。"""
+        if self._backend.execution.reservation is token:
+            return self.stop_active_motion()
+
+    @device_request
+    def update_trajectory_scene(self, revision):
+        """已观察到的环境变化使准备/活动曲线失效，健康设备继续使能保持。"""
+        self._scene_revision = str(revision)
+        token = self._backend.execution.reservation
+        if token is not None and token.scene_revision != self._scene_revision:
+            return self.stop_active_motion()
+
     @device_request
     def submit_arm_trajectory(self, joint_names, points, times, *, home=False,
                               velocity=None, timeout=2.):
         """原子检查六轴资源并提交轨迹; 返回只属于本请求的任务句柄."""
         self._lifecycle.require_enabled()
         self.require_available()
+        if self._backend.arm_resource_reserved:
+            raise RuntimeError('arm resource reserved by trajectory preparation')
         if len(joint_names) != 6 or set(joint_names) != set(self._backend.joint_names):
             raise ValueError('trajectory joints must match hardware exactly')
         if not points or len(points) != len(times):
@@ -296,6 +421,8 @@ class ArmController:
         """显式使能且无停止确认占用时设置六轴 rad 目标, 清除透传租约."""
         self._lifecycle.require_enabled()
         self.require_available()
+        if self._backend.arm_resource_reserved:
+            raise RuntimeError('arm resource reserved by trajectory preparation')
         self._arm_passthrough_until = None
         self._backend.set_target(positions)
 
@@ -400,6 +527,8 @@ class ArmController:
         with self._lifecycle.lock:
             self._lifecycle.require_enabled()
             self.require_available()
+            if self._backend.execution.reservation is not None:
+                raise RuntimeError('arm resource reserved by trajectory preparation')
             if joint_name not in self._backend.joint_names:
                 raise KeyError(f"unknown joint: {joint_name}")
 
@@ -498,6 +627,7 @@ class ArmController:
         """撤下周期并作废数值运行状态, 终结旧轨迹任务; 不直接失能."""
         self._backend.stop_control_loop()
         self._backend.set_execution_running(False)
+        self.reset_session()
         owner = self._arm_trajectory
         if owner is not None and owner.task is not None:
             owner.finish(owner.task, 'aborted', 'control mode or lifecycle changed')

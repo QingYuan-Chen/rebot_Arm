@@ -19,6 +19,41 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class PreparedArmHandoff:
+    """调用线程已解码的冻结交接，设备线程只做常量规模身份复核。"""
+
+    curve: object
+    session: int
+    generation: int
+    hold: tuple
+    gripper_positions: tuple
+    gripper_generation: int
+    scene_revision: str
+
+    def __deepcopy__(self, memo):
+        return self
+
+
+@dataclass(frozen=True)
+class ArmPreparation:
+    """六轴所有者颁发的准备身份，跨线程复制仍保留同一令牌。"""
+
+    session: int
+    generation: int
+    hold: tuple
+    feedback: tuple
+    observed_at: float
+    gripper_positions: tuple
+    gripper_generation: int
+    gripper_raw_position: float
+    scene_revision: str
+    deadline: float
+
+    def __deepcopy__(self, memo):
+        return self
+
+
+@dataclass(frozen=True)
 class JointSnapshot:
     """同一次缓存锁内复制的六轴反馈; 观测时间为本批最旧源时间."""
 

@@ -15,6 +15,8 @@
 """
 
 from __future__ import annotations
+import json
+import math
 import time
 from control_msgs.action import FollowJointTrajectory, GripperCommand
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
@@ -27,15 +29,34 @@ class ArmActions:
     """将 ROS Action 协议映射到原组件的数值任务与查询端口, 不拥有执行状态."""
 
     def __init__(self, node, namespace, *, runtime: RuntimeStatePort, lifecycle: LifecycleStatePort,
-                 feedback: JointFeedbackPort, arm: ArmCommandPort, gripper: GripperCommandPort):
+                 feedback: JointFeedbackPort, arm: ArmCommandPort, gripper: GripperCommandPort,
+                 trajectory_execution_mode='legacy'):
         """注入各职责组件并注册可重入 FJT 与夹爪 Action, 设备串行化由运行时负责."""
         self._node = node
         self._runtime, self._lifecycle = runtime, lifecycle
         self._feedback, self._arm, self._gripper = feedback, arm, gripper
+        if trajectory_execution_mode not in ('legacy', 'prepared_v1'):
+            raise ValueError('trajectory_execution_mode must be legacy or prepared_v1')
+        self._trajectory_mode = trajectory_execution_mode
+        self._pending_preparations = {}
+        from std_msgs.msg import String
+        from rclpy.qos import QoSProfile, DurabilityPolicy
+        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._capability_publisher = node.create_publisher(
+            String, f'/{namespace}/trajectory_execution_mode', qos)
+        self._capability_publisher.publish(String(data=trajectory_execution_mode))
+        if trajectory_execution_mode == 'prepared_v1':
+            from rebotarm_msgs.srv import PrepareArmTrajectory
+            self._prepare_type = PrepareArmTrajectory
+            self._prepare_client = node.create_client(PrepareArmTrajectory,
+                f'/{namespace}/prepare_arm_trajectory', callback_group=node.reentrant_group)
+            node.create_subscription(String, f'/{namespace}/trajectory_scene_revision',
+                lambda message: self._arm.update_trajectory_scene(message.data), qos,
+                callback_group=node.reentrant_group)
         self._follow_joint_trajectory_server = ActionServer(
             node, FollowJointTrajectory, f'/{namespace}/follow_joint_trajectory',
             execute_callback=self.execute_follow_joint_trajectory,
-            goal_callback=self.goal_callback, cancel_callback=self.cancel_follow_joint_trajectory,
+            goal_callback=self.trajectory_goal_callback, cancel_callback=self.cancel_follow_joint_trajectory,
             callback_group=node.reentrant_group)
         self._gripper_command_server = ActionServer(
             node, GripperCommand, f'/{namespace}/gripper/command',
@@ -45,11 +66,65 @@ class ArmActions:
 
     def goal_callback(self, _request):
         """只按当前 ready_for_motion 做第一层准入; 实际提交仍要在设备线程重新校验."""
-        return GoalResponse.ACCEPT if self._lifecycle.ready_for_motion else GoalResponse.REJECT
+        return (GoalResponse.ACCEPT if self._lifecycle.ready_for_motion
+                and not (self._trajectory_mode == 'prepared_v1' and self._runtime.arm_resource_reserved)
+                else GoalResponse.REJECT)
 
-    def cancel_follow_joint_trajectory(self, _goal):
-        """接纳取消意图; 执行回调用自己的任务身份提交停止, 不在此停止全局任务."""
-        # 只接纳取消意图; execute 回调使用自己的句柄提交, 避免误停其他任务.
+    def trajectory_goal_callback(self, request):
+        """准备路径先占用资源；忙时直接拒绝，不能积累尚未执行的 Goal。"""
+        received = time.monotonic()
+        if self._trajectory_mode == 'legacy':
+            return self.goal_callback(request)
+        try:
+            if not self._lifecycle.ready_for_motion or not self._prepare_client.service_is_ready():
+                return GoalResponse.REJECT
+            last = request.trajectory.points[-1].time_from_start
+            duration = last.sec+last.nanosec*1e-9
+            if not math.isfinite(duration) or not 0 <= duration <= 300.:
+                return GoalResponse.REJECT
+            deadline = received+min(2., .2*duration+.25)
+            token = self._arm.reserve_arm_preparation(deadline)
+            # Jazzy 将同一个请求交给 GoalHandle；按请求绑定，停止后新 Goal 不能串用旧令牌。
+            self._pending_preparations[id(request)] = (request, token)
+            return GoalResponse.ACCEPT
+        except (ValueError, RuntimeError, IndexError):
+            return GoalResponse.REJECT
+
+    def _prepare_follow_goal(self, goal_handle, token):
+        """服务等待和数值解码均在 ROS 调用线程；设备周期继续发送原保持目标。"""
+        request = self._prepare_type.Request()
+        request.trajectory = goal_handle.request.trajectory
+        request.session, request.generation = token.session, token.generation
+        request.hold_positions, request.feedback_positions = list(token.hold), list(token.feedback)
+        request.feedback_observed_at = token.observed_at
+        request.stationary = request.enabled = True
+        request.gripper_positions = list(token.gripper_positions)
+        request.gripper_generation = token.gripper_generation
+        request.scene_revision, request.deadline_monotonic = token.scene_revision, token.deadline
+        future = self._prepare_client.call_async(request)
+        while not future.done():
+            if goal_handle.is_cancel_requested or time.monotonic() >= token.deadline:
+                future.cancel()
+                raise RuntimeError('trajectory preparation canceled or timed out')
+            time.sleep(.002)
+        response = future.result()
+        if not response.success:
+            raise ValueError(response.message)
+        handoff = self._arm.decode_prepared_arm_trajectory(json.loads(response.prepared_json))
+        if goal_handle.is_cancel_requested:
+            raise RuntimeError('trajectory canceled before atomic admission')
+        return self._arm.admit_prepared_arm_trajectory(token, handoff)
+
+    def cancel_follow_joint_trajectory(self, goal):
+        """准备路径先撤销本 Goal 令牌；旧路径由执行回调按任务身份停止。"""
+        if self._trajectory_mode == 'prepared_v1':
+            pending = self._pending_preparations.get(id(goal.request))
+            if pending is not None and pending[0] is goal.request:
+                try:
+                    # 撤销所有者令牌先于取消回执，已排队的接纳也不能越过取消。
+                    self._arm.cancel_arm_preparation(pending[1])
+                except RuntimeError as exc:
+                    self._node.get_logger().error(f'trajectory cancel stop unconfirmed: {exc}')
         return CancelResponse.ACCEPT
 
     def cancel_gripper_command(self, _goal):
@@ -65,8 +140,13 @@ class ArmActions:
         """
         result = FollowJointTrajectory.Result()
         task = None
+        pending = (self._pending_preparations.get(id(goal_handle.request))
+            if self._trajectory_mode == 'prepared_v1' else None)
+        token = pending[1] if pending is not None and pending[0] is goal_handle.request else None
         try:
             if goal_handle.is_cancel_requested:
+                if token is not None:
+                    self._arm.cancel_arm_preparation(token)
                 goal_handle.canceled()
                 result.error_code = result.INVALID_GOAL
                 result.error_string = 'canceled before submission'
@@ -76,7 +156,12 @@ class ArmActions:
             points = [tuple(point.positions) for point in trajectory.points]
             times = [float(p.time_from_start.sec)+p.time_from_start.nanosec*1e-9
                      for p in trajectory.points]
-            task = self._arm.submit_arm_trajectory(names, points, times)
+            if self._trajectory_mode == 'prepared_v1':
+                if token is None:
+                    raise RuntimeError('trajectory was not reserved')
+                task = self._prepare_follow_goal(goal_handle, token)
+            else:
+                task = self._arm.submit_arm_trajectory(names, points, times)
             self._node.publish_arm_status()
             while not task.event.is_set():
                 if goal_handle.is_cancel_requested:
@@ -113,8 +198,27 @@ class ArmActions:
                     self._arm.stop_active_motion(task)
                 except Exception as stop_error:
                     exc = RuntimeError(f'{exc}; stop unconfirmed: {stop_error}')
+            stopped = True
+            if token is not None:
+                try:
+                    self._arm.cancel_arm_preparation(token)
+                except Exception as stop_error:
+                    stopped = False
+                    exc = RuntimeError(f'{exc}; stop unconfirmed: {stop_error}')
             result.error_code, result.error_string = result.INVALID_GOAL, str(exc)
-            goal_handle.abort()
+            if token is not None and task is None and goal_handle.is_cancel_requested and stopped:
+                goal_handle.canceled()
+            else:
+                goal_handle.abort()
+        finally:
+            if pending is not None:
+                self._pending_preparations.pop(id(goal_handle.request), None)
+            if token is not None and task is not None and task.result.state != 'succeeded':
+                try:
+                    self._arm.cancel_arm_preparation(token)
+                except Exception as stop_error:
+                    # 未确认停止仍由所有者保留资源，清理异常不能吞掉原 Action 结果。
+                    result.error_string += f'; stop unconfirmed: {stop_error}'
         self._node.publish_arm_status()
         return result
 

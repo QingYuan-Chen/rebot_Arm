@@ -91,6 +91,7 @@ class ControllerCycle:
             return
         try:
             self._expire_passthrough()
+            self.arm.check_prepared_context()
             if not self.arm.passthrough_active():
                 arm_callback(arm, dt)
         except CommandTransportError as exc:

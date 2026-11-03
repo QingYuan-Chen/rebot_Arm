@@ -55,6 +55,10 @@
   <!-- trajectory_msgs：关节轨迹消息，构造并下发给控制器。 -->
   <exec_depend>trajectory_msgs</exec_depend>
 
+  <exec_depend>rebotarm_trajectory</exec_depend>
+  <exec_depend>moveit_py</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+
   <export>
     <build_type>ament_python</build_type>
   </export>

@@ -1,6 +1,6 @@
 # 当前项目状态与关键决定
 
-> 状态：REFERENCE；类型：项目状态；适用范围：当前工作空间及强化学习远端部署；最后核对：2026-11-03（P005 第一批离线参考与校验整理提交，暂存内容完整软件回归通过；生产连续轨迹及整体硬件验收未完成）。
+> 状态：REFERENCE；类型：项目状态；适用范围：当前工作空间及强化学习远端部署；最后核对：2026-11-03（P005 第二批软件与 MuJoCo 验收完成，日常仿真默认 prepared_v1；实机仍 legacy，整体硬件验收未完成）。
 
 本文件是项目状态与进展的唯一文档，保留已完成进展、当前有效决定、验证范围和未解决问题。
 功能、架构、参数与启动命令分别链接到对应手册；不维护历史任务阶段、进度百分比或重复流水。
@@ -12,7 +12,7 @@
 
 - 主目录：`/home/a/project/rebot_Arm`；开发分支为 `develop`、发布分支为 `main`，远端仓库为 `QingYuan-Chen/rebot_Arm`。
 - 当前源码已整合 `huangbinai/robotarm_ros2 main@8c02470f594cfa0180e2ebfb86d1e14a640b4db3`，相对上次 `19f2939` 纳入 25 个上游提交。本次发布内容包括上游整合及已有 RL 迁出改动；原整合提交为 `dc7e067`，本轮整合前开发基线为 `53f9802`。此处是核对快照，不代表上游永远最新。
-- Ubuntu 24.04 / ROS 2 Jazzy，12 个活动 ROS 包；职责和依赖边界见[架构说明](../implemented/architecture.md)。
+- Ubuntu 24.04 / ROS 2 Jazzy，13 个活动 ROS 包；职责和依赖边界见[架构说明](../implemented/architecture.md)。
 - 视觉只维护 Gemini 2 → 本地 YOLO → ROS RGB-D/CameraInfo/detections → 本机进程内 GraspNet。
 - 分环境依赖由[依赖索引](../setup/dependencies/README.md)统一维护，安装工具为 `scripts/install_python_dependencies.py`。
 - 视觉、GraspNet 分别使用 `.venv-vision`、`.venv-graspnet`；MuJoCo 默认使用系统 Python 3.12 的用户级依赖；解释器选择见[配置契约](../setup/launch_python_configuration.md)。
@@ -20,7 +20,10 @@
 
 ## 近期完成进展
 
-- 2026-11-03 按用户要求先将 [P005 第一批离线成果](../implemented/features/hardware_execution.md#p005-离线连续轨迹参考)整理为本地提交：仅纳入 6 个新增实现/工具/样本/测试文件及配套功能、问题与状态说明，其他既有源码注释、反馈延迟诊断、硬件记录和部署文档差异未混入。直接导出暂存区，在 localhost 隔离域 175、复用现有 ROS 安装环境完成完整回归 **1699 passed / 2 skipped**（两条既有 Gymnasium 提示，230.78 s），分层 **26 passed**，规定及控制器/新增文件 compileall、文档链接和暂存差异检查通过；未重新构建，不属于独立安装区验收。证据在 `log/p005_batch1_commit_20261103_125824/`；本次未操作真机、未推送，第二批生产接入与仿真验收尚未实施。
+- 2026-11-03 按确认方案实施 [P005 第二批共享轨迹与执行接入](../implemented/features/p005_prepared_trajectory.md)：新增纯数值 `rebotarm_trajectory`，迁移行为等价回归通过；准备服务、正式控制器及 MuJoCo 原子接纳、逐周期采样和前端完整五次轨迹已接入。日常 MuJoCo 默认切换 `prepared_v1`，实机仍 `legacy`，专用路径保持既有语义。模型、增益、限值和 MoveIt 预算未修改。
+- 独立非软链接安装区构建 **13 包通过**；隐藏原源码/build/install 并隔离真实串口后，完整 ROS/MuJoCo 操作链通过，包含真实 MoveIt 成功执行、网页点对点、网页与 PTY 终端键盘、兼容输入、取消、执行中场景变化、固定夹爪忙拒绝、环境及附着物碰撞拒绝和原 jerk 负例。冻结物理指标全部通过，具体数据及命令见功能页；证据在 `log/p005_batch2_20261103/validated_acceptance/`。复核补充修复高频目标写入额外推进 PI 及准备节点回调池竞争；保持配置控制频率，完整默认启动链再次通过。最终全量回归 **1743 passed / 2 skipped**（两条既有 Gymnasium 提示，235.45 s），分层 **27 passed**，规定及新包/控制器/仿真编译、123 个本地文档链接和差异检查通过。收尾无本轮测试进程残留，真实串口无占用，6 处无关既有修改与接手快照一致。第二批软件与仿真验收完成；未操作真机，本次本地提交未推送，第三批实机须重新确认现场和授权。
+
+- 2026-11-03 按用户要求先将 [P005 第一批离线成果](../implemented/features/hardware_execution.md#p005-离线连续轨迹参考)整理为本地提交：仅纳入 6 个新增实现/工具/样本/测试文件及配套功能、问题与状态说明，其他既有源码注释、反馈延迟诊断、硬件记录和部署文档差异未混入。直接导出暂存区，在 localhost 隔离域 175、复用现有 ROS 安装环境完成完整回归 **1699 passed / 2 skipped**（两条既有 Gymnasium 提示，230.78 s），分层 **26 passed**，规定及控制器/新增文件 compileall、文档链接和暂存差异检查通过；未重新构建，不属于独立安装区验收。证据在 `log/p005_batch1_commit_20261103_125824/`；本次未操作真机、未推送，当时第二批生产接入与仿真验收尚未实施；现状见上文。
 
 - 2026-11-02 按用户要求修复控制器构造接线错误：仅删除 `hardware_manager.py` 向 `GripperFeedbackPort` 注入的 `get_feedback` 参数；`FeedbackReader` 没有该方法，端口无该字段，夹爪现有消费者使用缓存及已验证样本接口。未增加兼容占位接口或改变反馈/夹爪行为。原有用例修复前因 AttributeError 失败，修复后控制器运行时、故障样本及 ROS 端口专项 **69 passed**；当前工作区在 localhost 隔离域 174 完整回归 **1702 passed / 2 skipped**（两条既有 Gymnasium 提示，229.95 s），原 260 项构造失败解除。分层 **26 passed**，规定及控制器 compileall、文档链接和差异检查通过；P005 离线实现及其他既有未提交内容保留。证据保留于 `log/feedback_wiring_fix_20261102/`，收尾无本轮测试进程残留、真实串口无占用；本轮未重新构建、未操作真机、未提交推送。
 

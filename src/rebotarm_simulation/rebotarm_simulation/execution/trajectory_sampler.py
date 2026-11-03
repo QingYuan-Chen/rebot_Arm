@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from rebotarm_trajectory.sampling import linear_sample
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import math
@@ -28,6 +28,20 @@ import math
 # 规范关节顺序：六个机械臂关节固定按 joint1..joint6 排列。
 # 所有内部目标向量、采样结果和示例中的“完整向量”都使用这一顺序，与外部传入顺序无关。
 from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES
+
+
+@dataclass(frozen=True)
+class PreparedTrajectorySampler:
+    """已准备曲线的协议适配，采样数学仅由共享内核实现。"""
+
+    curve: object
+
+    @property
+    def duration(self):
+        return self.curve.duration
+
+    def sample(self, elapsed):
+        return self.curve.sample(elapsed)[0]
 
 
 @dataclass(frozen=True)
@@ -214,32 +228,7 @@ class TrajectorySampler:
         time = self._validate_sample_time(simulation_time)
         if self._cancelled:
             raise RuntimeError("trajectory sampling was cancelled")
-        if time >= self.duration:
-            return self._positions[-1]
-
-        # 二分定位第一个严格大于 time 的轨迹点下标，因此待插值区间必为 [upper-1, upper]。
-        upper = bisect_right(self._times, time)
-        if upper == 0:
-            # 早于第一个轨迹点：以 t=0 的初始位置作为插值区间左端。
-            lower_time = 0.0
-            lower_positions = self._initial
-        else:
-            lower_time = self._times[upper - 1]
-            lower_positions = self._positions[upper - 1]
-            if lower_time == time:
-                # 正好命中已记录的轨迹点，直接返回，避免插值引入浮点误差。
-                return lower_positions
-
-        upper_time = self._times[upper]
-        upper_positions = self._positions[upper]
-        if upper_time == lower_time:
-            # 时间严格递增时不会发生；此处仅作除零保护。
-            return upper_positions
-        fraction = (time - lower_time) / (upper_time - lower_time)
-        return tuple(
-            start + fraction * (end - start)
-            for start, end in zip(lower_positions, upper_positions)
-        )
+        return linear_sample(self._times, self._positions, self._initial, time)
 
     @staticmethod
     def _validate_sample_time(simulation_time: float) -> float:

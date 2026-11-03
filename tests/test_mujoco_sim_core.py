@@ -376,9 +376,11 @@ def test_end_effector_orientation_comes_from_site_frame_in_xyzw_order(tmp_path: 
         assert sim.get_state().end_effector_orientation == pytest.approx(expected_xyzw)
 
 
-def test_joint_targets_accept_mapping_or_arm_sequence_and_clamp(runtime_sim) -> None:
-    reached = runtime_sim.set_joint_position_targets({"joint1": 99.0, "joint2": -1.0})
-    assert reached == pytest.approx((2.8, -1.0, -1.0, 0.3, 0.0, 0.0))
+def test_joint_targets_accept_mapping_or_arm_sequence_and_reject_limits(runtime_sim) -> None:
+    before = runtime_sim.control_targets
+    with pytest.raises(ValueError, match="outside"):
+        runtime_sim.set_joint_position_targets({"joint1": 99.0, "joint2": -1.0})
+    assert runtime_sim.control_targets == before
 
     reached = runtime_sim.set_joint_position_targets([0.1, -0.2, -0.3, 0.4, 0.5, 0.6])
     assert reached == pytest.approx((0.1, -0.2, -0.3, 0.4, 0.5, 0.6))

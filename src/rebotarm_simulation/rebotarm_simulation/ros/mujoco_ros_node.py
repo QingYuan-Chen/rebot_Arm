@@ -7,6 +7,8 @@ policies live in the owning codec and execution modules.
 from __future__ import annotations
 
 import math
+import json
+from collections import deque
 import threading
 import time
 from typing import Any, Sequence
@@ -27,6 +29,8 @@ from rebotarm_simulation.execution.trajectory_state import terminal_disposition
 from rebotarm_simulation.ros.message_codec import trajectory_to_sampler
 from rebotarm_simulation.ros.message_codec import validate_gripper_width
 from rebotarm_simulation.execution.trajectory_sampler import ARM_JOINT_NAMES, NamedTrajectoryPoint, TrajectorySampler
+from rebotarm_simulation.execution.trajectory_sampler import PreparedTrajectorySampler
+from rebotarm_trajectory.polynomial import curve_from_payload, TrajectoryPoint, ordered_points
 
 
 from rebotarm_simulation.execution.control_api import SimulationControlApi, normalize_ros_control_mode
@@ -44,12 +48,14 @@ def create_node_class():
     from rclpy.clock import Clock as RclpyClock
     from rclpy.clock import ClockType
     from rclpy.node import Node
-    from rebotarm_msgs.msg import JointMotorState
+    from rebotarm_msgs.msg import JointMotorState, ArmStatus
     from rebotarm_msgs.srv import SetGripper, SetMode
     from rosgraph_msgs.msg import Clock
     from sensor_msgs.msg import JointState
     from std_srvs.srv import Trigger
     from trajectory_msgs.msg import JointTrajectoryPoint
+    from std_msgs.msg import String
+    from rclpy.qos import QoSProfile, DurabilityPolicy
 
     from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
     from rebotarm_simulation.ros.ros_diagnostics import build_control_diagnostic
@@ -62,6 +68,13 @@ def create_node_class():
             self.declare_parameter("show_viewer", False)
             self.declare_parameter("model_path", "")
             self.declare_parameter("arm_namespace", "rebotarm")
+            self.declare_parameter("trajectory_execution_mode", "legacy")
+            self.declare_parameter('trajectory_trace_path', '')
+            from rebotarm_simulation.diagnostics.trajectory_trace import TrajectoryTrace
+            self._trace = TrajectoryTrace(self.get_parameter('trajectory_trace_path').value)
+            self._trajectory_mode = self.get_parameter("trajectory_execution_mode").value
+            if self._trajectory_mode not in ('legacy', 'prepared_v1'):
+                raise ValueError('trajectory_execution_mode must be legacy or prepared_v1')
             self.declare_parameter("publish_rate_hz", 30.0)
             self.declare_parameter("max_trajectory_points", DEFAULT_MAX_TRAJECTORY_POINTS)
             self.declare_parameter("max_trajectory_duration_sec", DEFAULT_MAX_TRAJECTORY_DURATION_SEC)
@@ -140,6 +153,23 @@ def create_node_class():
             self._lifecycle = ExecutionLifecycle(self._active, self._command_gate)
             self._pending_sampler: TrajectorySampler | None = None
             self._callback_group = ReentrantCallbackGroup()
+            self._scene_revision = ''
+            self._preparation = None
+            self._sample_history = deque(maxlen=512)
+            self._last_physics_wall = time.monotonic()
+            self._stop_unconfirmed = False
+            self._retained_stop_token = None
+            qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+            self._capability_publisher = self.create_publisher(String,
+                f'/{namespace}/trajectory_execution_mode', qos)
+            self._capability_publisher.publish(String(data=self._trajectory_mode))
+            if self._trajectory_mode == 'prepared_v1':
+                from rebotarm_msgs.srv import PrepareArmTrajectory
+                self._prepare_type = PrepareArmTrajectory
+                self._prepare_client = self.create_client(PrepareArmTrajectory,
+                    f'/{namespace}/prepare_arm_trajectory', callback_group=self._callback_group)
+                self.create_subscription(String, f'/{namespace}/trajectory_scene_revision',
+                    self._scene_changed, qos, callback_group=self._callback_group)
             self._timer_callback_group = MutuallyExclusiveCallbackGroup()
             self._physics_clock = RclpyClock(clock_type=ClockType.STEADY_TIME)
             self._stamp = MonotonicStamp()
@@ -152,6 +182,7 @@ def create_node_class():
                 JointMotorState, f"/{self._arm_namespace}/gripper/state", 10
             )
             self._clock_pub = self.create_publisher(Clock, "/clock", 10)
+            self._status_pub = self.create_publisher(ArmStatus, f'/{namespace}/arm_status', qos)
             self._diagnostic_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
             self._diagnostic_last_wall = time.monotonic()
             self._diagnostic_last_sim = 0.0
@@ -227,13 +258,15 @@ def create_node_class():
         def _goal_callback(self, goal_request):
             token = goal_request
             try:
+                if self._trajectory_mode == 'prepared_v1':
+                    return self._reserve_prepared_goal(goal_request)
                 sampler = trajectory_to_sampler(
                     goal_request.trajectory,
                     initial_positions=self._current_arm_positions(),
                     max_points=self._max_points,
                     max_duration_sec=self._max_duration,
                 )
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, RuntimeError):
                 self.get_logger().warning("rejected invalid trajectory goal")
                 return GoalResponse.REJECT
             if not self._active.try_start(token):
@@ -242,14 +275,144 @@ def create_node_class():
             self._pending_sampler = sampler
             return GoalResponse.ACCEPT
 
+        def _stationary_snapshot(self, *, after=None):
+            """物理新帧覆盖完整静止窗口；保持目标来自最后成功接纳的命令。"""
+            state = self._sim.get_state()
+            cutoff = state.simulation_time-.2
+            samples = [item for item in self._sample_history if item.simulation_time >= cutoff-.0021]
+            if (time.monotonic()-self._last_physics_wall > .15 or len(samples) < 3
+                    or samples[-1].simulation_time-samples[0].simulation_time < .2-1e-9
+                    or (after is not None and samples[0].simulation_time <= after)):
+                raise RuntimeError('fresh complete stationary window required')
+            bounds = (3*25/65535,)*6+(3*25/65535*.009,)*2
+            speeds = (.05,)*6+(.00045,)*2
+            for index, (span, speed) in enumerate(zip(bounds, speeds)):
+                values = [item.joint_positions[index] for item in samples]
+                if (max(values)-min(values) > span
+                        or any(abs(item.joint_velocities[index]) > speed for item in samples)):
+                    raise RuntimeError('stationary arm and fixed gripper required')
+            hold = tuple(self._sim.get_control_status().joint_targets)
+            if max(abs(a-b) for a,b in zip(hold, state.joint_positions[:6])) > bounds[0]:
+                raise RuntimeError('feedback outside acknowledged hold span')
+            return state, hold
+
+        def _reserve_prepared_goal(self, goal):
+            received = time.monotonic()
+            if not self._prepare_client.service_is_ready() or not self._scene_revision:
+                return GoalResponse.REJECT
+            points = tuple(TrajectoryPoint(duration_to_seconds(p.time_from_start), p.positions,
+                p.velocities, p.accelerations) for p in goal.trajectory.points)
+            ordered_points(goal.trajectory.joint_names, points)
+            if not 0 < len(points) <= self._max_points or points[-1].time > self._max_duration:
+                return GoalResponse.REJECT
+            with self._active._lock:
+                if self._active.busy:
+                    return GoalResponse.REJECT
+                with self._lock:
+                    state, hold = self._stationary_snapshot()
+                    if self._sim.control_mode not in ('position', 'hold'):
+                        return GoalResponse.REJECT
+                    if not self._active.try_start(goal):
+                        return GoalResponse.REJECT
+                    request = self._prepare_type.Request()
+                    request.trajectory = goal.trajectory
+                    request.session = request.generation = id(goal)
+                    request.hold_positions, request.feedback_positions = list(hold), list(state.joint_positions[:6])
+                    request.feedback_observed_at = self._last_physics_wall
+                    request.stationary = request.enabled = True
+                    request.gripper_positions = list(state.joint_positions[-2:])
+                    request.gripper_generation = 0
+                    request.scene_revision = self._scene_revision
+                    request.deadline_monotonic = received+min(2., .2*points[-1].time+.25)
+                    self._preparation = (goal, request)
+                    self._pending_sampler = None
+                    self._stop_unconfirmed = False
+            return GoalResponse.ACCEPT
+
+        def _scene_changed(self, message):
+            with self._active._lock:
+                self._scene_revision = message.data
+                expected = (self._preparation[1].scene_revision if self._preparation is not None
+                            else self._active.prepared['revision'] if self._active.prepared else None)
+                if expected is not None and expected != message.data:
+                    self._command_gate.stop_and_hold(self._hold_current_position)
+
+        def _prepare_sampler(self, goal_handle, token):
+            pending = self._preparation
+            if pending is None or pending[0] is not token:
+                raise RuntimeError('preparation ownership lost')
+            request = pending[1]
+            self.get_logger().info(f'trajectory preparation dispatch age={time.monotonic()-request.feedback_observed_at:.4f}s')
+            future = self._prepare_client.call_async(request)
+            while not future.done():
+                if (goal_handle.is_cancel_requested or self._active.cancel_requested
+                        or time.monotonic() >= request.deadline_monotonic):
+                    future.cancel()
+                    raise RuntimeError('trajectory preparation canceled or timed out')
+                time.sleep(.002)
+            response = future.result()
+            if not response.success:
+                raise ValueError(response.message)
+            payload = json.loads(response.prepared_json)
+            curve = curve_from_payload(payload['curve'])
+            def admit():
+                with self._lock:
+                    state, hold = self._stationary_snapshot()
+                    context = payload['context']
+                    if (self._sim.control_mode not in ('position', 'hold')
+                            or time.monotonic() >= request.deadline_monotonic
+                            or self._scene_revision != response.scene_revision
+                            or payload['scene_revision'] != request.scene_revision
+                            or context['session'] != request.session or context['generation'] != request.generation
+                            or tuple(context['hold']) != tuple(request.hold_positions)
+                            or hold != tuple(request.hold_positions) or curve.points[0].positions != hold
+                            or payload['gripper_generation'] != request.gripper_generation
+                            or tuple(payload['gripper_positions']) != tuple(request.gripper_positions)
+                            or max(abs(a-b) for a,b in zip(state.joint_positions[-2:], request.gripper_positions)) > 3*25/65535*.009):
+                        raise RuntimeError('prepared simulation context changed')
+                    self._active.prepared = dict(curve=curve, start=state.simulation_time,
+                        revision=response.scene_revision, fingers=tuple(request.gripper_positions))
+                    self._preparation = None
+            outcome = self._command_gate.apply_with_reason(token,
+                lambda: goal_handle.is_cancel_requested, admit, self._hold_current_position)
+            if outcome is not GateOutcome.APPLIED:
+                raise RuntimeError('prepared trajectory canceled before atomic admission')
+            return PreparedTrajectorySampler(curve)
+
+        def _wait_prepared_stop(self):
+            """取消不是连续轨迹保证；资源仍占用至新物理帧确认静止。"""
+            after = self._sim_access.run(lambda sim: sim.get_state().simulation_time)
+            deadline = time.monotonic()+5.
+            while time.monotonic() < deadline:
+                try:
+                    self._sim_access.run(lambda _sim: self._stationary_snapshot(after=after))
+                    self._stop_unconfirmed = False
+                    return
+                except RuntimeError:
+                    time.sleep(.01)
+            self._stop_unconfirmed = True
+            raise RuntimeError('simulation stop/hold unconfirmed')
+
         def _cancel_callback(self, _goal_handle):
             stopped = self._command_gate.stop_and_hold(self._hold_current_position)
             return CancelResponse.ACCEPT if stopped else CancelResponse.REJECT
 
         def _stop_service(self, _request, response):
+            token = self._active.token
             stopped = self._command_gate.stop_and_hold(self._hold_current_position)
             if not stopped:
                 self._hold_current_position()
+            if self._trajectory_mode == 'prepared_v1' and stopped:
+                try:
+                    self._wait_prepared_stop()
+                    with self._active._lock:
+                        if self._retained_stop_token is token:
+                            self._preparation = None
+                            self._active.finish(token)
+                            self._retained_stop_token = None
+                except RuntimeError as exc:
+                    response.success, response.message = False, str(exc)
+                    return response
             response.success = True
             response.message = "simulation trajectory stop requested" if stopped else "no active trajectory"
             return response
@@ -289,11 +452,11 @@ def create_node_class():
             try:
                 width = validate_gripper_width(request.position)
                 max_force = validate_gripper_force(request.max_effort)
-                reached = self._sim_access.run(
-                    lambda _sim: self._control.command_gripper_width(
-                        width, max_force_n=max_force
-                    )
-                )
+                with self._active._lock:
+                    if self._trajectory_mode == 'prepared_v1' and self._active.busy:
+                        raise ValueError('fixed gripper reserved by arm trajectory')
+                    reached = self._sim_access.run(lambda _sim:
+                        self._control.command_gripper_width(width, max_force_n=max_force))
             except (TypeError, ValueError):
                 response.success = False
                 response.reached_position = 0.0
@@ -309,12 +472,14 @@ def create_node_class():
                 response.success = False
                 response.message = str(exc)
                 return response
-            if self._active.busy:
-                response.success = False
-                response.message = "trajectory active; stop or cancel it before changing mode"
-                return response
             try:
-                reached = self._sim_access.run(lambda _sim: self._control.set_mode(mode))
+                # 与准备占用使用同一锁，避免检查空闲后被新 Goal 抢入再切换模式。
+                with self._active._lock:
+                    if self._active.busy:
+                        response.success = False
+                        response.message = "trajectory active; stop or cancel it before changing mode"
+                        return response
+                    reached = self._sim_access.run(lambda _sim: self._control.set_mode(mode))
             except (TypeError, ValueError) as exc:
                 response.success = False
                 response.message = f"mode rejected: {exc}"
@@ -347,14 +512,18 @@ def create_node_class():
             token = self._active.token
             result = FollowJointTrajectory.Result()
             sampler, self._pending_sampler = self._pending_sampler, None
-            if sampler is None:
+            if sampler is None and self._trajectory_mode == 'legacy':
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
                 result.error_string = "trajectory was not admitted"
                 goal_handle.abort()
                 self._active.finish(token)
                 return result
             try:
-                start_time = self._sim_access.run(lambda sim: sim.get_state().simulation_time)
+                if self._trajectory_mode == 'prepared_v1':
+                    sampler = self._prepare_sampler(goal_handle, token)
+                    start_time = self._active.prepared['start']
+                else:
+                    start_time = self._sim_access.run(lambda sim: sim.get_state().simulation_time)
                 feedback_limiter = FeedbackRateLimiter(self._feedback_rate_hz)
                 while rclpy.ok():
                     command: dict[str, Any] = {}
@@ -363,7 +532,8 @@ def create_node_class():
                         state = self._sim.get_state()
                         elapsed = max(0.0, state.simulation_time - start_time)
                         desired = sampler.sample(min(elapsed, sampler.duration))
-                        self._control.command_joint_positions(desired)
+                        if self._trajectory_mode == 'legacy':
+                            self._control.command_joint_positions(desired)
                         command.update(state=state, elapsed=elapsed, desired=desired)
 
                     outcome = self._command_gate.apply_with_reason(
@@ -373,6 +543,8 @@ def create_node_class():
                         self._hold_current_position,
                     )
                     if outcome is not GateOutcome.APPLIED:
+                        if self._trajectory_mode == 'prepared_v1':
+                            self._wait_prepared_stop()
                         return self._terminate_goal(goal_handle, result, outcome)
                     state = command["state"]
                     elapsed = command["elapsed"]
@@ -402,15 +574,22 @@ def create_node_class():
                             token,
                             lambda: goal_handle.is_cancel_requested,
                             self._hold_current_position,
-                            lambda: (self._hold_current_position(), goal_handle.succeed()),
+                            lambda: (self._sim_access.run(lambda _sim:
+                                self._control.command_joint_positions(sampler.sample(sampler.duration)))
+                                if self._trajectory_mode == 'prepared_v1' else self._hold_current_position(),
+                                goal_handle.succeed()),
                         )
                         if completion is not GateOutcome.SUCCEEDED:
+                            if self._trajectory_mode == 'prepared_v1':
+                                self._wait_prepared_stop()
                             return self._terminate_goal(goal_handle, result, completion)
                         result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
                         result.error_string = "simulation trajectory finished"
                         return result
                     if settling == "timed_out":
                         self._command_gate.stop_and_hold(self._hold_current_position)
+                        if self._trajectory_mode == 'prepared_v1':
+                            self._wait_prepared_stop()
                         goal_handle.abort()
                         result.error_code = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
                         result.error_string = "simulation goal did not settle within configured tolerance"
@@ -425,19 +604,53 @@ def create_node_class():
                 self.get_logger().error(
                     f"trajectory execution exception: {type(exc).__name__}: {exc}"
                 )
-                self._lifecycle.fail(
-                    token,
-                    self._hold_current_position,
-                    lambda: goal_handle.abort() if getattr(goal_handle, "is_active", True) else None,
-                )
+                if self._trajectory_mode == 'prepared_v1':
+                    self._command_gate.stop_and_hold(self._hold_current_position)
+                    try:
+                        self._wait_prepared_stop()
+                    except RuntimeError as stop_error:
+                        exc = RuntimeError(f'{exc}; {stop_error}')
+                    if goal_handle.is_cancel_requested and not self._stop_unconfirmed:
+                        goal_handle.canceled()
+                    else:
+                        goal_handle.abort()
+                else:
+                    self._lifecycle.fail(token, self._hold_current_position,
+                        lambda: goal_handle.abort() if getattr(goal_handle, "is_active", True) else None)
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
-                result.error_string = "simulation trajectory execution failed"
+                result.error_string = f"simulation trajectory execution failed: {exc}"
                 return result
             finally:
-                self._active.finish(token)
+                if self._stop_unconfirmed:
+                    self._retained_stop_token = token
+                if not self._stop_unconfirmed:
+                    with self._active._lock:
+                        if self._preparation is not None and self._preparation[0] is token:
+                            self._preparation = None
+                        self._active.finish(token)
 
         def _timer_callback(self) -> None:
-            state = self._sim_access.run(lambda sim: sim.step(self._steps_per_tick))
+            if self._trajectory_mode == 'legacy':
+                state = self._sim_access.run(lambda sim: sim.step(self._steps_per_tick))
+            else:
+                # 锁序固定为目标闸门 -> 仿真；每个物理步按当前仿真时间采样，不积压旧目标。
+                with self._active._lock:
+                    def step(sim):
+                        for _ in range(self._steps_per_tick):
+                            active = self._active.prepared
+                            if active is not None and not self._active.cancel_requested:
+                                current = sim.get_state()
+                                if max(abs(a-b) for a,b in zip(current.joint_positions[-2:], active['fingers'])) > 3*25/65535*.009:
+                                    self._command_gate.stop_and_hold(self._hold_current_position)
+                                else:
+                                    target = active['curve'].sample(current.simulation_time-active['start'])[0]
+                                    self._control.command_joint_positions(target)
+                            state = sim.step()
+                            self._trace.record(state, sim.get_control_status(), active)
+                            self._sample_history.append(state)
+                        self._last_physics_wall = time.monotonic()
+                        return state
+                    state = self._sim_access.run(step)
             stamp = Clock()
             seconds, nanoseconds = self._stamp.update(state.simulation_time)
             stamp.clock.sec = seconds
@@ -458,13 +671,23 @@ def create_node_class():
             gripper.position = float(state.gripper_width)
             gripper.velocity = 0.0
             gripper.torque = float(sum(abs(v) for v in state.actuator_forces[-2:]))
-            gripper.status_code = 0
+            gripper.status_code = 1
             self._gripper_pub.publish(gripper)
+            status = ArmStatus()
+            status.header.stamp = stamp.clock
+            status.mode, status.enabled, status.control_loop_active = 'pos_vel', True, True
+            status.state_machine = ('TRAJ_PREPARING' if self._preparation else
+                'TRAJ_RUNNING' if self._active.busy else 'IDLE')
+            status.joint_names = list(ARM_JOINT_NAMES)
+            status.per_joint_status_code = [1]*6
+            status.error_codes = ['SIM_STOP_UNCONFIRMED'] if self._stop_unconfirmed else []
+            self._status_pub.publish(status)
 
 
         def destroy_node(self):
             """释放动作服务端与仿真实例。"""
             self._action_server.destroy()
+            self._trace.close()
             self._sim_access.run(lambda sim: sim.close())
             return super().destroy_node()
 

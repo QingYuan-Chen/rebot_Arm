@@ -85,7 +85,7 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 | `bringup.launch.py` | 基础真机入口 | 硬件、夹爪可视化状态桥、TF 和可选基础 RViz；不启动 MoveIt |
 | `moveit_hardware.launch.py` | 唯一真机 MoveIt 用户入口 | 薄包装 `interactive_system.launch.py`，固定真机、MoveIt、真实关节状态和唯一状态源；启动后仍需显式 Enable |
 | `moveit_demo.launch.py` | 离线 MoveIt 演示入口 | 使用 `rebotarm_moveit_config` 的模型与规划参数，启动 MoveIt、RViz 和夹爪可视化桥；不接真机 |
-| `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 启动唯一 MuJoCo 执行后端并包含本包的 MoveIt 演示入口；无头和桌面薄入口位于同目录 |
+| `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 唯一 MuJoCo 后端、MoveIt 与轨迹准备服务；默认 prepared_v1，可选 Dashboard |
 | `interactive_system.launch.py` | 共享实现 | 统一拥有状态发布、MoveIt、RViz 以及真机/无硬件状态源的互斥选择；不建议用户手写其内部组合参数启动真机 |
 | `rebotarm_app.launch.py` | 完整真机入口 | 包含真机 MoveIt 组合，再增加示教录制、Dashboard 和状态 RViz；不启动键盘节点 |
 | `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认不接真机。无硬件模式使用 RViz 轨迹插值预演控制器，按键可以改变 RViz 姿态，但不代表物理仿真 |
@@ -97,6 +97,12 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 物理验证**。它不计算动力学、执行器力、接触、碰撞或抓取结果；这些内容必须使用
 `mujoco_moveit_sim.launch.py` 验证；无窗口时设置
 `use_rviz:=false use_mujoco_viewer:=false`。
+
+MuJoCo 组合的 `trajectory_execution_mode` 默认为 `prepared_v1`；真实硬件仍默认为
+`legacy`。可选 `use_dashboard:=true` 使用相同轨迹模式；另起终端键盘时也须选择
+`trajectory_execution_mode:=prepared_v1`，默认单步为 0.02 rad / 0.4 s。
+前后端能力不匹配或未知时拒绝，不自动回退；契约与验收见
+[P005 执行接入](../../../docs/implemented/features/p005_prepared_trajectory.md)。
 
 ## 两组容易混淆的入口
 

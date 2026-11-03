@@ -33,6 +33,13 @@ from .controller_values import JointSnapshot
 
 
 @dataclass(frozen=True)
+class ArmGripperPort:
+    """准备事务只读取固定夹爪状态，不取得夹爪发送能力。"""
+
+    snapshot: Callable[[], dict]
+
+
+@dataclass(frozen=True)
 class ArmFeedbackPort:
     """六轴目标和停止确认所需的新鲜值查询."""
 
@@ -95,6 +102,7 @@ class ArmCyclePort:
     clear_passthrough: Callable[[], None]
     expire_passthrough: Callable[[float], None]
     check_task_generation: Callable[[], None]
+    check_prepared_context: Callable[[], None]
     passthrough_active: Callable[[], bool]
     update_task: Callable[[JointSnapshot], None]
 

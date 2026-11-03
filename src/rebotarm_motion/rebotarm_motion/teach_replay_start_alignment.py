@@ -121,7 +121,9 @@ class MoveItStartAligner:
             elapsed += first_hold
             first_point = self._trajectory_point_factory()
             first_point.positions = [float(v) for v in first_positions]
-            first_point.velocities = [0.0 for _ in first_positions]
+            for field in ('velocities', 'accelerations'):
+                present = bool(getattr(trajectory.points[-1], field, ()))
+                setattr(first_point, field, [0.]*len(first_positions) if present else [])
             set_duration(first_point.time_from_start, elapsed)
             trajectory.points.append(first_point)
         return elapsed
@@ -156,7 +158,16 @@ class MoveItStartAligner:
         missing = [name for name in trajectory.joint_names if name not in index_by_name]
         if missing:
             raise ValueError(f"moveit start alignment missing joints: {', '.join(missing)}")
-        for source_point in getattr(plan.trajectory, "points", []):
+        source_points = list(getattr(plan.trajectory, 'points', []))
+        if not source_points:
+            raise ValueError('empty MoveIt start alignment')
+        for field in ('velocities', 'accelerations'):
+            present = [bool(getattr(point, field, ())) for point in source_points]
+            if any(present) and not all(present):
+                raise ValueError(f'mixed missing {field} in MoveIt start alignment')
+            # 只有合成的静止保持点补齐约束，规划中间点逐值保留。
+            setattr(trajectory.points[-1], field, [0.]*len(trajectory.joint_names) if all(present) else [])
+        for source_point in source_points:
             # 规划时间戳的 sec/nanosec 分量为整秒 + 纳秒，需合并为浮点秒再加偏移，
             # 不能只取 sec，否则亚秒部分会丢失。
             source_time = (
@@ -173,7 +184,14 @@ class MoveItStartAligner:
                     float(source_point.velocities[index_by_name[name]])
                     for name in trajectory.joint_names
                 ]
+            if getattr(source_point, 'accelerations', None):
+                point.accelerations = [float(source_point.accelerations[index_by_name[name]])
+                    for name in trajectory.joint_names]
             set_duration(point.time_from_start, elapsed + source_time)
+            if source_time == 0.:
+                if tuple(point.positions) != tuple(trajectory.points[-1].positions):
+                    raise ValueError('MoveIt start alignment initial position mismatch')
+                continue
             trajectory.points.append(point)
         # 以最后一个规划点的时间戳回算累计时长，保证返回值与轨迹实际时间轴一致。
         if trajectory.points:

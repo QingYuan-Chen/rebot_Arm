@@ -115,6 +115,7 @@ class RetimedTeachPoint:
     positions: tuple[float, ...]
     source_sample: int
     velocities: tuple[float, ...] = ()
+    accelerations: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)

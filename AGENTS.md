@@ -20,6 +20,7 @@ Before changing code, read `docs/implemented/architecture.md`, `docs/reference/c
 - 真机启动默认失能。必须具备新鲜反馈、完成现场安全检查，并显式调用 `/rebotarm/enable`；不得恢复自动使能。
 - MoveIt 执行需要 `moveit_simple_controller_manager`；规划成功不能作为执行成功的证据。
 - 硬件访问归 `rebotarmcontroller`。
+- 纯数值轨迹数据、校验与求值归 `rebotarm_trajectory`，模块平铺包根目录；不得引入 ROS、SDK、物理引擎、线程或自主计时。motion、controller、simulation 单向依赖它。
 - 控制器后续拆分在包根目录按职责组织模块，不新建职责子目录；组件边界和独立状态仍须保留。控制器新增及调整的注释、文档字符串使用中文，在并发、生命周期和安全约束等需要解释之处补充说明。
 - 轨迹生成、MoveIt 适配、重定时、碰撞检查和运行时安全检查归 `rebotarm_motion`。
 - 示教录制、轨迹准备和回放编排归 `rebotarm_teach`。

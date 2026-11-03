@@ -88,6 +88,18 @@ class ArmTrajectory:
         with self.lock:
             return replace(task.result)
 
+    def submit_prepared(self, curve, generation, *, settle=2., tolerance=.03):
+        """在同一任务事务内接纳已检查曲线，末点发送仍需后续新帧到位确认。"""
+        with self.lock:
+            if self.task is not None and not self.task.event.is_set():
+                raise RuntimeError('arm resource busy')
+            now = self.clock()
+            if not self.execution.submit_prepared(curve, generation, now=now):
+                raise RuntimeError('prepared trajectory superseded or execution inactive')
+            self.task = ArmTask(self.execution.generation, curve.points[-1].positions,
+                                now+curve.duration+settle, tolerance)
+            return self.task
+
     def stopping(self, task):
         """将尚未终结的任务置为 stopping, 保留事件直到停止确认收尾."""
         with self.lock:

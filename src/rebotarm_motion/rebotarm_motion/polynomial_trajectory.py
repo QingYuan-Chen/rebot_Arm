@@ -1,68 +1,19 @@
 """离线轨迹参考: 完整点约束生成分段系数, 采样和极值均使用同一组系数.
 
 只依赖数值库, 不创建 ROS 节点或设备. 系数按归一化段时间 u=(t-t0)/T
-升幂排列, 位置 rad, 时间 s. 本模块尚未接入生产 FJT.
+升幂排列, 位置 rad, 时间 s. 准备服务生成并检查, 执行端使用共享内核采样.
 """
 
-from bisect import bisect_right
-from dataclasses import dataclass
 import math
 
 import numpy as np
 from numpy.polynomial import polynomial as poly
 
 
-JOINT_NAMES = tuple(f'joint{i}' for i in range(1, 7))
-CALC_ATOL = 1e-9
-
-
-def vector6(values):
-    """复制六个有限数值; 返回不可变元组."""
-    result = tuple(float(v) for v in values)
-    if len(result) != 6 or not all(math.isfinite(v) for v in result):
-        raise ValueError('six finite joint values required')
-    return result
-
-
-@dataclass(frozen=True)
-class TrajectoryPoint:
-    time: float
-    positions: tuple
-    velocities: tuple = ()
-    accelerations: tuple = ()
-
-    def __post_init__(self):
-        stamp = float(self.time)
-        if not math.isfinite(stamp) or stamp < 0:
-            raise ValueError('finite nonnegative trajectory time required')
-        object.__setattr__(self, 'time', stamp)
-        object.__setattr__(self, 'positions', vector6(self.positions))
-        for name in ('velocities', 'accelerations'):
-            values = tuple(getattr(self, name))
-            object.__setattr__(self, name, vector6(values) if values else ())
-
-
-def ordered_points(joint_names, points):
-    """按规范顺序复制所有位置及导数; 混合缺失不能默默降级."""
-    names = tuple(joint_names)
-    if len(names) != 6 or set(names) != set(JOINT_NAMES):
-        raise ValueError('exactly joint1..joint6 required')
-    source = tuple(points)
-    if not source:
-        raise ValueError('trajectory points required')
-    order = tuple(names.index(n) for n in JOINT_NAMES)
-    result = tuple(TrajectoryPoint(p.time, tuple(p.positions[i] for i in order),
-        tuple(p.velocities[i] for i in order) if p.velocities else (),
-        tuple(p.accelerations[i] for i in order) if p.accelerations else ()) for p in source)
-    if any(b.time <= a.time for a, b in zip(result, result[1:])):
-        raise ValueError('trajectory times must strictly increase')
-    for field in ('velocities', 'accelerations'):
-        present = [bool(getattr(p, field)) for p in result]
-        if any(present) and not all(present):
-            raise ValueError(f'mixed missing {field}')
-    if result[0].accelerations and not result[0].velocities:
-        raise ValueError('accelerations require velocities')
-    return result
+from rebotarm_trajectory.polynomial import (
+    CALC_ATOL, JOINT_NAMES, TrajectoryPoint, ordered_points, vector6,
+    PolynomialSegment as NumericSegment, PolynomialTrajectory as NumericTrajectory,
+)
 
 
 def real_roots(coefficients):
@@ -89,54 +40,15 @@ def real_roots(coefficients):
     return tuple(sorted(set(result)))
 
 
-@dataclass(frozen=True)
-class PolynomialSegment:
-    start: float
-    duration: float
-    coefficients: tuple
-
-    def axis(self, joint, order=0):
-        c = np.asarray(poly.polyder(self.coefficients[joint], m=order), dtype=float)
-        try:
-            with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
-                values = c / self.duration ** order
-        except OverflowError as exc:
-            raise ValueError('unknown polynomial derivatives: numerical overflow') from exc
-        if not np.isfinite(values).all():
-            raise ValueError('unknown polynomial derivatives: numerical overflow')
-        return values
-
-    def at(self, u, order=0):
-        values = tuple(float(poly.polyval(u, self.axis(j, order))) for j in range(6))
-        return vector6(values)
+class PolynomialSegment(NumericSegment):
+    """运动层追加解析极值候选；数值求值直接复用共享内核。"""
 
     def candidates(self, joint, order=0):
         return (0., *real_roots(poly.polyder(self.axis(joint, order))), 1.)
 
 
-@dataclass(frozen=True)
-class PolynomialTrajectory:
-    points: tuple
-    segments: tuple
-    degree: int
-
-    @property
-    def duration(self):
-        return self.points[-1].time
-
-    def sample(self, elapsed):
-        """按实际经过时间求 q/v/a/j; 区间外保持端点, 不外推."""
-        elapsed = float(elapsed)
-        if not math.isfinite(elapsed):
-            raise ValueError('finite sample time required')
-        if elapsed < 0 or elapsed > self.duration or not self.segments:
-            point = self.points[0] if elapsed <= 0 else self.points[-1]
-            return (point.positions, (0.,) * 6, (0.,) * 6, (0.,) * 6)
-        index = min(len(self.segments) - 1,
-                    bisect_right(tuple(p.time for p in self.points), elapsed) - 1)
-        segment = self.segments[index]
-        u = min(1., max(0., (elapsed - segment.start) / segment.duration))
-        return tuple(segment.at(u, k) for k in range(4))
+class PolynomialTrajectory(NumericTrajectory):
+    """运动层拥有连续性报告和碰撞采样安排。"""
 
     def continuity(self):
         """报告首尾保持及内部节点左右导数差; 低阶兼容不伪称 C2."""
@@ -173,12 +85,6 @@ class PolynomialTrajectory:
             raise ValueError('collision coverage exceeds sample budget')
         return tuple(sorted(times))
 
-    def to_payload(self):
-        """离线数值交换; 实际采样使用携带的系数, 不是另一套重新拟合的轨迹."""
-        return {'version': 1, 'joint_names': list(JOINT_NAMES), 'degree': self.degree,
-                'points': [dict(time_from_start=p.time, positions=p.positions,
-                    velocities=p.velocities, accelerations=p.accelerations) for p in self.points],
-                'coefficients': [s.coefficients for s in self.segments]}
 
 
 def build_curve(joint_names, points):

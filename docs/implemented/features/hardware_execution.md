@@ -17,6 +17,11 @@
 
 ## P005 离线连续轨迹参考
 
+本节保留第一批（`39028d1`）的历史验证。第二批已迁移共享内核并接入准备服务、
+正式控制周期和 MuJoCo；当前契约与软件/仿真结果见
+[P005 共享轨迹与 prepared_v1 执行](p005_prepared_trajectory.md)。
+实机默认仍为 legacy，尚未进行第二批对应的实机验证。
+
 第一批仅实现离线数值参考、校验及假设备交接, **没有切换生产 FJT 执行器**。
 新增实现位于 motion 的 `polynomial_trajectory.py` 和 `trajectory_preparation.py`;
 硬件控制器、网页入口、键盘配置、取消保持、保护和 `safe_home` 仍沿用原行为。

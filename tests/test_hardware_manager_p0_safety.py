@@ -1093,6 +1093,7 @@ def test_joint_state_read_waits_for_disable_transition() -> None:
 def test_action_goal_callback_rejects_motion_until_explicit_enable() -> None:
     from rebotarmcontroller.ros_actions import ArmActions, GoalResponse
     actions = ArmActions.__new__(ArmActions)
+    actions._trajectory_mode = 'legacy'
     actions._lifecycle = SimpleNamespace(ready_for_motion=False)
     assert actions.goal_callback(None) == GoalResponse.REJECT
     actions._lifecycle.ready_for_motion = True

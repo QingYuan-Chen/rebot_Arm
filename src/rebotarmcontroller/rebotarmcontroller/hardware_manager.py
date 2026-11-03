@@ -32,7 +32,7 @@ from .component_ports import (
     ArmFeedbackPort, GripperFeedbackPort, GravityFeedbackPort, CycleFeedbackPort,
     GripperAcquisitionPort, ArmCyclePort, GripperCyclePort, ArmProtectionPort,
     GripperProtectionPort, GravityProtectionPort, GravityArmPort, ArmGravityPort,
-    CyclePort, ProtectionPort,
+    CyclePort, ProtectionPort, ArmGripperPort,
 )
 from .gripper_controller import GripperController
 from .feedback_reader import FeedbackReader
@@ -130,6 +130,7 @@ class HardwareManager:
             clear_passthrough=self.arm.clear_passthrough,
             expire_passthrough=self.arm.expire_passthrough,
             check_task_generation=self.arm.check_task_generation,
+            check_prepared_context=self.arm.check_prepared_context,
             passthrough_active=self.arm.passthrough_active,
             update_task=self.arm.update_task,
         )
@@ -172,7 +173,9 @@ class HardwareManager:
         # 组件全部存在后才完成一次绑定, 避免循环依赖要求构造中访问尚未就绪的对端.
         self.feedback.bind(gripper=gripper_acquisition_port)
         self.gripper.bind(feedback=gripper_feedback_port, protection=protection_port)
-        self.arm.bind(cycle=cycle_port, feedback=arm_feedback_port, gravity=gravity_arm_port, protection=protection_port)
+        arm_gripper_port = ArmGripperPort(snapshot=self.gripper.preparation_snapshot)
+        self.arm.bind(cycle=cycle_port, feedback=arm_feedback_port, gravity=gravity_arm_port,
+                      protection=protection_port, gripper=arm_gripper_port)
         self.gravity.bind(arm=arm_gravity_port, cycle=cycle_port, feedback=gravity_feedback_port, protection=protection_port)
         self.cycle.bind(arm=arm_cycle_port, feedback=cycle_feedback_port, gripper=gripper_cycle_port, protection=protection_port)
         self.protection.bind(arm=arm_protection_port, gravity=gravity_protection_port, gripper=gripper_protection_port)

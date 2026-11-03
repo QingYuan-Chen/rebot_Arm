@@ -59,7 +59,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rebotarm_msgs.msg import ArmStatus, JointMotorState
-from rebotarm_msgs.srv import SetTeachRecordPath
+from rebotarm_msgs.srv import SetTeachRecordPath, SetGripper
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
@@ -79,6 +79,8 @@ from .status_panel_page import HTML_PAGE
 from .status_panel_state import TeleopStatusStore
 from .web_command_gateway import WebCommandGateway, WebCommandRequest
 from rebotarm_teleop.teleop_core import validate_web_keyboard_command
+from rebotarm_teleop.trajectory_capability import TrajectoryCapability
+from rebotarm_motion.trajectory_messages import point_to_point_message
 from rebotarm_teach.teach_record_client import TeachRecordClient
 from rebotarm_teach.teach_replay_workflow import TeachReplayWorkflow
 from rebotarm_teach.teach_replay_trajectory_builder import set_duration
@@ -332,6 +334,10 @@ class TeleopStatusPanelNode(Node):
         self.declare_parameter("use_hardware", False)
         # execution_mode：命令网关闸门，只有 "execute" 才放行真实执行，其余取值（默认 "dry_run"）只做校验。
         self.declare_parameter("execution_mode", "dry_run")
+        self.declare_parameter('trajectory_execution_mode', 'legacy')
+        self._trajectory_capability = TrajectoryCapability(self.get_parameter('trajectory_execution_mode').value)
+        self.declare_parameter('simulation_backend', 'preview')
+        self._physical_simulation = self.get_parameter('simulation_backend').value == 'mujoco'
         # panel_mode：界面工作模式，"control" 可操作；"check" 为只读，仅观察状态。
         self.declare_parameter("panel_mode", "control")
         # ---------------- 关节几何（URDF 读取失败时的回退值） ----------------
@@ -368,7 +374,8 @@ class TeleopStatusPanelNode(Node):
         self.declare_parameter("web_keyboard_max_step_rad", 0.10)
         # web_keyboard_default_duration / min / max（s）：键盘单步默认时长及其允许区间，
         # 它与步长共同决定该步的等效角速度，进而触发限速校验。
-        self.declare_parameter("web_keyboard_default_duration", 0.2)
+        self.declare_parameter("web_keyboard_default_duration",
+            .4 if self._trajectory_capability.expected == 'prepared_v1' else .2)
         self.declare_parameter("web_keyboard_min_duration", 0.1)
         self.declare_parameter("web_keyboard_max_duration", 2.0)
         # web_keyboard_default_speed_rad_s（rad/s）：键盘遥操作默认速度上限。
@@ -440,6 +447,8 @@ class TeleopStatusPanelNode(Node):
             GripperCommand,
             f"/{self._arm_namespace}/gripper/command",
         )
+        self._simulation_gripper_client = self.create_client(SetGripper,
+            f'/{self._arm_namespace}/gripper/set') if self._physical_simulation else None
         # 整臂与示教相关的服务客户端：全部按 arm_namespace 拼接，禁止硬编码顶层名称。
         self._gravity_start_client = self.create_client(
             Trigger,
@@ -503,6 +512,8 @@ class TeleopStatusPanelNode(Node):
             follow_goal_factory=FollowJointTrajectory.Goal,
             gripper_action_client=self._gripper_action_client,
             gripper_goal_factory=GripperCommand.Goal,
+            trajectory_execution_mode=self._trajectory_capability.expected,
+            require_trajectory_capability=self._trajectory_capability.require,
         )
         # 当前 web 执行目标句柄（供"停止"按钮取消）与其互斥锁：动作回调与 HTTP 线程并发访问。
         self._calibration_client = CalibrationClient(
@@ -518,6 +529,7 @@ class TeleopStatusPanelNode(Node):
         self._execute_goal_handle = None
         # Web 键盘会话状态：显式启用后才接受按键；步长/时长/速度可在会话内被前端调整，故加锁保护。
         self._web_keyboard_lock = threading.Lock()
+        self._web_keyboard_busy = False
         self._web_keyboard_enabled = False
         self._web_keyboard_step_rad = float(self.get_parameter("web_keyboard_default_step_rad").value)
         self._web_keyboard_duration = float(self.get_parameter("web_keyboard_default_duration").value)
@@ -553,6 +565,8 @@ class TeleopStatusPanelNode(Node):
             sensor_qos,
         )
         self.create_subscription(ArmStatus, f"/{self._arm_namespace}/arm_status", self._on_arm_status, arm_status_qos)
+        self.create_subscription(String, f'/{self._arm_namespace}/trajectory_execution_mode',
+            self._trajectory_capability.update, arm_status_qos)
         # 三条遥操作状态流：通用状态、录制状态、回放状态，内容可能是 JSON 也可能是纯文本。
         self.create_subscription(String, f"/{self._arm_namespace}/teleop/status", lambda msg: self._on_status("status", msg), 10)
         self.create_subscription(String, f"/{self._arm_namespace}/teleop/recording_status", lambda msg: self._on_status("recording", msg), 10)
@@ -572,7 +586,7 @@ class TeleopStatusPanelNode(Node):
             sensor_qos,
         )
         self._sim_gripper_state_pub = None
-        if not self._use_hardware:
+        if not self._use_hardware and not self._physical_simulation:
             # 无硬件时由面板自己扮演夹爪反馈源，否则界面上的夹爪永远没有实时位置。
             self._sim_gripper_state_pub = self.create_publisher(
                 JointMotorState,
@@ -794,6 +808,11 @@ class TeleopStatusPanelNode(Node):
             return result
         if not result.get("accepted", False):
             return result
+        if intent == 'teach_replay_execute':
+            try:
+                self._trajectory_capability.require()
+            except ValueError as exc:
+                return dict(accepted=False, state='rejected', message=str(exc))
         return None
 
     def _legacy_blocked_response(self, intent: str, message: str, payload: dict | None = None) -> dict:
@@ -1071,6 +1090,10 @@ class TeleopStatusPanelNode(Node):
         if gateway_result is not None:
             self._store.update_teleop_status("status", {**gateway_result, "source": "web_keyboard", "last_key": payload.get("key")})
             return gateway_result
+        try:
+            self._trajectory_capability.require()
+        except ValueError as exc:
+            return dict(accepted=False, state='rejected', message=str(exc))
         if not self._action_client.wait_for_server(timeout_sec=0.05):
             message = "follow_joint_trajectory action unavailable"
             self._store.update_teleop_status("status", {"source": "web_keyboard", "state": "unavailable", "message": message, "last_key": decision.key})
@@ -1082,9 +1105,22 @@ class TeleopStatusPanelNode(Node):
         # 单点轨迹：时间戳即"从当前时刻起走到该目标点"的时长，速度由校验环节保证不超限。
         _set_duration(point.time_from_start, decision.duration)
         trajectory.points = [point]
+        if self._trajectory_capability.expected == 'prepared_v1':
+            trajectory = point_to_point_message(decision.joint_names,
+                tuple(current_positions[name] for name in decision.joint_names),
+                decision.positions, decision.duration, trajectory_factory=JointTrajectory,
+                point_factory=JointTrajectoryPoint)
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = trajectory
-        future = self._action_client.send_goal_async(goal)
+        with self._web_keyboard_lock:
+            if self._web_keyboard_busy:
+                return dict(accepted=False, state='rejected', message='keyboard step busy; input discarded')
+            self._web_keyboard_busy = True
+        try:
+            future = self._action_client.send_goal_async(goal)
+        except Exception as exc:
+            self._finish_keyboard_step()
+            return dict(accepted=False, state='failed', message=str(exc))
         future.add_done_callback(lambda fut: self._on_keyboard_goal_response(fut, decision))
         result = _keyboard_decision_response(decision)
         self._store.update_teleop_status(
@@ -1103,11 +1139,14 @@ class TeleopStatusPanelNode(Node):
         try:
             goal_handle = future.result()
         except Exception as exc:
+            self._finish_keyboard_step()
             self._store.update_teleop_status("status", {"source": "web_keyboard", "state": "failed", "message": str(exc), "last_key": decision.key})
             return
         if goal_handle is None or not goal_handle.accepted:
+            self._finish_keyboard_step()
             self._store.update_teleop_status("status", {"source": "web_keyboard", "state": "rejected", "message": "keyboard trajectory goal rejected", "last_key": decision.key})
             return
+        goal_handle.get_result_async().add_done_callback(self._on_keyboard_result)
         self._store.update_teleop_status(
             "status",
             {
@@ -1121,6 +1160,20 @@ class TeleopStatusPanelNode(Node):
                 "max_joint_speed_rad_s": decision.max_joint_speed_rad_s,
             },
         )
+
+    def _finish_keyboard_step(self):
+        with self._web_keyboard_lock:
+            self._web_keyboard_busy = False
+
+    def _on_keyboard_result(self, future):
+        self._finish_keyboard_step()
+        try:
+            response = future.result()
+            state = 'done' if response.status == 4 and response.result.error_code == 0 else 'failed'
+            self._store.update_teleop_status('status', dict(source='web_keyboard', state=state,
+                message=response.result.error_string))
+        except Exception as exc:
+            self._store.update_teleop_status('status', dict(source='web_keyboard', state='failed', message=str(exc)))
 
     def _handle_execute_preview(self, payload: dict) -> dict:
         """处理面板块上的"执行预览"（相对当前位形的关节目标）。
@@ -1220,6 +1273,21 @@ class TeleopStatusPanelNode(Node):
             self._store.update_teleop_status("web_gripper", result["status"])
             return result["response"]
         if result.get("simulated_position") is not None:
+            if self._physical_simulation:
+                client = self._simulation_gripper_client
+                if not client.wait_for_service(timeout_sec=.1):
+                    return dict(accepted=False, message='simulation gripper unavailable')
+                request = SetGripper.Request()
+                request.position, request.max_effort = decision.position, decision.max_effort
+                future = client.call_async(request)
+                deadline = time.monotonic()+.5
+                while not future.done() and time.monotonic() < deadline:
+                    time.sleep(.005)
+                if not future.done():
+                    return dict(accepted=False, message='simulation gripper response unconfirmed')
+                response = future.result()
+                return dict(accepted=response.success, position=response.reached_position,
+                    message='simulation gripper accepted' if response.success else 'simulation gripper reserved or rejected')
             # 仿真分支：没有动作目标，直接把模拟落点当作当前开口并主动推一帧反馈。
             self._sim_gripper_position = float(result["simulated_position"])
             self._publish_simulated_gripper_state()

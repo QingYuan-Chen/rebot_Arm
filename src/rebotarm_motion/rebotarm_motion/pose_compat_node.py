@@ -239,7 +239,6 @@ class PoseCompatNode(Node):
             stamp = round(value['elapsed_sec']*1e9)
             point.time_from_start = Duration(sec=stamp//1_000_000_000, nanosec=stamp%1_000_000_000)
             goal.trajectory.points.append(point)
-        goal.trajectory.points[-1].velocities = [0.]*6
         with self.lock:
             self._check_run(run, canceled)
             run.command, run.dispatched = command, time.monotonic()

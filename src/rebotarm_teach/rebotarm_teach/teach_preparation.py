@@ -75,6 +75,7 @@ def build_replay_start_soft_points(
         raise ValueError("current and first joint vectors have different lengths")
     elapsed = 0.0
     points: list[RetimedTeachPoint] = []
+    zeros = (0.,)*len(current_positions)
     hold = max(float(start_hold_sec), 0.0)
     if hold > 0.0:
         elapsed += hold
@@ -83,6 +84,7 @@ def build_replay_start_soft_points(
                 time_from_start=elapsed,
                 positions=tuple(float(v) for v in current_positions),
                 source_sample=-1,
+                velocities=zeros, accelerations=zeros,
             )
         )
     band = str(start_band or "").strip().lower()
@@ -105,11 +107,18 @@ def build_replay_start_soft_points(
         # 时长为 0 或点数过多时会算出与上一点相同/更早的时间戳，必须跳过。
         if points and timestamp <= points[-1].time_from_start:
             continue
+        from rebotarm_motion.trajectory_messages import rest_to_rest_sample
+        if duration > 0:
+            positions, velocities, accelerations = rest_to_rest_sample(
+                current_positions, first_positions, duration, ratio)
+        else:
+            velocities = accelerations = zeros
         points.append(
             RetimedTeachPoint(
                 time_from_start=timestamp,
                 positions=tuple(float(v) for v in positions),
                 source_sample=-1,
+                velocities=velocities, accelerations=accelerations,
             )
         )
     elapsed += duration
@@ -122,6 +131,7 @@ def build_replay_start_soft_points(
                     time_from_start=elapsed,
                     positions=tuple(float(v) for v in first_positions),
                     source_sample=-1,
+                    velocities=zeros, accelerations=zeros,
                 )
             )
     return points

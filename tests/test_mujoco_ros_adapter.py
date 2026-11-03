@@ -407,6 +407,7 @@ def test_ros_adapter_trajectory_lifecycle_explicitly_enters_position_and_hold():
         "\n        def _timer_callback", 1
     )[0]
     assert "self._control.command_joint_positions(desired)" in execute_body
-    assert "lambda: (self._hold_current_position(), goal_handle.succeed())" in execute_body
+    assert "self._control.command_joint_positions(sampler.sample(sampler.duration))" in execute_body
+    assert "if self._trajectory_mode == 'prepared_v1' else self._hold_current_position()" in execute_body
     assert "GOAL_TOLERANCE_VIOLATED" in execute_body
     assert "self._command_gate.stop_and_hold(self._hold_current_position)" in execute_body

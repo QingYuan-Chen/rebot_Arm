@@ -43,6 +43,7 @@ from .gripper_control import _G_VERIFIED_OPEN_LIMIT_M
 from .gripper_control import _G_ZERO_VERIFY_SAMPLES
 from .gripper_control import _G_ZERO_VERIFY_TIMEOUT_SEC
 from .device_requests import device_request
+from .stationary_evidence import StationaryEvidence, POSITION_SPAN
 import numpy as np
 import time
 from .controller_parameters import (
@@ -101,6 +102,7 @@ class GripperController:
         """连接前重置反馈时效及执行代次, 唤醒旧会话等待者."""
         self._gripper_feedback_updated_monotonic = None
         self._gripper_feedback_error = None
+        self._stationary.reset()
         with self._gripper_execution._gripper_lock:
             self._gripper_execution.supersede_locked()
             self._gripper_execution._gripper_active = False
@@ -146,6 +148,7 @@ class GripperController:
         self._gripper_passthrough_until = None
         self._gripper_loop_running = False
         self._gripper_execution = self._assemble_execution()
+        self._stationary = StationaryEvidence(joints=1)
 
     def bind(self, *, feedback: GripperFeedbackPort, protection: ProtectionPort):
         """装配阶段一次注入明确组件接口; 运行后不替换依赖."""
@@ -173,6 +176,20 @@ class GripperController:
     def has_gripper(self) -> bool:
         """查询是否已绑定夹爪设备, 不代表反馈健康或已经使能."""
         return self._gripper_mot is not None
+
+    def preparation_snapshot(self):
+        """只复制新鲜、连续静止且空闲的夹爪状态，不能在准备时停止原有夹爪任务。"""
+        sample = self.feedback.verified_sample('gripper')
+        with self._gripper_execution._gripper_lock:
+            if (self._gripper_execution._gripper_active
+                    or self._gripper_execution._gripper_neutral_pending is not None
+                    or self._gripper_passthrough_until is not None
+                    or sample.state.status_code != 1
+                    or not self._stationary.confirmed(time.monotonic())):
+                raise RuntimeError('fresh stationary idle gripper required')
+            width = float(np.clip(sample.state.pos / _G_ANGLE_OPEN * _G_MAX_DIST_M, 0., _G_MAX_DIST_M))
+            return dict(positions=(width/2, -width/2), raw_position=sample.state.pos,
+                        generation=self._gripper_execution._generation)
 
     @property
     def gripper_active(self) -> bool:
@@ -231,6 +248,12 @@ class GripperController:
                 self._record_gripper_feedback_error(coordinate_error)
                 return
             self._gripper_feedback_error = None
+            if (status != 1 or self._gripper_execution._gripper_active
+                    or abs(velocity) > .05
+                    or (self._stationary.anchor is not None
+                        and abs(position-self._stationary.anchor[0]) > POSITION_SPAN)):
+                self._stationary.reset((position,))
+            self._stationary.observe((position,), (velocity,), timestamp, time.monotonic())
         if recovered:
             _LOG.info(
                 "gripper feedback recovered pos=%.6frad vel=%.6frad/s "
@@ -391,6 +414,8 @@ class GripperController:
         超时按"角度行程 / 最大速度 + 余量"估算, 供 ``wait_gripper_target`` 使用.
         """
         self._lifecycle.require_enabled()
+        if self._backend.arm_resource_reserved:
+            raise RuntimeError('gripper reserved by prepared arm trajectory')
         if not self._backend.control_loop_active:
             raise RuntimeError(
                 "gripper command requires the unified hardware control loop"
@@ -505,6 +530,8 @@ class GripperController:
         释放是否生效仍取决于发送及设备状态, 不能单凭计时结束证明卸力.
         """
         self._lifecycle.require_enabled()
+        if self._backend.arm_resource_reserved:
+            raise RuntimeError('gripper reserved by prepared arm trajectory')
         if not self._backend.control_loop_active:
             raise RuntimeError(
                 "gripper grasp requires the unified hardware control loop"
@@ -639,6 +666,8 @@ class GripperController:
         mode: 0 = MIT, 1 = 位置-速度, 2 = 速度.
         """
         self._lifecycle.require_enabled()
+        if self._backend.arm_resource_reserved:
+            raise RuntimeError('gripper reserved by prepared arm trajectory')
         if self._gripper_mot is None or self._gripper_cfg is None:
             raise RuntimeError("gripper is not initialized")
         with self._gripper_execution._gripper_lock:
@@ -760,7 +789,12 @@ class GripperController:
     @device_request
     def release_grasp_hold(self, *args, **kwargs):
         """通过设备请求结束显式抓取保持, 并使旧夹爪代次失效."""
-        return self._gripper_execution.release_grasp_hold(*args, **kwargs)
+        released = self._gripper_execution.release_grasp_hold(*args, **kwargs)
+        if self._backend.arm_resource_reserved and not released:
+            # 空闲夹爪的显式保护性释放也撤销固定状态绑定，六轴周期随后受控停止。
+            with self._gripper_execution._gripper_lock:
+                self._gripper_execution.supersede_locked()
+        return released
 
     @property
     def grasp_hold_release_reason(self):

@@ -56,7 +56,8 @@ def test_mujoco_moveit_launch_starts_upstream_node_and_moveit_without_fake_joint
 
     assert 'executable="rebotarm_mujoco_node"' in launch_text
     assert "rebotarm_mujoco_adapter" not in launch_text
-    assert "simulation_backend" not in launch_text
+    assert "'simulation_backend': 'mujoco'" in launch_text
+    assert 'DeclareLaunchArgument("simulation_backend"' not in launch_text
     assert 'moveit_demo.launch.py' in launch_text
     assert '"use_fake_joint_states": "false"' in launch_text
     assert '"show_viewer": use_mujoco_viewer' in launch_text

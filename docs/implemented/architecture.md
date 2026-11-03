@@ -10,6 +10,21 @@
 
 ## 职责边界
 
+### 共享轨迹内核
+
+`rebotarm_trajectory` 是 `ament_python` 纯数值库，无节点、ROS、NumPy、SDK、
+物理引擎、线程和时钟依赖，模块平铺包根目录。它拥有不可变轨迹点和分段系数、
+结构/维度/有限性/时间校验、已检查系数解码、旧阶梯索引、线性采样和 q/v/a/jerk 求值。
+motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查；控制器保留发送回执、
+执行代次、任务与资源占用；仿真保留物理时间、模式与生命周期。
+三者单向依赖共享包，控制器及仿真不导入 motion 实现。
+
+`PrepareArmTrajectory` 属于内部准备接口，唯一公共执行入口仍为 FJT。
+后端先预留机械臂与固定夹爪，motion 在 MoveItPy 同一只读场景锁内完成采样检查，
+后端原子复核会话、代次、已发送保持目标、静止新帧、固定夹爪与场景版本后使用原系数。
+准备等待不占设备周期；已观察到的相关场景变化使曲线停止保持。本批不提供动态避障。
+模式、期限和验证边界见 [P005 执行接入](features/p005_prepared_trajectory.md)。
+
 ### 硬件职责（Hardware ownership）
 
 `rebotarmcontroller` 负责真实硬件通信和最后一道安全防线。
@@ -294,6 +309,7 @@ rebotarm_dashboard
   -> MoveIt / ROS messages / controller actions
 
 rebotarm_teach -> rebotarm_motion
+rebotarm_motion / rebotarmcontroller / rebotarm_simulation -> rebotarm_trajectory
 rebotarm_teleop -> 使用旧 interactive preview 辅助工具时依赖 rebotarm_motion
 rebotarm_vision -> 为验证和执行依赖 rebotarm_motion / MoveIt 接口
 rebotarm_bringup -> 仅依赖各包的 launch 入口和配置

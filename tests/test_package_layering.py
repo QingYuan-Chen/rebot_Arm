@@ -392,3 +392,27 @@ def test_legacy_custom_interactive_preview_entrypoints_are_removed() -> None:
 
     assert not (ROOT / "src/rebotarm_motion/rebotarm_motion/preview_node.py").exists()
     assert not (ROOT / "src/rebotarm_motion/rebotarm_motion/execution_node.py").exists()
+
+
+def test_shared_trajectory_is_flat_pure_numeric_and_dependencies_are_one_way():
+    package = ROOT/'src/rebotarm_trajectory'
+    module = package/'rebotarm_trajectory'
+    import sys
+    for path in module.rglob('*.py'):
+        assert path.parent == module, path
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                imports = [item.name.split('.')[0] for item in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                imports = [(node.module or '').split('.')[0]]
+            else:
+                continue
+            assert all(name in sys.stdlib_module_names for name in imports), path
+            assert not set(imports) & {'threading', 'time', 'asyncio'}, path
+    assert '<build_type>ament_python</build_type>' in (package/'package.xml').read_text()
+    for name in ('rebotarm_motion', 'rebotarmcontroller', 'rebotarm_simulation'):
+        manifest = ET.parse(ROOT/'src'/name/'package.xml').getroot()
+        assert any(child.text == 'rebotarm_trajectory' for child in manifest), name
+    for path in (ROOT/'src/rebotarmcontroller/rebotarmcontroller').glob('*.py'):
+        assert 'from rebotarm_motion' not in path.read_text(), path
+        assert 'import rebotarm_motion' not in path.read_text(), path

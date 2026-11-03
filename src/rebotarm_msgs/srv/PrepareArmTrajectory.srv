@@ -1,0 +1,18 @@
+# 本机内部数值交接，所有单调时刻来自同一主机；不是硬件执行许可。
+trajectory_msgs/JointTrajectory trajectory
+uint64 session
+uint64 generation
+float64[6] hold_positions
+float64[6] feedback_positions
+float64 feedback_observed_at
+bool stationary
+bool enabled
+float64[2] gripper_positions
+uint64 gripper_generation
+string scene_revision
+float64 deadline_monotonic
+---
+bool success
+string message
+string prepared_json
+string scene_revision

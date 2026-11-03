@@ -40,6 +40,8 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_srvs.srv import Trigger
 
 from rebotarm_msgs.msg import JointMotorState
@@ -116,6 +118,10 @@ class SimTrajectoryControllerNode(Node):
         self._motion_lock = threading.Lock()
         self._callback_group = ReentrantCallbackGroup()
 
+        self._capability_pub = self.create_publisher(String,
+            f'/{self._arm_namespace}/trajectory_execution_mode',
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self._capability_pub.publish(String(data='legacy'))
         self._joint_state_pub = self.create_publisher(JointState, f"/{self._arm_namespace}/joint_states", 10)
         self._gripper_state_pub = self.create_publisher(
             JointMotorState,
