@@ -7,6 +7,19 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / 'src/rebotarmcontroller/rebotarmcontroller'
+MODULES = {
+    'arm_controller': 'arm/arm_controller.py',
+    'gripper_controller': 'gripper/gripper_controller.py',
+    'feedback_reader': 'hardware/feedback_reader.py',
+    'gravity_controller': 'gravity/gravity_controller.py',
+    'controller_cycle': 'runtime/controller_cycle.py',
+    'controller_protection': 'runtime/controller_protection.py',
+    'ros_actions': 'ros/ros_actions.py',
+    'ros_services': 'ros/ros_services.py',
+    'ros_publishers': 'ros/ros_publishers.py',
+    'motor_passthrough': 'ros/motor_passthrough.py',
+    'lifecycle': 'runtime/lifecycle.py',
+}
 
 
 def test_manager_only_constructs_and_wires_components():
@@ -30,7 +43,7 @@ def test_manager_only_constructs_and_wires_components():
 def test_components_never_receive_manager_or_use_lazy_assembly():
     for name in ('arm_controller', 'gripper_controller', 'feedback_reader',
                  'gravity_controller', 'controller_cycle', 'controller_protection'):
-        tree = ast.parse((PACKAGE / f'{name}.py').read_text())
+        tree = ast.parse((PACKAGE / MODULES[name]).read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.arg):
                 assert 'manager' not in node.arg
@@ -47,7 +60,7 @@ def test_components_never_receive_manager_or_use_lazy_assembly():
 
 
 def test_stop_confirmation_contains_no_device_polling_or_sleep():
-    tree = ast.parse((PACKAGE / 'arm_stop.py').read_text())
+    tree = ast.parse((PACKAGE / 'arm/arm_stop.py').read_text())
     assert not any(isinstance(node, (ast.While, ast.For)) for node in ast.walk(tree))
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute):
@@ -62,10 +75,10 @@ def test_safety_fixtures_use_formal_construction():
 def test_peer_access_is_limited_to_declared_public_ports():
     """不只检查门面：bind 的每条边必须是冻结端口，调用不得越过端口字段。"""
     from dataclasses import fields, is_dataclass
-    import rebotarmcontroller.component_ports as ports
+    import rebotarmcontroller.contracts.component_ports as ports
     for name in ('arm_controller', 'gripper_controller', 'feedback_reader',
                  'gravity_controller', 'controller_cycle', 'controller_protection'):
-        tree = ast.parse((PACKAGE / f'{name}.py').read_text())
+        tree = ast.parse((PACKAGE / MODULES[name]).read_text())
         owner = next(node for node in tree.body if isinstance(node, ast.ClassDef))
         bind = next(node for node in owner.body
                     if isinstance(node, ast.FunctionDef) and node.name == 'bind')
@@ -99,7 +112,7 @@ def test_manager_never_pierces_component_private_state():
 
 def test_initialized_controller_fields_do_not_use_fixture_fallbacks():
     for name in ('arm_controller', 'gripper_controller', 'gravity_controller'):
-        tree = ast.parse((PACKAGE / f'{name}.py').read_text())
+        tree = ast.parse((PACKAGE / MODULES[name]).read_text())
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                     and node.func.id == 'getattr' and node.args):
@@ -125,7 +138,7 @@ def test_only_composition_node_receives_manager_components():
 
 def test_ros_adapters_only_access_declared_role_ports():
     """只读端口不能发命令；适配和关闭协调不得穿透组件私有状态或写入属性。"""
-    contracts = ast.parse((PACKAGE / 'ros_ports.py').read_text())
+    contracts = ast.parse((PACKAGE / 'contracts/ros_ports.py').read_text())
     classes = {node.name: node for node in contracts.body if isinstance(node, ast.ClassDef)}
 
     def members(name):
@@ -135,7 +148,7 @@ def test_ros_adapters_only_access_declared_role_ports():
         return inherited | {node.name for node in owner.body if isinstance(node, ast.FunctionDef)}
 
     for name in ('ros_actions', 'ros_services', 'ros_publishers', 'motor_passthrough', 'lifecycle'):
-        tree = ast.parse((PACKAGE / f'{name}.py').read_text())
+        tree = ast.parse((PACKAGE / MODULES[name]).read_text())
         # 构造参数与同名私有字段一一对应；关闭策略直接使用参数。
         functions = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
                      and node.name in ('__init__', 'shutdown_policy')]
@@ -194,12 +207,13 @@ def test_manager_assembly_does_not_use_transparent_lambdas():
 
 
 def test_request_entries_use_one_component_layer_and_the_central_policy():
-    from rebotarmcontroller.device_requests import REQUEST_POLICIES
+    from rebotarmcontroller.runtime.device_requests import REQUEST_POLICIES
 
-    modules = {'ControllerLifecycle': 'lifecycle', 'ArmController': 'arm_controller',
-               'GripperController': 'gripper_controller', 'GravityController': 'gravity_controller'}
+    modules = {'ControllerLifecycle': 'runtime/lifecycle.py', 'ArmController': 'arm/arm_controller.py',
+               'GripperController': 'gripper/gripper_controller.py',
+               'GravityController': 'gravity/gravity_controller.py'}
     found = {}
-    for path in PACKAGE.glob('*.py'):
+    for path in PACKAGE.rglob('*.py'):
         tree = ast.parse(path.read_text())
         for owner in (node for node in tree.body if isinstance(node, ast.ClassDef)):
             for method in (node for node in owner.body if isinstance(node, ast.FunctionDef)):
@@ -208,10 +222,11 @@ def test_request_entries_use_one_component_layer_and_the_central_policy():
                     continue
                 assert len(method.decorator_list) == 1
                 assert isinstance(decorators[0], ast.Name) and decorators[0].id == 'device_request'
-                assert modules.get(owner.name) == path.stem
+                assert modules.get(owner.name) == path.relative_to(PACKAGE).as_posix()
                 key = f'{owner.name}.{method.name}'
                 assert key not in found
-                found[key] = getattr(getattr(importlib.import_module(f'rebotarmcontroller.{path.stem}'), owner.name), method.name)
+                module = '.'.join(path.relative_to(PACKAGE).with_suffix('').parts)
+                found[key] = getattr(getattr(importlib.import_module(f'rebotarmcontroller.{module}'), owner.name), method.name)
     assert set(found) == set(REQUEST_POLICIES)
     for key, entry in found.items():
         assert entry.request_policy is REQUEST_POLICIES[key]
@@ -223,6 +238,6 @@ def test_request_entries_use_one_component_layer_and_the_central_policy():
 
 
 def test_lifecycle_requires_explicit_request_runtime():
-    from rebotarmcontroller.lifecycle import ControllerLifecycle
+    from rebotarmcontroller.runtime.lifecycle import ControllerLifecycle
     with pytest.raises(TypeError):
         ControllerLifecycle()

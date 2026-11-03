@@ -105,7 +105,7 @@ def test_disable_cancels_passthrough_continuation_before_any_direct_write(monkey
 
 
 def test_runtime_close_finishes_waiter_of_deferred_request(monkeypatch):
-    from rebotarmcontroller.arm_stop import CycleResult
+    from rebotarmcontroller.arm.arm_stop import CycleResult
     manager, _ = make_local_manager(monkeypatch)
     runtime = manager.runtime
     accepted = threading.Event()

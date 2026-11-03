@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""P005 冻结物理对照及隔离 ROS 全链验收；永不启动真实控制器。"""
+"""P005 冻结物理对照及隔离 ROS 操作链验收。
+
+文件职责
+    比较旧阶梯与 prepared_v1 的跟踪和保持效果，按需验证已启动的 MuJoCo/MoveIt/
+    Dashboard/键盘正式链；保存原始轨迹、配置摘要和检查结论。
+对外接口
+    main 接受必需的 --output；--ros 启用 ROS/HTTP 操作链，--dashboard 指定对应仿真界面。
+    physics_acceptance 返回物理指标，ros_acceptance 返回各操作检查记录。
+安全约束
+    不启动真实控制器；--ros 会发送目标、取消并修改场景，必须使用隔离的非零 ROS 域
+    和同一仿真链的 Dashboard。程序核对 MuJoCo 节点及唯一 FJT，但不替代运行环境隔离。
+    不调整模型、增益、限值或 Action 容差；独立物理观察窗口不延长 MoveIt 执行预算。
+    输出目录应按本次验收独立分配，同名报告会覆盖；软件结果不构成实机验收。
+文件结构
+    JSON 输出 → 固定物理对照 → ROS 服务/Action/网页/终端验收 → 配置摘要和 CLI。
+"""
 import argparse
 import hashlib
 import json
@@ -11,10 +26,12 @@ from urllib.error import HTTPError
 
 
 def write_json(path, value):
+    """写入一次完整报告，禁止非有限 JSON；调用者负责选择本次独立产物路径。"""
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False)+'\n')
 
 
 def physics_acceptance(output):
+    """两次独立仿真使用同一初始姿态和控制配置，只改变目标采样方式。"""
     from rebotarm_motion.polynomial_trajectory import JOINT_NAMES, build_curve
     from rebotarm_motion.trajectory_preparation import point_to_point
     from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
@@ -24,6 +41,7 @@ def physics_acceptance(output):
     curve = build_curve(JOINT_NAMES, point_to_point(start, target, .4))
     report = {}
     for mode in ('legacy_step', 'prepared_v1'):
+        # 每组重新建模并先保持 2 s，防止上一组的积分、速度或接触状态影响对照。
         with RebotArmMujoco() as sim:
             sim.reset_joint_positions(start)
             sim.command_joint_positions(start)
@@ -43,6 +61,7 @@ def physics_acceptance(output):
                 if elapsed <= .4+1e-9:
                     maximum = max(maximum, max(abs(a-b) for a,b in zip(reference,state.joint_positions[:6])))
                 if elapsed >= .4:
+                    # 到达与连续 0.5 s 静止由独立物理观察判断，不读取 Action 的成功标记。
                     quiet = (max(abs(a-b) for a,b in zip(target,state.joint_positions[:6])) <= .001
                         and max(abs(v) for v in state.joint_velocities[:6]) <= .01)
                     stable_since = stable_since if quiet else None
@@ -53,6 +72,7 @@ def physics_acceptance(output):
                 trace.record(state, sim.get_control_status(), dict(curve=curve, start=origin))
             before = sim.get_control_status()
             before_q = sim.get_state().joint_positions[:6]
+            # 同时观察切换瞬间支撑力矩与随后 1 s 漂移，不能只看最终位置是否恢复。
             sim.set_mode('hold')
             after = sim.get_control_status()
             torque_jump = max(abs(a-b) for a,b in zip(before.applied_torques,after.applied_torques))
@@ -74,6 +94,7 @@ def physics_acceptance(output):
 
 
 def ros_acceptance(output, dashboard):
+    """驱动已存在的隔离仿真图；等待、Action 终态和实际反馈分别检查，失败直接抛错。"""
     if os.environ.get('ROS_DOMAIN_ID', '0') == '0':
         raise RuntimeError('use an isolated nonzero ROS_DOMAIN_ID for simulation acceptance')
     import rclpy
@@ -104,6 +125,7 @@ def ros_acceptance(output, dashboard):
         node.create_subscription(String, '/rebotarm/'+name,
             lambda m, key=name: latest.update({key:m.data}), qos)
     def wait(predicate, timeout=8.):
+        """等待期间持续 spin 接收反馈；超时表示证据不足，不能替代为成功。"""
         deadline = time.monotonic()+timeout
         while not predicate() and time.monotonic()<deadline:
             rclpy.spin_once(node, timeout_sec=.01)
@@ -143,6 +165,7 @@ def ros_acceptance(output, dashboard):
         feedbacks[id(handle)]=events
         return handle
     def finish(handle, success=True):
+        """同时检查 ROS Goal 终态和 FJT 错误码；MoveIt 自身的错误码由对应调用点核对。"""
         future=handle.get_result_async();wait(future.done,12.)
         response=future.result()
         if success:assert response.status==4 and response.result.error_code==0,str(response)
@@ -186,6 +209,7 @@ def ros_acceptance(output, dashboard):
         results['compatibility']='C0/C1 pass'
         # 实际 MoveIt 服务规划，选一条不修改时间、不放宽限值的有效轨迹。
         planned=None
+        # 改变规划请求取得合格样本，不修改返回轨迹；每次实际执行的成功/拒绝都留证据。
         for scaling in (.03,.01,.003):
             req=GetMotionPlan.Request();plan=req.motion_plan_request
             plan.group_name='arm';plan.pipeline_id='ompl';plan.num_planning_attempts=1
@@ -340,6 +364,7 @@ def ros_acceptance(output, dashboard):
 
 
 def main():
+    """先记录本次安装资源摘要，再执行物理检查；只有显式 --ros 才访问已有仿真图。"""
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--ros',action='store_true')

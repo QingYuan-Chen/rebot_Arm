@@ -43,11 +43,11 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
 
 from .hardware_manager import HardwareManager
-from .lifecycle import shutdown_policy
-from .motor_passthrough import MotorPassthrough
-from .ros_actions import ArmActions
-from .ros_publishers import JointStatePublisher
-from .ros_services import ArmServices
+from .runtime.lifecycle import shutdown_policy
+from .ros.motor_passthrough import MotorPassthrough
+from .ros.ros_actions import ArmActions
+from .ros.ros_publishers import JointStatePublisher
+from .ros.ros_services import ArmServices
 
 
 # 操作员在操作界面记录并确认过的安全停靠姿态(6 个关节角, 单位: 弧度).
@@ -86,6 +86,7 @@ class reBotArmController(Node):
         # arm_config: 机械臂配置文件路径; 空串表示使用本包默认配置, 不从旧 SDK 加载.
         self.declare_parameter("arm_config", "")
         self.declare_parameter("gravity_config", "")
+        # 实机默认 legacy；准备模式只改变协议路径，不隐含使能或实机验收许可。
         self.declare_parameter("trajectory_execution_mode", "legacy")
         # gripper_config: 夹爪配置文件路径; 空串表示使用默认夹爪配置.
         self.declare_parameter("gripper_config", "")

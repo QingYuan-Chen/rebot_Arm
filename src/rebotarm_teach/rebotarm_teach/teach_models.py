@@ -108,7 +108,9 @@ class RetimedTeachPoint:
     ``time_from_start`` 相对本段轨迹起点的时间（秒），严格递增；
     ``positions``       关节位置（rad），顺序与来源记录的 ``joint_names`` 一致；
     ``source_sample``   对应的原始样本下标；由软启动/对齐等步骤插入的合成点为 -1；
-    ``velocities``      重定时算出的关节速度（rad/s，位置对时间的差分），可为空元组。
+    ``velocities``      重定时或合成段提供的关节速度（rad/s），可为空元组；
+    ``accelerations``   同序关节加速度（rad/s²），可为空元组。
+    空元组表示未提供该阶约束，不能等同于全零；拼接与消息编码必须保留这种区别。
     """
 
     time_from_start: float

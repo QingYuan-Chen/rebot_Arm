@@ -15,8 +15,8 @@ from control_msgs.action import GripperCommand
 from rebotarm_motion.pose_kinematics import JOINT_NAMES
 from hardware_regression_io import Audit
 from hardware_regression_gate import RegressionGate, SustainedSpeed
-from rebotarmcontroller.stationary_evidence import StationaryEvidence, DisabledTransitionEvidence
-from rebotarmcontroller.gripper_control import _G_POSITION_MAX_SPEED_RAD_S
+from rebotarmcontroller.runtime.stationary_evidence import StationaryEvidence, DisabledTransitionEvidence
+from rebotarmcontroller.gripper.gripper_control import _G_POSITION_MAX_SPEED_RAD_S
 
 if not __debug__:
     raise RuntimeError('现场回归不允许使用 Python 优化模式')

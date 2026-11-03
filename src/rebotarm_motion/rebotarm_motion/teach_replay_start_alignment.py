@@ -161,6 +161,7 @@ class MoveItStartAligner:
         source_points = list(getattr(plan.trajectory, 'points', []))
         if not source_points:
             raise ValueError('empty MoveIt start alignment')
+        # 保留 MoveIt 提供的完整导数；合成保持点可补同等级的零约束，规划中间点不能改写。
         for field in ('velocities', 'accelerations'):
             present = [bool(getattr(point, field, ())) for point in source_points]
             if any(present) and not all(present):
@@ -189,6 +190,7 @@ class MoveItStartAligner:
                     for name in trajectory.joint_names]
             set_duration(point.time_from_start, elapsed + source_time)
             if source_time == 0.:
+                # t=0 已由前一保持点占据；只接受相同位置，避免制造重复时间或零时长跳变。
                 if tuple(point.positions) != tuple(trajectory.points[-1].positions):
                     raise ValueError('MoveIt start alignment initial position mismatch')
                 continue

@@ -1,6 +1,6 @@
-"""MoveIt 独立演示/调试启动文件——只做规划与可视化，不接真机执行。
+"""MoveIt 规划、可视化及可选轨迹准备服务的公共启动组合。
 
-职责：在没有任何硬件与控制器动作的前提下，拉起一套最小可用的 MoveIt 规划环境，
+职责：本文件不创建硬件控制器，独立运行时拉起一套 MoveIt 规划环境，
 用来在 RViz 里检查 URDF/SRDF、规划组、命名姿态、运动学插件与 OMPL 参数是否配好。
 上层启动组合包（真机、示教、交互、仿真）都通过 IncludeLaunchDescription 复用它，
 并用 launch 参数切换「假关节状态」与「真实关节状态」两种数据源。
@@ -15,6 +15,7 @@
 4. robot_state_publisher：订阅 /<arm_namespace>/visual_joint_states，计算并发布 TF；
 5. move_group：MoveIt 规划节点，模型与参数全部来自本包 config/ 目录；
 6. rviz2：按 rviz/moveit.rviz 打开 MotionPlanning 面板。
+另在 prepare_trajectories=true 时启动运动层准备服务，使用相同模型与场景输入。
 
 launch 参数（由上层启动组合包传入，命名必须与控制器/驱动一致）：
 - use_rviz：是否启动 rviz2，默认 true；
@@ -22,9 +23,12 @@ launch 参数（由上层启动组合包传入，命名必须与控制器/驱动
 - use_fake_joint_states：true 时用 joint_state_publisher 造假的六轴关节角；接真机或
   接仿真时上层传 false，改为消费真实反馈；
 - use_sim_time：是否使用 /clock 仿真时间，接仿真时必须为 true。
+- prepare_trajectories：是否提供 prepared_v1 内部准备服务，默认 false；不切换后端模式。
 
 安全约束：本文件不下发任何轨迹执行目标，也不启用硬件；执行权限由控制器与上层启动
 组合包掌握。这里的轨迹执行容差只用于判断规划结果能否被执行器接受，不放宽硬件保护。
+
+文件结构：launch/MoveIt 配置导入 → 模型与规划参数装配 → 公共参数 → 准备/规划/可视化节点。
 """
 
 import os
@@ -155,6 +159,7 @@ def generate_launch_description():
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             DeclareLaunchArgument("use_fake_joint_states", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            # 准备节点读取同一规范模型和场景；服务存在不等于任何后端获得执行许可。
             DeclareLaunchArgument('prepare_trajectories', default_value='false'),
             Node(
                 package='rebotarm_motion', executable='TrajectoryPreparationNode',

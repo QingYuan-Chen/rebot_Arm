@@ -3,7 +3,7 @@ import threading
 import time
 from types import SimpleNamespace
 import pytest
-from rebotarmcontroller.device_requests import DeviceRequests, RequestRejected
+from rebotarmcontroller.runtime.device_requests import DeviceRequests, RequestRejected
 from test_controller_local_runtime import make_local_manager, wait_until
 
 

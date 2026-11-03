@@ -1,4 +1,12 @@
-"""正式所有者、设备周期与假驱动的 prepared_v1 回归，不打开串口。"""
+"""prepared_v1 正式控制器所有者与设备周期的假设备回归。
+
+文件职责：验证资源预约、原子接纳、周期采样、成功保持、失败不确认以及取消/重连失效。
+对外接口：pytest 用例；enabled_manager/reserve/shutdown 复用正式装配和假驱动夹具。
+安全约束：connect/enable 只作用于内存假设备，不打开真实串口；不把任务成功当作实机物理证据。
+    用例中的少量 Action 替身只隔离协议竞态，周期与发送用例仍运行正式所有者。
+文件结构：就绪与交接夹具 → 正式周期/上下文/夹爪测试 → 发送失败与延迟
+    → Goal 身份及迟到响应 → legacy 接替、场景变化和取消回执顺序。
+"""
 from dataclasses import replace
 import time
 from types import SimpleNamespace
@@ -12,6 +20,7 @@ from rebotarm_motion.trajectory_preparation import point_to_point
 
 
 def enabled_manager(monkeypatch):
+    """等待六轴和夹爪各自的连续静止证据，避免用单帧或强改 ready 标志绕过准入。"""
     manager, buses = make_local_manager(monkeypatch)
     manager.lifecycle.connect()
     manager.lifecycle.enable()
@@ -22,6 +31,7 @@ def enabled_manager(monkeypatch):
 
 
 def reserve(manager, duration=.4):
+    """按真实预约身份构造同值准备载荷；这里只替代远端准备服务，不跳过后端接纳检查。"""
     token = manager.arm.reserve_arm_preparation(time.monotonic()+2.)
     target = list(token.hold)
     target[0] += .02
@@ -127,6 +137,7 @@ def test_prepared_partial_write_failure_does_not_acknowledge_candidate(monkeypat
     try:
         token, curve, handoff = reserve(manager)
         previous = manager.runtime.execution.last_sent_target
+        # 第三轴失败意味着前两轴可能已发送；整批不能被确认，更不能更新保持证据。
         bus.failure = (3, 'position')
         manager.arm.admit_prepared_arm_trajectory(token, handoff)
         wait_until(lambda: not manager.runtime.control_loop_active)
@@ -139,7 +150,7 @@ def test_prepared_partial_write_failure_does_not_acknowledge_candidate(monkeypat
 
 
 def test_delayed_cycle_samples_current_time_without_replaying_backlog():
-    from rebotarmcontroller.arm_execution import ArmExecution
+    from rebotarmcontroller.arm.arm_execution import ArmExecution
     execution = ArmExecution()
     execution.running = True
     curve = build_curve(JOINT_NAMES, point_to_point((0.,)*6, (.02,)*6))
@@ -147,6 +158,7 @@ def test_delayed_cycle_samples_current_time_without_replaying_backlog():
     first = execution.sample(10.05)
     assert execution.progress == 0.
     later = execution.sample(10.29)
+    # 采样本身不推进确认；必须显式 acknowledge 才能改写 last_sent_target。
     assert later.positions == pytest.approx(curve.sample(.29)[0])
     assert later.positions[0] > first.positions[0]
     assert execution.last_sent_target is None
@@ -159,7 +171,7 @@ def test_delayed_cycle_samples_current_time_without_replaying_backlog():
 
 
 def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
-    from rebotarmcontroller.ros_actions import ArmActions, GoalResponse
+    from rebotarmcontroller.ros.ros_actions import ArmActions, GoalResponse
     from control_msgs.action import FollowJointTrajectory
     actions = ArmActions.__new__(ArmActions)
     tokens = iter((object(), object()))
@@ -183,6 +195,7 @@ def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
         assert actions.trajectory_goal_callback(request) == GoalResponse.ACCEPT
     expected = [actions._pending_preparations[id(request)][1] for request in requests]
     for request in reversed(requests):
+        # 倒序返回模拟旧 Goal 的迟到回调，必须分别使用原预约，不能串用最后一个令牌。
         handle = SimpleNamespace(request=request, is_cancel_requested=False, abort=lambda: None)
         actions.execute_follow_joint_trajectory(handle)
     assert seen == expected[::-1]
@@ -192,7 +205,7 @@ def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
 
 @pytest.mark.parametrize('reason', ['cancel', 'deadline'])
 def test_action_wait_cancels_late_service_without_decoding_or_admitting(reason):
-    from rebotarmcontroller.ros_actions import ArmActions
+    from rebotarmcontroller.ros.ros_actions import ArmActions
     from rebotarm_msgs.srv import PrepareArmTrajectory
     from trajectory_msgs.msg import JointTrajectory
     actions = ArmActions.__new__(ArmActions)
@@ -212,7 +225,7 @@ def test_action_wait_cancels_late_service_without_decoding_or_admitting(reason):
 
 
 def test_legacy_special_path_replaces_completed_prepared_curve():
-    from rebotarmcontroller.arm_execution import ArmExecution
+    from rebotarmcontroller.arm.arm_execution import ArmExecution
     execution = ArmExecution();execution.running = True
     curve = build_curve(JOINT_NAMES, point_to_point((0.,)*6,(.02,)*6))
     assert execution.submit_prepared(curve, execution.generation, now=10.)
@@ -240,7 +253,7 @@ def test_observed_scene_change_stops_active_curve_and_keeps_enabled(monkeypatch)
 
 
 def test_action_cancel_invalidates_owner_before_returning_acceptance():
-    from rebotarmcontroller.ros_actions import ArmActions, CancelResponse
+    from rebotarmcontroller.ros.ros_actions import ArmActions, CancelResponse
     actions = ArmActions.__new__(ArmActions)
     request,token = object(),object()
     canceled=[]

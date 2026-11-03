@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarmcontroller.gripper_control import GripperControl
-from rebotarmcontroller.gripper_execution import GripperExecution
+from rebotarmcontroller.gripper.gripper_control import GripperControl
+from rebotarmcontroller.gripper.gripper_execution import GripperExecution
 
 
 VECTORS = json.loads((Path(__file__).parent / 'fixtures/controller_gripper_vectors.json').read_text())

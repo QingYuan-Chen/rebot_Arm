@@ -1,6 +1,10 @@
-"""候选系数通过生产周期/驱动发送到假设备; 适配器仅属于测试, 不接入生产.
+"""P005 第一批数值交接与生产发送周期的离线回归。
 
-覆盖真实发送回执和设备线程; 不把此适配器当作未来 FJT 接纳事务已经实现的证明.
+文件职责：将同一候选系数接给生产 position_tick 和驱动，验证采样、回执及代次失效。
+对外接口：pytest 用例与本文件的 OfflineCurveExecution 测试适配器；不提供生产入口。
+安全约束：底层仅使用假总线，不打开真实串口；碰撞通过由替身提供，不能作为实际避障证据。
+    本文件保留第一批实验边界，正式原子接纳由 test_p005_prepared_controller 另行验证。
+文件结构：测试执行器 → 假设备/候选准备与关闭 → 延迟周期、部分发送、迟到与兼容回归。
 """
 
 from dataclasses import replace
@@ -9,9 +13,9 @@ import threading
 
 import pytest
 
-from rebotarmcontroller.arm_execution import ArmExecution, ArmTarget
-from rebotarmcontroller.controller_runtime import ControllerRuntime
-from rebotarmcontroller.sdk_driver import CommandTransportError
+from rebotarmcontroller.arm.arm_execution import ArmExecution, ArmTarget
+from rebotarmcontroller.runtime.controller_runtime import ControllerRuntime
+from rebotarmcontroller.hardware.sdk_driver import CommandTransportError
 from rebotarm_motion.polynomial_trajectory import JOINT_NAMES, TrajectoryPoint
 from rebotarm_motion.trajectory_preparation import (
     PreparedTrajectory, PreparationContext, analyze_trajectory, point_to_point,
@@ -156,7 +160,7 @@ def test_collision_uncertainty_has_no_device_side_effect_and_old_production_stay
         candidate, report, _ = prepare(runtime, checker=lambda *_: dict(state='unknown'))
         assert candidate is None and report['state'] == 'unknown'
         assert not any(m == 'position' for _, m, _ in bus.events)
-        # 必须保留本批不切换生产策略的实际行为证据.
+        # legacy 的 submit 仍按旧阶梯采样；新增 prepared 路径不能改写旧接口语义。
         old = runtime.execution
         old.running = True
         assert old.submit([(0.,) * 6, (.02, 0., 0., 0., 0., 0.)], [0., 1.],

@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 from builtin_interfaces.msg import Time
 
-from rebotarmcontroller.ros_publishers import JointStatePublisher
-import rebotarmcontroller.ros_publishers as ros_publishers
+from rebotarmcontroller.ros.ros_publishers import JointStatePublisher
+import rebotarmcontroller.ros.ros_publishers as ros_publishers
 
 
 @pytest.fixture(autouse=True)

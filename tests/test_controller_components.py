@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from rebotarmcontroller.configuration import HardwareSettings, load_configuration, default_config
-from rebotarmcontroller.controller_contracts import MotorFeedback
+from rebotarmcontroller.contracts.controller_contracts import MotorFeedback
 
 # 批次 2 切换时，用相同输入对照旧模型和规范模型的正运动学结果。
 FK_SAMPLES = ((0.,0.,0.,0.,0.,0.), (0.,0.,-.017453292519943295,0.,0.,0.),
@@ -56,7 +56,7 @@ def test_feedback_contract_copies_values_and_is_frozen():
 
 def test_manager_and_ros_have_no_legacy_private_access():
     root=Path(__file__).resolve().parents[1]/'src/rebotarmcontroller/rebotarmcontroller'
-    for name in ('hardware_manager.py','ros_actions.py','ros_services.py','motor_passthrough.py'):
+    for name in ('hardware_manager.py','ros/ros_actions.py','ros/ros_services.py','ros/motor_passthrough.py'):
         for node in ast.walk(ast.parse((root/name).read_text())):
             if not isinstance(node, ast.Attribute):
                 continue

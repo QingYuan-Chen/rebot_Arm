@@ -28,7 +28,7 @@ class GravityCommandError(RuntimeError):
 
 _LOG = logging.getLogger('rebotarmcontroller.hardware_manager')
 
-from .gripper_control import (
+from .gripper.gripper_control import (
     _G_MAX_DIST_M,
     _G_VERIFIED_OPEN_LIMIT_M,
     _G_ANGLE_OPEN,

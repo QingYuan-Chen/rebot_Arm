@@ -10,6 +10,10 @@
 门控说明：本模块只消费预处理结果 ``prepared``（其 ``samples`` 或 ``retimed_points``），
 不读取记录文件；录制段一定先重定时再下发，不会把原始采样时刻直接写进轨迹，
 yellow 风险等级还会在这里把速度压到配置上限以内。
+
+对外接口：TeachReplayTrajectoryBuilder.build 拼接并返回轨迹，消息工厂和起点对齐器由调用方注入。
+安全约束：按录制/重定时结果的完整导数字段选择等级，混合缺失明确拒绝；不补造中间零导数。
+文件结构：时间编码 → 构建配置/结果 → 起点分档与拼接 → 回放点编码 → 合法末点保持。
 """
 
 from __future__ import annotations
@@ -157,6 +161,7 @@ class TeachReplayTrajectoryBuilder:
         start_count = len(trajectory.points)
         self._append_replay_points(trajectory, prepared=prepared, elapsed=elapsed, config=config)
         replay = trajectory.points[start_count:]
+        # 先以真实回放段确定字段完整性，再处理合成起始段；不能让合成段抬高输入等级。
         for field in ('velocities', 'accelerations'):
             present = [bool(getattr(point, field, ())) for point in replay]
             if any(present) and not all(present):
@@ -252,10 +257,11 @@ class TeachReplayTrajectoryBuilder:
             trajectory.points.append(point)
 
     def append_final_hold(self, trajectory: Any, *, final_hold_sec: float) -> None:
-        """在轨迹末尾追加一个零速度保持点，让控制器在终点稳定停住。
+        """在轨迹末尾追加同等级保持点，位置和已有的零导数约束沿用末点。
 
         ``final_hold_sec <= 0`` 或轨迹还没有任何点时直接返回（不改动轨迹）；
         保持点的位置沿用最后一个点，时间 = 上一点时刻 + 保持时长。
+        末点若提供非零 v/a 则拒绝，不能通过追加零导数点掩盖突变；q-only 保持 q-only。
         """
         final_hold = max(float(final_hold_sec), 0.0)
         if final_hold <= 0.0 or not trajectory.points:

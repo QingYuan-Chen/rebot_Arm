@@ -4,8 +4,8 @@ import sys
 from types import SimpleNamespace
 import types
 
-import rebotarmcontroller.ros_actions as ros_actions_module
-from rebotarmcontroller.ros_actions import ArmActions
+import rebotarmcontroller.ros.ros_actions as ros_actions_module
+from rebotarmcontroller.ros.ros_actions import ArmActions
 
 
 class _LongMoveHardware:

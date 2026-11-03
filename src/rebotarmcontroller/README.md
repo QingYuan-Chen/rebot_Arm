@@ -2,33 +2,52 @@
 
 真实机械臂与夹爪的硬件控制包，是仓库中唯一允许访问电机 SDK、串口/总线和真实执行器的包。它发布已校验反馈、提供 ROS 服务/动作，并执行最后一道低层安全检查。
 
-## 目录结构
+## 文件结构
 
 ```text
 rebotarmcontroller/
 ├── rebotarmcontroller/
-│   ├── rebotarm_controller.py       # reBotArmController ROS 节点装配
-│   ├── hardware_manager.py           # 唯一运行时与职责组件的纯装配
-│   ├── configuration.py              # 配置解析、范围和资源定位
-│   ├── controller_contracts.py       # 不可变反馈与发送回执
-│   ├── sdk_driver.py                 # MotorBridge 唯一总线与句柄
-│   ├── device_requests.py            # 集中请求策略、有界队列、优先级与资源代次
-│   ├── controller_runtime.py         # 唯一设备线程、反馈与周期调度
-│   ├── feedback_acquisition.py       # 序号采集、缓存和只读健康判断
-│   ├── lifecycle.py                  # 生命周期请求、状态、事务与关闭策略
-│   ├── arm_execution.py              # 六轴目标、速度覆盖和轨迹游标
-│   ├── arm_trajectory.py             # 六轴任务、到位与取消结果
-│   ├── arm_position_control.py       # 位置命令计算
-│   ├── controller_kinematics.py       # 状态查询所需的规范模型 FK
-│   ├── gravity_control.py            # 重力模型、补偿状态和积分计算
-│   ├── gripper_execution.py          # 独立夹爪任务与周期推进
-│   ├── gripper_control.py            # 夹爪斜坡和有界力矩
-│   ├── ros_ports.py                  # ROS 适配与关闭协调的职责端口声明
-│   ├── ros_services.py               # enable/disable/safe_home/stop/zero/夹爪等服务
-│   ├── ros_actions.py                # FJT、夹爪 Action 协议映射
-│   ├── ros_publishers.py              # joint_states、JointMotorState、ArmStatus
-│   ├── motor_passthrough.py           # 受门控的低层电机命令透传
-│   ├── conversions.py                 # 位姿、RPY、旋转矩阵互转
+│   ├── rebotarm_controller.py        # ROS 节点组合、参数与退出协调
+│   ├── hardware_manager.py           # 运行时、生命周期和六个职责组件的纯装配
+│   ├── configuration.py              # 配置加载、校验与默认资源定位
+│   ├── controller_parameters.py      # 控制器常量与参数边界
+│   ├── contracts/                   # 跨组件数值和能力接口
+│   │   ├── controller_contracts.py   # 不可变命令、反馈与发送回执
+│   │   ├── controller_values.py      # 跨组件快照、准备接纳与结果
+│   │   ├── component_ports.py        # 组件间冻结能力端口
+│   │   └── ros_ports.py              # ROS 适配与关闭协调的接口声明
+│   ├── hardware/                    # 设备通信与已校验反馈
+│   │   ├── sdk_driver.py             # MotorBridge 总线、电机句柄与发送回执
+│   │   ├── feedback_acquisition.py   # 逐路序号、验证缓存与健康判断
+│   │   └── feedback_reader.py        # 反馈分组、一致快照与组件查询
+│   ├── runtime/                     # 设备线程、生命周期与安全协调
+│   │   ├── controller_runtime.py     # 唯一设备线程、周期调度与停止续体
+│   │   ├── device_requests.py        # 有界队列、优先级、资源与代次
+│   │   ├── lifecycle.py              # 连接、使能、失能、模式、置零与关闭
+│   │   ├── controller_cycle.py       # 反馈与六轴、夹爪、重力周期协调
+│   │   ├── controller_protection.py  # 故障协调、保护失能和恢复确认
+│   │   ├── command_guard.py          # 透传准入、故障决策与保护锁存
+│   │   └── stationary_evidence.py    # 静止窗口、位移与固定锚点证据
+│   ├── arm/                         # 六轴执行与 FK
+│   │   ├── arm_controller.py         # 六轴准入、保持、停靠与透传
+│   │   ├── arm_execution.py          # 六轴目标、速度覆盖和轨迹游标
+│   │   ├── arm_trajectory.py         # 任务、到位与取消结果
+│   │   ├── arm_position_control.py   # 六轴位置命令计算
+│   │   ├── arm_stop.py               # 停止保持与周期确认状态机
+│   │   └── controller_kinematics.py  # 规范六轴模型 FK
+│   ├── gripper/                     # 夹爪事务、任务与控制计算
+│   │   ├── gripper_controller.py     # 坐标、零位验证、准入和发送
+│   │   ├── gripper_execution.py      # 独立任务及周期推进
+│   │   └── gripper_control.py        # 斜坡、限力和保持计算
+│   ├── gravity/                     # 重力补偿与模式交接
+│   │   ├── gravity_controller.py     # 启停、模式交接与诊断
+│   │   └── gravity_control.py        # 动力学模型、力矩约束与补偿计算
+│   ├── ros/                         # ROS 协议与消息适配
+│   │   ├── ros_services.py           # 生命周期、停止、夹爪等 Service
+│   │   ├── ros_actions.py            # FJT 和夹爪 Action
+│   │   ├── ros_publishers.py         # JointState、JointMotorState、ArmStatus
+│   │   ├── motor_passthrough.py      # 受准入及租约约束的命令订阅
+│   │   └── conversions.py            # ROS 位姿与矩阵转换
 │   ├── examples/
 │   │   ├── gravity_compensation.py   # 重力补偿/手动拖拽演示
 │   │   ├── gripper_control.py         # 夹爪开合交互演示

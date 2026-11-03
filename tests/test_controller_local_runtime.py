@@ -12,11 +12,11 @@ import numpy as np
 import pytest
 
 from rebotarmcontroller.configuration import load_configuration
-from rebotarmcontroller.controller_contracts import PositionCommand
-from rebotarmcontroller.sdk_driver import SdkMotorDriver, CommandTransportError
-from rebotarmcontroller.arm_execution import ArmExecution
-from rebotarmcontroller.arm_position_control import ArmPositionControl
-from rebotarmcontroller.controller_runtime import ControllerRuntime
+from rebotarmcontroller.contracts.controller_contracts import PositionCommand
+from rebotarmcontroller.hardware.sdk_driver import SdkMotorDriver, CommandTransportError
+from rebotarmcontroller.arm.arm_execution import ArmExecution
+from rebotarmcontroller.arm.arm_position_control import ArmPositionControl
+from rebotarmcontroller.runtime.controller_runtime import ControllerRuntime
 from rebotarmcontroller.hardware_manager import HardwareManager
 
 
@@ -577,7 +577,7 @@ def test_valid_passthrough_preempt_uses_feedback_after_stop_confirmation(monkeyp
         [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., 10.])
     command = SimpleNamespace(mode=1,
         **{f'use_{key}': False for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')})
-    from rebotarmcontroller.arm_stop import ArmStop
+    from rebotarmcontroller.arm.arm_stop import ArmStop
     original = ArmStop.update
     def stopped(owner, *args, **kwargs):
         result = original(owner, *args, **kwargs)

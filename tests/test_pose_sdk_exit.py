@@ -134,15 +134,54 @@ def test_fixed_sdk_comparison_vectors(case):
     ('rebotarmcontroller', 'config/gravity_compensation.yaml'),
     ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
 ])
+def test_owned_resource_uses_source_when_install_index_is_missing(monkeypatch, package, relative):
+    """只隔离安装索引，确保目录迁移后的源码回退深度仍能找到实际资源。"""
+    import ament_index_python.packages
+    from rebotarmcontroller.gravity.gravity_control import package_file
+
+    def missing_index(name):
+        raise LookupError(name)
+
+    monkeypatch.setattr(ament_index_python.packages, 'get_package_share_directory', missing_index)
+    assert package_file(package, relative) == ROOT/'src'/package/relative
+
+
+@pytest.mark.parametrize('package,relative', [
+    ('rebotarmcontroller', 'config/arm.yaml'),
+    ('rebotarmcontroller', 'config/gripper.yaml'),
+    ('rebotarmcontroller', 'config/gravity_compensation.yaml'),
+    ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
+])
+def test_owned_resource_prefers_install_index_to_existing_source(tmp_path, monkeypatch, package, relative):
+    """让源码与安装资源同时存在，必须选安装索引，避免本机源码掩盖安装错误。"""
+    import ament_index_python.packages
+    from rebotarmcontroller.gravity.gravity_control import package_file
+
+    share = tmp_path/'share'/package
+    installed = share/relative
+    installed.parent.mkdir(parents=True)
+    installed.write_text('installed resource')
+    monkeypatch.setattr(ament_index_python.packages, 'get_package_share_directory',
+                        lambda name: str(tmp_path/'share'/name))
+    assert package_file(package, relative) == installed
+
+
+@pytest.mark.parametrize('package,relative', [
+    ('rebotarmcontroller', 'config/arm.yaml'),
+    ('rebotarmcontroller', 'config/gripper.yaml'),
+    ('rebotarmcontroller', 'config/gravity_compensation.yaml'),
+    ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
+])
 def test_missing_owned_resource_fails_without_legacy_fallback(tmp_path, monkeypatch, package, relative):
     import ament_index_python.packages
-    from rebotarmcontroller import gravity_control
+    from rebotarmcontroller.gravity import gravity_control
     from rebotarm_motion import pose_kinematics
     monkeypatch.setattr(ament_index_python.packages, 'get_package_share_directory',
                         lambda name: str(tmp_path/'install/share'/name))
     # 同时隔离源码回退, 否则当前机器的正常资源会掩盖缺失安装文件.
-    for module in (gravity_control, pose_kinematics):
-        monkeypatch.setattr(module, '__file__', str(tmp_path/'missing/src/pkg/module.py'))
+    monkeypatch.setattr(gravity_control, '__file__',
+                        str(tmp_path/'missing/src/rebotarmcontroller/rebotarmcontroller/gravity/gravity_control.py'))
+    monkeypatch.setattr(pose_kinematics, '__file__', str(tmp_path/'missing/src/pkg/module.py'))
     with pytest.raises(FileNotFoundError):
         gravity_control.package_file(package, relative)
     if package == 'rebotarm_moveit_config':

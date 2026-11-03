@@ -1,5 +1,5 @@
 """停止状态机的源时间、发送确认和代次约束；不连接真实设备。"""
-from rebotarmcontroller.arm_stop import ArmStop
+from rebotarmcontroller.arm.arm_stop import ArmStop
 
 
 def test_stop_requires_successful_send_and_new_stationary_window():

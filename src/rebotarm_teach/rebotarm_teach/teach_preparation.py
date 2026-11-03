@@ -64,10 +64,12 @@ def build_replay_start_soft_points(
 
     段结构（合成点的 ``source_sample`` 一律为 -1，便于与真实示教帧区分）：
       1. 起始保持段：时长 ``start_hold_sec``，停在当前位姿，给控制器和操作者一个缓冲；
-      2. 对齐段：从当前位姿线性插值到记录首帧位姿。分档为 ``align`` 时使用
+      2. 对齐段：按静止到静止五次曲线从当前位姿到记录首帧。分档为 ``align`` 时使用
          ``align_duration`` / ``align_steps``（较慢较长，属于真正的位置对齐）；其余分档
          （如 ``direct``）使用 ``soft_start_duration`` / ``soft_start_steps`` 的软启动；
-      3. 首帧保持段：时长 ``first_hold_sec``，停在记录首帧，确保进入示教轨迹时速度为零。
+      3. 首帧保持段：时长 ``first_hold_sec``，在记录首帧显式给出零速度、零加速度约束。
+    本函数合成完整 q/v/a；整条回放最终使用的等级由构建器根据录制段实际字段决定，
+    不能用合成段的导数补造录制段约束，也不能据参考静止声称实际机械臂已停稳。
     时长与点数都被夹到非负/至少 2；时间戳必须严格递增，若某合成点的时间不大于上一点则
     直接丢弃，避免生成零时长或时间回退的点（重定时/执行要求时间严格单调）。
     """
@@ -109,6 +111,7 @@ def build_replay_start_soft_points(
             continue
         from rebotarm_motion.trajectory_messages import rest_to_rest_sample
         if duration > 0:
+            # 前面的线性列表只确定采样数量；实际 q/v/a 统一取运动层的解析五次曲线。
             positions, velocities, accelerations = rest_to_rest_sample(
                 current_positions, first_positions, duration, ratio)
         else:

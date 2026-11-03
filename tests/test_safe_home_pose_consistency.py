@@ -81,8 +81,8 @@ def test_mujoco_keyframe_matches_the_srdf_safe_home_state():
 
 
 def test_driver_safe_home_does_not_delegate_to_the_vendor_zero_homing():
-    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/arm_controller.py")
-    services = _read("src/rebotarmcontroller/rebotarmcontroller/ros_services.py")
+    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/arm/arm_controller.py")
+    services = _read("src/rebotarmcontroller/rebotarmcontroller/ros/ros_services.py")
     controller = _read("src/rebotarmcontroller/rebotarmcontroller/rebotarm_controller.py")
 
     # ArmEndPos.safe_home() and ArmEndPos.end() both drive to all zeros.
@@ -96,7 +96,7 @@ def test_driver_safe_home_does_not_delegate_to_the_vendor_zero_homing():
 
 
 def test_configured_safe_home_target_is_validated_against_joint_limits():
-    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/arm_controller.py")
+    hardware = _read("src/rebotarmcontroller/rebotarmcontroller/arm/arm_controller.py")
     assert "def _validated_safe_home_target(" in hardware
     assert "_JOINT_POSITION_LIMITS_RAD.get(name)" in hardware
     assert "safe_home target must be finite" in hardware

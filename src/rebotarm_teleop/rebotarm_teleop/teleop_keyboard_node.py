@@ -5,8 +5,8 @@
 
 工作方式：以 ``poll_period`` 为周期轮询终端（非阻塞），每个有效按键由
 ``KeyboardCommandMapper`` 映射为「某关节 ±1 步」，再由 ``TeleopTargetPlanner``
-在当前反馈角上叠加 ``joint_step_rad`` 并夹紧到关节限位，最后以单点轨迹形式发给
-``/<ns>/follow_joint_trajectory`` 动作。
+在当前反馈角上叠加 ``joint_step_rad`` 并夹紧到关节限位，再发送 FJT。
+legacy 保留单个位置点；prepared_v1 由运动层生成完整五次首末约束，默认单步 0.02 rad / 0.4 s。
 
 对外话题/动作（``<ns>`` 取自参数 arm_namespace，默认 rebotarm）：
 - 动作 ``/<ns>/follow_joint_trajectory``：下发目标关节角；
@@ -17,10 +17,13 @@
 状态机（发布在 status 的 state 字段）：idle → active；按下空格为 stopped；
 配置 deadman_required 时，未在 input_timeout 内按过 deadman_key 的按键会被 blocked，
 只有 deadman_key 能刷新授权时间窗；超时未按键回落到 timeout，此后按键需重新按 deadman_key；
-动作服务端在 50 ms 内不可达则 unavailable，校验失败为 rejected。
+动作服务端在 50 ms 内不可达则 unavailable，校验失败为 rejected；Action 成功终结后发布 done。
 
 安全约束：终端被切到 cbreak 模式以逐字符读取输入，退出时必须恢复原终端设置；
-所有目标角都经关节限位夹紧，单次增量固定为 joint_step_rad，因此遥操作不会产生大跨度跳变。
+所有目标角都经关节限位夹紧；请求前核对执行能力和完整六轴反馈的本地接收年龄。
+反馈接收及时不代替后端源数据验证；忙时明确丢弃本次按键，不累积下一步目标。
+
+文件结构：时长编码 → 节点参数与终端设置 → 反馈/读键 → 单步发送与终态回调 → 状态发布和退出。
 """
 
 from __future__ import annotations
@@ -224,11 +227,11 @@ class TeleopKeyboardNode(Node):
         message: str,
         key: str,
     ) -> None:
-        """把一次按键结果作为单点轨迹发出。
+        """把一次按键结果按配置等级发出，并占用单步状态直到 Action 终态。
 
         只等 0.05 s 服务端：控制器不在线时立刻报 unavailable 并丢弃本次目标，
         不排队、不阻塞定时器，避免按键积压成突然的大幅运动。
-        状态发布挂在 future 回调上：目标被接受即视为 active（不等待执行完成）。
+        目标被接受只发布 active；后续结果回调才区分 done/failed 并解除本地 busy。
         """
         if self._busy:
             self._publish_status('rejected', 'keyboard step busy; input discarded', key=key)
@@ -250,6 +253,7 @@ class TeleopKeyboardNode(Node):
         _set_duration(point.time_from_start, self._trajectory_duration)
         trajectory.points = [point]
         if self._capability.expected == 'prepared_v1':
+            # 前端不实现插值数学；运动层给出完整约束，后端准备后逐周期采样。
             from rebotarm_motion.trajectory_messages import point_to_point_message
             trajectory = point_to_point_message(joint_names,
                 tuple(self._current_positions[name] for name in joint_names), positions,
@@ -266,6 +270,7 @@ class TeleopKeyboardNode(Node):
             self._publish_status('failed', str(exc), key=key)
 
     def _goal_response(self, future, message, key):
+        """处理接纳或拒绝；接纳后仍保持 busy，避免运动中连续按键形成排队轨迹。"""
         try:
             handle = future.result()
             if handle is None or not handle.accepted:
@@ -277,6 +282,7 @@ class TeleopKeyboardNode(Node):
             self._publish_status('rejected', str(exc), key=key)
 
     def _goal_result(self, future, key):
+        """释放本地单步占用，并同时核对 ROS 终态及 FJT 错误码。"""
         self._busy = False
         try:
             response = future.result()

@@ -23,22 +23,22 @@ from pathlib import Path
 from typing import Optional
 
 from .configuration import HardwareSettings, load_configuration, default_config
-from .controller_runtime import ControllerRuntime
-from .controller_kinematics import ArmKinematics
-from .gravity_control import GravitySettings, load_gravity_model, package_file
-from .lifecycle import ControllerLifecycle, LifecyclePorts
-from .arm_controller import ArmController
-from .component_ports import (
+from .runtime.controller_runtime import ControllerRuntime
+from .arm.controller_kinematics import ArmKinematics
+from .gravity.gravity_control import GravitySettings, load_gravity_model, package_file
+from .runtime.lifecycle import ControllerLifecycle, LifecyclePorts
+from .arm.arm_controller import ArmController
+from .contracts.component_ports import (
     ArmFeedbackPort, GripperFeedbackPort, GravityFeedbackPort, CycleFeedbackPort,
     GripperAcquisitionPort, ArmCyclePort, GripperCyclePort, ArmProtectionPort,
     GripperProtectionPort, GravityProtectionPort, GravityArmPort, ArmGravityPort,
     CyclePort, ProtectionPort, ArmGripperPort,
 )
-from .gripper_controller import GripperController
-from .feedback_reader import FeedbackReader
-from .gravity_controller import GravityController
-from .controller_cycle import ControllerCycle
-from .controller_protection import ControllerProtection
+from .gripper.gripper_controller import GripperController
+from .hardware.feedback_reader import FeedbackReader
+from .gravity.gravity_controller import GravityController
+from .runtime.controller_cycle import ControllerCycle
+from .runtime.controller_protection import ControllerProtection
 from .controller_parameters import (
     _HARDWARE_FEEDBACK_RATE_HZ, _G_LARGE_MOVE_MAX_TAU_NM,
     _G_POSITION_MAX_SPEED_RAD_S, _G_POSITION_TIMEOUT_MARGIN_SEC,
@@ -173,6 +173,7 @@ class HardwareManager:
         # 组件全部存在后才完成一次绑定, 避免循环依赖要求构造中访问尚未就绪的对端.
         self.feedback.bind(gripper=gripper_acquisition_port)
         self.gripper.bind(feedback=gripper_feedback_port, protection=protection_port)
+        # 准备所需的夹爪快照仍由夹爪组件核验；manager 只绑定方法，不保存第二份状态。
         arm_gripper_port = ArmGripperPort(snapshot=self.gripper.preparation_snapshot)
         self.arm.bind(cycle=cycle_port, feedback=arm_feedback_port, gravity=gravity_arm_port,
                       protection=protection_port, gripper=arm_gripper_port)

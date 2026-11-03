@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 
 from controller_fake_backend import inject_feedback_refresh
-from rebotarmcontroller.sdk_driver import CommandTransportError
-from rebotarmcontroller.controller_contracts import CommandReceipt
+from rebotarmcontroller.hardware.sdk_driver import CommandTransportError
+from rebotarmcontroller.contracts.controller_contracts import CommandReceipt
 from test_lifecycle_transactions import lifecycle
 from test_controller_local_runtime import make_local_manager
 from test_hardware_manager_p0_safety import make_manager, configure_gravity_compensation_test

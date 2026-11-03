@@ -13,7 +13,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT/'src/rebotarmcontroller'), str(ROOT/'src/rebotarm_motion')]
-from rebotarmcontroller.stationary_evidence import StationaryEvidence, POSITION_SPAN
+from rebotarmcontroller.runtime.stationary_evidence import StationaryEvidence, POSITION_SPAN
 from rebotarm_motion.trajectory_runtime_limits import JointRuntimeLimit, TrajectoryRuntimeLimitGuard
 
 

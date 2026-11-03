@@ -12,8 +12,8 @@ import pytest
 
 from controller_fake_backend import FakeBackend, inject_feedback_refresh
 from rebotarmcontroller.configuration import load_configuration
-from rebotarmcontroller.command_guard import CommandGuard
-from rebotarmcontroller.feedback_acquisition import FeedbackAcquisition, _JOINT_POSITION_LIMITS_RAD
+from rebotarmcontroller.runtime.command_guard import CommandGuard
+from rebotarmcontroller.hardware.feedback_acquisition import FeedbackAcquisition, _JOINT_POSITION_LIMITS_RAD
 from rebotarmcontroller.hardware_manager import HardwareManager
 from rebotarmcontroller.controller_parameters import (
     _LOG,
@@ -262,7 +262,7 @@ def configure_gravity_compensation_test(
     manager.test_arm.mode_mit = lambda **_kwargs: True
     mit_commands: list[dict[str, object]] = []
     manager.gravity._send_gravity_mit = lambda **kwargs: mit_commands.append(dict(kwargs))
-    from rebotarmcontroller.gravity_control import GravitySettings
+    from rebotarmcontroller.gravity.gravity_control import GravitySettings
     manager.gravity._gc_settings = GravitySettings()
     manager.gravity._gc_torque_limits = np.array([27., 27., 27., 7., 7., 7.])
     manager.gravity._gravity_execution.last_total = np.zeros(6)
@@ -368,7 +368,7 @@ def test_gravity_deadline_fault_keeps_healthy_arm_enabled(monkeypatch):
     q = np.array([.2, -.3, -.4, .1, .2, -.1])
     configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
     manager.gravity.start_gravity_compensation()
-    from rebotarmcontroller.gravity_control import LoopTiming
+    from rebotarmcontroller.gravity.gravity_control import LoopTiming
     manager.gravity._gravity_timing = LoopTiming(100.)
     inject_feedback_refresh(monkeypatch, manager, lambda **kwargs: False)
     for i in range(4):
@@ -1091,7 +1091,7 @@ def test_joint_state_read_waits_for_disable_transition() -> None:
 
 
 def test_action_goal_callback_rejects_motion_until_explicit_enable() -> None:
-    from rebotarmcontroller.ros_actions import ArmActions, GoalResponse
+    from rebotarmcontroller.ros.ros_actions import ArmActions, GoalResponse
     actions = ArmActions.__new__(ArmActions)
     actions._trajectory_mode = 'legacy'
     actions._lifecycle = SimpleNamespace(ready_for_motion=False)
@@ -2834,7 +2834,7 @@ def test_zero_rejects_old_zero_cache_and_retains_failure_until_verified() -> Non
 @pytest.mark.parametrize("result", ["nonzero", "closed_tolerance", "enabled", "nonfinite", "write_error"])
 def test_zero_failure_never_returns_success_or_retries_write(result, monkeypatch) -> None:
     manager, gripper = _manager_for_zero_verification(-1.0)
-    monkeypatch.setattr(__import__("rebotarmcontroller.gripper_controller", fromlist=["_G_ZERO_VERIFY_TIMEOUT_SEC"]), "_G_ZERO_VERIFY_TIMEOUT_SEC", 0.03)
+    monkeypatch.setattr(__import__("rebotarmcontroller.gripper.gripper_controller", fromlist=["_G_ZERO_VERIFY_TIMEOUT_SEC"]), "_G_ZERO_VERIFY_TIMEOUT_SEC", 0.03)
 
     def zero():
         gripper.set_zero_position_calls += 1
@@ -2857,7 +2857,7 @@ def test_zero_failure_never_returns_success_or_retries_write(result, monkeypatch
 
 def test_zero_requires_consecutive_near_zero_samples(monkeypatch) -> None:
     manager, gripper = _manager_for_zero_verification(-1.0)
-    monkeypatch.setattr(__import__("rebotarmcontroller.gripper_controller", fromlist=["_G_ZERO_VERIFY_TIMEOUT_SEC"]), "_G_ZERO_VERIFY_TIMEOUT_SEC", 0.04)
+    monkeypatch.setattr(__import__("rebotarmcontroller.gripper.gripper_controller", fromlist=["_G_ZERO_VERIFY_TIMEOUT_SEC"]), "_G_ZERO_VERIFY_TIMEOUT_SEC", 0.04)
     deliver = gripper.deliver_requested_feedback
     samples = iter([0.0, 0.0, -1.0])
 
@@ -2878,7 +2878,7 @@ def test_zero_requires_consecutive_near_zero_samples(monkeypatch) -> None:
 
 def test_invalid_coordinate_publishes_unknown_without_losing_arm_feedback() -> None:
     from builtin_interfaces.msg import Time
-    from rebotarmcontroller.ros_publishers import JointStatePublisher
+    from rebotarmcontroller.ros.ros_publishers import JointStatePublisher
     from rebotarm_dashboard.status_panel_state import TeleopStatusStore
 
     manager, _gripper = _manager_for_zero_verification(2 * np.pi)

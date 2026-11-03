@@ -8,12 +8,12 @@ from control_msgs.action import FollowJointTrajectory, GripperCommand
 from std_srvs.srv import Trigger
 from trajectory_msgs.msg import JointTrajectoryPoint
 
-from rebotarmcontroller.lifecycle import shutdown_policy
-from rebotarmcontroller.motor_passthrough import MotorPassthrough
-from rebotarmcontroller.ros_actions import ArmActions, GoalResponse
-import rebotarmcontroller.ros_actions as action_module
-from rebotarmcontroller.ros_publishers import JointStatePublisher
-from rebotarmcontroller.ros_services import ArmServices
+from rebotarmcontroller.runtime.lifecycle import shutdown_policy
+from rebotarmcontroller.ros.motor_passthrough import MotorPassthrough
+from rebotarmcontroller.ros.ros_actions import ArmActions, GoalResponse
+import rebotarmcontroller.ros.ros_actions as action_module
+from rebotarmcontroller.ros.ros_publishers import JointStatePublisher
+from rebotarmcontroller.ros.ros_services import ArmServices
 from test_controller_local_runtime import make_local_manager
 from test_device_request_arbitration import motor_command
 

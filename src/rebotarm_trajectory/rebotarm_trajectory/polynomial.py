@@ -1,4 +1,23 @@
-"""不可变六轴曲线及纯数值采样；调用者传入经过时间，不读取时钟或设备。"""
+"""六轴分段多项式的数据契约和数值求值内核。
+
+文件职责
+    保存不可变轨迹点和系数，校验数值结构，并按外部提供的经过时间求 q/v/a/jerk。
+    motion 生成、检查曲线；控制器和仿真复用本文件执行同一组系数。
+
+对外接口
+    TrajectoryPoint、PolynomialSegment、PolynomialTrajectory 表示点、段和整条轨迹；
+    ordered_points 统一关节顺序；curve_from_payload 解码已准备的曲线，不重新拟合。
+    系数按归一化时间 u=(t-start)/duration 的升幂排列，六行依次对应 joint1..joint6。
+    位置单位 rad，时间单位 s，返回的导数分别为 rad/s、rad/s²、rad/s³。
+
+安全约束
+    本库不读取时钟，不持有执行状态，不访问 ROS、设备或物理引擎。
+    数值合法不代表限位、碰撞或执行上下文有效；这些检查由上层各自完成。
+    缺失导数用空元组表示，不能补零后声称更高连续性；五次曲线也不承诺 jerk 连续。
+
+文件结构
+    常量及向量校验 → 轨迹点与排序 → 分段求值 → 整轨采样/编码 → 系数解码。
+"""
 
 from bisect import bisect_right
 from dataclasses import dataclass, field
@@ -18,6 +37,8 @@ def vector6(values):
 
 @dataclass(frozen=True)
 class TrajectoryPoint:
+    """一个带相对时刻的六轴约束点；输入序列复制为元组，避免调用者事后修改。"""
+
     time: float
     positions: tuple
     velocities: tuple = ()
@@ -48,6 +69,7 @@ def ordered_points(joint_names, points):
         tuple(p.accelerations[i] for i in order) if p.accelerations else ()) for p in source)
     if any(b.time <= a.time for a, b in zip(result, result[1:])):
         raise ValueError('trajectory times must strictly increase')
+    # 全轨迹必须采用同一约束等级；部分节点缺导数时不能静默降级或自行补零。
     for field in ('velocities', 'accelerations'):
         present = [bool(getattr(p, field)) for p in result]
         if any(present) and not all(present):
@@ -59,6 +81,8 @@ def ordered_points(joint_names, points):
 
 @dataclass(frozen=True)
 class PolynomialSegment:
+    """六轴共用一个时间区间；每行 2/4/6 个升幂系数分别表示线性/三次/五次。"""
+
     start: float
     duration: float
     coefficients: tuple
@@ -80,6 +104,7 @@ class PolynomialSegment:
         c = tuple(self.coefficients[joint])
         for _ in range(order):
             c = tuple(i * value for i, value in enumerate(c) if i) or (0.,)
+        # 对 u 求导后还需除以 T**order，才能得到相对于实际秒的导数。
         try:
             values = tuple(value / self.duration ** order for value in c)
         except (OverflowError, ZeroDivisionError) as exc:
@@ -89,6 +114,7 @@ class PolynomialSegment:
         return values
 
     def at(self, u, order=0):
+        """在归一化时刻 u 用 Horner 法求六轴值；区间选择和钳位由整轨采样负责。"""
         values = []
         for joint in range(6):
             value = 0.
@@ -100,6 +126,8 @@ class PolynomialSegment:
 
 @dataclass(frozen=True)
 class PolynomialTrajectory:
+    """点约束和分段系数的冻结容器；构造检查结构，交换数据还须经过解码校验。"""
+
     points: tuple
     segments: tuple
     degree: int
@@ -135,6 +163,7 @@ class PolynomialTrajectory:
         if elapsed < 0 or elapsed > self.duration or not self.segments:
             point = self.points[0] if elapsed <= 0 else self.points[-1]
             return (point.positions, (0.,) * 6, (0.,) * 6, (0.,) * 6)
+        # 内部节点取右段，终点取最后一段；C0/C1 的高阶导数跳变不会被平滑隐藏。
         index = min(len(self.segments) - 1,
                     bisect_right(self.times, elapsed) - 1)
         segment = self.segments[index]
@@ -142,7 +171,7 @@ class PolynomialTrajectory:
         return tuple(segment.at(u, k) for k in range(4))
 
     def to_payload(self):
-        """离线数值交换; 实际采样使用携带的系数, 不是另一套重新拟合的轨迹."""
+        """编码版本化数值载荷；执行端采样携带的系数，避免重新拟合造成检查与执行不一致。"""
         return {'version': 1, 'joint_names': list(JOINT_NAMES), 'degree': self.degree,
                 'points': [dict(time_from_start=p.time, positions=p.positions,
                     velocities=p.velocities, accelerations=p.accelerations) for p in self.points],
@@ -150,7 +179,7 @@ class PolynomialTrajectory:
 
 
 def curve_from_payload(payload):
-    """校验并载入已检查系数，接收端不生成、重拟合或修正曲线。"""
+    """校验版本、形状、有限性及端点约束并载入系数；不替代上层限位和碰撞检查。"""
     if payload['version'] != 1 or tuple(payload['joint_names']) != JOINT_NAMES:
         raise ValueError('unsupported curve version or joint order')
     points = ordered_points(JOINT_NAMES, tuple(TrajectoryPoint(
@@ -177,6 +206,7 @@ def curve_from_payload(payload):
         for order in range(4):
             segment.at(0., order)
             segment.at(1., order)
+        # 只核对源轨迹实际声明的导数；解码不能改变兼容等级或修复不一致的载荷。
         for order, field in enumerate(('positions', 'velocities', 'accelerations')):
             if order and not getattr(first, field):
                 continue

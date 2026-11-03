@@ -1,18 +1,31 @@
-# 本机内部数值交接，所有单调时刻来自同一主机；不是硬件执行许可。
+# 文件职责：后端向运动层提交冻结快照及原轨迹，交换已检查的准确曲线系数。
+# 对外接口：仅供本机内部 PrepareArmTrajectory 服务使用，公共执行入口仍为 FJT。
+# 安全约束：success 不是运动许可；后端须原子复核令牌、反馈、夹爪及场景。
+# 文件结构：分隔线上方为准备请求，下方为检查结论和绑定后的 JSON 载荷。
+# 所有 monotonic/observed_at 时刻来自同一主机的单调时钟，不使用 ROS 仿真时间。
+
+# 原始点、导数及相对时刻；准备层按字段完整性选择 C0/C1/C2，不能静默降级。
 trajectory_msgs/JointTrajectory trajectory
+# 设备会话与六轴目标代次；重连、取消或目标变化后，旧准备结果必须作废。
 uint64 session
 uint64 generation
+# joint1..joint6 顺序，单位 rad；保持值必须来自最后成功发送的命令。
 float64[6] hold_positions
 float64[6] feedback_positions
+# 六轴反馈最旧观测时刻；stationary 是已有连续静止证据，不是单帧速度判断。
 float64 feedback_observed_at
 bool stationary
 bool enabled
+# 固定 left_finger_joint/right_finger_joint，单位 m；与夹爪任务代次一起绑定。
 float64[2] gripper_positions
 uint64 gripper_generation
+# 碰撞环境、附着物及碰撞规则的摘要；普通关节反馈不参与该版本。
 string scene_revision
+# 从 Goal 接收起计算的绝对单调期限，响应晚到不得启动执行。
 float64 deadline_monotonic
 ---
 bool success
 string message
+# 精确系数、六轴上下文及夹爪/场景绑定；失败时不可采信或执行此字段。
 string prepared_json
 string scene_revision

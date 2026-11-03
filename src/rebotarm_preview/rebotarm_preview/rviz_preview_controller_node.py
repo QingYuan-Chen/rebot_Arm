@@ -118,6 +118,7 @@ class SimTrajectoryControllerNode(Node):
         self._motion_lock = threading.Lock()
         self._callback_group = ReentrantCallbackGroup()
 
+        # 轻量预演仍使用旧采样；持久化能力声明让后启动的前端也能拒绝 prepared_v1 错配。
         self._capability_pub = self.create_publisher(String,
             f'/{self._arm_namespace}/trajectory_execution_mode',
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))

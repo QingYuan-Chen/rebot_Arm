@@ -1,4 +1,12 @@
-"""P005 解析反例和协议往返; 不使用真实设备或 ROS 图."""
+"""P005 曲线生成、规范化和安全检查的独立数值回归。
+
+文件职责：用已知多项式、闭式峰值和段内反例验证分级插值、极值覆盖、碰撞预算及交接规则。
+对外接口：pytest 用例；LIMITS/LOWER/UPPER、context、collision_pass 供相关测试复用。
+安全约束：不使用真实设备或 ROS 图；collision_pass 只是覆盖计数替身，不证明真实无碰撞。
+    捕获的 MoveIt 样本保留为 jerk 超限拒绝证据，不能修改样本或限值使测试通过。
+文件结构：规范限值与夹具 → 分级/连续性/往返 → 解析峰值和段内极值
+    → 起点与上下文 → 碰撞失败 → 真实样本和离线 CLI。
+"""
 
 from dataclasses import replace
 import json

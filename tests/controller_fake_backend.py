@@ -2,9 +2,9 @@
 import threading
 import time
 from dataclasses import replace
-from rebotarmcontroller.arm_execution import ArmExecution
+from rebotarmcontroller.arm.arm_execution import ArmExecution
 import numpy as np
-from rebotarmcontroller.device_requests import DeviceRequests
+from rebotarmcontroller.runtime.device_requests import DeviceRequests
 
 
 class WriterRuntime:

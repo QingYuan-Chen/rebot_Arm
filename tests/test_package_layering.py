@@ -413,6 +413,6 @@ def test_shared_trajectory_is_flat_pure_numeric_and_dependencies_are_one_way():
     for name in ('rebotarm_motion', 'rebotarmcontroller', 'rebotarm_simulation'):
         manifest = ET.parse(ROOT/'src'/name/'package.xml').getroot()
         assert any(child.text == 'rebotarm_trajectory' for child in manifest), name
-    for path in (ROOT/'src/rebotarmcontroller/rebotarmcontroller').glob('*.py'):
+    for path in (ROOT/'src/rebotarmcontroller/rebotarmcontroller').rglob('*.py'):
         assert 'from rebotarm_motion' not in path.read_text(), path
         assert 'import rebotarm_motion' not in path.read_text(), path

@@ -5,8 +5,8 @@ from types import SimpleNamespace as NS
 import numpy as np
 import pytest
 
-from rebotarmcontroller.stationary_evidence import StationaryEvidence, DisabledTransitionEvidence, POSITION_CODE
-from rebotarmcontroller.arm_stop import ArmStop
+from rebotarmcontroller.runtime.stationary_evidence import StationaryEvidence, DisabledTransitionEvidence, POSITION_CODE
+from rebotarmcontroller.arm.arm_stop import ArmStop
 from rebotarm_motion.stop_feedback import StopFeedback
 from rebotarm_motion.trajectory_runtime_limits import JointRuntimeLimit, TrajectoryRuntimeLimitGuard
 

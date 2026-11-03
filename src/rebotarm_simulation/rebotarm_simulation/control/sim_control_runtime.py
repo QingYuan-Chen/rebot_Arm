@@ -144,7 +144,8 @@ class SimControlRuntime:
             self._raw_torque_command.fill(0.0)
             self._raw_torque_requested.fill(0.0)
             self._raw_torque_deadline = float(data.time) + 0.1
-        # position 与 hold 共用位置控制器；交接时保留积分和支撑力矩，避免重力下坠。
+        # position 与 hold 共用位置控制器；position→hold 保留积分和上一拍支撑力矩。
+        # 不能在静止保持时清零后等待 PI 重建重力支撑；其余模式的既有复位规则保留。
         if mode == "gravity_comp" or (mode == "hold" and self._control_mode != "position"):
             self._arm_controller.reset()
         self._control_mode = mode
@@ -183,7 +184,8 @@ class SimControlRuntime:
             if not lower <= current[index] <= upper:
                 raise ValueError(f"joint target outside limits: {ARM_JOINT_NAMES[index]}")
         self._position_targets[:6] = current
-        # 高频参考只更新目标，不能额外积分或突破配置控制频率；模式切入仍按原路径执行。
+        # 高频参考只更新目标，PI 的积分与力矩更新仍由配置控制频率推进。
+        # 每次写目标都调用 set_mode 会额外执行控制计算，使高频轨迹改变有效增益。
         if self._control_mode != 'position':
             self.set_mode(model, data, "position")
         return tuple(current)

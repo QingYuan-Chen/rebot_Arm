@@ -1,7 +1,20 @@
-"""ROS adapter for isolated MuJoCo execution, gripper state, and stop/hold services.
+"""MuJoCo 后端的 ROS 执行、物理步进及停止保持适配。
 
-No hardware or virtual-camera transport is started. Validation and execution
-policies live in the owning codec and execution modules.
+文件职责
+    提供仿真 FJT、夹爪和控制模式服务，驱动物理定时器，并发布实际状态与可选验收记录。
+对外接口
+    create_node_class 延迟加载 ROS 并返回节点类；main 创建执行器。
+    trajectory_execution_mode 选择 legacy 或 prepared_v1；准备服务只返回检查结果，
+    仿真节点自己拥有目标令牌、资源占用、物理时钟和原子接纳。
+安全约束
+    不导入真实硬件后端或运动层实现；参考求值来自共享数值包。
+    锁序固定为活动目标锁 → 仿真锁；准备服务等待、停止等待均不能占住物理步进锁。
+    prepared_v1 用仿真时间采样，用主机单调时间控制准备期限和反馈新鲜度。
+    固定夹爪或场景变化后停止保持；停止未确认继续占用资源，不能因 Action 退出而放行。
+    正常成功保持曲线终点；Action 成功条件与独立物理验收指标分开。
+文件结构
+    延迟创建节点 → 参数/仿真/ROS 装配 → Goal 预约与准备 → 停止及控制服务
+    → Action 终态协调 → 物理周期与状态发布 → 关闭和进程入口。
 """
 
 from __future__ import annotations
@@ -39,7 +52,7 @@ from rebotarm_simulation.ros.message_codec import validate_gripper_force
 DEFAULT_HOME_JOINT_POSITIONS = (0.0, -0.8, -1.0, 0.3, 0.0, 0.0)
 
 def create_node_class():
-    """Import ROS lazily and return the concrete node class."""
+    """延迟导入 ROS 并返回具体节点类；仅导入本模块不会创建节点或仿真实例。"""
     import rclpy
     from control_msgs.action import FollowJointTrajectory
     from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
@@ -154,6 +167,7 @@ def create_node_class():
             self._pending_sampler: TrajectorySampler | None = None
             self._callback_group = ReentrantCallbackGroup()
             self._scene_revision = ''
+            # 待准备请求与已接纳曲线分开保存，服务返回之前物理周期仍保持当前位置。
             self._preparation = None
             self._sample_history = deque(maxlen=512)
             self._last_physics_wall = time.monotonic()
@@ -276,7 +290,11 @@ def create_node_class():
             return GoalResponse.ACCEPT
 
         def _stationary_snapshot(self, *, after=None):
-            """物理新帧覆盖完整静止窗口；保持目标来自最后成功接纳的命令。"""
+            """调用方持仿真锁，核验六轴及两指的完整静止窗口并返回实际状态和保持命令。
+
+            物理窗口按仿真时间覆盖 0.2 s，墙上单调时钟另查物理循环是否停滞；
+            after 用于要求停止发起之后的全新窗口，重复发布旧状态不能满足条件。
+            """
             state = self._sim.get_state()
             cutoff = state.simulation_time-.2
             samples = [item for item in self._sample_history if item.simulation_time >= cutoff-.0021]
@@ -297,6 +315,7 @@ def create_node_class():
             return state, hold
 
         def _reserve_prepared_goal(self, goal):
+            """先校验输入，再按固定锁序预约空闲资源；忙时拒绝，不累积键盘或网页目标。"""
             received = time.monotonic()
             if not self._prepare_client.service_is_ready() or not self._scene_revision:
                 return GoalResponse.REJECT
@@ -316,6 +335,7 @@ def create_node_class():
                         return GoalResponse.REJECT
                     request = self._prepare_type.Request()
                     request.trajectory = goal.trajectory
+                    # 本进程保留 goal 对象作为身份；仿真无设备重连会话，仍须逐项核对回传值。
                     request.session = request.generation = id(goal)
                     request.hold_positions, request.feedback_positions = list(hold), list(state.joint_positions[:6])
                     request.feedback_observed_at = self._last_physics_wall
@@ -330,6 +350,7 @@ def create_node_class():
             return GoalResponse.ACCEPT
 
         def _scene_changed(self, message):
+            """收到不同碰撞版本时使准备/执行失效；由命令闸门接管保持，不重算活动曲线。"""
             with self._active._lock:
                 self._scene_revision = message.data
                 expected = (self._preparation[1].scene_revision if self._preparation is not None
@@ -338,6 +359,7 @@ def create_node_class():
                     self._command_gate.stop_and_hold(self._hold_current_position)
 
         def _prepare_sampler(self, goal_handle, token):
+            """Action 工作线程等待服务并解码，最终由命令闸门原子核验身份和仿真快照。"""
             pending = self._preparation
             if pending is None or pending[0] is not token:
                 raise RuntimeError('preparation ownership lost')
@@ -356,6 +378,7 @@ def create_node_class():
             payload = json.loads(response.prepared_json)
             curve = curve_from_payload(payload['curve'])
             def admit():
+                """在目标锁内再取得仿真锁，复核期间不能插入物理状态或控制模式修改。"""
                 with self._lock:
                     state, hold = self._stationary_snapshot()
                     context = payload['context']
@@ -370,6 +393,7 @@ def create_node_class():
                             or tuple(payload['gripper_positions']) != tuple(request.gripper_positions)
                             or max(abs(a-b) for a,b in zip(state.joint_positions[-2:], request.gripper_positions)) > 3*25/65535*.009):
                         raise RuntimeError('prepared simulation context changed')
+                    # 执行起时在接纳时捕获；不能用准备开始时间让曲线跳过起始运动。
                     self._active.prepared = dict(curve=curve, start=state.simulation_time,
                         revision=response.scene_revision, fingers=tuple(request.gripper_positions))
                     self._preparation = None
@@ -383,6 +407,7 @@ def create_node_class():
             """取消不是连续轨迹保证；资源仍占用至新物理帧确认静止。"""
             after = self._sim_access.run(lambda sim: sim.get_state().simulation_time)
             deadline = time.monotonic()+5.
+            # 每轮只短暂读取物理状态，等待在锁外进行，物理定时器才能产生新的静止证据。
             while time.monotonic() < deadline:
                 try:
                     self._sim_access.run(lambda _sim: self._stationary_snapshot(after=after))
@@ -453,6 +478,7 @@ def create_node_class():
                 width = validate_gripper_width(request.position)
                 max_force = validate_gripper_force(request.max_effort)
                 with self._active._lock:
+                    # 从准备到停止确认都固定夹爪；不能只在“正在采样曲线”时才拒绝夹爪运动。
                     if self._trajectory_mode == 'prepared_v1' and self._active.busy:
                         raise ValueError('fixed gripper reserved by arm trajectory')
                     reached = self._sim_access.run(lambda _sim:
@@ -505,6 +531,7 @@ def create_node_class():
             return result
 
         def _execute_goal(self, goal_handle):
+            """协调反馈和终态；prepared_v1 的实际目标采样由物理定时器唯一推进。"""
             # rclpy does not promise that the goal-request wrapper passed to
             # admission and the one exposed by the goal handle are identical.
             # Preserve the admission token so cleanup cannot leave the server
@@ -532,6 +559,7 @@ def create_node_class():
                         state = self._sim.get_state()
                         elapsed = max(0.0, state.simulation_time - start_time)
                         desired = sampler.sample(min(elapsed, sampler.duration))
+                        # prepared 路径这里只构造反馈，避免 Action 线程另行写目标造成双重推进。
                         if self._trajectory_mode == 'legacy':
                             self._control.command_joint_positions(desired)
                         command.update(state=state, elapsed=elapsed, desired=desired)
@@ -570,6 +598,7 @@ def create_node_class():
                     ):
                         goal_handle.publish_feedback(feedback)
                     if settling == "succeeded":
+                        # prepared 正常结束再明确写入最终命令；不能捕获瞬时实际位置代替它。
                         completion = self._command_gate.complete_with_reason(
                             token,
                             lambda: goal_handle.is_cancel_requested,
@@ -621,6 +650,7 @@ def create_node_class():
                 result.error_string = f"simulation trajectory execution failed: {exc}"
                 return result
             finally:
+                # 停止证据不足时保留 token；只有后续显式停止确认才能恢复资源可用。
                 if self._stop_unconfirmed:
                     self._retained_stop_token = token
                 if not self._stop_unconfirmed:
@@ -630,6 +660,7 @@ def create_node_class():
                         self._active.finish(token)
 
         def _timer_callback(self) -> None:
+            """物理定时器串行推进仿真；一个定时回调含多步时也在每个物理步重采参考。"""
             if self._trajectory_mode == 'legacy':
                 state = self._sim_access.run(lambda sim: sim.step(self._steps_per_tick))
             else:
@@ -646,6 +677,7 @@ def create_node_class():
                                     target = active['curve'].sample(current.simulation_time-active['start'])[0]
                                     self._control.command_joint_positions(target)
                             state = sim.step()
+                            # 记录与静止窗口都使用真正推进后的物理帧，而不是 ROS 重复发布频率。
                             self._trace.record(state, sim.get_control_status(), active)
                             self._sample_history.append(state)
                         self._last_physics_wall = time.monotonic()

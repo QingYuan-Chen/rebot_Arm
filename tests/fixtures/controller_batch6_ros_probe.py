@@ -21,7 +21,7 @@ class BlockSDK(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockSDK())
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_controller_local_runtime import HandleController
-from rebotarmcontroller.sdk_driver import SdkMotorDriver
+from rebotarmcontroller.hardware.sdk_driver import SdkMotorDriver
 
 buses = []
 class FakeBus(HandleController):

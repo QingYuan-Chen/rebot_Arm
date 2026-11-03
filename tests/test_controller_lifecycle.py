@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from rebotarmcontroller.arm_execution import ArmExecution
-from rebotarmcontroller.lifecycle import ControllerLifecycle, shutdown_policy
+from rebotarmcontroller.arm.arm_execution import ArmExecution
+from rebotarmcontroller.runtime.lifecycle import ControllerLifecycle, shutdown_policy
 from controller_fake_backend import WriterRuntime
 
 
@@ -125,7 +125,7 @@ def test_signal_shutdown_keeps_executor_running_after_refusal(monkeypatch):
 def test_gravity_and_lifecycle_fixed_vectors():
     import json
     from pathlib import Path
-    from rebotarmcontroller.gravity_control import GravityExecutionState
+    from rebotarmcontroller.gravity.gravity_control import GravityExecutionState
     vectors = json.loads((Path(__file__).parent / 'fixtures/controller_arm_vectors.json').read_text())
     for case in vectors['gravity_steps']:
         gravity = GravityExecutionState()

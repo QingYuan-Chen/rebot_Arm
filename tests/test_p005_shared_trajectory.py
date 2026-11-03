@@ -1,4 +1,11 @@
-"""共享求值不依赖运动策略，仿真缺陷用物理状态回归。"""
+"""共享轨迹迁移、入口兼容与 MuJoCo 控制边界回归。
+
+文件职责：用独立解析值和旧采样语义核对共享内核，并复现越界目标、支撑力矩及重复 PI 推进问题。
+对外接口：pytest 用例，直接构造数值曲线、消息替身或本地 MuJoCo 实例。
+安全约束：不访问真实硬件；数值等价、物理回归与完整 ROS 操作链是不同验证层。
+文件结构：纯依赖/系数往返 → 解析值和非法输入 → 旧采样 → 物理控制缺陷
+    → 不可变对象、消息/能力/示教等级 → 高频目标写入不推进 PI。
+"""
 
 import ast
 import copy
@@ -78,6 +85,7 @@ def test_simulation_rejects_out_of_limit_batch_without_partial_target_change():
     with RebotArmMujoco() as sim:
         before = sim.get_control_status()
         with pytest.raises(ValueError, match='outside'):
+            # 第一轴合法、第二轴越界：同时断言没有部分写入前一轴，而不只检查异常类型。
             sim.command_joint_positions({'joint1': .1, 'joint2': 99.})
         after = sim.get_control_status()
         assert after.joint_targets == before.joint_targets
@@ -92,6 +100,7 @@ def test_stationary_position_to_hold_preserves_support_torque_and_pose():
         sim.command_joint_positions(start)
         sim.step(1000)
         before = sim.get_control_status()
+        # 先证明当前确有支撑负载，零力矩姿态无法暴露切换时清零控制器状态的缺陷。
         assert max(abs(value) for value in before.applied_torques) > 1.
         sim.set_mode('hold')
         after = sim.get_control_status()

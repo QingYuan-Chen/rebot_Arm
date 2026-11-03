@@ -1,6 +1,6 @@
 # 硬件控制器功能拆分与 C++ 迁移初步规划
 
-> 状态：DESIGN；类型：控制器拆分与 SDK 功能整合方案，按批次实施，当前进展见项目状态；适用范围：Ubuntu 24.04 / ROS 2 Jazzy 的 `rebotarmcontroller` 与其 SDK 依赖；最后核对：2026-10-29（批次 6.7 按用户追加要求改为 manager 纯装配，移除全部业务转发）。
+> 状态：DESIGN；类型：控制器拆分与 SDK 功能整合方案，按批次实施，当前进展见项目状态；适用范围：Ubuntu 24.04 / ROS 2 Jazzy 的 `rebotarmcontroller` 与其 SDK 依赖；最后核对：2026-11-03（模块按一层职责子目录整理，manager 纯装配及组件边界保留）。
 
 ## 当前范围
 
@@ -31,7 +31,7 @@
 
 ### 先拆模块，保留一个硬件包
 
-保留包名 `rebotarmcontroller` 和唯一硬件进程，在包内按文件建立职责边界。后续控制器拆分直接使用包根目录下的模块，不再按职责创建子目录；组件职责、接口与独立状态仍须保持清晰。
+保留包名 `rebotarmcontroller` 和唯一硬件进程，在包内按一层职责子目录组织模块，根目录保留节点入口、装配和配置；组件职责、接口与独立状态仍须保持清晰。文件归属见[文件与组件归属](#文件与组件归属)。
 
 | 建议模块 | 拥有的职责和状态 | 边界 |
 | --- | --- | --- |
@@ -49,7 +49,7 @@
 
 ### 六轴机械臂与末端执行器分别控制
 
-机械臂和夹爪分别使用根目录中的控制与执行模块；位置、保持和重力补偿按职责分工，不依靠目录区分状态。
+机械臂和夹爪分别使用 `arm/` 和 `gripper/` 中的控制与执行模块；位置、保持和重力补偿按职责分工，状态仍由原组件独立持有。
 
 - **数据分别定义**：机械臂状态、目标与控制输出只包含六轴；夹爪拥有独立的开口、运动状态、接触判定和命令结果，不作为“第七轴”拼入六轴控制向量。设备层可以按电机标识统一编解码，控制层必须按资源类型分发。
 - **参数分别维护**：六轴增益、关节限位、重力模型与夹爪开口映射、限力参数、接触阈值、保持时限分开配置。夹爪电机力矩与指端夹持力分开表达，未标定时不能把两者等同。
@@ -125,7 +125,7 @@ flowchart TD
 2026-10-27 核对本机 SDK 为固定提交 `6a49302804f25e624995e771acb6d61896d1856d`，其工作区无未提交修改。以下记录迁移起点的调用清单，不代表当前仍有这些依赖；以实际已用能力为依据，不以 SDK 的包级导出列表作为功能需求。
 
 - [hardware_manager.py](../../src/rebotarmcontroller/rebotarmcontroller/hardware_manager.py)：直接导入 `RobotArm`、`ArmEndPos`、`compute_fk` 和夹爪配置 `load_cfg`；默认机械臂及夹爪配置也从 SDK 目录读取。
-- [ros_services.py](../../src/rebotarmcontroller/rebotarmcontroller/ros_services.py)、[ros_actions.py](../../src/rebotarmcontroller/rebotarmcontroller/ros_actions.py) 与 [motor_passthrough.py](../../src/rebotarmcontroller/rebotarmcontroller/motor_passthrough.py)：间接使用 `ArmEndPos` 的 IK、笛卡尔轨迹、目标缓存和送点线程，并访问其私有状态。
+- [ros_services.py](../../src/rebotarmcontroller/rebotarmcontroller/ros/ros_services.py)、[ros_actions.py](../../src/rebotarmcontroller/rebotarmcontroller/ros/ros_actions.py) 与 [motor_passthrough.py](../../src/rebotarmcontroller/rebotarmcontroller/ros/motor_passthrough.py)：间接使用 `ArmEndPos` 的 IK、笛卡尔轨迹、目标缓存和送点线程，并访问其私有状态。
 - [pose_preview_solver.py](../../src/rebotarm_motion/rebotarm_motion/pose_preview_solver.py)：使用 SDK 的模型加载、末端帧定位、位姿转换、带重试 IK 与 FK；这是移除 SDK 运行依赖必须一并迁移的纯计算使用者。
 - `tests/test_hardware_manager_p0_safety.py` 仍导入 SDK 夹爪配置加载器；安装说明和接口手册也有 SDK 路径及导入要求，需要随实现完成同步更新。独立 Star Arm 跟随工具直接使用 MotorBridge，不属于此 Python SDK 的迁移范围。
 
@@ -137,7 +137,7 @@ flowchart TD
 | --- | --- | --- |
 | `actuator/arm.py` 的 `JointCfg/load_cfg`；`actuator/gripper.py` 的 `GripperCfg/load_cfg` | `rebotarmcontroller/configuration.py` | 保留数值、单位、六轴顺序及显式覆盖；仅接纳 damiao；内存覆盖 channel，校验夹爪共享通道；解析不导入 MotorBridge、不打开设备 |
 | SDK `config/arm.yaml`、`config/gripper.yaml` | `src/rebotarmcontroller/config/arm.yaml`、`gripper.yaml` | 纳入本包安装资源；默认路径从 SDK 目录改为本包 share，保留显式 YAML 路径和 channel 覆盖；迁入时核对数值，不同时调参 |
-| `RobotArm` 的控制器创建、设备注册、句柄及总线映射 | `rebotarmcontroller/sdk_driver.py` → `SdkMotorDriver` | 仅适配 damiao；直接使用带序号补丁的 MotorBridge，按物理 channel 管理唯一控制器；夹爪共享句柄所有者；不包装 `RobotArm` 或模仿其私有成员 |
+| `RobotArm` 的控制器创建、设备注册、句柄及总线映射 | `rebotarmcontroller/hardware/sdk_driver.py` → `SdkMotorDriver` | 仅适配 damiao；直接使用带序号补丁的 MotorBridge，按物理 channel 管理唯一控制器；夹爪共享句柄所有者；不包装 `RobotArm` 或模仿其私有成员 |
 | `RobotArm` 的反馈请求/轮询、状态与 MIT/POS_VEL/VEL 设备操作 | 驱动提供原始操作；`feedback_acquisition.py`、`feedback_store.py` 接管采集和缓存；`feedback_safety.py` 接管可用性 | 保留本地序号验证、首帧、年龄、原因分类与新帧恢复；不迁入缺样本补零、吞掉发送异常等宽松语义 |
 | `RobotArm` 的模式、寄存器、使能/失能、置零及关闭 | 底层操作归 `sdk_driver.py`；流程与确认归 `lifecycle.py` | 纳入寄存器 25～28 的 POS_VEL 参数写入、模式确认、反馈验证与资源释放；逐电机返回结果，保留严格置零及使能回滚 |
 | `RobotArm.start_control_loop/stop_control_loop` 与循环存活状态 | `rebotarmcontroller/controller_runtime.py` | 批次 2 与驱动一起替换最小周期线程；有界停止并确认退出，不使用 `Thread._stop()`；完整队列与仲裁在批次 6 接入 |
@@ -250,43 +250,25 @@ ABI 探测是批次 0～1 的必做项，用来确定 Python `SdkMotorDriver` �
 
 ### 文件与组件归属
 
-下面按包根目录的文件列出组件归属。已存在和拟议模块一起列出；后续按职责增加文件，不建立控制器内部职责子目录。
+2026-11-03 按用户确认方案，将原平铺模块整理为一层职责子目录。文件名、类名、方法签名、
+状态所有权及设备线程模型保持原样；Python 导入迁往新路径，旧位置不保留转发或模块别名。
 
-```text
-rebotarmcontroller/
-├── hardware_manager.py        # 运行时、生命周期及职责组件的纯装配
-├── configuration.py           # 参数、范围与资源路径
-├── controller_contracts.py    # 值类型、请求、结果与故障
-├── controller_values.py       # 六轴快照、夹爪接纳及结果值
-├── controller_parameters.py   # 无状态默认值和兼容常量
-├── sdk_driver.py              # MotorBridge 设备与总线收发
-├── controller_kinematics.py   # 规范模型的 FK 薄适配
-├── controller_runtime.py      # 唯一设备线程与周期调度
-├── device_requests.py         # 有界请求、优先级、有效期和资源代次
-├── feedback_acquisition.py    # 反馈采集、缓存、采集错误与只读判断
-├── feedback_reader.py         # 采集装配、成套快照与兼容查询
-├── lifecycle.py               # 连接、使能与模式状态、关闭策略
-├── command_guard.py           # 命令准入、健康失败保持与保护决策
-├── controller_cycle.py        # 周期采集、租约检查及执行分发
-├── controller_protection.py   # 保护清理与一次失能协调
-├── arm_controller.py          # 六轴准入、停靠、保持与透传事务
-├── arm_stop.py                # 发送后的周期静止确认
-├── arm_position_control.py    # 六轴位置命令
-├── arm_execution.py           # 六轴目标与轨迹执行
-├── arm_trajectory.py          # 六轴任务接纳、到位与取消结果
-├── gripper_control.py         # 夹爪控制算法
-├── gripper_execution.py       # 夹爪执行状态
-├── gripper_controller.py      # 坐标、零位验证、接纳与发送
-├── gravity_control.py         # 重力补偿状态、计算与模型工具
-├── gravity_controller.py      # 补偿启停、模式交接及周期诊断
-├── ros_ports.py               # ROS 适配与关闭协调的职责端口声明
-├── ros_actions.py             # Action 协议映射
-├── ros_services.py            # Service 适配
-├── ros_publishers.py          # 状态发布
-├── motor_passthrough.py       # 低层透传与仲裁入口
-├── conversions.py             # 消息与核心值类型转换
-└── rebotarm_controller.py     # 装配及启停协调
-```
+| 位置 | 模块 |
+| --- | --- |
+| 根目录 | `__init__`、`rebotarm_controller`、`hardware_manager`、`configuration`、`controller_parameters` |
+| `contracts/` | `controller_contracts`、`controller_values`、`component_ports`、`ros_ports` |
+| `hardware/` | `sdk_driver`、`feedback_acquisition`、`feedback_reader` |
+| `runtime/` | `controller_runtime`、`device_requests`、`lifecycle`、`controller_cycle`、`controller_protection`、`command_guard`、`stationary_evidence` |
+| `arm/` | `arm_controller`、`arm_execution`、`arm_trajectory`、`arm_position_control`、`arm_stop`、`controller_kinematics` |
+| `gripper/` | `gripper_controller`、`gripper_execution`、`gripper_control` |
+| `gravity/` | `gravity_controller`、`gravity_control` |
+| `ros/` | `ros_actions`、`ros_services`、`ros_publishers`、`motor_passthrough`、`conversions` |
+| `examples/` | 保留原 ROS 客户端及入口路径 |
+
+子包 `__init__.py` 仅声明用途，不汇总导入或创建设备。保留 `find_packages()` 和五个既有
+可执行名称、ROS 接口及配置位置。资源定位继续优先安装索引，源码回退按新深度解析；
+目录迁移不整理既有公共数值依赖和核心层 ROS 转换，后续独立规划。
+完整树见[控制器 README](../../src/rebotarmcontroller/README.md#文件结构)。
 
 包级配置资源仍随本包安装；各组件独立持有状态，不使用 mixin 拆类，也不将完整 manager 或共享字典作为组件接口。
 
@@ -402,7 +384,7 @@ rebotarmcontroller/
 验收须证明组件可用假时钟、假驱动独立装配和测试，且既有 ROS 名称、消息、参数及安全行为兼容。
 默认失能、显式使能、新鲜反馈、健康任务失败保持、失能确认和关闭释放约束均须保留；
 软件通过不能替代实机验收，涉及实机时仍按现场安全及显式授权规则分项验证。
-模块继续平铺包根目录，不建立第二份 SDK，只迁已用能力；IK 与路径生成仍归 motion。
+本节的模块职责保留，位置采用上文的一层职责子目录；不建立第二份 SDK，只迁已用能力；IK 与路径生成仍归 motion。
 当前完成项与仍未满足的门统一记在项目状态，不用“结构完成百分比”代替逐项验证。
 
 实现采用已有执行/反馈值类型，加上 `controller_values.py` 的实际跨组件输入与快照；
@@ -459,7 +441,7 @@ rebotarmcontroller/
 
 以上三步分别形成可评审、可回归的小范围交付，再做整体结构和行为验收；提交与推送遵守项目约定。
 本批不调整控制参数、量化反馈判据或任何安全门限，不迁入 IK、路径生成等 motion 职责。
-模块继续在包根目录平铺，新增及调整的注释、文档字符串使用中文。
+模块位置采用上文的一层职责子目录，新增及调整的注释、文档字符串使用中文。
 
 #### 验收条件
 

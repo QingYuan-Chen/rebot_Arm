@@ -7,14 +7,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from rebotarmcontroller.arm_execution import ArmExecution
-from rebotarmcontroller.arm_position_control import ArmPositionControl
-from rebotarmcontroller.arm_trajectory import ArmTrajectory
-from rebotarmcontroller.arm_stop import ArmStop
-from rebotarmcontroller.command_guard import CommandGuard
-from rebotarmcontroller.controller_values import GripperTarget
-from rebotarmcontroller.gripper_execution import GripperExecution
-from rebotarmcontroller.sdk_driver import CommandTransportError
+from rebotarmcontroller.arm.arm_execution import ArmExecution
+from rebotarmcontroller.arm.arm_position_control import ArmPositionControl
+from rebotarmcontroller.arm.arm_trajectory import ArmTrajectory
+from rebotarmcontroller.arm.arm_stop import ArmStop
+from rebotarmcontroller.runtime.command_guard import CommandGuard
+from rebotarmcontroller.contracts.controller_values import GripperTarget
+from rebotarmcontroller.gripper.gripper_execution import GripperExecution
+from rebotarmcontroller.hardware.sdk_driver import CommandTransportError
 from test_controller_local_runtime import make_driver, make_local_manager, wait_until
 from test_lifecycle_transactions import lifecycle
 

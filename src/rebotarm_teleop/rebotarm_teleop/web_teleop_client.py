@@ -9,14 +9,17 @@
   ROS 消息类型，可以在没有 ROS 运行时的环境下做单元测试。
 
 对外交互（客户端由调用方注入）：
-- 关节动作 ``/<ns>/follow_joint_trajectory``：接收平滑插值后的多点关节轨迹；
+- 关节动作 ``/<ns>/follow_joint_trajectory``：legacy 接收旧离散点，prepared_v1 接收完整五次首末约束；
 - 夹爪动作 ``/<ns>/gripper/command``：接收目标开口与最大力矩；
 - 触发器服务 ``/<ns>/trajectory_stop``：请求硬件控制器停止当前轨迹。
 
 安全语义：
 - 校验不通过时绝不发送动作目标，直接返回 ``accepted=False``；
 - 动作服务器在 0.1 s 内不可用即判为失败，不排队等待；
+- 正式入口注入执行能力核对回调；配置与后端不匹配时拒绝，不因失败回退到旧模式；
 - 停止流程总是先请求控制器级 trajectory_stop，再取消动作目标，两条路径互不阻塞。
+
+文件结构：时长和响应编码 → WebTeleopClient 依赖注入 → 点对点/旧轨迹组装 → 停止与夹爪适配。
 """
 
 from __future__ import annotations
@@ -196,6 +199,7 @@ class WebTeleopClient:
         # 起点必须与决策里的关节顺序对齐，否则位置会挂到错误的关节上
         current = tuple(current_positions[name] for name in decision.joint_names)
         if self._trajectory_mode == 'prepared_v1':
+            # 两点包含 q/v/a，连续曲线由运动层准备；此处不离散化或修改请求时长。
             from rebotarm_motion.trajectory_messages import point_to_point_message
             trajectory = point_to_point_message(decision.joint_names, current,
                 decision.positions, decision.duration, trajectory_factory=self._trajectory_factory,
@@ -223,6 +227,7 @@ class WebTeleopClient:
         }
 
     def _append_legacy_points(self, trajectory, current, decision):
+        """保留旧模式的位置点序列；不补写导数，避免把兼容输入错误标成 C1/C2。"""
         for elapsed, positions in interpolate_joint_points(
             current=current,
             target=decision.positions,

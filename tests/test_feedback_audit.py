@@ -180,7 +180,7 @@ def test_installed_sdk_seven_motor_startup_on_virtual_serial(through_relay):
     motorbridge = pytest.importorskip('motorbridge')
     if motorbridge.__version__ != '0.4.7+rebotarm.1':
         pytest.skip('requires the verified MotorBridge wheel')
-    from rebotarmcontroller.feedback_acquisition import FeedbackAcquisition
+    from rebotarmcontroller.hardware.feedback_acquisition import FeedbackAcquisition
     from test_motorbridge_transport_safety import packet
     master, slave = os.openpty()
     tty.setraw(slave)

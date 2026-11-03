@@ -19,7 +19,8 @@
     调用：动作 ``/{ns}/follow_joint_trajectory``、``/{ns}/gripper/command``；服务
         ``/{ns}/enable``、``/{ns}/disable``、``/{ns}/safe_home``、``/{ns}/trajectory_stop``、
         ``/{ns}/gravity_compensation/{start,stop}``、``/{ns}/teleop/teach_record/{start,set_path,stop}``。
-    发布：仅在不接真实硬件时发布仿真夹爪状态到 ``/{ns}/gripper/state``。
+    发布：仅在轻量预演时合成夹爪状态；MuJoCo 的物理反馈由仿真后端唯一发布。
+    轨迹能力：订阅 ``/{ns}/trajectory_execution_mode``，网页命令须与后端能力一致。
     HTTP（只监听本机 UI/API）：GET ``/`` 页面、``/events`` SSE、``/api/status``、
         ``/api/config``、``/api/teach_record_info``、``/api/teach_records``、
         ``/api/teach_trajectory``、``/robot/urdf``、``/robot/meshes/<name>``；
@@ -30,11 +31,17 @@
       网关才放行；其余取值一律返回 state="dry_run" 且不下发任何目标。
     - 面板下发命令还要求 ``web_execute_enabled`` 为真；默认关闭，必须由操作者在启动时显式打开。
     - 整臂命令（使能/失能/回原点）在示教回放或停止过程中被锁定，避免人工操作与回放轨迹互相打架。
-    - ``use_hardware`` 为假时夹爪只做仿真：由本节点自己发布夹爪反馈，保证无硬件时界面仍可用。
+    - ``use_hardware`` 为假时，MuJoCo 夹爪通过真实仿真服务执行并遵守资源预约；
+      只有轻量预演使用面板合成反馈，不能把合成位置当成物理到位。
+    - 网页键盘每次按键独立起停，busy 从发送前保持到拒绝/失败/Action 终态，期间新按键直接拒绝。
 
 线程模型
     HTTP 服务在独立线程中处理请求与 SSE，ROS 执行器线程负责订阅回调、定时器与动作回调，
     两者共享同一个加锁的状态存储；``_execute_lock`` 只保护当前 web 执行目标句柄的读写。
+
+文件结构
+    消息/响应辅助函数 → 节点参数与依赖装配 → 状态接收 → HTTP 意图处理与异步结果
+    → 服务调用、反馈发布及关闭。轨迹数学委托运动层，页面线程不自行驱动设备周期。
 """
 
 from __future__ import annotations
@@ -1102,7 +1109,7 @@ class TeleopStatusPanelNode(Node):
         trajectory.joint_names = list(decision.joint_names)
         point = JointTrajectoryPoint()
         point.positions = [float(v) for v in decision.positions]
-        # 单点轨迹：时间戳即"从当前时刻起走到该目标点"的时长，速度由校验环节保证不超限。
+        # legacy 保留单位置点；prepared_v1 下方替换为含起点及首末 v/a 的完整约束。
         _set_duration(point.time_from_start, decision.duration)
         trajectory.points = [point]
         if self._trajectory_capability.expected == 'prepared_v1':
@@ -1113,6 +1120,7 @@ class TeleopStatusPanelNode(Node):
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = trajectory
         with self._web_keyboard_lock:
+            # HTTP 请求可能并发到达；先原子占用，再异步发送，不能等 Goal 回执才标 busy。
             if self._web_keyboard_busy:
                 return dict(accepted=False, state='rejected', message='keyboard step busy; input discarded')
             self._web_keyboard_busy = True
@@ -1135,7 +1143,7 @@ class TeleopStatusPanelNode(Node):
         return result
 
     def _on_keyboard_goal_response(self, future, decision) -> None:
-        """键盘单点轨迹的目标受理回调：把"收到目标/被拒绝/发送失败"写进面板状态。"""
+        """键盘单步的接纳回调；接纳后继续占用 busy，Action 结果到达才解除。"""
         try:
             goal_handle = future.result()
         except Exception as exc:
@@ -1162,10 +1170,12 @@ class TeleopStatusPanelNode(Node):
         )
 
     def _finish_keyboard_step(self):
+        """在网页键盘锁内结束本地单步占用；不向后端发取消或释放资源命令。"""
         with self._web_keyboard_lock:
             self._web_keyboard_busy = False
 
     def _on_keyboard_result(self, future):
+        """同时核对 Goal 终态与 FJT 错误码，避免把接纳或传输成功当成运动成功。"""
         self._finish_keyboard_step()
         try:
             response = future.result()
@@ -1274,6 +1284,7 @@ class TeleopStatusPanelNode(Node):
             return result["response"]
         if result.get("simulated_position") is not None:
             if self._physical_simulation:
+                # MuJoCo 必须实际执行服务，忙时固定夹爪会拒绝；不能直接回显一个虚构落点。
                 client = self._simulation_gripper_client
                 if not client.wait_for_service(timeout_sec=.1):
                     return dict(accepted=False, message='simulation gripper unavailable')
@@ -1288,7 +1299,7 @@ class TeleopStatusPanelNode(Node):
                 response = future.result()
                 return dict(accepted=response.success, position=response.reached_position,
                     message='simulation gripper accepted' if response.success else 'simulation gripper reserved or rejected')
-            # 仿真分支：没有动作目标，直接把模拟落点当作当前开口并主动推一帧反馈。
+            # 轻量预演没有物理执行，才允许把界面落点作为合成反馈发布。
             self._sim_gripper_position = float(result["simulated_position"])
             self._publish_simulated_gripper_state()
             self._store.update_teleop_status("web_gripper", result["status"])

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarmcontroller.lifecycle import ControllerLifecycle, LifecyclePorts
+from rebotarmcontroller.runtime.lifecycle import ControllerLifecycle, LifecyclePorts
 from controller_fake_backend import WriterRuntime
 
 

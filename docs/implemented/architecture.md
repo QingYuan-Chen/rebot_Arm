@@ -53,7 +53,11 @@ ROS 适配器直接接收职责组件的提交、取消和只读查询端口，�
 重力补偿状态与计算归 `gravity_control.py`，启停、模式交接与诊断归
 `gravity_controller.py`。`controller_cycle.py` 分发采集和执行，
 `controller_protection.py` 协调设备故障清理及一次保护失能。
-全部模块平铺包根目录；C++ 后续归属见
+模块按一层职责子目录组织：`contracts/` 声明数据与能力接口，`hardware/` 负责通信与反馈，
+`runtime/` 负责设备线程、生命周期与安全协调，`arm/`、`gripper/`、`gravity/` 保留各自执行状态，
+`ros/` 负责协议与消息适配。根目录只保留节点入口、装配、配置和参数模块，`examples/` 保留原路径。
+子包不汇总导入，旧平铺模块不保留转发；Python 调用方使用新路径，ROS 名称与入口不变。
+目录整理保留既有模块依赖，公共数值函数归位及核心层 ROS 依赖清理另行规划。C++ 后续归属见
 [拆分规划](../design/controller_refactor_plan.md)。
 
 `command_guard.py` 已接管透传准入与故障保护锁存，位置边界统一读取规范 URDF。

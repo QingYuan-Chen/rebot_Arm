@@ -1,4 +1,8 @@
 <?xml version="1.0"?>
+<!-- 文件职责：声明共享数值包的 ament 元数据。
+     对外接口：供 colcon 和 ROS 包索引发现，Python 模块不提供节点。
+     安全约束：不添加 ROS 消息、SDK 或物理引擎运行依赖。
+     文件结构：包身份与许可、构建工具、ament_python 导出。 -->
 <package format="3">
   <name>rebotarm_trajectory</name>
   <version>0.1.0</version>

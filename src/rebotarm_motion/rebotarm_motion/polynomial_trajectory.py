@@ -1,7 +1,18 @@
-"""离线轨迹参考: 完整点约束生成分段系数, 采样和极值均使用同一组系数.
+"""运动层的分级曲线生成、解析极值和碰撞采样安排。
 
-只依赖数值库, 不创建 ROS 节点或设备. 系数按归一化段时间 u=(t-t0)/T
-升幂排列, 位置 rad, 时间 s. 准备服务生成并检查, 执行端使用共享内核采样.
+文件职责
+    根据完整点约束生成线性、三次 Hermite 或五次 Hermite 系数，并为限值和碰撞检查
+    提供候选时刻。数值求值继承共享轨迹内核，不在运动层维护第二套采样算法。
+对外接口
+    build_curve 构造曲线；PolynomialSegment.candidates 给出端点与段内极值候选；
+    PolynomialTrajectory 提供连续性报告及 collision_times；curve_from_payload
+    用于运动层往返核对生成规则，执行后端使用共享内核的直接解码接口。
+安全约束
+    q/qv/qva 分别保留 C0/C1/C2 等级；不补造缺失导数、不重定时、不裁剪超限值。
+    系数以 u=(t-t0)/T 升幂排列，导数按实际秒缩放。求根数值不可判定时明确失败。
+    碰撞时刻控制相邻样本的关节跨度，但离散采样不是连续碰撞证明；超预算直接拒绝。
+文件结构
+    实根求解 → 极值候选 → 连续性与碰撞采样 → 系数生成 → 交换载荷一致性检查。
 """
 
 import math
@@ -44,6 +55,7 @@ class PolynomialSegment(NumericSegment):
     """运动层追加解析极值候选；数值求值直接复用共享内核。"""
 
     def candidates(self, joint, order=0):
+        """当前 order 阶量的极值在端点或其下一阶导数零点，返回归一化时间 u。"""
         return (0., *real_roots(poly.polyder(self.axis(joint, order))), 1.)
 
 
@@ -75,6 +87,7 @@ class PolynomialTrajectory(NumericTrajectory):
         for segment in self.segments:
             speed = max(abs(poly.polyval(u, segment.axis(j, 1))) for j in range(6)
                         for u in segment.candidates(j, 1))
+            # 使用段内速度峰值而非首末距离；即使关节先去后回，也不会漏掉中间行程。
             count = max(1, math.ceil(speed * segment.duration / max_joint_step))
             if count + len(times) > max_samples:
                 raise ValueError('collision coverage exceeds sample budget')
@@ -107,6 +120,7 @@ def build_curve(joint_names, points):
             if degree == 1:
                 c = (q, delta)
             elif degree == 3:
+                # 输入 v/a 是秒制约束，先乘 T/T² 转成对 u 的约束，再解端点方程。
                 v0, v1 = first.velocities[j] * duration, last.velocities[j] * duration
                 c = (q, v0, 3 * delta - 2 * v0 - v1, -2 * delta + v0 + v1)
             else:
@@ -122,6 +136,7 @@ def build_curve(joint_names, points):
         for order in range(4):
             segment.at(0., order)
             segment.at(1., order)
+        # 生成后用同一求值器核对端点，拒绝浮点范围或残差已使约束失真的系数。
         for order, field in enumerate(('positions', 'velocities', 'accelerations')):
             if order and not getattr(first, field):
                 continue
