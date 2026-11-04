@@ -453,8 +453,9 @@ RViz 拖动控制现在采用原生 MoveIt MotionPlanning 工作流。不再使�
 
 - 为纯逻辑添加单元测试
 - 变更职责归属时添加包分层测试
-- 运行 `python -m pytest tests -q`
-- 对变更过的 Python 包运行 `python -m compileall`
+- 运行 `AGENTS.md`「检查要求」中必需的分层测试和 `compileall` 检查
+- 根据改动范围和风险选择定向检查；完整回归仅在用户明确要求、重大跨包或安全关键改动、
+  发布前确认整体兼容性时运行，命令以 `AGENTS.md` 为准
 
 ### 仿真内部状态与资源
 

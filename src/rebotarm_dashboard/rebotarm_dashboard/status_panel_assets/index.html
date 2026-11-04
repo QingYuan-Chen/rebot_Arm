@@ -307,6 +307,7 @@
       gap: 10px;
       align-items: center;
     }
+    #web-teleop-card .execute-row { grid-template-columns: minmax(0, 1fr); }
     .execute-status {
       color: var(--muted);
       line-height: 1.35;
@@ -779,8 +780,7 @@
 
         <!-- 网页遥操作卡片：拖动预览滑条只改左侧 3D 模型和本地目标值，
              点“执行关节 + 夹爪”才把关节目标和夹爪目标一次性发给后端。
-             下面的“单次最大差值 / 执行时长 / 最大速度”是执行前的本地门限，
-             它们只决定请求是否被本地拦下或拒绝，真正的限位仍由后端复核。 -->
+             执行时长由组合计划使用，限位由后端复核。 -->
         <section class="panel slider-panel collapsible-card collapsed" id="web-teleop-card">
           <div class="card-header"><div class="panel-title">网页遥操作</div><button class="card-toggle" type="button" data-card-toggle="web-teleop-card" aria-label="展开或折叠网页遥操作"></button></div>
           <div class="card-body">
@@ -794,16 +794,8 @@
           </div>
           <div class="execute-settings">
             <div class="execute-setting">
-              <label for="execute-max-delta">单次最大差值</label>
-              <input id="execute-max-delta" type="number" min="0.05" max="1.50" step="0.05" value="0.80">
-            </div>
-            <div class="execute-setting">
               <label for="execute-duration">执行时长</label>
               <input id="execute-duration" type="number" min="1.0" max="8.0" step="0.5" value="3.0">
-            </div>
-            <div class="execute-setting">
-              <label for="execute-speed">最大速度</label>
-              <input id="execute-speed" type="number" min="0.1" max="1.5" step="0.1" value="1.5">
             </div>
           </div>
           <div class="execute-row">
@@ -814,13 +806,10 @@
               <label><input type="checkbox" id="fixed-duration">机械臂固定时长（超限拒绝；默认机械臂重定时）</label>
             </details>
             <button class="tool-button" id="preview-coordinated" type="button">组合运动预览</button>
-            <div id="coordinated-plan-status">按闭合夹爪模型检查；不覆盖实际张开手指的碰撞范围。夹爪独立开合。</div>
-            <div id="admission-status">再次执行条件：未知</div>
-            <div class="execute-status" id="execute-status">当前仅预览。拖动目标滑条后，再确认执行。</div>
+            <div class="card-note">按闭合夹爪模型检查，不覆盖实际张开手指的碰撞范围。</div>
+            <div class="execute-status" id="motion-result" aria-live="polite">任务：空闲</div>
             <div>
               <button class="tool-button execute-button" id="execute-preview" type="button" disabled>执行关节 + 夹爪</button>
-              <button class="tool-button" id="execute-arm-only" type="button">仅执行关节</button>
-              <button class="tool-button" id="execute-gripper-only" type="button">独立夹爪</button>
               <button class="tool-button stop-button" id="stop-execute" type="button" disabled>停止</button>
             </div>
           </div>
@@ -1135,14 +1124,12 @@
     const syncRealActionButtons = () => {
       if (isCheckMode) {
         document.getElementById('execute-preview')?.setAttribute('disabled', '');
-        document.getElementById('set-gripper')?.setAttribute('disabled', '');
         document.getElementById('run-teach-dry-run')?.setAttribute('disabled', '');
         document.getElementById('run-teach-replay')?.setAttribute('disabled', '');
         return;
       }
       if (webExecuteEnabled) return;
       document.getElementById('execute-preview')?.setAttribute('disabled', '');
-      document.getElementById('set-gripper')?.setAttribute('disabled', '');
       document.getElementById('run-teach-replay')?.setAttribute('disabled', '');
     };
     // 把后端的状态对象拼成“状态芯片 + 明细”的一行；
@@ -1554,18 +1541,15 @@
       active: false,
       targets: {},
       latestJoints: {},
-      executing: false,
       latestTeleop: {},
     };
     // 执行参数与设置项的初始值：全部优先取后端配置，代码里的字面量只是兜底。
     // 单位约定：关节位置为弧度（rad），夹爪为米（m），速度为 rad/s，时长为秒（s）。
     // 键盘单步默认 0.02 rad 属于很小的步长，配合下面的时长上限保证单步速度受限。
     const executeSettings = {
-      maxDelta: 0.8,
       duration: 3.0,
       maxSpeed: Number(panelConfig.web_execute?.max_joint_speed_rad_s) || 1.5,
     };
-    const executeMaxDeltaLimit = Number(panelConfig.web_execute?.max_delta_rad) || 1.5;
     const gripperSettings = {
       maxEffort: Number(panelConfig.web_gripper?.max_effort) || 0.3,
     };
@@ -1797,11 +1781,10 @@
       document.getElementById('web-teleop-card').classList.remove('preview-active');
       document.getElementById('execute-preview').disabled = true;
       document.getElementById('stop-execute').disabled = true;
-      document.getElementById('execute-status').textContent = '已同步当前姿态。拖动目标滑条后再执行。';
       updateRobotViewer(previewState.latestJoints);
       viewerStatus('3D 视图已连接：正在跟随关节和夹爪状态');
     };
-    const exitPreviewToLive = (message = '已切换为实时反馈。') => {
+    const exitPreviewToLive = () => {
       coordinatedPlan = null;
       cancelAnimationFrame(previewAnimation);
       previewState.targets = {};
@@ -1809,7 +1792,6 @@
       document.getElementById('web-teleop-card').classList.remove('preview-active');
       document.getElementById('execute-preview').disabled = true;
       document.getElementById('stop-execute').disabled = true;
-      document.getElementById('execute-status').textContent = message;
       sliderNames.forEach((name) => updateSlider(name, previewState.latestJoints[name], 'preview'));
       updateRobotViewer(previewState.latestJoints);
       viewerStatus('3D 视图已连接：正在跟随实时反馈');
@@ -1883,41 +1865,6 @@
       });
       return { result, missing };
     };
-    // 目标值校验辅助：预览目标缺失时用实时反馈补齐，收集真正无数据的关节名；
-    // 最大差值用于对照单次最大差值限制。注意此处只比较关节，夹爪单独校验。
-    const maxPreviewDelta = () => {
-      let maxDelta = 0;
-      armJointNames.forEach((name) => {
-        const live = previewState.latestJoints[name]?.position;
-        const target = previewState.targets[name];
-        if (Number.isFinite(Number(live)) && Number.isFinite(Number(target))) {
-          maxDelta = Math.max(maxDelta, Math.abs(Number(target) - Number(live)));
-        }
-      });
-      return maxDelta;
-    };
-    const speedLimitForJoint = (name) => {
-      const configured = Number(panelConfig.joint_velocity_limits?.[name]);
-      return Number.isFinite(configured) ? Math.min(configured, executeSettings.maxSpeed) : executeSettings.maxSpeed;
-    };
-    // 速度预检：按“目标与实时的距离 ÷ 执行时长”估算每个关节的平均速度，
-    // 与“配置的关节速度上限和界面速度上限中较小者”比较，取最坏的关节报告。
-    // 时长下限用 1e-6 兜底只为避免除零，真正的时长约束在输入控件上。
-    const speedCheck = () => {
-      let worst = { name: '', speed: 0, limit: executeSettings.maxSpeed, minDuration: 0 };
-      armJointNames.forEach((name) => {
-        const live = motorPosition(previewState.latestJoints[name]);
-        const target = Number(previewState.targets[name]);
-        if (!Number.isFinite(live) || !Number.isFinite(target)) return;
-        const limit = speedLimitForJoint(name);
-        const distance = Math.abs(target - live);
-        const speed = distance / Math.max(executeSettings.duration, 1e-6);
-        if (speed > worst.speed) {
-          worst = { name, speed, limit, minDuration: distance / Math.max(limit, 1e-6) };
-        }
-      });
-      return worst;
-    };
     const bindExecuteSetting = (inputId, key, min, max) => {
       const input = document.getElementById(inputId);
       const update = (value) => {
@@ -1928,132 +1875,26 @@
       input.addEventListener('change', (event) => update(event.target.value));
       update(executeSettings[key]);
     };
-    // 执行预览目标（关节部分）：本地三道校验依次是
-    //   1. 必须处于预览模式且没有正在发送的请求（防止双击重复下发）；
-    //   2. 不能缺少实时关节反馈——没有反馈就无法算速度，宁可不发；
-    //   3. 估算速度不得超过门限，超了就提示需要多大的时长而不是静默降速。
-    // 通过后弹窗列出目标差值、允许差值、时长与速度上限；
-    // 请求体里的 confirm 字段是后端二次确认的令牌，不是普通参数。
-    const executePreview = async (options = {}) => {
-      if (!previewState.active || previewState.executing) return { accepted: false, message: '预览未激活' };
-      const delta = maxPreviewDelta();
-      const targets = previewArmTargets();
-      if (targets.missing.length) {
-        document.getElementById('execute-status').textContent = `无法执行：缺少实时关节状态 ${targets.missing.join(', ')}`;
-        return { accepted: false, message: '缺少实时关节状态' };
-      }
-      const speed = speedCheck();
-      if (speed.speed > speed.limit) {
-        document.getElementById('execute-status').textContent =
-          `${speed.name} 速度过高：${fmt(speed.speed, 3)} rad/s > ${fmt(speed.limit, 3)} rad/s，请把时长设为 >= ${fmt(speed.minDuration, 2)}s。`;
-        return { accepted: false, message: '速度过高' };
-      }
-      if (options.confirm !== false) {
-        const confirmed = window.confirm(
-          `发送预览目标到真实机械臂？\n` +
-          `目标差值: ${fmt(delta)} rad\n` +
-          `允许差值: ${fmt(executeSettings.maxDelta)} rad\n` +
-          `执行时长: ${fmt(executeSettings.duration, 2)} s\n` +
-          `速度上限: ${fmt(executeSettings.maxSpeed, 2)} rad/s`
-        );
-        if (!confirmed) return { accepted: false, message: '已取消' };
-      }
-      previewState.executing = true;
-      const button = document.getElementById('execute-preview');
-      const stopButton = document.getElementById('stop-execute');
-      const status = document.getElementById('execute-status');
-      button.disabled = true;
-      stopButton.disabled = false;
-      status.textContent = '正在发送预览目标...';
-      try {
-        const response = await fetch('/api/execute_preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            confirm: 'EXECUTE',
-            joint_positions: targets.result,
-            max_delta_rad: executeSettings.maxDelta,
-            max_joint_speed_rad_s: executeSettings.maxSpeed,
-            duration: executeSettings.duration,
-          }),
-        });
-        const result = await response.json();
-        status.textContent = result.message || (result.accepted ? '已接收' : '已拒绝');
-        if (!result.accepted) {
-          button.disabled = false;
-          stopButton.disabled = true;
-        }
-        return result;
-      } catch (error) {
-        status.textContent = `执行请求失败: ${error.message}`;
-        button.disabled = false;
-        stopButton.disabled = true;
-        return { accepted: false, message: error.message };
-      } finally {
-        previewState.executing = false;
-      }
-    };
     // 停止执行：请求发出后立刻禁用按钮防止连点；
     // 仅当后端明确没有接收且当前不是空闲态时才重新启用，方便操作员重试。
     const stopExecute = async () => {
       const stopButton = document.getElementById('stop-execute');
-      const status = document.getElementById('execute-status');
       stopButton.disabled = true;
-      status.textContent = '正在请求停止...';
       try {
         const response = await fetch('/api/stop_execute', { method: 'POST' });
         const result = await response.json();
-        status.textContent = result.message || (result.accepted ? '已请求停止' : '停止被拒绝');
+        if (!result.accepted && result.state !== 'idle') window.alert(result.message || '停止被拒绝');
         if (!result.accepted && result.state !== 'idle') {
           stopButton.disabled = false;
         }
       } catch (error) {
-        status.textContent = `停止请求失败: ${error.message}`;
+        window.alert(`停止请求失败: ${error.message}`);
         stopButton.disabled = false;
-      }
-    };
-    const setGripper = async (options = {}) => {
-      const target = Number(previewState.targets.gripper);
-      const live = motorPosition(previewState.latestJoints.gripper);
-      const position = Number.isFinite(target) ? target : live;
-      if (!Number.isFinite(live) || !Number.isFinite(position)) {
-        document.getElementById('execute-status').textContent = '无法设置夹爪：夹爪位置未知，请检查反馈或零位';
-        return { accepted: false, message: '夹爪位置未知' };
-      }
-      if (options.confirm !== false) {
-        const confirmed = window.confirm(`设置夹爪目标？\n位置: ${fmt(position)} m`);
-        if (!confirmed) return { accepted: false, message: '已取消' };
-      }
-      const button = document.getElementById('execute-preview');
-      const status = document.getElementById('execute-status');
-      button.disabled = true;
-      status.textContent = '正在发送夹爪目标...';
-      try {
-        const response = await fetch('/api/set_gripper', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            confirm: 'SET_GRIPPER',
-            position,
-            max_effort: gripperSettings.maxEffort,
-          }),
-        });
-        const result = await response.json();
-        status.textContent = result.message || (result.accepted ? '夹爪目标已接收' : '夹爪目标被拒绝');
-        if (!result.accepted) {
-          button.disabled = false;
-        }
-        return result;
-      } catch (error) {
-        status.textContent = `夹爪请求失败: ${error.message}`;
-        button.disabled = false;
-        return { accepted: false, message: error.message };
       }
     };
     let coordinatedPlan = null;
     let previewAnimation = 0;
     const planCoordinated = async () => {
-      const status = document.getElementById('coordinated-plan-status');
       coordinatedPlan = null;
       cancelAnimationFrame(previewAnimation);
       try {
@@ -2066,12 +1907,10 @@
           const text = document.getElementById(id).value.trim();
           if (text) payload[key] = JSON.parse(text);
         }
-        status.textContent = '正在生成六轴计划及独立夹爪目标...';
         const response = await fetch('/api/preview_coordinated', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         const result = await response.json();
         if (!result.accepted) throw new Error(result.message);
         coordinatedPlan = result;
-        status.textContent = `机械臂时长 ${fmt(result.duration,3)} s；独立夹爪目标 ${fmt(result.gripper_position,4)} m，上限 ${fmt(result.torque_cap_nm,2)} N·m；不保证同时到达。按闭合夹爪模型检查。`;
         previewState.active = true;
         document.getElementById('execute-preview').disabled = !webExecuteEnabled;
         const start = performance.now();
@@ -2087,7 +1926,7 @@
         previewAnimation = requestAnimationFrame(animate);
         return result;
       } catch(error) {
-        status.textContent = `组合计划拒绝：${error.message}`;
+        window.alert(`组合计划拒绝：${error.message}`);
         return null;
       }
     };
@@ -2099,8 +1938,10 @@
       try {
         const response = await fetch('/api/execute_preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'EXECUTE',plan_id:plan.plan_id})});
         const result = await response.json();
-        exitPreviewToLive(result.message || (result.accepted ? '组合任务已提交，等待接纳。' : '组合任务被拒绝。'));
-      } catch(error) { exitPreviewToLive(`组合请求失败：${error.message}`); }
+        if (!result.accepted) window.alert(result.message || '组合任务被拒绝。');
+        else document.getElementById('motion-result').textContent = '任务：已提交';
+        exitPreviewToLive();
+      } catch(error) { window.alert(`组合请求失败：${error.message}`); exitPreviewToLive(); }
     };
     // 夹爪不参与示教回放；请先独立设置开度，再检查六轴路径。
     // 示教轨迹检查（dry-run）：只向后端提交检查请求，不下发任何真实轨迹。
@@ -2321,7 +2162,7 @@
       }
       buttons.forEach((button) => { button.disabled = true; });
       if (command === 'safe_home' || command === 'disable') {
-        exitPreviewToLive(`${label} requested; switching web view back to live feedback.`);
+        exitPreviewToLive();
       }
       try {
         const response = await fetch(`/api/arm_${command}`, { method: 'POST' });
@@ -2436,9 +2277,7 @@
         status.innerHTML = `<span class="chip bad">失败</span><div class="detail">${escapeHtml(error.message)}</div>`;
       }
     };
-    bindExecuteSetting('execute-max-delta', 'maxDelta', 0.05, executeMaxDeltaLimit);
     bindExecuteSetting('execute-duration', 'duration', 1.0, 8.0);
-    bindExecuteSetting('execute-speed', 'maxSpeed', 0.1, 1.5);
     bindKeyboardSetting('keyboard-step-number', 'stepRad', keyboardSettings.minStepRad, keyboardSettings.maxStepRad, 3);
     bindKeyboardSetting('keyboard-speed-number', 'maxSpeed', 0.1, executeSettings.maxSpeed, 1);
     bindTeachReplaySetting('teach-replay-speed', 'teach-replay-speed-number', 'replaySpeed', 0.1, 1.0, 1);
@@ -2456,12 +2295,6 @@
         document.getElementById('web-teleop-card').classList.add('preview-active');
         document.getElementById('execute-preview').disabled = false;
         syncRealActionButtons();
-        const speed = speedCheck();
-        const speedText = speed.speed > speed.limit
-          ? ` ${speed.name} 速度过高；时长需要 >= ${fmt(speed.minDuration, 2)}s。`
-          : ` 速度 ${fmt(speed.speed, 3)} rad/s <= ${fmt(speed.limit, 3)} rad/s。`;
-        document.getElementById('execute-status').textContent =
-          `预览目标已就绪。最大差值 ${fmt(maxPreviewDelta())} rad，限制 ${fmt(executeSettings.maxDelta)} rad，时长 ${fmt(executeSettings.duration, 2)}s。${speedText}`;
         updateRobotViewer(jointsFromTargets(previewState.targets));
         viewerStatus('仅预览：当前姿态只显示在网页模型，尚未发送到真机');
       });
@@ -2469,9 +2302,7 @@
     document.getElementById('sync-preview').addEventListener('click', syncPreviewFromLive);
     document.getElementById('execute-preview').addEventListener('click', executePreviewAndGripper);
     document.getElementById('preview-coordinated').addEventListener('click', planCoordinated);
-    document.getElementById('execute-arm-only').addEventListener('click', executePreview);
-    document.getElementById('execute-gripper-only').addEventListener('click', setGripper);
-    ['arm-keyframes','fixed-duration','execute-duration','execute-speed'].forEach(id=>{
+    ['arm-keyframes','fixed-duration','execute-duration'].forEach(id=>{
       document.getElementById(id).addEventListener('input',()=>{coordinatedPlan=null;cancelAnimationFrame(previewAnimation);});
     });
     document.getElementById('stop-execute').addEventListener('click', stopExecute);
@@ -2553,17 +2384,14 @@
       // 保证“能停下”和“有东西可停”一致。
       const webExecuteState = statusObj(data.teleop.web_execute).state || '-';
       document.getElementById('stop-execute').disabled = !['submitted','active','accepted','preparing','executing','stopping','cancel_requested'].includes(String(webExecuteState).toLowerCase());
-      if (!previewState.active && ['submitted','accepted','preparing','executing','stopping','cancel_requested','done','failed','rejected','canceled'].includes(webExecuteState)) {
-        const execution = statusObj(data.teleop.web_execute);
-        document.getElementById('execute-status').textContent = `${webExecuteState}：${execution.message || ''}`
-          + (Number.isFinite(execution.progress) ? `；机械臂进度 ${fmt(100*execution.progress,1)}%` : '')
-          + (execution.arm_state ? `；机械臂 ${execution.arm_state}` : '')
-          + (execution.gripper_state ? `；夹爪 ${execution.gripper_state}` : '');
+      const motionLabels = {submitted:'已提交', accepted:'已接纳', preparing:'准备中', executing:'执行中',
+        active:'执行中', stopping:'停止中', cancel_requested:'停止中', done:'已完成',
+        failed:'失败', rejected:'已拒绝', canceled:'已取消'};
+      if (motionLabels[webExecuteState]) {
+        const motion = document.getElementById('motion-result');
+        motion.textContent = `任务：${motionLabels[webExecuteState]}`;
+        motion.title = statusObj(data.teleop.web_execute).message || '';
       }
-      const admission = statusObj(data.teleop.trajectory_admission);
-      const freshAdmission = Date.now()/1000-Number(admission.received_at) <= 1;
-      document.getElementById('admission-status').textContent = !freshAdmission ? '再次执行条件：未知（快照过期）'
-        : `再次执行条件：${admission.ready ? '就绪' : '未就绪'}；${admission.message || ''}。此快照不是某次 REJECT 的原因。`;
       ['arm-safe-home', 'arm-enable', 'arm-disable'].forEach((id) => {
         const button = document.getElementById(id);
         if (button) button.disabled = !useHardware || isCheckMode || !webExecuteEnabled || isReplayArmCommandLocked(replayStatus);
