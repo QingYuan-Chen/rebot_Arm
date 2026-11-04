@@ -11,6 +11,9 @@
 3. 在首个示教点上再保持 ``first_hold_sec`` 秒（速度 0），用保持段吸收规划终点残差
    （规划器允许的关节容差），保证进入示教轨迹时刻的速度与位置都精确。
 
+对外接口：MoveItStartAligner.append 与只读 last_report；仅用于示教对齐适配。
+安全约束：显式转换到示教等级，原规划约束保留在报告中；转换后必须重新检查实际曲线。
+文件结构：时间编码 → 配置 → 同等级保持 → 规划校验、转换与拼接。
 时间基准：所有点的 ``time_from_start`` 都是相对轨迹起点的累计时长，由本模块自行
 累加，不使用绝对时间。本模块只构造轨迹数据，不发送任何控制指令。
 """
@@ -53,6 +56,7 @@ class MoveItStartAlignmentConfig:
     joint_goal_tolerance: float
     velocity_scaling: float
     acceleration_scaling: float
+    reference_grade: str = 'q/v'
 
 
 class MoveItStartAligner:
@@ -76,6 +80,7 @@ class MoveItStartAligner:
     ) -> None:
         self._planner = planner
         self._trajectory_point_factory = trajectory_point_factory
+        self.last_report = {}
 
     def append(
         self,
@@ -97,10 +102,15 @@ class MoveItStartAligner:
         返回值为累计时长：起点保持 + 对齐段实际时长 + 首点保持，可继续用于后续追加
         轨迹点的相对时间基准。偏差小于阈值时跳过对齐段，只保留保持点。
         """
+        if config.reference_grade not in ('q', 'q/v', 'q/v/a'):
+            raise ValueError('invalid teach alignment reference grade')
+        self.last_report = dict(state='skipped', reference_grade=config.reference_grade,
+                                message='未规划对齐段')
         elapsed = max(float(config.start_hold_sec), 0.0)
         hold_point = self._trajectory_point_factory()
         hold_point.positions = [float(v) for v in current_positions]
-        hold_point.velocities = [0.0 for _ in current_positions]
+        hold_point.velocities = [0.0 for _ in current_positions] if config.reference_grade != 'q' else []
+        hold_point.accelerations = [0.0 for _ in current_positions] if config.reference_grade == 'q/v/a' else []
         set_duration(hold_point.time_from_start, elapsed)
         trajectory.points.append(hold_point)
         # 逐关节取最大绝对偏差（rad）作为是否需要对齐的判据：只要有一个关节差得多，
@@ -142,8 +152,8 @@ class MoveItStartAligner:
         规划按回放轨迹的关节顺序发起，目标为 ``first_positions``；返回的规划点按关节
         名重映射（规划器可能给出不同顺序），缺少任一所需关节即视为无效规划并抛
         ``ValueError``。每个规划点的时间戳都加上 ``elapsed`` 偏移（规划自身从 0 计时），
-        因此结果与前方保持段无缝衔接。若规划点未携带速度，则不写入 ``velocities``
-        （保持消息默认值，交由控制器插值）。
+        因此结果与前方保持段无缝衔接。q/v 示教显式取消 a 约束并重建三次曲线，
+        中间 v 保留、首末 v 归零；不补造缺失字段，完整曲线重新限值和碰撞检查。
         """
         plan = self._planner.plan_joint_positions(
             joint_names=tuple(trajectory.joint_names),
@@ -155,6 +165,8 @@ class MoveItStartAligner:
         if not plan.success or plan.trajectory is None:
             raise ValueError(f"moveit start alignment failed: {plan.message}")
         source_names = list(getattr(plan.trajectory, "joint_names", []))
+        if len(set(source_names)) != len(source_names):
+            raise ValueError('duplicate MoveIt start alignment joints')
         index_by_name = {name: index for index, name in enumerate(source_names)}
         missing = [name for name in trajectory.joint_names if name not in index_by_name]
         if missing:
@@ -162,33 +174,41 @@ class MoveItStartAligner:
         source_points = list(getattr(plan.trajectory, 'points', []))
         if not source_points:
             raise ValueError('empty MoveIt start alignment')
-        # 保留 MoveIt 提供的完整导数；合成保持点可补同等级的零约束，规划中间点不能改写。
-        for field in ('velocities', 'accelerations'):
-            present = [bool(getattr(point, field, ())) for point in source_points]
-            if any(present) and not all(present):
-                raise ValueError(f'mixed missing {field} in MoveIt start alignment')
-            # 只有合成的静止保持点补齐约束，规划中间点逐值保留。
-            setattr(trajectory.points[-1], field, [0.]*len(trajectory.joint_names) if all(present) else [])
-        for source_point in source_points:
+        for p in source_points:
+            if len(p.positions) != len(source_names) or any(
+                    getattr(p, field, ()) and len(getattr(p, field)) != len(source_names)
+                    for field in ('velocities','accelerations')):
+                raise ValueError('MoveIt start alignment field dimensions differ')
+        from .polynomial_trajectory import TrajectoryPoint
+        from .trajectory_time_parameterization import teach_input_grade, prepare_teach_reference
+        order = [index_by_name[name] for name in trajectory.joint_names]
+        # 先验证完整规划字段，再显式适配；不能靠删除 a 掩盖原规划的混合缺失。
+        original = tuple(TrajectoryPoint(
+            p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
+            tuple(p.positions[i] for i in order),
+            tuple(p.velocities[i] for i in order) if p.velocities else (),
+            tuple(p.accelerations[i] for i in order) if getattr(p,'accelerations',()) else ()) for p in source_points)
+        source_grade = teach_input_grade(original)
+        if config.reference_grade != 'q' and not original[0].velocities:
+            raise ValueError('MoveIt teach alignment requires planned velocities')
+        if config.reference_grade == 'q/v/a' and not original[0].accelerations:
+            raise ValueError('MoveIt teach alignment requires planned accelerations')
+        aligned = prepare_teach_reference(tuple(TrajectoryPoint(p.time, p.positions,
+            p.velocities if config.reference_grade != 'q' else (),
+            p.accelerations if config.reference_grade == 'q/v/a' else ()) for p in original))
+        self.last_report = dict(state='converted' if source_grade != config.reference_grade else 'preserved',
+            input_grade=source_grade, reference_grade=config.reference_grade,
+            message=f'对齐段由 {source_grade} 转换为 {config.reference_grade}；重建后重新限值及碰撞检查',
+            original_points=[dict(time=p.time,positions=list(p.positions),velocities=list(p.velocities),
+                                  accelerations=list(p.accelerations)) for p in original])
+        for source_point in aligned:
             # 规划时间戳的 sec/nanosec 分量为整秒 + 纳秒，需合并为浮点秒再加偏移，
             # 不能只取 sec，否则亚秒部分会丢失。
-            source_time = (
-                float(source_point.time_from_start.sec)
-                + float(source_point.time_from_start.nanosec) * 1e-9
-            )
+            source_time = source_point.time
             point = self._trajectory_point_factory()
-            point.positions = [
-                float(source_point.positions[index_by_name[name]])
-                for name in trajectory.joint_names
-            ]
-            if getattr(source_point, "velocities", None):
-                point.velocities = [
-                    float(source_point.velocities[index_by_name[name]])
-                    for name in trajectory.joint_names
-                ]
-            if getattr(source_point, 'accelerations', None):
-                point.accelerations = [float(source_point.accelerations[index_by_name[name]])
-                    for name in trajectory.joint_names]
+            point.positions = list(source_point.positions)
+            point.velocities = list(source_point.velocities)
+            point.accelerations = list(source_point.accelerations)
             set_duration(point.time_from_start, elapsed + source_time)
             if source_time == 0.:
                 # t=0 已由前一保持点占据；只接受相同位置，避免制造重复时间或零时长跳变。

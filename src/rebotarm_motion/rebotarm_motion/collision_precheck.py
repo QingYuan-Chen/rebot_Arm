@@ -174,9 +174,9 @@ class CollisionPrechecker:
             request.robot_state.is_diff = True
             request.robot_state.joint_state.position = [float(v) for v in positions]
             future = self._client.call_async(request)
-            # 本模块不持有 executor, 用轮询 + 短休眠等待服务返回; 0.01 s 兼顾响应速度与开销.
+            # 不持有 executor；1 ms 轮询避免大量短查询把固定总预算耗在休眠上。
             while not future.done() and self._monotonic() < deadline:
-                self._sleep(0.01)
+                self._sleep(0.001)
             if not future.done():
                 # 到截止时间仍未返回: 跳出循环, 后面按"检查不完整"归为 unknown.
                 break

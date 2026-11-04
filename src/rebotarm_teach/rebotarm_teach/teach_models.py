@@ -1,11 +1,14 @@
-"""Immutable data models used by teach recording and replay workflows.
+"""示教录制与回放的不可变数据契约。
 
-This module contains no ROS, filesystem, or motion-planning dependencies.
+职责：声明样本、质量、分级参考及工作流结果，不进行规划、文件或设备访问。
+对外接口：本文件的 dataclass/枚举；新增元数据保留默认值以兼容旧六轴调用方。
+安全约束：空导数字段表示缺失，不等于零；来源标签区分录制与派生约束，不升级输入等级。
+文件结构：录制样本 → 质量事件/汇总 → 重定时点/准备结果 → 起点及工作流判定。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -17,6 +20,7 @@ class TeachSample:
     ``joint_names``  本帧包含的关节名，整条记录内应保持一致，否则判为结构性异常；
     ``positions``    关节位置（rad，仅旋转关节），与 ``joint_names`` 一一对应且等长；
     ``velocities``   关节速度（rad/s），可能为空元组（重采样后会清空）；
+    ``accelerations`` 加速度约束（rad/s²），原始录制可缺省；v5 q/v 不生成该字段；
     ``efforts``      关节力矩/电流读数（原始采样单位，来自硬件反馈），可能为空；
     ``motor_status`` 电机状态码字典，键为电机标识、值为整型状态码（硬件定义），可能为空；
     ``arm_state``    采集当时的机械臂状态字符串（由采集侧写入，回放侧只透传不解释）。
@@ -37,6 +41,12 @@ class TeachSample:
     gripper_width_m: float | None = None
     gripper_source_stamp: float | None = None
     gripper_valid: bool = False
+    # 空 a 表示未提供约束。旧 v4 的 a 是派生约束，不是实测加速度。
+    accelerations: tuple[float, ...] = ()
+    input_grade: str = ""
+    reference_grade: str = ""
+    velocity_source: str = ""
+    acceleration_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -183,6 +193,11 @@ class PreparedTeachReplay:
     time_parameterization_requested_method: str = "auto"
     time_parameterization_used_method: str = "current_jerk_retime"
     time_parameterization_message: str = ""
+    input_grade: str = ""
+    reference_grade: str = ""
+    velocity_source: str = ""
+    acceleration_source: str = ""
+    curve_analysis: dict = field(default_factory=dict)
 
     @property
     def before_quality(self) -> TeachTrajectoryQuality:

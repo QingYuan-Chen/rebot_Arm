@@ -1359,18 +1359,27 @@
       const trackingGuard = replay.runtime_monitor || {};
       const moveit = replay.moveit_start_align || {};
       const collision = replay.collision_precheck || {};
+      const preparation = replay.trajectory_preparation || {};
+      const reference = lastTeachDryRun?.prepared_replay || replay.prepared_replay || {};
+      const referenceOrder = reference.final_curve?.continuity?.guaranteed_order;
       return [
         teachMetric('起点状态', `<span class="chip ${classFor(band)}">${escapeHtml(displayState(band || 'unknown'))}</span>`, { raw: true }),
         teachMetric('回放质量', `<span class="chip ${classFor(playbackRisk)}">${escapeHtml(displayState(playbackRisk || '-'))}</span>`, { raw: true }),
         teachMetric('MoveIt', moveit.state ? `<span class="chip ${classFor(moveit.state)}">${escapeHtml(moveit.state)}</span>` : '-', { raw: true }),
-        teachMetric('碰撞检查', collision.state ? `<span class="chip ${classFor(collision.state)}">${escapeHtml(displayState(collision.state))}</span>` : '-', { raw: true }),
+        teachMetric('轨迹准备/拼接', preparation.state ? displayState(preparation.state) : '未检查'),
+        teachMetric('准备原因', text(preparation.message || '-')),
+        teachMetric('输入 / 参考', `${text(reference.input_grade || '-')} / ${Number.isInteger(referenceOrder) ? `C${referenceOrder}` : text(reference.reference_grade || '-')}`),
+        teachMetric('速度来源', reference.velocity_source === 'derived_filtered_q_t' ? '速度由滤波路径生成（派生参考速度）' : text(reference.velocity_source || '-')),
+        teachMetric('对齐转换', text(reference.alignment_conversion?.message || '-')),
+        teachMetric('连续性边界', text(reference.final_curve?.note || '-')),
+        teachMetric('碰撞检查', collision.state ? `<span class="chip ${classFor(collision.state)}">${escapeHtml(collision.state === 'not_checked' ? '未检查' : displayState(collision.state))}</span>` : '未检查', { raw: true }),
         teachMetric('碰撞原因', text(collision.message || '-')),
         teachMetric('起点误差', Number.isFinite(info?.max_error) ? `${fmt(info.max_error)} rad` : '-'),
         teachMetric('最大关节', text(info?.worst_joint)),
         teachMetric('优化跳变', Number.isFinite(preparedJump) ? `${fmt(preparedJump)} rad` : '-'),
         teachMetric('优化速度', Number.isFinite(preparedVelocity) ? `${fmt(preparedVelocity)} rad/s` : '-'),
-        teachMetric('优化加速度', Number.isFinite(preparedAcceleration) ? `${fmt(preparedAcceleration)} rad/s^2` : '-'),
-        teachMetric('优化加加速度', Number.isFinite(preparedJerk) ? `${fmt(preparedJerk)} rad/s^3` : '-'),
+        teachMetric('段内加速度', Number.isFinite(preparedAcceleration) ? `${fmt(preparedAcceleration)} rad/s^2` : '-'),
+        teachMetric('段内 jerk', Number.isFinite(preparedJerk) ? `${fmt(preparedJerk)} rad/s^3` : '-'),
         teachMetric('请求倍率', `${fmt(requestedSpeed, 1)} x`),
         teachMetric('实际倍率', `${fmt(effectiveSpeed, 1)} x`),
         teachMetric('大范围轨迹', large_motion?.enabled ? '是' : '否'),
@@ -1394,13 +1403,15 @@
       const useAlign = String(info?.start_band || '').toLowerCase() === 'align';
       const recordDuration = Number(info?.duration_sec);
       const replayDuration = Number.isFinite(recordDuration) ? recordDuration / Math.max(speed, 0.01) : NaN;
+      // dry-run 已生成完整曲线时采用其最终时长；输入变化会清除 lastTeachDryRun。
+      const checkedDuration = lastTeachDryRun?.prepared_replay?.final_curve?.duration;
       return {
         speed,
         alignDuration,
         alignSteps,
         finalHold,
         useAlign,
-        estimatedDuration: (Number.isFinite(replayDuration) ? replayDuration : 0) + (useAlign ? alignDuration : 0) + finalHold,
+        estimatedDuration: Number.isFinite(checkedDuration) ? checkedDuration : (Number.isFinite(replayDuration) ? replayDuration : 0) + (useAlign ? alignDuration : 0) + finalHold,
         trajectoryPoints: (Number(info?.samples) || 0) + (useAlign ? alignSteps : 0) + ((Number(info?.samples) || 0) > 0 && finalHold > 0 ? 1 : 0),
       };
     };

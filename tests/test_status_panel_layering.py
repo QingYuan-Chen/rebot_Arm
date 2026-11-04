@@ -954,11 +954,13 @@ def test_teach_replay_trajectory_builder_calls_moveit_alignment_with_keywords() 
     )
     calls = []
 
-    def _align(trajectory, *, current_positions, first_positions):
+    def _align(trajectory, *, current_positions, first_positions, reference_grade):
+        assert reference_grade == 'q/v'
         calls.append((trajectory, current_positions, first_positions))
         point = _TrajectoryPoint()
         point.positions = list(first_positions)
         point.velocities = [0.]*len(first_positions)
+        point.accelerations = []
         trajectory.points.append(point)
         return 0.25
 
@@ -1022,7 +1024,9 @@ def test_moveit_start_aligner_appends_hold_plan_and_first_hold_with_joint_remap(
     assert planner.calls[0]["target_positions"] == (0.2, -0.2)
     assert trajectory.points[0].positions == [0.0, 0.0]
     assert trajectory.points[1].positions == [0.2, -0.2]
-    assert trajectory.points[1].velocities == [0.1, -0.1]
+    # 本例唯一规划点是终点，明确连接静止保持；缺 a 仍保持 C1。
+    assert trajectory.points[1].velocities == [0.0, 0.0]
+    assert trajectory.points[1].accelerations == []
     assert trajectory.points[-1].positions == [0.2, -0.2]
     assert trajectory.points[-1].velocities == [0.0, 0.0]
 

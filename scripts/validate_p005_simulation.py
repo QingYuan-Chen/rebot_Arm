@@ -22,6 +22,7 @@ import os
 from pathlib import Path
 import time
 import urllib.request
+import urllib.parse
 from urllib.error import HTTPError
 
 
@@ -92,7 +93,7 @@ def physics_acceptance(output):
     return report
 
 
-def ros_acceptance(output, dashboard):
+def ros_acceptance(output, dashboard, teach_record=None):
     """驱动已存在的隔离仿真图；等待、Action 终态和实际反馈分别检查，失败直接抛错。"""
     if os.environ.get('ROS_DOMAIN_ID', '0') == '0':
         raise RuntimeError('use an isolated nonzero ROS_DOMAIN_ID for simulation acceptance')
@@ -192,6 +193,73 @@ def ros_acceptance(output, dashboard):
             if name == '/rebotarm/follow_joint_trajectory']
         assert len(owners) == 1, owners
         results['graph_nodes']=nodes
+        if teach_record is not None:
+            # 复用网页正式入口；只复制输入，绝不在用户录制文件旁生成或覆盖派生文件。
+            raw=output/'teach_input.jsonl'
+            original=teach_record.read_bytes()
+            raw.write_bytes(original)
+            payload=dict(record_path=str(raw.resolve()))
+            with urllib.request.urlopen(dashboard+'/api/teach_trajectory?'+urllib.parse.urlencode(
+                    dict(path=str(raw.resolve()),max_points=500)),timeout=30) as response:
+                preview=json.load(response)
+            write_json(output/'teach_web_preview.json',preview)
+            assert preview['accepted'],preview
+            assert preview['prepared_replay']['curve_analysis']['degree']==3,preview
+            assert preview['collision_precheck']['state']=='pass',preview
+            trace=[]
+            from rcl_interfaces.msg import Log
+            admissions=[]
+            node.create_subscription(Log,'/rosout',
+                lambda m: admissions.append(m.msg) if m.msg.startswith('prepared curve accepted degree=') else None,10)
+            node.create_subscription(FollowJointTrajectory.Impl.FeedbackMessage,
+                '/rebotarm/follow_joint_trajectory/_action/feedback',
+                lambda m:trace.append(message_to_ordereddict(m.feedback)),10)
+            terminals=('done','failed','aborted','rejected','blocked','safety_stop','canceled')
+            for cancel in (True,False):
+                label='cancel' if cancel else 'complete'
+                dry=post('/api/teach_dry_run',payload)
+                write_json(output/f'teach_{label}_dry_run.json',dry)
+                assert dry['accepted'],dry
+                assert dry['trajectory_preparation']['state']=='pass',dry
+                reference=dry['prepared_replay']
+                assert reference['input_grade']==reference['reference_grade']=='q/v',reference
+                assert reference['velocity_source']=='derived_filtered_q_t',reference
+                assert reference['final_curve']['degree']==3,reference['final_curve']
+                assert reference['final_curve']['continuity']['guaranteed_order']==1,reference['final_curve']
+                assert reference['final_curve']['continuity']['max_boundary_gaps']['velocity']<1e-9
+                assert reference['alignment_conversion']['reference_grade']=='q/v',reference
+                from rebotarm_teach.teach_record_io import load_teach_samples
+                derived=load_teach_samples(dry['prepared_record_path'])
+                assert all(s.format_version==5 and s.velocities and not s.accelerations for s in derived)
+                check=dry['collision_precheck']
+                assert check['state']=='pass' and check['checked_samples']==check['requested_samples'],check
+                replay=post('/api/teach_replay_execute',payload)
+                write_json(output/f'teach_{label}_execute.json',replay)
+                assert replay['accepted'],replay
+                wait(lambda:status()['teleop'].get('replay',{}).get('state')=='replaying',8.)
+                if cancel:
+                    pause(3.)
+                    before_stop=status()['teleop'].get('replay',{})
+                    assert before_stop.get('state')=='replaying',before_stop
+                    stop=post('/api/teach_replay_stop',{})
+                    write_json(output/'teach_cancel_request.json',stop)
+                deadline=time.monotonic()+float(replay['estimated_duration_sec'])*1.2+8.
+                while time.monotonic()<deadline:
+                    pause(.1)
+                    replay=status()['teleop'].get('replay',{})
+                    if replay.get('state') in terminals:
+                        break
+                results['teach_'+label]=replay
+                write_json(output/'teach_ros_acceptance.json',results)
+                assert replay.get('state')==('canceled' if cancel else 'done'),replay
+                pause(1.)
+            assert raw.read_bytes()==original and teach_record.read_bytes()==original,'raw record changed'
+            results['raw_sha256']=hashlib.sha256(original).hexdigest()
+            assert len(admissions)==2 and all('degree=3 ' in msg for msg in admissions),admissions
+            results['backend_curve_admissions']=admissions
+            write_json(output/'teach_feedback.json',trace)
+            write_json(output/'teach_ros_acceptance.json',results)
+            return results
         # 同时验证标准 byte 诊断经过网页订阅后仍能正确显示“再次可执行”。
         wait(lambda:status()['teleop'].get('trajectory_admission',{}).get('ready') is True)
         results['web_admission_ready']=status()['teleop']['trajectory_admission']
@@ -504,6 +572,7 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--ros',action='store_true')
     parser.add_argument('--dashboard',default='http://127.0.0.1:18088')
+    parser.add_argument('--teach-record',type=Path,help='仅验收指定记录的真实对齐、完整碰撞预检、取消和回放')
     args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=True)
     from ament_index_python.packages import get_package_share_directory
     simulation=Path(get_package_share_directory('rebotarm_simulation'))
@@ -512,9 +581,11 @@ def main():
         moveit/'config/joint_limits.yaml']
     write_json(args.output/'frozen_files.json',{str(p):hashlib.sha256(p.read_bytes()).hexdigest()
         for p in frozen if p.is_file()})
-    result=dict(physics=physics_acceptance(args.output))
-    if args.ros:result['ros']=ros_acceptance(args.output,args.dashboard)
-    print(json.dumps(result.get('physics'),ensure_ascii=False),flush=True)
+    if args.teach_record and not args.ros:
+        parser.error('--teach-record requires --ros and an isolated simulation graph')
+    result={} if args.teach_record else dict(physics=physics_acceptance(args.output))
+    if args.ros:result['ros']=ros_acceptance(args.output,args.dashboard,args.teach_record)
+    print(json.dumps(result,ensure_ascii=False),flush=True)
 
 
 if __name__=='__main__':main()

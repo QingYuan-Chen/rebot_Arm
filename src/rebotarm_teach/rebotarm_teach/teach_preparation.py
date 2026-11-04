@@ -1,4 +1,11 @@
-"""Pure teach trajectory preparation and time-axis construction."""
+"""示教记录的滤波、质量评估和派生数据装配。
+
+职责：组织平滑/低通、显示重采样和运动层的分级时间参数化，不执行运动或读写设备。
+对外接口：prepare_teach_replay_samples、retime_teach_samples 及质量/预览字典转换。
+安全约束：原始样本不原地修改；生成导数后必须重新检查实际曲线，质量摘要不能替代
+完整拼接后的模型限位与碰撞检查。重建算法归 motion，本模块只做调用和记录格式适配。
+文件结构：位置处理 → 重定时适配 → 滤波/重采样 → 准备编排 → 状态与显示预览。
+"""
 
 from __future__ import annotations
 
@@ -194,7 +201,9 @@ def retime_teach_samples(
 ) -> list[RetimedTeachPoint]:
     """保留示教位置点、只重排时间轴，使速度/加速度/加加速度满足上限（本模块的兜底重定时）。
 
-    做法：按原时间间隔除以 ``replay_speed`` 得到候选 dt，再保证 dt 不小于"按关节速度上限
+    六轴执行路径由 motion 按参考输入等级构建曲线，按段内解析极值整体放慢，
+    位置节点和相对时序保持；首末导数归零。旧局部维度分析保留以下差分时间参数化。
+    按原时间间隔除以 ``replay_speed`` 得到候选 dt，再保证 dt 不小于"按关节速度上限
     所需的最短时间"（各关节 ``|Δq| / 速度上限`` 的最大值），然后最多迭代 24 次、每次把 dt
     放大 1.25 倍，直到加速度与 jerk 同时不越界为止；因此它只放慢、绝不加速，是保守的安全
     重定时。位置点本身不做改动，只在时间上被拉开。
@@ -219,6 +228,13 @@ def retime_teach_samples(
     velocity_limits = _velocity_limits_for_joints(max_velocity_rad_s, expected_joints)
     acceleration_limit = max(float(max_acceleration_rad_s2), 0.01)
     jerk_limit = max(float(max_jerk_rad_s3), 0.01)
+    if expected_joints == tuple(f'joint{i}' for i in range(1,7)):
+        from rebotarm_motion.trajectory_time_parameterization import parameterize_teach_waypoints
+        points = parameterize_teach_waypoints(expected_joints, samples, velocity_limits,
+            acceleration_limit, jerk_limit, replay_speed=speed,
+            initial_delay=max(float(initial_delay_sec),0.),zero_endpoints=boundary_zero_velocity)
+        return [RetimedTeachPoint(p.time,p.positions,i,p.velocities,p.accelerations)
+                for i,p in enumerate(points)]
     zero_velocity = tuple(0.0 for _ in samples[0].positions)
     retimed = [
         RetimedTeachPoint(
@@ -337,6 +353,7 @@ def retime_teach_samples(
                 source_sample=last_point.source_sample,
                 velocities=tuple(0.0 for _ in last_point.positions),
             )
+    # 局部维度分析沿用旧 q/v 数值工具，不自动补 a 或冒称 C2。
     return retimed
 
 
@@ -391,15 +408,7 @@ def lowpass_filter_teach_samples(
     result: list[TeachSample] = []
     for sample, positions in zip(samples, filtered_positions):
         result.append(
-            TeachSample(
-                stamp=sample.stamp,
-                joint_names=sample.joint_names,
-                positions=tuple(float(v) for v in positions),
-                velocities=sample.velocities,
-                efforts=sample.efforts,
-                motor_status=dict(sample.motor_status),
-                arm_state=sample.arm_state,
-            )
+            replace(sample, positions=tuple(float(v) for v in positions))
         )
     return result
 
@@ -437,15 +446,7 @@ def smooth_teach_samples(
             for joint_index in range(len(sample.positions))
         )
         smoothed.append(
-            TeachSample(
-                stamp=sample.stamp,
-                joint_names=sample.joint_names,
-                positions=positions,
-                velocities=sample.velocities,
-                efforts=sample.efforts,
-                motor_status=dict(sample.motor_status),
-                arm_state=sample.arm_state,
-            )
+            replace(sample, positions=positions)
         )
     return smoothed
 
@@ -570,6 +571,19 @@ def prepare_teach_replay_samples(
     ``before_quality`` 只用于展示"处理前有多差"。
     """
     from .teach_record_io import arm_replay_samples
+    from rebotarm_motion.polynomial_trajectory import TrajectoryPoint
+    from rebotarm_motion.trajectory_time_parameterization import teach_input_grade, prepare_teach_reference
+    # 必须在滤波及六轴提取之前验证；否则 zip/按名提取可能掩盖非法原记录。
+    input_grade = ''
+    if samples:
+        if len(set(samples[0].joint_names)) != len(samples[0].joint_names):
+            raise ValueError('duplicate teach joint_names')
+        if any(s.joint_names != samples[0].joint_names for s in samples):
+            raise ValueError('joint_names mismatch in teach input')
+        if any(len(s.positions) != len(s.joint_names) for s in samples):
+            raise ValueError('positions length mismatch in teach input')
+        input_grade = teach_input_grade(tuple(TrajectoryPoint(
+            s.stamp, s.positions, s.velocities, s.accelerations) for s in samples))
     samples = arm_replay_samples(samples)
     max_joint_span, total_joint_motion = _motion_scope(samples)
     requested_speed = min(max(float(replay_speed), 0.01), 1.0)
@@ -604,7 +618,21 @@ def prepare_teach_replay_samples(
         max_acceleration_rad_s2=max_acceleration_rad_s2,
         max_jerk_rad_s3=max_jerk_rad_s3,
     )
-    if resample_enabled and len(prepared) > 1:
+    # 控制节点保留滤波后的源位置和相对时间；q/v 不生成 a，关闭处理时保留中间 v。
+    path_samples = list(prepared)
+    position_processed = smoothing_applied or filter_applied
+    if path_samples:
+        reference = prepare_teach_reference(tuple(TrajectoryPoint(
+            s.stamp-samples[0].stamp, s.positions, s.velocities, s.accelerations) for s in path_samples),
+            derive_velocity=position_processed)
+        path_samples = [replace(s, velocities=p.velocities, accelerations=p.accelerations)
+                        for s,p in zip(path_samples,reference)]
+    velocity_source = ('derived_filtered_q_t' if position_processed else 'input') if input_grade != 'q' else 'absent'
+    acceleration_source = ('derived_filtered_q_t' if position_processed else
+        'derived_legacy_v4' if any(s.format_version == 4 for s in samples) else 'input') if input_grade == 'q/v/a' else 'absent'
+    # 显示重采样不参与后续控制节点生成，避免线性细分或清空字段改变输入等级。
+    six_axis = bool(samples) and samples[0].joint_names == tuple(f'joint{i}' for i in range(1,7))
+    if resample_enabled and len(prepared) > 1 and not six_axis:
         prepared = resample_teach_samples(prepared, rate_hz=resample_rate_hz)
         # 以"样本数是否变化"判定重采样是否真的生效（等间隔记录可能点数不变）。
         resample_applied = len(prepared) != len(samples)
@@ -612,7 +640,7 @@ def prepare_teach_replay_samples(
     if retime_enabled and not _has_structural_teach_anomaly(filtered_quality):
         # 时间参数化后端由运动包提供；这里把兜底重定时函数作为回调传入，后端不可用时自动回退。
         time_parameterization = parameterize_teach_samples(
-            prepared,
+            path_samples if six_axis else prepared,
             method=time_parameterization_method,
             fallback_retime=retime_teach_samples,
             replay_speed=effective_speed,
@@ -623,6 +651,10 @@ def prepare_teach_replay_samples(
             boundary_zero_velocity=True,
         )
         retimed_points = time_parameterization.points
+        if six_axis:
+            time_parameterization = replace(time_parameterization,
+                used_method=f'c{ {"q":0,"q/v":1,"q/v/a":2}[input_grade]}_waypoint_retime',
+                message=f'{input_grade}: {velocity_source}; uniform segment-extrema retiming; no grade upgrade')
         retime_applied = len(retimed_points) > 0
     else:
         time_parameterization = None
@@ -633,21 +665,47 @@ def prepare_teach_replay_samples(
             joint_names=prepared[0].joint_names if prepared else (),
             positions=point.positions,
             velocities=point.velocities,
+            accelerations=point.accelerations,
             efforts=(),
             motor_status={},
             arm_state="RETIMED",
         )
         for point in retimed_points
     ]
+    curve_analysis = {}
+    if retimed_samples and six_axis:
+        from rebotarm_motion.polynomial_trajectory import TrajectoryPoint, build_curve
+        curve = build_curve(retimed_samples[0].joint_names, tuple(TrajectoryPoint(
+            p.time_from_start,p.positions,p.velocities,p.accelerations) for p in retimed_points))
+        if curve.duration > 300.:
+            raise ValueError('retimed duration exceeds execution budget')
+        # 跳变/差分质量仍按原有固定采样频率评估；控制节点间距不是周期命令跳变。
+        # 从实际参考曲线采样，计算 a 仅用于分析，不能回填为新的执行约束。
+        from rebotarm_motion.trajectory_time_parameterization import teach_curve_analysis
+        curve_analysis = teach_curve_analysis(curve)
+        count = math.ceil(curve.duration*max(float(resample_rate_hz),1.))
+        retimed_samples = [replace(retimed_samples[0],stamp=t,positions=q,
+            velocities=v if input_grade != 'q' else (),accelerations=a if input_grade == 'q/v/a' else ())
+            for t in ((curve.duration*i/count for i in range(count+1)) if count else (0.,))
+            for q,v,a,_ in (curve.sample(t),)]
+        resample_applied = bool(resample_enabled) and len(retimed_samples) != len(samples)
     # 没有重定点时退回评估预处理样本本身，保证 after_quality 始终反映"将要执行的东西"。
     retimed_quality = analyze_teach_trajectory(
         retimed_samples if retimed_samples else prepared,
         max_velocity_rad_s=max_velocity_rad_s,
         max_acceleration_rad_s2=max_acceleration_rad_s2,
         max_jerk_rad_s3=max_jerk_rad_s3,
+        check_dynamics=not bool(curve_analysis),
     )
+    if curve_analysis:
+        # 固定频率位置跳变门仍生效；执行动态判定只使用段内解析峰值。
+        peaks = curve_analysis['segment_peaks']
+        retimed_quality = replace(retimed_quality, max_velocity_rad_s=peaks['velocity'],
+            max_acceleration_rad_s2=peaks['acceleration'],max_jerk_rad_s3=peaks['jerk'],
+            velocity_limit_rad_s=max(_velocity_limits_for_joints(max_velocity_rad_s,samples[0].joint_names)),
+            acceleration_limit_rad_s2=max_acceleration_rad_s2,jerk_limit_rad_s3=max_jerk_rad_s3)
     return PreparedTeachReplay(
-        samples=prepared,
+        samples=path_samples if six_axis else prepared,
         raw_quality=raw_quality,
         filtered_quality=filtered_quality,
         retimed_quality=retimed_quality,
@@ -661,6 +719,8 @@ def prepare_teach_replay_samples(
         filter_sample_rate_hz=max(float(filter_sample_rate_hz), 1.0),
         resample_rate_hz=max(float(resample_rate_hz), 1.0),
         retimed_points=retimed_points,
+        input_grade=input_grade,reference_grade=input_grade,velocity_source=velocity_source,
+        acceleration_source=acceleration_source,curve_analysis=curve_analysis,
         large_motion=large_motion,
         max_joint_span_rad=max_joint_span,
         total_joint_motion_rad=total_joint_motion,
@@ -687,6 +747,11 @@ def prepared_teach_replay_to_dict(prepared: PreparedTeachReplay) -> dict:
     判定的两个关键字段，``raw/filtered/retimed_quality`` 用于排查是哪一步导致了等级变化。
     """
     return {
+        "input_grade": prepared.input_grade,
+        "reference_grade": prepared.reference_grade,
+        "velocity_source": prepared.velocity_source,
+        "acceleration_source": prepared.acceleration_source,
+        "curve_analysis": prepared.curve_analysis,
         "smoothing_applied": prepared.smoothing_applied,
         "filter_applied": prepared.filter_applied,
         "resample_applied": prepared.resample_applied,
@@ -732,6 +797,18 @@ def teach_trajectory_preview_to_dict(
     ``sample`` 保留原始下标，便于把质量事件里的 ``sample`` 直接映射到曲线位置。
     样本为空时返回空结构（但仍带回一份 red 质量结果）。
     """
+    source_count = len(samples)
+    if (samples and samples[0].joint_names == tuple(f'joint{i}' for i in range(1,7))
+            and all(s.arm_state == 'PREPARED_REPLAY' for s in samples)):
+        from rebotarm_motion.polynomial_trajectory import TrajectoryPoint, build_curve
+        curve = build_curve(samples[0].joint_names,tuple(TrajectoryPoint(
+            s.stamp-samples[0].stamp,s.positions,s.velocities,s.accelerations) for s in samples))
+        # 页面抽样的是执行曲线，不能将源节点间折线当作三次参考路径。
+        count = min(max(int(max_points),2)-1,math.ceil(curve.duration*150.))
+        samples = [replace(samples[0],stamp=t,positions=q,
+            velocities=v if curve.degree>=3 else (),accelerations=a if curve.degree==5 else ())
+            for t in ((curve.duration*i/count for i in range(count+1)) if count else (0.,))
+            for q,v,a,_ in (curve.sample(t),)]
     quality = analyze_teach_trajectory(samples)
     if not samples:
         return {
@@ -775,7 +852,7 @@ def teach_trajectory_preview_to_dict(
         )
     return {
         "joint_names": list(samples[0].joint_names),
-        "raw_samples": len(samples),
+        "raw_samples": source_count,
         "returned_samples": len(points),
         "downsample_step": step,
         "duration_sec": max(0.0, float(samples[-1].stamp) - first_stamp),

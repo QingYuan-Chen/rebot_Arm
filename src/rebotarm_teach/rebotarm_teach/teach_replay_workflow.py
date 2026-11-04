@@ -324,7 +324,8 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
     def _prepare_teach_replay_samples(self, samples, settings: dict[str, float | int] | None = None):
         """把原始示教样本预处理成可用于回放的样本序列（滤波/重采样/重定时）。
 
-        处理链固定为"平滑 -> 低通滤波 -> 重采样 -> 重定时（时间参数化）"，开关与参数
+        处理链为"平滑 -> 低通滤波 -> 源节点 C2 重建/整体重定时"，重采样用于质量和显示。
+        开关与参数
         全部来自节点参数；``settings`` 提供本次请求的规范化设置（速度、对齐参数），
         缺省时用参数里的 ``replay_speed``。``retime_enabled`` 恒为 True：回放一律使用
         预处理轨迹，原始录制样本只作为输入数据。返回值同时携带处理前后质量报告。
@@ -340,7 +341,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             filter_cutoff_hz=float(self.get_parameter("filter_cutoff_hz").value),
             filter_sample_rate_hz=float(self.get_parameter("filter_sample_rate_hz").value),
             resample_enabled=bool(self.get_parameter("resample_enabled").value),
-            # 统一重采样到固定频率 Hz，使后续重定时与动作点的 dt 均匀。
+            # 固定频率用于显示和差分质量；C2 控制节点保留滤波后的源时间分布。
             resample_rate_hz=float(self.get_parameter("resample_rate_hz").value),
             retime_enabled=True,
             replay_speed=replay_speed,
@@ -376,7 +377,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         """生成预处理轨迹的可视化预览（曲线数据 + 预处理报告 + 碰撞预检）。
 
         预览曲线取自"预处理后的记录文件"而非原始记录：界面看到的就是回放真正会走的轨迹。
-        预处理结果会写入 ``<记录名>.prepared.jsonl``（与原始记录同目录、扩展名不同），
+        预处理结果写入 ``<记录名>.prepared.v5.jsonl``（重复生成另加序号，不覆盖旧派生），
         并排除在记录列举之外；``max_points`` 限制返回给界面的采样点数（默认为 500）。
         读取失败不抛异常，返回 ``accepted=False`` 与失败原因。
         """
@@ -394,6 +395,8 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         prepared_path = write_prepared_teach_record(path, prepared)
         preview_samples = load_teach_samples(prepared_path)
         payload = teach_trajectory_preview_to_dict(preview_samples, max_points=max_points)
+        # 显示抽样只负责画图；质量使用完整执行参考的固定频率跳变及解析动态检查。
+        payload['quality'] = prepared_teach_replay_to_dict(prepared)['after_quality']
         payload["prepared_replay"] = prepared_teach_replay_to_dict(prepared)
         payload["collision_precheck"] = self._collision_precheck(preview_samples)
         payload["accepted"] = True
@@ -437,8 +440,8 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         decision = validate_teach_dry_run_request(str(info_payload.get("start_band", "")))
         prepared_payload = {}
         prepared_record_path = ""
-        # 预检默认状态是 unknown（"尚未检查"），未经检查绝不能被当成通过。
-        collision_precheck = {"state": "unknown", "message": "collision precheck not run"}
+        collision_precheck = {"state": "not_checked", "message": "完整轨迹尚未生成，碰撞未检查"}
+        preparation = {"state": "not_checked", "message": "轨迹未准备"}
         moveit_align = self._moveit_align_summary(info_payload)
         samples_for_precheck = []
         trajectory_points = 0
@@ -458,11 +461,18 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
                     settings,
                 )
                 trajectory_points = len(trajectory.points)
-                collision_precheck = self._collision_precheck_trajectory(trajectory)
+                prepared_payload = dict(self._last_teach_prepared_payload)
+                preparation = {"state": "pass", "message": "按输入等级拼接及最终曲线限值检查通过"}
         except Exception as exc:
-            # 预处理/构造失败一律降级为 unknown 预检，绝不放行，也不中断状态上报。
+            # 构造/重定时尚未成功，不能把这一阶段的异常冒充碰撞检查失败。
             prepared_payload = {"error": str(exc)}
-            collision_precheck = {"state": "unknown", "message": f"collision precheck failed: {exc}"}
+            preparation = {"state": "failed", "message": f"trajectory preparation/splice failed: {exc}"}
+        if preparation['state'] == 'pass':
+            try:
+                collision_precheck = self._collision_precheck_trajectory(trajectory)
+            except Exception as exc:
+                collision_precheck = {"state": "unknown", "message": f"collision precheck failed: {exc}"}
+        prepared_payload['trajectory_preparation'] = preparation
         result = self._teach_replay_coordinator.build_dry_run_result(
             info_payload=info_payload,
             settings=settings,
@@ -501,7 +511,8 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         prepared_payload = {}
         prepared_quality = {}
         prepared_record_path = ""
-        collision_precheck = {"state": "unknown", "message": "collision precheck not run"}
+        collision_precheck = {"state": "not_checked", "message": "完整轨迹尚未生成，碰撞未检查"}
+        preparation = {"state": "not_checked", "message": "轨迹未准备"}
         moveit_align = self._moveit_align_summary(info_payload)
         trajectory = None
         try:
@@ -519,7 +530,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             moveit_align = self._moveit_align_summary(info_payload, source_samples, plan=False)
         except Exception as exc:
             prepared_payload = {"error": str(exc)}
-            collision_precheck = {"state": "unknown", "message": f"collision precheck failed: {exc}"}
+            preparation = {"state": "failed", "message": f"trajectory preparation failed: {exc}"}
         # 第一道门：dry-run 令牌一致性 + 质量分级 + 跳变/加速度/急动度上限 + 黄色速度上限。
         decision = self._teach_replay_coordinator.evaluate_execute_request(
             info_payload=info_payload,
@@ -528,6 +539,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             dry_run_token=self._last_teach_dry_run or {},
             limits=self._teach_replay_limits(),
             yellow_max_speed=float(self.get_parameter("yellow_max_speed").value),
+            align_duration_auto=self._teach_replay_settings_provider.align_duration_auto,
         )
         # 第二道门：起始对齐不可用或结论不明时按"不可放行"处理。
         moveit_state = str(moveit_align.get("state", "")).lower()
@@ -543,17 +555,25 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
                 if not samples:
                     raise ValueError("record contains no samples")
                 trajectory = self._build_teach_replay_trajectory(samples, str(info_payload.get("start_band", "")), settings)
-                collision_precheck = self._collision_precheck_trajectory(trajectory)
+                prepared_payload = dict(self._last_teach_prepared_payload)
+                preparation = {"state": "pass", "message": "按输入等级拼接及最终曲线限值检查通过"}
             except Exception as exc:
-                collision_precheck = {"state": "unknown", "message": f"collision precheck failed: {exc}"}
+                preparation = {"state": "failed", "message": f"trajectory preparation/splice failed: {exc}"}
+            if preparation['state'] == 'pass':
+                try:
+                    collision_precheck = self._collision_precheck_trajectory(trajectory)
+                except Exception as exc:
+                    collision_precheck = {"state": "unknown", "message": f"collision precheck failed: {exc}"}
+        prepared_payload['trajectory_preparation'] = preparation
         # 第三道门：碰撞预检必须明确 pass；检测到碰撞或结论不明（服务不可用/超时/异常）
         # 都要阻断，绝不允许把"没查成功"当成"没有碰撞"。
         precheck_state = str(collision_precheck.get("state", "")).lower()
-        if decision.accepted and precheck_state in ("collision", "unknown"):
+        if decision.accepted and precheck_state != 'pass':
             decision = type(decision)(
                 accepted=False,
                 state="blocked",
-                message=f"collision precheck blocked replay: {collision_precheck.get('message', precheck_state)}",
+                message=(preparation['message'] if preparation['state'] == 'failed' else
+                         f"collision precheck blocked replay: {collision_precheck.get('message', precheck_state)}"),
             )
         if not decision.accepted:
             result = self._teach_replay_coordinator.build_execute_result(
@@ -594,8 +614,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             result = self._compact_replay_payload(result)
             self._publish_status("replay", result)
             return result
-        # 轨迹构建时缓存的预处理报告优先（它对应最终下发的轨迹），没有才用本次预处理结果。
-        prepared_payload = getattr(self, "_last_teach_prepared_payload", prepared_payload)
+        # prepared_payload 已对应本次最终曲线及检查阶段，不用旧任务的缓存覆盖。
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = trajectory
         future = self._action_client.send_goal_async(goal)
@@ -704,20 +723,45 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             ),
             moveit_start_alignment=self._append_moveit_start_alignment,
         )
+        # 两种后端都预检同一条分级参考；完整拼接后再核验模型限位及示教动态限值。
+        from ament_index_python.packages import get_package_share_directory
+        from pathlib import Path
+        from rebotarm_motion.coordinated_trajectory import curve_message
+        from rebotarm_motion.trajectory_time_parameterization import finalize_teach_curve, teach_curve_analysis
+        from rebotarm_motion.polynomial_trajectory import TrajectoryPoint
+        if result.trajectory.points[0].time_from_start.sec or result.trajectory.points[0].time_from_start.nanosec:
+            result.trajectory.points.insert(0,JointTrajectoryPoint(
+                positions=[current_map[n] for n in first.joint_names],
+                velocities=[0.]*6 if prepared.reference_grade != 'q' else [],
+                accelerations=[0.]*6 if prepared.reference_grade == 'q/v/a' else []))
+        from .teach_quality import _velocity_limits_for_joints
+        speeds = _velocity_limits_for_joints(self._max_replay_velocity_limits(tuple(first.joint_names)),first.joint_names)
+        curve, scale = finalize_teach_curve(result.trajectory.joint_names,tuple(TrajectoryPoint(
+            p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
+            for p in result.trajectory.points), Path(get_package_share_directory('rebotarm_moveit_config'))/'config',
+            speeds,float(self.get_parameter('max_replay_acceleration_rad_s2').value),
+            float(self.get_parameter('max_replay_jerk_rad_s3').value))
+        final = curve_message(curve,trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
         if self._trajectory_capability is not None and self._retime_trajectory is not None:
             capability = self._trajectory_capability()
             if capability['mode'] == 'prepared_v1':
-                # 原六轴等级不变，但最终拼接曲线仍须按执行插值重新核定时间，不能只检查离散差分。
-                if result.trajectory.points and (result.trajectory.points[0].time_from_start.sec
-                        or result.trajectory.points[0].time_from_start.nanosec):
-                    first_point = JointTrajectoryPoint(positions=[current_map[n] for n in first.joint_names])
-                    for field in ('velocities','accelerations'):
-                        if getattr(result.trajectory.points[0],field):
-                            setattr(first_point,field,[0.]*6)
-                    result.trajectory.points.insert(0,first_point)
-                return self._retime_trajectory(result.trajectory,capability,False,
+                final = self._retime_trajectory(final,capability,False,
                     float(self.get_parameter('max_replay_velocity_rad_s').value))
-        return result.trajectory
+        duration = final.points[-1].time_from_start.sec + final.points[-1].time_from_start.nanosec*1e-9
+        # 服务返回后仅复核、不改时间；纳秒编码后的整条实际曲线也必须满足示教限值。
+        final_curve, _ = finalize_teach_curve(final.joint_names,tuple(TrajectoryPoint(
+            p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
+            for p in final.points),Path(get_package_share_directory('rebotarm_moveit_config'))/'config',
+            speeds,float(self.get_parameter('max_replay_acceleration_rad_s2').value),
+            float(self.get_parameter('max_replay_jerk_rad_s3').value),fixed=True)
+        # 服务可能进一步缩放；状态栏必须展示真正交给碰撞检查和执行器的最终时间。
+        self._last_teach_prepared_payload['final_curve'] = dict(duration=duration,
+            time_scale=scale*duration/curve.duration,points=len(final.points),**teach_curve_analysis(final_curve))
+        self._last_teach_prepared_payload['alignment_conversion'] = (
+            dict(self._moveit_start_aligner.last_report)
+            if self.get_parameter('use_moveit_start_align').value else
+            dict(state='not_used',reference_grade=prepared.reference_grade,message='软启动按参考等级构建'))
+        return final
 
     def _append_final_hold(self, trajectory: JointTrajectory, *, final_hold_sec: float) -> None:
         # 在轨迹末尾追加一个"保持当前位置"的点，保证回放结束后动作正常收尾。

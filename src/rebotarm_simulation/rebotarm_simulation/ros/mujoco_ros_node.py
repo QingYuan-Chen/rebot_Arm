@@ -494,6 +494,8 @@ def create_node_class():
                 lambda: goal_handle.is_cancel_requested, admit, self._hold_current_position)
             if outcome is not GateOutcome.APPLIED:
                 raise RuntimeError('prepared trajectory canceled before atomic admission')
+            # 记录原子接纳后实际解码的阶数，供仿真验收核对；不在周期线程内增加检查。
+            self.get_logger().info(f'prepared curve accepted degree={curve.degree} points={len(curve.points)}')
             return PreparedTrajectorySampler(curve)
 
         def _wait_prepared_stop(self):

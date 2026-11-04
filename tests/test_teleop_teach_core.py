@@ -1025,7 +1025,9 @@ class TeachRecordingCoreTests(unittest.TestCase):
             exported = load_teach_samples(output_path)
 
             self.assertEqual(output_path, prepared_record_path(raw_path))
-            self.assertEqual(output_path.name, "teach1.prepared.v3.jsonl")
+            self.assertEqual(output_path.name, "teach1.prepared.v5.jsonl")
+            self.assertEqual([s.accelerations for s in exported],
+                             [p.accelerations for p in prepared.retimed_points])
             self.assertGreater(len(exported), len(samples))
             self.assertTrue(all(sample.arm_state == "PREPARED_REPLAY" for sample in exported))
             self.assertEqual(exported[0].stamp, 0.0)
@@ -1490,10 +1492,7 @@ def test_dashboard_unknown_gripper_feedback_does_not_render_or_command_zero():
 
     helpers = section("    const motorPosition =", "    const deg =")
     slider = section("    const updateSlider =", "    const syncPreviewFromLive =")
-    # The next handler follows setGripper; locate its declaration, not locals.
-    start = html.index("    const setGripper =")
-    end = html.index("\n    const ", start + len("    const setGripper ="))
-    command = html[start:end]
+    # 网页已移除独立夹爪入口；继续验证共享实际反馈滑条不会用零冒充缺失值。
     script = r'''
 const assert = require('node:assert/strict');
 const elements = new Map();
@@ -1507,16 +1506,13 @@ const deg = (x) => String(x);
 const previewState = {latestJoints: {gripper: {position: null}}, targets: {gripper: 0.02}};
 let fetchCalls = 0;
 const fetch = () => {fetchCalls++; throw Error('Unexpected request');};
-'''+helpers+slider+command+r'''
+'''+helpers+slider+r'''
 (async () => {
   assert.ok(Number.isNaN(motorPosition({position: null})));
   assert.equal(motorPosition({position: 0}), 0);
   updateSlider('gripper', {position: null});
   assert.equal(document.getElementById('slider-rad-gripper').textContent, '-');
   assert.equal(document.getElementById('slider-gripper').value, 0.04);
-  const result = await setGripper({confirm: false});
-  assert.equal(result.accepted, false);
-  assert.equal(fetchCalls, 0);
   updateSlider('gripper', {position: 0.01});
   assert.equal(document.getElementById('slider-gripper').value, 0.01);
 })().catch(error => {console.error(error); process.exitCode = 1;});

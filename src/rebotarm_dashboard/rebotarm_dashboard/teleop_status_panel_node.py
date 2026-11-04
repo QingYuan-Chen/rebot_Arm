@@ -303,7 +303,7 @@ class TeleopStatusPanelNode(Node):
         # collision_check_service：状态有效性查询服务名。
         self.declare_parameter("collision_check_service", "/check_state_validity")
         # collision_check_max_samples（点数）：预检最多抽样的轨迹点数，内部至少 1。
-        self.declare_parameter("collision_check_max_samples", 80)
+        self.declare_parameter("collision_check_max_samples", 10000)
         # collision_check_timeout_sec（s）：预检总超时，内部下限 0.1 s。
         self.declare_parameter("collision_check_timeout_sec", 2.0)
         # ---------------- 轨迹预处理参数 ----------------

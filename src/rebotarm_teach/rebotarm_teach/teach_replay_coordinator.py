@@ -60,6 +60,7 @@ class TeachReplayCoordinator:
         dry_run_token: dict,
         limits: TeachReplayLimits,
         yellow_max_speed: float,
+        align_duration_auto: bool = False,
     ):
         """校验一次真实回放请求，返回决策对象（含 accepted/state/message）。
 
@@ -77,12 +78,16 @@ class TeachReplayCoordinator:
         yellow_max_speed：yellow 风险下允许的最大回放速度倍率，取值 <= 1。
         """
         quality = info_payload.get("quality") if isinstance(info_payload.get("quality"), dict) else {}
+        # 自动时长来自当前反馈，不是用户设置。执行仍重新规划并检查完整曲线；
+        # 不能因正常停稳后的反馈变化要求用户反复 dry-run。手动时长及其他设置仍严格绑定。
+        def bound_settings(values):
+            return {k:v for k,v in values.items() if not (align_duration_auto and k == 'align_duration')}
         # 凭证有效性 = 已通过 + 记录路径一致 + 预处理风险等级一致 + 设置完全一致。
         dry_run_passed = (
             bool(dry_run_token.get("accepted"))
             and str(dry_run_token.get("record_path", "")) == str(info_payload.get("path", ""))
             and str(dry_run_token.get("prepared_risk_level", "")) == str(prepared_quality.get("risk_level", ""))
-            and dry_run_token.get("settings") == settings
+            and bound_settings(dry_run_token.get("settings") or {}) == bound_settings(settings)
         )
         return validate_teach_replay_execute_request(
             str(info_payload.get("start_band", "")),
@@ -126,8 +131,8 @@ class TeachReplayCoordinator:
         """
         # 预检状态统一转小写比较，容忍各来源的大小写差异。
         gate_blocked = (
-            str(moveit_align.get("state", "")).lower() in ("failed", "unavailable")
-            or str(collision_precheck.get("state", "")).lower() in ("collision", "unknown")
+            str(moveit_align.get("state", "")).lower() in ("failed", "unavailable", "unknown")
+            or str(collision_precheck.get("state", "")).lower() != 'pass'
         )
         return self._build_replay_result(
             info_payload=info_payload,
@@ -135,7 +140,9 @@ class TeachReplayCoordinator:
             accepted=bool(decision.accepted) and not gate_blocked,
             state="blocked" if decision.accepted and gate_blocked else decision.state,
             message=(
-                f"{decision.message}; MoveIt/collision precheck blocked real replay"
+                (prepared_payload.get('trajectory_preparation',{}).get('message')
+                 if prepared_payload.get('trajectory_preparation',{}).get('state') == 'failed'
+                 else f"{decision.message}; MoveIt/collision precheck blocked real replay")
                 if decision.accepted and gate_blocked
                 else decision.message
             ),
@@ -246,7 +253,8 @@ class TeachReplayCoordinator:
             # 轨迹点数按优先级取值：本次实际点数 -> 预处理样本数 -> 估算值，
             # 这样被阻断（没有真实轨迹）时也能给出可预期的工作量。
             "trajectory_points": int(trajectory_points or prepared_payload.get("prepared_samples") or estimate["trajectory_points"]),
-            "estimated_duration_sec": float(estimate["estimated_duration_sec"]),
+            "estimated_duration_sec": float(prepared_payload.get('final_curve',{}).get(
+                'duration',estimate["estimated_duration_sec"])),
             "settings": settings,
             "quality": quality,
             "risk_level": str(quality.get("risk_level", "unknown")),
@@ -261,6 +269,7 @@ class TeachReplayCoordinator:
             "prepared_replay": prepared_payload,
             "moveit_start_align": moveit_align,
             "collision_precheck": collision_precheck,
+            "trajectory_preparation": prepared_payload.get('trajectory_preparation',{}),
             "target_runtime": target_runtime,
             "dry_run": bool(dry_run),
         }

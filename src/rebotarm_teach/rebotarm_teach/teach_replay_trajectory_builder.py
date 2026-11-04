@@ -12,7 +12,7 @@
 yellow 风险等级还会在这里把速度压到配置上限以内。
 
 对外接口：TeachReplayTrajectoryBuilder.build 拼接并返回轨迹，消息工厂和起点对齐器由调用方注入。
-安全约束：按录制/重定时结果的完整导数字段选择等级，混合缺失明确拒绝；不补造中间零导数。
+安全约束：按原输入等级拼接；示教对齐须显式转换并重新检查，不补造缺失的高阶导数。
 文件结构：时间编码 → 构建配置/结果 → 起点分档与拼接 → 回放点编码 → 合法末点保持。
 """
 
@@ -129,6 +129,10 @@ class TeachReplayTrajectoryBuilder:
         if not replay_samples:
             raise ValueError("record contains no samples")
         first = replay_samples[0]
+        reference = prepared.retimed_points[0] if prepared.retimed_points else first
+        grade = getattr(prepared, 'reference_grade', '') or (
+            'q/v/a' if getattr(reference,'accelerations',()) else
+            'q/v' if getattr(reference,'velocities',()) else 'q')
         trajectory = self._trajectory_factory()
         # 关节顺序以记录首样本为准，后续所有点都按这个顺序排列。
         trajectory.joint_names = list(first.joint_names)
@@ -147,6 +151,7 @@ class TeachReplayTrajectoryBuilder:
                     trajectory,
                     current_positions=current,
                     first_positions=tuple(first.positions),
+                    reference_grade=grade,
                 )
             )
         else:
@@ -157,25 +162,15 @@ class TeachReplayTrajectoryBuilder:
                 start_band=start_band,
                 settings=settings,
                 config=config,
+                reference_grade=grade,
             )
-        start_count = len(trajectory.points)
         self._append_replay_points(trajectory, prepared=prepared, elapsed=elapsed, config=config)
-        replay = trajectory.points[start_count:]
-        # 先以真实回放段确定字段完整性，再处理合成起始段；不能让合成段抬高输入等级。
-        for field in ('velocities', 'accelerations'):
-            present = [bool(getattr(point, field, ())) for point in replay]
-            if any(present) and not all(present):
-                raise ValueError(f'mixed missing {field} in teach replay')
-            for point in trajectory.points[:start_count]:
-                values = getattr(point, field, ())
-                if all(present):
-                    if not values:
-                        raise ValueError(f'start alignment is missing {field}')
-                else:
-                    if config.use_moveit_start_align and values:
-                        raise ValueError(f'MoveIt alignment and teach replay have different {field} grades')
-                    # 原输入没有该阶导数时，整条兼容轨迹保留相同等级。
-                    setattr(point, field, [])
+        # 对齐适配已显式确定等级；这里仍严格核验，不自动补导数或静默删除另一段字段。
+        for point in trajectory.points:
+            for field in ('velocities', 'accelerations'):
+                expected = grade != 'q' if field == 'velocities' else grade == 'q/v/a'
+                if len(getattr(point,field,())) != (len(trajectory.joint_names) if expected else 0):
+                    raise ValueError(f'teach {grade} splice has incompatible {field}')
         self.append_final_hold(trajectory, final_hold_sec=float(settings["final_hold_sec"]))
         return TeachReplayTrajectoryResult(trajectory=trajectory)
 
@@ -188,13 +183,14 @@ class TeachReplayTrajectoryBuilder:
         start_band: str,
         settings: dict[str, float | int],
         config: TeachReplayTrajectoryConfig,
+        reference_grade: str,
     ) -> float:
         """追加"起始保持 + 插值对齐 + 首点保持"，返回对齐段结束时刻（s）。
 
         对齐段用静止到静止的五次曲线生成；``align`` 分级使用设置里的
         ``align_duration`` / ``align_steps``（可由起始误差自动推算），
         其余可回放分级使用配置里的软启动参数。
-        合成段按录制段实际完整字段选择等级；不补造录制导数。
+        合成段显式投影到示教参考等级；最终检查的是投影后实际曲线。
         """
         start_points = build_replay_start_soft_points(
             current_positions=current_positions,
@@ -210,8 +206,8 @@ class TeachReplayTrajectoryBuilder:
         for start_point in start_points:
             point = self._trajectory_point_factory()
             point.positions = [float(v) for v in start_point.positions]
-            point.velocities = list(start_point.velocities)
-            point.accelerations = list(getattr(start_point, 'accelerations', ()))
+            point.velocities = list(start_point.velocities) if reference_grade != 'q' else []
+            point.accelerations = list(start_point.accelerations) if reference_grade == 'q/v/a' else []
             set_duration(point.time_from_start, start_point.time_from_start)
             trajectory.points.append(point)
         # 最后一个起始点的时刻即录制段的起点偏移；无起始点时从 0 开始。
@@ -248,12 +244,22 @@ class TeachReplayTrajectoryBuilder:
                 initial_delay_sec=float(config.initial_replay_delay_sec),
                 boundary_zero_velocity=True,
             )
+        from rebotarm_motion.polynomial_trajectory import TrajectoryPoint
+        from rebotarm_motion.trajectory_time_parameterization import prepare_teach_reference
+        retimed_points = prepare_teach_reference(tuple(TrajectoryPoint(
+            p.time_from_start, p.positions, p.velocities, getattr(p,'accelerations',()))
+            for p in retimed_points))
         for retimed in retimed_points:
             point = self._trajectory_point_factory()
             point.positions = [float(v) for v in retimed.positions]
             point.velocities = [float(v) for v in getattr(retimed, 'velocities', ())]
             point.accelerations = [float(v) for v in getattr(retimed, 'accelerations', ())]
-            set_duration(point.time_from_start, float(elapsed) + initial_delay + float(retimed.time_from_start))
+            set_duration(point.time_from_start, float(elapsed) + initial_delay + retimed.time)
+            if trajectory.points and point.time_from_start == trajectory.points[-1].time_from_start:
+                if any(getattr(point, f) != getattr(trajectory.points[-1], f)
+                       for f in ('positions','velocities','accelerations')):
+                    raise ValueError('teach splice has a zero-duration state change')
+                continue
             trajectory.points.append(point)
 
     def append_final_hold(self, trajectory: Any, *, final_hold_sec: float) -> None:

@@ -56,7 +56,7 @@ JointTrajectory header，插件缓存最终完整数值并由原 simple controll
 MoveIt 保留 `arm` FJT 和 `gripper` 独立 GripperCommand 两组，移除 `arm_with_gripper`。
 `/rebotarm/gripper/moveit_command` 把左指 m ×2 交给原总开口接口，反馈/结果 ÷2；
 单左指曲线仅用于规划限速预算，不是 FJT 执行能力。
-示教按名称提取六轴、保留原始夹爪数据供查看，派生 `.prepared.v3.jsonl` 不覆盖原文件，
+示教按名称提取六轴、保留原始夹爪数据供查看，派生 `.prepared.v5.jsonl` 按原等级保存执行约束且不覆盖原文件或旧派生文件，
 页面提示夹爪不参与回放。视觉先独立预张爪完成，再按实际开度规划预抓取和接近，止于接触前。
 
 网页只编辑机械臂关键点，夹爪为单次目标，组合按钮交接一次性 `plan_id`。
@@ -303,8 +303,15 @@ FJT、默认失能、显式使能、MoveIt Plan/Execute、协同执行、IK/Pose
 同一轨迹混合缺失导数拒绝。C0/C1 段内导数检查不代表节点跳变满足高阶限值。
 网页点对点和键盘由 motion 构造首末完整 q/v/a 约束；prepared 键盘默认为
 `0.02 rad / 0.4 s`，独立起停、忙时拒绝、不排队。legacy 时长仍为 0.2 s。
-PoseCompat 保留 q-only；示教保留完整可用字段和非零中间导数，混合字段拒绝。
-MoveIt 对齐段和录制段的导数等级不同时明确拒绝，不能删除规划导数来迁就录制字段。
+PoseCompat 保留 q-only；公共 FJT 仍按完整字段分级，混合字段拒绝。
+示教保留输入等级。q/v 由滤波后 q/t 生成派生参考 v，a 为空；对齐适配明确把规划
+q/v/a 转换为 q/v，保留 q/t 与中间 v、首末 v 归零，与保持及示教拼成一次 C1 执行。
+原规划保留对照，转换后整条曲线重新限值与碰撞检查，普通 MoveIt 不受影响。详见
+[示教 C1 处理](teach_replay.md#缺少加速度的记录与-c1-拼接)。
+
+此前补算 a 的 C2/v4 验收保留为历史证据，方案已撤销，不代表本轮 C1 验收。
+准备/拼接失败显示碰撞未检查，正式准备保留完整覆盖且省去离线对照网格。现行验收见
+[示教 C1 验收](teach_replay.md#c1-修订验收2026-11-04)，不增加实机验收结论。
 
 `/<ns>/follow_joint_trajectory` 始终由选定的唯一后端提供。
 `/<ns>/prepare_arm_trajectory` 是内部服务，契约位于

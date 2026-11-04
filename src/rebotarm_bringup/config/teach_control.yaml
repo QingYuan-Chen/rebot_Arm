@@ -70,7 +70,8 @@
     moveit_acceleration_scaling: 0.1
     collision_check_enabled: true
     collision_check_service: /check_state_validity
-    collision_check_max_samples: 80
+    # 实际参考曲线含全部节点与内部极值；预算不足时拒绝，不抽稀。
+    collision_check_max_samples: 10000
     collision_check_timeout_sec: 2.0
 
     # 录制后的平滑、滤波、重采样和重定时。

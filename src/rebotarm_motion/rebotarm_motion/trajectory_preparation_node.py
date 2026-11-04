@@ -115,7 +115,7 @@ class SceneCollisionChecker:
                             requested_samples=len(positions))
             prepared, report = analyze_trajectory(names, points,
                 lower=lower, upper=upper, limits=limits, context=context, now=now,
-                collision_check=collision)
+                collision_check=collision, include_reference_comparison=False)
             if prepared is None:
                 raise ValueError(json.dumps(report, ensure_ascii=False, allow_nan=False))
             if time.monotonic() >= request.deadline_monotonic:

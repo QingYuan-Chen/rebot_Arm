@@ -1,4 +1,10 @@
-"""MoveIt precheck adaptation for teach replay workflow."""
+"""示教工作流的 MoveIt 对齐与碰撞预检适配。
+
+职责：把节点设置和真实夹爪快照传给 motion 工具，不生成设备指令。
+对外接口：ReplayMoveItPrecheckMixin 的对齐摘要、轨迹碰撞预检和对齐段追加。
+安全约束：检查实际生成曲线的完整采样；覆盖不足报告未检查，不抽稀、不当作通过。
+文件结构：对齐摘要 → 示教/完整曲线采样 → 碰撞查询参数 → 对齐回调。
+"""
 
 from __future__ import annotations
 
@@ -42,17 +48,31 @@ class ReplayMoveItPrecheckMixin:
             # 没有样本时仍走统一入口：由预检器返回 unknown，避免"空输入=无碰撞"的误判。
             return self._collision_precheck_positions((), [])
         first = samples[0]
-        positions = [tuple(sample.positions) for sample in samples]
-        return self._collision_precheck_positions(tuple(first.joint_names), positions)
+        from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
+        curve = build_curve(first.joint_names,tuple(TrajectoryPoint(
+            sample.stamp-first.stamp,sample.positions,sample.velocities,sample.accelerations)
+            for sample in samples))
+        return self._collision_precheck_curve(curve)
 
     def _collision_precheck_trajectory(self, trajectory: JointTrajectory) -> dict:
-        """对最终要下发的轨迹点做碰撞预检（真实回放前的最后一道门）。"""
-        positions = [
-            tuple(point.positions)
-            for point in getattr(trajectory, "points", [])
-            if getattr(point, "positions", None)
-        ]
-        return self._collision_precheck_positions(tuple(trajectory.joint_names), positions)
+        """采样最终分级参考（含节点、内部位置极值和最多 0.02 rad 跨度），不只查离散点。"""
+        from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
+        curve = build_curve(trajectory.joint_names,tuple(TrajectoryPoint(
+            p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
+            for p in trajectory.points))
+        return self._collision_precheck_curve(curve)
+
+    def _collision_precheck_curve(self, curve) -> dict:
+        """预览段和完整拼接轨迹共用实际系数采样；预算不足时不查询、不抽稀。"""
+        budget = max(int(self.get_parameter('collision_check_max_samples').value),1)
+        try:
+            times = curve.collision_times(.02,max_samples=budget)
+        except ValueError as exc:
+            return {'state':'not_checked','checked_samples':0,
+                'message':f'碰撞未检查：无法按要求覆盖完整曲线：{exc}'}
+        result = self._collision_precheck_positions(tuple(curve.joint_names),[curve.sample(t)[0] for t in times])
+        result.update(max_joint_step_rad=.02, continuous_collision_proof=False)
+        return result
 
     def _collision_precheck_positions(self, joint_names: tuple[str, ...], positions_list: list[tuple[float, ...]]) -> dict:
         """以节点参数构造碰撞预检配置并执行检查（关节位置单位 rad）。"""
@@ -78,6 +98,7 @@ class ReplayMoveItPrecheckMixin:
         *,
         current_positions: tuple[float, ...],
         first_positions: tuple[float, ...],
+        reference_grade: str = 'q/v',
     ) -> float:
         """起始对齐回调：把规划出的对齐段追加到轨迹前部，返回对齐段结束时刻（秒）。
 
@@ -95,5 +116,6 @@ class ReplayMoveItPrecheckMixin:
                 joint_goal_tolerance=float(self.get_parameter("moveit_joint_goal_tolerance").value),
                 velocity_scaling=float(self.get_parameter("moveit_velocity_scaling").value),
                 acceleration_scaling=float(self.get_parameter("moveit_acceleration_scaling").value),
+                reference_grade=reference_grade,
             ),
         )

@@ -236,11 +236,12 @@ class PreparedTrajectory:
 
 
 def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=None,
-                       now=0., collision_check=None):
+                       now=0., collision_check=None, include_reference_comparison=True):
     """返回候选与可审计报告; 只有完整覆盖的碰撞 pass 才产生候选.
 
     collision_check(names, positions) 由调用者注入, 应绑定其记录的规划场景与完整
     夹爪状态. 无检查器、异常、超时或样本数不足都不能生成候选.
+    include_reference_comparison 仅控制离线阶梯对照统计，不影响极值或碰撞检查。
     """
     source = ordered_points(joint_names, points)
     names = canonical_names(joint_names)
@@ -259,7 +260,9 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
         curve = build_curve(names, points)
         report.update(duration=curve.duration, degree=curve.degree,
                       normalized_trajectory=curve.to_payload())
-        report['comparison'] = compare_reference(curve, source)
+        # 阶梯误差对照仅供离线分析；正式准备不生成长时域网格，仍全量检查极值和碰撞。
+        if include_reference_comparison:
+            report['comparison'] = compare_reference(curve, source)
         report['limits'] = check_curve(curve, lower, upper, limits)
         times = curve.collision_times(tuple(.00018 if n == 'left_finger_joint' else .02 for n in names))
     except (ValueError, OverflowError, np.linalg.LinAlgError) as exc:

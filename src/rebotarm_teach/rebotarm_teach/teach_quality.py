@@ -1,4 +1,10 @@
-"""Teach trajectory quality analysis and record inspection."""
+"""示教原始差分诊断、固定频率位置跳变检查及文件巡检。
+
+对外接口：analyze_teach_trajectory、inspect_teach_record 及字典转换。
+安全约束：默认差分诊断不等于执行曲线极值；关闭动态差分门仅用于已解析检查的参考，
+位置跳变和结构校验仍保留。不修改记录，不访问硬件。
+文件结构：限值展开 → 质量分析 → 状态转换 → 原始记录巡检与列表。
+"""
 
 from __future__ import annotations
 
@@ -48,6 +54,7 @@ def analyze_teach_trajectory(
     max_velocity_rad_s: float = 2.0,
     max_acceleration_rad_s2: float = 999.0,
     max_jerk_rad_s3: float = 999.0,
+    check_dynamics: bool = True,
 ) -> TeachTrajectoryQuality:
     """逐帧差分评估示教轨迹质量，给出 green/yellow/red 分档与异常清单。
 
@@ -60,6 +67,8 @@ def analyze_teach_trajectory(
     风险等级只升不降（已经 red 不会被后续 yellow 覆盖）。速度/加速度/加加速度用相邻帧差分，
     因此对采集噪声敏感，这也是后续要做滤波与重采样的原因。
     ``samples`` 为空时返回 red 且 ``replay_policy`` 为 "record contains no samples"。
+    ``check_dynamics=False`` 仅保留结构与固定采样位置跳变判定；用于执行参考曲线，
+    动态门由 motion 解析极值负责。原始差分诊断仍使用默认值，不改变其检查范围。
     """
     anomalies: list[str] = []
     events: list[TeachTrajectoryEvent] = []
@@ -157,7 +166,7 @@ def analyze_teach_trajectory(
                 if risk_level != "red":
                     risk_level = "yellow"
             velocity_limit = velocity_limits[joint_index]
-            if velocity is not None and velocity > velocity_limit:
+            if check_dynamics and velocity is not None and velocity > velocity_limit:
                 # 同一帧已有更严重的事件（跳变）时保留原 message/level，只追加异常行。
                 velocity_message = f"{joint_name} velocity {velocity:.4f} rad/s at sample {index}"
                 if not message:
@@ -166,7 +175,7 @@ def analyze_teach_trajectory(
                 if risk_level != "red":
                     risk_level = "yellow"
                 anomalies.append(velocity_message)
-            if acceleration is not None and acceleration > float(max_acceleration_rad_s2):
+            if check_dynamics and acceleration is not None and acceleration > float(max_acceleration_rad_s2):
                 acceleration_message = f"{joint_name} acceleration {acceleration:.4f} rad/s^2 at sample {index}"
                 if not message:
                     message = acceleration_message
@@ -174,7 +183,7 @@ def analyze_teach_trajectory(
                 if risk_level != "red":
                     risk_level = "yellow"
                 anomalies.append(acceleration_message)
-            if jerk is not None and jerk > float(max_jerk_rad_s3):
+            if check_dynamics and jerk is not None and jerk > float(max_jerk_rad_s3):
                 jerk_message = f"{joint_name} jerk {jerk:.4f} rad/s^3 at sample {index}"
                 if not message:
                     message = jerk_message

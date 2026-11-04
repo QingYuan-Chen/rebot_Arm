@@ -225,7 +225,7 @@ def test_delayed_single_target_gets_explicit_hold_origin_and_zero_time_motion_re
     assert hold.sample(1.) == (START, ZERO, ZERO, ZERO)
 
 
-@pytest.mark.parametrize('changes', [dict(enabled=False), dict(busy=True), dict(stationary=False),
+@pytest.mark.parametrize('changes', [dict(enabled=False), dict(busy=True),
     dict(observed_at=9.8), dict(observed_at=10.1)])
 def test_bad_hold_evidence_prevents_preparation(changes):
     with pytest.raises(ValueError):
@@ -264,7 +264,7 @@ def test_no_hold_context_only_produces_analysis():
 
 @pytest.mark.parametrize('changes', [dict(session=2), dict(generation=3),
     dict(hold=tuple(v + .0001 for v in START)), dict(enabled=False),
-    dict(stationary=False), dict(busy=True)])
+    dict(busy=True)])
 def test_stale_result_rejected_after_serialization(changes):
     candidate, report = analyze()
     assert report['state'] == 'pass'

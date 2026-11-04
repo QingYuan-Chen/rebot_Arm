@@ -345,7 +345,7 @@ def test_operator_capability_rejects_unknown_or_mismatched_backend_without_fallb
     capability.require()
 
 
-def test_teach_does_not_drop_moveit_acceleration_to_match_lower_replay_grade():
+def test_teach_builder_requires_explicit_alignment_conversion_before_splice():
     from types import SimpleNamespace
     from rebotarm_teach.teach_replay_trajectory_builder import TeachReplayTrajectoryBuilder
     from test_status_panel_layering import _Trajectory, _TrajectoryPoint, _PreparedReplay
@@ -360,7 +360,7 @@ def test_teach_does_not_drop_moveit_acceleration_to_match_lower_replay_grade():
         return .25
     config = SimpleNamespace(use_moveit_start_align=True, yellow_max_speed=.6,
         initial_replay_delay_sec=.05)
-    with pytest.raises(ValueError, match='different accelerations grades'):
+    with pytest.raises(ValueError, match='incompatible accelerations'):
         builder.build(prepared=_PreparedReplay(), current_positions={'joint1':0.,'joint2':0.},
             start_band='align',settings={'final_hold_sec':1.},config=config,
             moveit_start_alignment=align)

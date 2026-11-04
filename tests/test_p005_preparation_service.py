@@ -128,3 +128,13 @@ def test_prepare_rejects_invalid_context_or_curve_without_partial_handoff(damage
     else:req.trajectory.points[-1].positions[0]=2.
     with pytest.raises((ValueError,TimeoutError)):
         SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+
+
+def test_formal_preparation_skips_only_offline_comparison(monkeypatch):
+    import rebotarm_motion.trajectory_preparation as preparation
+    def forbidden(*args,**kwargs):
+        raise AssertionError('formal preparation must not run offline comparison grid')
+    monkeypatch.setattr(preparation,'compare_reference',forbidden)
+    monitor=LockedMonitor()
+    payload,_=SceneCollisionChecker(monitor).prepare(request(monitor),LOWER,UPPER,LIMITS)
+    assert payload['curve'] and len(monitor.checked)>2
