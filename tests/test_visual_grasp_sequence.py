@@ -12,6 +12,19 @@ if str(VISION_SRC) not in sys.path:
     sys.path.insert(0, str(VISION_SRC))
 
 
+def test_prepared_visual_sequence_stops_at_precontact_with_explicit_opening():
+    from rebotarm_vision.visual_grasp_sequence import (
+        PoseTarget, VisualGraspSequenceConfig, build_visual_grasp_sequence,
+    )
+    pose = PoseTarget((.3, 0., .3), (0., 0., 0., 1.))
+    stages = build_visual_grasp_sequence(pose, pose,
+        VisualGraspSequenceConfig(coordinated_position_only=True,
+            open_before_approach=True, open_position_m=.04, include_safe_home=True))
+    assert [stage.name for stage in stages] == ['open_gripper','move_to_pregrasp', 'approach_grasp']
+    assert stages[0].kind == 'gripper' and stages[0].gripper_position_m == .04
+    assert all(stage.kind == 'move' and stage.gripper_position_m is None for stage in stages[1:])
+
+
 def test_build_sequence_moves_pregrasp_grasp_then_closes():
     from rebotarm_vision.visual_grasp_sequence import (
         PoseTarget,

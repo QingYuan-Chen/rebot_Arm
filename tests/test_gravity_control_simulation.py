@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rebotarmcontroller.gravity_control import (
+from rebotarmcontroller.gravity.gravity_control import (
     GravitySettings, bounded_mit_command, load_gravity_model,
 )
 

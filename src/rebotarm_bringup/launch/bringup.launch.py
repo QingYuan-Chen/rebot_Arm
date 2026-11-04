@@ -37,6 +37,7 @@ def generate_launch_description():
     joint_state_rate = LaunchConfiguration("joint_state_rate")
     cmd_arbitration = LaunchConfiguration("cmd_arbitration")
     arm_namespace = LaunchConfiguration("arm_namespace")
+    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
     use_rviz = LaunchConfiguration("use_rviz")
     frame_id = LaunchConfiguration("frame_id")
     ee_frame_id = LaunchConfiguration("ee_frame_id")
@@ -66,6 +67,9 @@ def generate_launch_description():
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             # arm_namespace：话题/服务/动作命名空间段，去首尾斜杠后拼成 /{ns}/...。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
+            # 底层启动不提供准备服务；新模式需由外部完整 MoveIt 组合提供。
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
+                choices=["legacy", "prepared_v1"]),
             # use_rviz：是否启动 RViz。默认 false，无可视化也能完成启动与执行。
             DeclareLaunchArgument("use_rviz", default_value="false"),
             # frame_id / ee_frame_id：对外位姿的参考坐标系与末端坐标系名，需与 URDF 中的 link 名一致，否则 TF 查询与可视化会失败。
@@ -85,6 +89,7 @@ def generate_launch_description():
                     "joint_state_rate": joint_state_rate,
                     "cmd_arbitration": cmd_arbitration,
                     "arm_namespace": arm_namespace,
+                    "trajectory_execution_mode": trajectory_mode,
                     "frame_id": frame_id,
                     "ee_frame_id": ee_frame_id,
                 }.items(),

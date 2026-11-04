@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarmcontroller.feedback_acquisition import FeedbackAcquisition
-import rebotarmcontroller.feedback_acquisition as acquisition
+from rebotarmcontroller.hardware.feedback_acquisition import FeedbackAcquisition
+import rebotarmcontroller.hardware.feedback_acquisition as acquisition
 
 
 VECTORS = json.loads((Path(__file__).parent / 'fixtures/controller_feedback_vectors.json').read_text())

@@ -43,6 +43,7 @@ POST_ROUTES: dict[str, PostRoute] = {
     "/api/calibration/command": PostRoute("_handle_calibration_command", payload=True),
     # 预览一次点动执行：只做参数校验与规划检查，不直接下发硬件目标
     "/api/execute_preview": PostRoute("_handle_execute_preview", payload=True),
+    "/api/preview_coordinated": PostRoute("_handle_preview_coordinated", payload=True),
     # 停止正在执行的 web 点动目标
     "/api/stop_execute": PostRoute("_handle_stop_execute"),
     # 设置夹爪开度；是否真实下发由 use_hardware 决定，为假时只更新仿真反馈

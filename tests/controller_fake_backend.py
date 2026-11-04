@@ -1,9 +1,30 @@
 """保留旧行为样本的设备替身；实现运行时接口，不改变生产准入条件。"""
 import threading
 import time
-from rebotarmcontroller.arm_execution import ArmExecution
+from dataclasses import replace
+from rebotarmcontroller.arm.arm_execution import ArmExecution
 import numpy as np
-from rebotarmcontroller.device_requests import DeviceRequests
+from rebotarmcontroller.runtime.device_requests import DeviceRequests
+
+
+class WriterRuntime:
+    """独立事务测试显式置于设备线程；外部排队由真实运行时专项覆盖。"""
+
+    in_writer = True
+
+    def call(self, operation, **request_options):
+        raise AssertionError('writer-context test must not enqueue a nested transaction')
+
+    def close_worker(self):
+        raise AssertionError('writer-context test must not join its own thread')
+
+
+def inject_feedback_refresh(monkeypatch, manager, refresh):
+    """动作开始前注入刷新替身；只替换测试端口，不改已装配的方法引用。"""
+    for component in (manager.gripper, manager.gravity, manager.cycle):
+        monkeypatch.setattr(component, 'feedback', replace(
+            component.feedback, refresh_feedback_if_due=refresh))
+
 
 class FakeBackend:
     def __init__(self, arm, config):
@@ -14,6 +35,11 @@ class FakeBackend:
         self.requests = DeviceRequests()
         self.in_writer = True
         self._waiting = False
+
+    def assert_writer(self):
+        """旧行为夹具显式处于内存设备事务；与生产端口同样拒绝越过 writer 边界。"""
+        if not self.in_writer:
+            raise RuntimeError('device writer context required')
 
     @property
     def joint_names(self): return list(self._arm.joint_names)
@@ -42,6 +68,8 @@ class FakeBackend:
     def trajectory_moving(self): return self.execution.moving
     @property
     def trajectory_progress(self): return self.execution.progress
+    @property
+    def arm_resource_reserved(self): return self.execution.reservation is not None
     def position_tick(self, runtime, dt): self.position_callback(runtime, dt)
     def current_pose_values(self, q): return self.kinematics.pose(q)
     def device_wait(self, duration): time.sleep(duration)

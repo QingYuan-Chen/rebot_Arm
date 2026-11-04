@@ -1,6 +1,6 @@
 # 硬件控制器功能拆分与 C++ 迁移初步规划
 
-> 状态：DESIGN；类型：控制器拆分与 SDK 功能整合方案，按批次实施，当前进展见项目状态；适用范围：Ubuntu 24.04 / ROS 2 Jazzy 的 `rebotarmcontroller` 与其 SDK 依赖；最后核对：2026-10-28（同步平铺组件映射、SDK 退出契约与 C++ 初始承载方案）。
+> 状态：DESIGN；类型：控制器拆分与 SDK 功能整合方案，按批次实施，当前进展见项目状态；适用范围：Ubuntu 24.04 / ROS 2 Jazzy 的 `rebotarmcontroller` 与其 SDK 依赖；最后核对：2026-11-03（模块按一层职责子目录整理，manager 纯装配及组件边界保留）。
 
 ## 当前范围
 
@@ -31,7 +31,7 @@
 
 ### 先拆模块，保留一个硬件包
 
-保留包名 `rebotarmcontroller` 和唯一硬件进程，在包内按文件建立职责边界。后续控制器拆分直接使用包根目录下的模块，不再按职责创建子目录；组件职责、接口与独立状态仍须保持清晰。
+保留包名 `rebotarmcontroller` 和唯一硬件进程，在包内按一层职责子目录组织模块，根目录保留节点入口、装配和配置；组件职责、接口与独立状态仍须保持清晰。文件归属见[文件与组件归属](#文件与组件归属)。
 
 | 建议模块 | 拥有的职责和状态 | 边界 |
 | --- | --- | --- |
@@ -49,7 +49,7 @@
 
 ### 六轴机械臂与末端执行器分别控制
 
-机械臂和夹爪分别使用根目录中的控制与执行模块；位置、保持和重力补偿按职责分工，不依靠目录区分状态。
+机械臂和夹爪分别使用 `arm/` 和 `gripper/` 中的控制与执行模块；位置、保持和重力补偿按职责分工，状态仍由原组件独立持有。
 
 - **数据分别定义**：机械臂状态、目标与控制输出只包含六轴；夹爪拥有独立的开口、运动状态、接触判定和命令结果，不作为“第七轴”拼入六轴控制向量。设备层可以按电机标识统一编解码，控制层必须按资源类型分发。
 - **参数分别维护**：六轴增益、关节限位、重力模型与夹爪开口映射、限力参数、接触阈值、保持时限分开配置。夹爪电机力矩与指端夹持力分开表达，未标定时不能把两者等同。
@@ -125,7 +125,7 @@ flowchart TD
 2026-10-27 核对本机 SDK 为固定提交 `6a49302804f25e624995e771acb6d61896d1856d`，其工作区无未提交修改。以下记录迁移起点的调用清单，不代表当前仍有这些依赖；以实际已用能力为依据，不以 SDK 的包级导出列表作为功能需求。
 
 - [hardware_manager.py](../../src/rebotarmcontroller/rebotarmcontroller/hardware_manager.py)：直接导入 `RobotArm`、`ArmEndPos`、`compute_fk` 和夹爪配置 `load_cfg`；默认机械臂及夹爪配置也从 SDK 目录读取。
-- [ros_services.py](../../src/rebotarmcontroller/rebotarmcontroller/ros_services.py)、[ros_actions.py](../../src/rebotarmcontroller/rebotarmcontroller/ros_actions.py) 与 [motor_passthrough.py](../../src/rebotarmcontroller/rebotarmcontroller/motor_passthrough.py)：间接使用 `ArmEndPos` 的 IK、笛卡尔轨迹、目标缓存和送点线程，并访问其私有状态。
+- [ros_services.py](../../src/rebotarmcontroller/rebotarmcontroller/ros/ros_services.py)、[ros_actions.py](../../src/rebotarmcontroller/rebotarmcontroller/ros/ros_actions.py) 与 [motor_passthrough.py](../../src/rebotarmcontroller/rebotarmcontroller/ros/motor_passthrough.py)：间接使用 `ArmEndPos` 的 IK、笛卡尔轨迹、目标缓存和送点线程，并访问其私有状态。
 - [pose_preview_solver.py](../../src/rebotarm_motion/rebotarm_motion/pose_preview_solver.py)：使用 SDK 的模型加载、末端帧定位、位姿转换、带重试 IK 与 FK；这是移除 SDK 运行依赖必须一并迁移的纯计算使用者。
 - `tests/test_hardware_manager_p0_safety.py` 仍导入 SDK 夹爪配置加载器；安装说明和接口手册也有 SDK 路径及导入要求，需要随实现完成同步更新。独立 Star Arm 跟随工具直接使用 MotorBridge，不属于此 Python SDK 的迁移范围。
 
@@ -137,7 +137,7 @@ flowchart TD
 | --- | --- | --- |
 | `actuator/arm.py` 的 `JointCfg/load_cfg`；`actuator/gripper.py` 的 `GripperCfg/load_cfg` | `rebotarmcontroller/configuration.py` | 保留数值、单位、六轴顺序及显式覆盖；仅接纳 damiao；内存覆盖 channel，校验夹爪共享通道；解析不导入 MotorBridge、不打开设备 |
 | SDK `config/arm.yaml`、`config/gripper.yaml` | `src/rebotarmcontroller/config/arm.yaml`、`gripper.yaml` | 纳入本包安装资源；默认路径从 SDK 目录改为本包 share，保留显式 YAML 路径和 channel 覆盖；迁入时核对数值，不同时调参 |
-| `RobotArm` 的控制器创建、设备注册、句柄及总线映射 | `rebotarmcontroller/sdk_driver.py` → `SdkMotorDriver` | 仅适配 damiao；直接使用带序号补丁的 MotorBridge，按物理 channel 管理唯一控制器；夹爪共享句柄所有者；不包装 `RobotArm` 或模仿其私有成员 |
+| `RobotArm` 的控制器创建、设备注册、句柄及总线映射 | `rebotarmcontroller/hardware/sdk_driver.py` → `SdkMotorDriver` | 仅适配 damiao；直接使用带序号补丁的 MotorBridge，按物理 channel 管理唯一控制器；夹爪共享句柄所有者；不包装 `RobotArm` 或模仿其私有成员 |
 | `RobotArm` 的反馈请求/轮询、状态与 MIT/POS_VEL/VEL 设备操作 | 驱动提供原始操作；`feedback_acquisition.py`、`feedback_store.py` 接管采集和缓存；`feedback_safety.py` 接管可用性 | 保留本地序号验证、首帧、年龄、原因分类与新帧恢复；不迁入缺样本补零、吞掉发送异常等宽松语义 |
 | `RobotArm` 的模式、寄存器、使能/失能、置零及关闭 | 底层操作归 `sdk_driver.py`；流程与确认归 `lifecycle.py` | 纳入寄存器 25～28 的 POS_VEL 参数写入、模式确认、反馈验证与资源释放；逐电机返回结果，保留严格置零及使能回滚 |
 | `RobotArm.start_control_loop/stop_control_loop` 与循环存活状态 | `rebotarmcontroller/controller_runtime.py` | 批次 2 与驱动一起替换最小周期线程；有界停止并确认退出，不使用 `Thread._stop()`；完整队列与仲裁在批次 6 接入 |
@@ -240,7 +240,9 @@ ABI 探测是批次 0～1 的必做项，用来确定 Python `SdkMotorDriver` �
 
 最终在不将 SDK 目录加入 `PYTHONPATH`、且以导入阻断验证无隐式回退的隔离进程中，检查配置、FK/IK、轨迹计算、假驱动控制器和 ROS 兼容接口；安装区同样验证。更新依赖/部署文档与测试夹具，源码不再注入 SDK 路径；不删除、改名本机参考目录来实现隔离测试。
 
-最终完成条件是控制器和运动包均不再导入 `reBotArm_control_py`、不读取 SDK 配置/模型、不使用其线程或私有状态。只有配置搬入或驱动外包一层不算完成。SDK 不可导入的测试使用拦截或隔离环境，不删除、改名本机依赖目录。
+最终完成条件是控制器和运动包均不再导入 `reBotArm_control_py`、不读取 SDK 配置/模型、不使用其线程或私有状态。只有配置搬入或驱动外包一层不算完成。默认完整测试同样不读取旧目录; FK 使用固定数值样本, 实时历史模型对照必须显式传入 URDF 路径。
+
+批次 6.7 后补充收敛采用独立交付副本和非软链接安装, 通过文件系统命名空间隐藏原工作区及旧树, 安装探针再隐藏副本源码并检查实际模块与资源路径。不删除或改名本机参考目录, 不自动进入批次 7。命令与边界见[SDK 退出的离线验收](../implemented/features/hardware_execution.md#sdk-退出的离线验收)。
 
 ## HardwareManager 的 Python 拆分实施方案
 
@@ -248,46 +250,32 @@ ABI 探测是批次 0～1 的必做项，用来确定 Python `SdkMotorDriver` �
 
 ### 文件与组件归属
 
-下面按包根目录的文件列出组件归属。已存在和拟议模块一起列出；后续按职责增加文件，不建立控制器内部职责子目录。
+2026-11-03 按用户确认方案，将原平铺模块整理为一层职责子目录。文件名、类名、方法签名、
+状态所有权及设备线程模型保持原样；Python 导入迁往新路径，旧位置不保留转发或模块别名。
 
-```text
-rebotarmcontroller/
-├── hardware_manager.py        # 现有 API 的兼容门面
-├── configuration.py           # 参数、范围与资源路径
-├── controller_contracts.py    # 值类型、请求、结果与故障
-├── controller_values.py       # 六轴快照、夹爪接纳及结果值
-├── controller_parameters.py   # 无状态默认值和兼容常量
-├── sdk_driver.py              # MotorBridge 设备与总线收发
-├── controller_kinematics.py   # 规范模型的 FK 薄适配
-├── controller_runtime.py      # 唯一设备线程与周期调度
-├── device_requests.py         # 有界请求、优先级、有效期和资源代次
-├── feedback_acquisition.py    # 反馈采集、缓存、采集错误与只读判断
-├── feedback_reader.py         # 采集装配、成套快照与兼容查询
-├── lifecycle.py               # 连接、使能与模式状态、关闭策略
-├── command_guard.py           # 命令准入、健康失败保持与保护决策
-├── controller_cycle.py        # 周期采集、租约检查及执行分发
-├── controller_protection.py   # 保护清理与一次失能协调
-├── arm_controller.py          # 六轴准入、停靠、保持与透传事务
-├── arm_stop.py                # 发送后的周期静止确认
-├── arm_position_control.py    # 六轴位置命令
-├── arm_execution.py           # 六轴目标与轨迹执行
-├── arm_trajectory.py          # 六轴任务接纳、到位与取消结果
-├── gripper_control.py         # 夹爪控制算法
-├── gripper_execution.py       # 夹爪执行状态
-├── gripper_controller.py      # 坐标、零位验证、接纳与发送
-├── gravity_control.py         # 重力补偿状态、计算与模型工具
-├── gravity_controller.py      # 补偿启停、模式交接及周期诊断
-├── ros_actions.py             # Action 协议映射
-├── ros_services.py            # Service 适配
-├── ros_publishers.py          # 状态发布
-├── motor_passthrough.py       # 低层透传与仲裁入口
-├── conversions.py             # 消息与核心值类型转换
-└── rebotarm_controller.py     # 装配及启停协调
-```
+| 位置 | 模块 |
+| --- | --- |
+| 根目录 | `__init__`、`rebotarm_controller`、`hardware_manager`、`configuration`、`controller_parameters` |
+| `contracts/` | `controller_contracts`、`controller_values`、`component_ports`、`ros_ports` |
+| `hardware/` | `sdk_driver`、`feedback_acquisition`、`feedback_reader` |
+| `runtime/` | `controller_runtime`、`device_requests`、`lifecycle`、`controller_cycle`、`controller_protection`、`command_guard`、`stationary_evidence` |
+| `arm/` | `arm_controller`、`arm_execution`、`arm_trajectory`、`arm_position_control`、`arm_stop`、`controller_kinematics` |
+| `gripper/` | `gripper_controller`、`gripper_execution`、`gripper_control` |
+| `gravity/` | `gravity_controller`、`gravity_control` |
+| `ros/` | `ros_actions`、`ros_services`、`ros_publishers`、`motor_passthrough`、`conversions` |
+| `examples/` | 保留原 ROS 客户端及入口路径 |
+
+子包 `__init__.py` 仅声明用途，不汇总导入或创建设备。保留 `find_packages()` 和五个既有
+可执行名称、ROS 接口及配置位置。资源定位继续优先安装索引，源码回退按新深度解析；
+目录迁移不整理既有公共数值依赖和核心层 ROS 转换，后续独立规划。
+完整树见[控制器 README](../../src/rebotarmcontroller/README.md#文件结构)。
 
 包级配置资源仍随本包安装；各组件独立持有状态，不使用 mixin 拆类，也不将完整 manager 或共享字典作为组件接口。
 
-| 当前方法或状态 | 拆分后的所有者 | 保留在门面的能力 |
+下表记录拆分起点至 6.5 的过渡安排。6.7 按用户追加要求移除全部业务转发，第三列的
+业务能力由对应所有者直接向适配层提供；manager 只保留构造参数与装配。
+
+| 起点的方法或状态 | 拆分后的所有者 | 过渡门面的安排（6.7 后改为组件直接提供） |
 | --- | --- | --- |
 | `default_*_cfg`、SDK 路径查找、`_arm_cfg_with_channel`、构造参数校验 | `configuration.py` 负责配置；默认 YAML 迁入本包，以内存覆盖替代临时文件；完成迁移后删除 SDK 路径注入 | 接受现有构造参数，保留显式路径覆盖；不顺带统一不同入口的默认值 |
 | `init_gripper` 的设备注册、`_patch_*_bus*`、`_wrap_motor_bus`、实际 send/enable/disable/mode/zero 调用 | `SdkMotorDriver` | 提交设备操作；不向外返回可写的 SDK 对象 |
@@ -317,7 +305,7 @@ rebotarmcontroller/
 
 夹爪命令继续使用 0～90 mm／−5～0 rad，闭合端反馈容差继续为等效 10 mm；反馈容差、命令范围和严格置零条件分别表达。六轴限位、模型、增益及各入口实际默认值均按基线记录。
 
-兼容门面新增的执行接口建议为 `submit_arm_trajectory`、`cancel_arm_execution`、`arm_execution_status`、`submit_gripper_target`、`cancel_gripper_execution` 和 `snapshot`。名称是草案；现有阻塞方法可以在门面等待对应结果，内部状态由执行器推进。
+最初兼容门面的执行接口草案为 `submit_arm_trajectory`、`cancel_arm_execution`、`arm_execution_status`、`submit_gripper_target`、`cancel_gripper_execution` 和 `snapshot`。当前使用已有组件的实际接口与值类型，6.7 移除门面转发；含等待的流程留在原组件的调用线程侧，内部状态由执行器推进。
 
 ### 必须一并收口的现有调用
 
@@ -342,7 +330,8 @@ rebotarmcontroller/
 | 4. 夹爪提取 | 提取 `GripperExecution + GripperControl`，堵转检测改为周期输入/事件 | 固定独立夹爪输入/输出与保护对照样本 | 斜坡、总力矩、保持期限、中性释放、取消及失败结果正确；与六轴状态分开 |
 | 5. 六轴与生命周期完善 | 在批次 2 的最小实现上补全保持/停靠/重力补偿及启停、模式、置零状态；清理参数和任务覆盖 | 固定六轴算法、状态迁移与时序样本 | 积分/限幅/交接、启用回滚、失能和严格置零不退化；健康任务失败保持；不重复改写位置输出 |
 | 6. 完整仲裁与 ROS / SDK 退出 | 运行时统一设备请求、优先级及代次；迁出 ROS 执行循环；IK/CLIK/采样迁 motion，旧位姿端点转 FJT；删除临时适配器与 SDK 路径注入 | 核心接口冻结，复用 ABI 验证选择 C++ 承载框架 | 全部设备访问由运行时协调；服务端唯一；无 SDK 导入的源码/安装区测试及隔离 MoveIt Execute 链路通过；新旧位姿结果差异有对照 |
-| 6.5. Python 控制器结构收敛与 C++ 迁移前准备 | 迁出生命周期事务；清理 manager 私有兼容层和测试夹具；停止确认周期化；补齐实际跨组件契约与对照样本 | 固定可供 C++ 复用的输入、输出、发送回执、状态迁移与故障决策样本 | HardwareManager 仅负责装配和必要公开接口转发；组件可独立测试；既有 ROS 接口与安全行为兼容；满足下述 C++ 前置完成标准后才能进入批次 7 |
+| 6.5. Python 控制器结构收敛与 C++ 迁移前准备 | 迁出生命周期事务；清理 manager 私有兼容层和测试夹具；停止确认周期化；补齐实际跨组件契约与对照样本 | 固定可供 C++ 复用的输入、输出、发送回执、状态迁移与故障决策样本 | HardwareManager 仅负责装配和必要公开接口转发；组件可独立测试；既有 ROS 接口与安全行为兼容；完成后继续批次 6.7 |
+| 6.7. 控制器门面与请求入口收敛 | 删除全部门面业务入口及转出名称；生产适配和测试迁到职责端口；manager 只装配；端口使用方法引用；请求调度统一在组件命令入口层 | 冻结请求策略和组件端口，复用既有 Python/C++ 对照样本 | manager 仅有构造与接线；无纯透传 lambda 或测试专用导入；请求参数、锁顺序、停止优先级及关闭释放等价；满足下述 C++ 前置完成标准后才具备进入批次 7 的条件 |
 | 7. C++ 核心替换 | Python 拆分实现作为离线对照；ROS 名称与消息契约保留 | 实现驱动、运行时、算法与执行器，完成构建/安装、并发/释放/PTY/周期测量 | 相同输入输出和故障决策可解释；不在周期嵌 Python；只启一个真实后端，未把软件通过当成实机验收 |
 | 8. 集成与收尾 | 清理过渡门面，更新架构、部署和状态；保留未用 SDK 原目录 | 单独授权后的 C++ 实机分项检查及必要运动验收，确认回退方式 | 启动、保持、取消、模式和故障行为分别验收；软件、仿真、历史实机结论与本次实机结论分开记录 |
 
@@ -364,17 +353,18 @@ rebotarmcontroller/
 
 ### C++ 迁移前的完成标准
 
-1. `HardwareManager` 只做兼容转发和装配协调，状态各有所有者；不以文件行数达标代替职责验收。
+1. `HardwareManager` 只做装配协调，状态各有所有者，ROS 适配与关闭协调接收职责端口；不以文件行数达标代替职责验收。
 2. 六轴与夹爪计算、执行和保护决策能使用假时钟、假驱动独立运行，生产控制核心不再依赖 SDK 的运动学、送点线程和可变内部状态。
 3. 形成“相同反馈与请求 → 控制输出、发送回执、状态迁移、故障决策”的离线对照样本；C++ 后续复用同一数据和容差，而非照搬 Python 文件数量。
 4. 现有 ROS 客户端、参数覆盖、发布缓存时间与停止/取消语义有兼容验证；设备层直接使用 MotorBridge，控制器与运动包均完成上述 SDK 运行依赖退出检查，所需数学功能已按归属迁入。
 5. 批次 0～1 的 ABI 必做探测已形成可复用结果，批次 2 的设备映射无悬空缺口，再实施 C++ 核心替换；承载框架选择不作为第一份拆分的前置。
+6. [批次 6.7](#批次-67控制器门面与请求入口收敛) 的接口、装配和请求边界验收完成；6.5 的既有完成结论保留，不能据此跳过新增清理门，也不自动开始批次 7。
 
 ### 批次 6.5：Python 控制器结构收敛与 C++ 迁移前准备
 
 批次 6.5 安排在批次 6 与批次 7 之间，补齐批次 0～6 行为交付后尚未完成的结构目标。
 本节定义范围、实施依赖和验收条件；定义成立不代表已经实施或通过验收。
-完成上述结构验收后再进入批次 7，不以 manager 行数或新增文件数量作为完成依据。
+完成上述结构验收后继续批次 6.7，再按 C++ 前置完成标准进入批次 7；不以 manager 行数或新增文件数量作为完成依据。
 
 实施按下列依赖顺序拆为较小提交，每份提交保持可独立评审和回归：
 
@@ -394,7 +384,7 @@ rebotarmcontroller/
 验收须证明组件可用假时钟、假驱动独立装配和测试，且既有 ROS 名称、消息、参数及安全行为兼容。
 默认失能、显式使能、新鲜反馈、健康任务失败保持、失能确认和关闭释放约束均须保留；
 软件通过不能替代实机验收，涉及实机时仍按现场安全及显式授权规则分项验证。
-模块继续平铺包根目录，不建立第二份 SDK，只迁已用能力；IK 与路径生成仍归 motion。
+本节的模块职责保留，位置采用上文的一层职责子目录；不建立第二份 SDK，只迁已用能力；IK 与路径生成仍归 motion。
 当前完成项与仍未满足的门统一记在项目状态，不用“结构完成百分比”代替逐项验证。
 
 实现采用已有执行/反馈值类型，加上 `controller_values.py` 的实际跨组件输入与快照；
@@ -402,6 +392,77 @@ rebotarmcontroller/
 [Python/C++ 对照样本](../implemented/features/controller_reference_samples.md)。
 
 每批复用现有硬件安全、反馈缓存、夹爪完成、重力补偿与协议测试，按新组件边界逐步替换依赖 `HardwareManager.__new__` 和私有字段的夹具；保留原行为断言，明确的行为变化使用修订后的预期。新增测试聚焦资源仲裁、代次失效、停止确认、部分发送和线程交接。实施批次执行仓库规定的分层、完整回归及编译检查；安装区验证确认新增子包实际被打包。实机测试按项目安全边界分项安排。
+
+### 批次 6.7：控制器门面与请求入口收敛
+
+批次 6.7 接在 6.5 之后，作为批次 7 前的最后一轮 Python 结构清理。目标是将
+`HardwareManager` 收窄为运行时和组件的纯装配入口，仅保留构造函数和装配字段。
+2026-10-29 用户追加决定覆盖先前“保留 41 个生产门面成员”的目标：全部业务方法和
+属性转发移除，ROS 适配与关闭协调直接使用职责端口，不新增替代门面或动态代理。
+本批有意移除 Python 门面接口；ROS 名称、消息、参数、默认失能、显式使能、反馈新鲜度、
+健康任务失败保持、保护失能及关闭确认等生产行为沿用既有契约。实施和验收状态只记在项目状态。
+
+#### 实施顺序
+
+1. **纯装配与调用方归属。** 先记录 `src/` 中 manager 的实际调用、属性读取及回调引用。
+   起点的 64 个公开方法/属性中 23 个无生产调用，先清理下表成员及测试归属，再移除剩余
+   41 个业务转发。组件内部仍在使用的同名能力保留。
+
+   | 门面删除候选 | 成员 |
+   | --- | --- |
+   | 无调用的 10 项 | `hold_current_position`、`cancel_arm_trajectory`、`trajectory_moving`、`trajectory_progress`、`safe_home_target`、`submit_grasp`、`gravity_compensation_diagnostics`、`grasp_hold_release_reason`、`default_arm_cfg`、`default_gripper_cfg` |
+   | 仅测试使用的 13 项 | `current_pose`、`error_codes`、`get_joint_status_codes`、`gripper_feedback_error`、`gripper_reached_target`、`gripper_target_timeout_sec`、`init_gripper`、`joint_target`、`refresh_feedback_if_due`、`release_grasp_hold`、`set_joint_target`、`set_state_machine`、`wait_gripper_target` |
+
+   `ros_ports.py` 按运行时元数据、生命周期、反馈、六轴、夹爪及重力职责声明 Protocol，
+   直接注入原所有者，不实现转发对象或第二份状态。发布器只获得只读能力；服务、Action、
+   透传和关闭协调按职责接收命令能力。节点组合入口读取 manager 装配字段，不调用业务门面。
+   测试改为调用实际所有者的公开接口，保留原行为断言，补齐正式节点及 ROS 客户端的假设备覆盖。
+   随后删除 manager 仅为测试或兼容转出而导入的名称，测试从 `controller_parameters`、
+   `feedback_acquisition` 等定义模块导入。先迁移 `hardware_manager_module.time/threading`
+   的 patch，再删除对应导入；优先使用已有假时钟注入，直接 patch 标准库时限制作用域并注意全局影响。
+   未使用导入按实际引用清理，不以“34 个转出名”作为验收数量。
+
+2. **端口装配。** 将 `lambda *args, **kw: self.component.method(*args, **kw)` 等纯转发
+   替换为绑定方法引用。测试在构造或绑定时注入替身端口，不再依赖装配后 monkeypatch
+   组件方法仍被动态查找；测试夹具可在动作开始前显式替换冻结端口值，生产的 `bind` 仍只执行一次。
+   真正承担适配的闭包保留，例如反馈绑定结果取电机、为保护回调补充错误类别；
+   动态属性读取保持调用时求值，不提前冻结为构造时的状态。
+
+3. **请求边界。** 将 `device_request` 统一放在组件命令入口层，manager 不再负责入队。
+   现有六个生命周期入口的调度交给 `ControllerLifecycle`，通过显式依赖注入使用同一运行时的
+   调度能力；不传整个 manager，不增加第二条队列，也不提供缺队列时直接执行的回退。
+   在 `device_requests.py` 集中定义供装饰器引用的请求策略，列明实际入队入口及其
+   `resource/priority/ttl/invalidate`，包含私有入队入口；由结构测试核对策略与入口一一对应。
+
+   入队必须位于生命周期锁外，保持唯一设备线程内的重入直调、输入深复制、资源代次失效、
+   停止保留容量及高优先级、已开始事务报告实际回执、关闭后回收 worker 的规则。
+   `safe_home`、`grasp_gripper`、`set_gripper_position` 等含同步等待的编排继续由调用线程等待，
+   仅其设备子命令入队，避免等待堵住周期或失能请求。不能将此项视为仅移动装饰器。
+
+以上三步分别形成可评审、可回归的小范围交付，再做整体结构和行为验收；提交与推送遵守项目约定。
+本批不调整控制参数、量化反馈判据或任何安全门限，不迁入 IK、路径生成等 motion 职责。
+模块位置采用上文的一层职责子目录，新增及调整的注释、文档字符串使用中文。
+
+#### 验收条件
+
+- 在 `test_controller_structure.py` 中限制 manager 仅有构造函数、运行时/生命周期及六个
+  组件字段，不保留业务方法、只读转发属性、动态代理、算法或请求装饰器；已有组件端口及
+  私有访问门禁继续生效。
+- 生产只有节点组合入口可以导入 manager，适配层和关闭协调不接收 manager。
+  核对端口访问属于声明集合，不写入端口状态或穿透设备/组件私有成员；查询保持调用时
+  读取原所有者，禁止将动态状态提前冻结到构造时。
+- 禁止测试专用转出导入和纯透传 lambda；允许有实际参数适配或动态取值职责的回调。
+  请求入口集合、所在层和集中策略登记须一致，覆盖遗漏入队、重复包装及锁内等待的风险。
+- 复用现有对照样本与安全测试，验证同输入下的控制输出、发送回执、状态迁移和故障决策；
+  补齐生命周期并发、队列满/超时、旧代次、停止/失能抢先及关闭释放场景。
+  保留使能回滚、失能验证失败、保护锁存与显式恢复、透传仲裁、重力交接的原有断言。
+- 执行仓库规定的分层、完整回归和 compileall，补充控制器编译、构建与安装区导入验证；
+  核对源码与安装区一致，未执行的 ABI 或硬件检查不得沿用历史结果冒充本轮验证。
+- 以职责、调用依据和行为证据验收；41 个成员是上一版过渡门面的清单，当前全部移除，
+  “约 200 行”也不是完成门限。必要的回调交接仍须显式装配，不能宣称组件完全无耦合。
+
+结构变更后的真机回归另行取得本轮现场确认和授权；既有 `1338b38` 的夹爪往返分项结论
+不自动成为 6.7 的硬件基线。软件完成与硬件未验收分别记录，批次 7 保持独立启动决定。
 
 ## C++ 迁移路线
 

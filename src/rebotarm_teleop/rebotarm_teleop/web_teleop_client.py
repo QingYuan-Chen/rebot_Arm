@@ -9,14 +9,18 @@
   ROS 消息类型，可以在没有 ROS 运行时的环境下做单元测试。
 
 对外交互（客户端由调用方注入）：
-- 关节动作 ``/<ns>/follow_joint_trajectory``：接收平滑插值后的多点关节轨迹；
+- 关节动作：legacy 使用 ``/<ns>/follow_joint_trajectory``；prepared_v1 使用
+  ``/<ns>/execute_teleop_motion`` 提交六轴五次约束和可选独立夹爪目标；
 - 夹爪动作 ``/<ns>/gripper/command``：接收目标开口与最大力矩；
 - 触发器服务 ``/<ns>/trajectory_stop``：请求硬件控制器停止当前轨迹。
 
 安全语义：
 - 校验不通过时绝不发送动作目标，直接返回 ``accepted=False``；
 - 动作服务器在 0.1 s 内不可用即判为失败，不排队等待；
+- 正式入口注入执行能力核对回调；配置与后端不匹配时拒绝，不因失败回退到旧模式；
 - 停止流程总是先请求控制器级 trajectory_stop，再取消动作目标，两条路径互不阻塞。
+
+文件结构：时长和响应编码 → WebTeleopClient 依赖注入 → 点对点/旧轨迹组装 → 停止与夹爪适配。
 """
 
 from __future__ import annotations
@@ -99,6 +103,9 @@ class WebTeleopClient:
         follow_goal_factory: Callable[[], Any],
         gripper_action_client: Any | None = None,
         gripper_goal_factory: Callable[[], Any] | None = None,
+        trajectory_execution_mode: str = 'legacy',
+        require_trajectory_capability: Callable[[], None] = lambda: None,
+        finalize_trajectory=None,
     ) -> None:
         """注入动作客户端与消息工厂（全部为关键字参数）。
 
@@ -121,6 +128,9 @@ class WebTeleopClient:
         self._follow_goal_factory = follow_goal_factory
         self._gripper_action_client = gripper_action_client
         self._gripper_goal_factory = gripper_goal_factory
+        self._trajectory_mode = trajectory_execution_mode
+        self._require_trajectory_capability = require_trajectory_capability
+        self._finalize_trajectory = finalize_trajectory
 
     def execute(
         self,
@@ -170,6 +180,12 @@ class WebTeleopClient:
                 "status": {"state": "rejected", "message": decision.message},
                 "goal_future": None,
             }
+        try:
+            self._require_trajectory_capability()
+        except ValueError as exc:
+            return dict(accepted=False, decision=decision, goal_future=None,
+                response=dict(accepted=False, message=str(exc)),
+                status=dict(state='rejected', message=str(exc)))
         # 只等 0.1 s：Web 命令背后是人在等反馈，宁可快速失败也不要阻塞面板线程
         if not self._action_client.wait_for_server(timeout_sec=0.1):
             message = "follow_joint_trajectory action unavailable"
@@ -185,16 +201,17 @@ class WebTeleopClient:
         trajectory.joint_names = list(decision.joint_names)
         # 起点必须与决策里的关节顺序对齐，否则位置会挂到错误的关节上
         current = tuple(current_positions[name] for name in decision.joint_names)
-        for elapsed, positions in interpolate_joint_points(
-            current=current,
-            target=decision.positions,
-            duration=decision.duration,
-        ):
-            point = self._trajectory_point_factory()
-            point.positions = [float(v) for v in positions]
-            # time_from_start 是相对轨迹起点的时刻（s），由插值函数按步长给出
-            set_duration(point.time_from_start, elapsed)
-            trajectory.points.append(point)
+        if self._trajectory_mode == 'prepared_v1':
+            # 两点包含 q/v/a，连续曲线由运动层准备；此处不离散化或修改请求时长。
+            from rebotarm_motion.trajectory_messages import point_to_point_message
+            trajectory = point_to_point_message(decision.joint_names, current,
+                decision.positions, decision.duration, trajectory_factory=self._trajectory_factory,
+                point_factory=self._trajectory_point_factory)
+            if self._finalize_trajectory is None:
+                raise ValueError('final planning binding required')
+            trajectory = self._finalize_trajectory(trajectory)
+        else:
+            self._append_legacy_points(trajectory, current, decision)
         goal = self._follow_goal_factory()
         goal.trajectory = trajectory
         future = self._action_client.send_goal_async(goal)
@@ -214,6 +231,36 @@ class WebTeleopClient:
             "goal_future": future,
             "trajectory": trajectory,
         }
+
+    def send_planned(self, trajectory, decision, *, gripper=(), feedback_callback=None):
+        """提交已预览的准确联合消息；不再插值、改时长或发送独立夹爪 Action。"""
+        self._require_trajectory_capability()
+        if self._trajectory_mode != 'prepared_v1':
+            raise ValueError('coordinated execution requires prepared_v1')
+        if not self._action_client.wait_for_server(timeout_sec=.1):
+            raise ValueError('follow_joint_trajectory action unavailable')
+        goal = self._follow_goal_factory()
+        goal.trajectory = trajectory
+        goal.move_gripper = bool(gripper)
+        if gripper:
+            goal.gripper_position, goal.gripper_max_effort = gripper
+        return dict(accepted=True,decision=decision,response=decision_response(decision),
+            status=dict(state='submitted',message='联合轨迹已提交，等待控制器接纳',duration=decision.duration),
+            trajectory=trajectory,goal_future=self._action_client.send_goal_async(goal,
+                feedback_callback=feedback_callback))
+
+    def _append_legacy_points(self, trajectory, current, decision):
+        """保留旧模式的位置点序列；不补写导数，避免把兼容输入错误标成 C1/C2。"""
+        for elapsed, positions in interpolate_joint_points(
+            current=current,
+            target=decision.positions,
+            duration=decision.duration,
+        ):
+            point = self._trajectory_point_factory()
+            point.positions = [float(v) for v in positions]
+            # time_from_start 是相对轨迹起点的时刻（s），由插值函数按步长给出
+            set_duration(point.time_from_start, elapsed)
+            trajectory.points.append(point)
 
     def stop(self, goal_handle: Any | None, *, trajectory_stop_client: Any) -> dict:
         """停止 Web 触发的运动：先请求控制器级停止，再取消动作目标。

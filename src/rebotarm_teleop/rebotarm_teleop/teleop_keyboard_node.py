@@ -5,8 +5,8 @@
 
 工作方式：以 ``poll_period`` 为周期轮询终端（非阻塞），每个有效按键由
 ``KeyboardCommandMapper`` 映射为「某关节 ±1 步」，再由 ``TeleopTargetPlanner``
-在当前反馈角上叠加 ``joint_step_rad`` 并夹紧到关节限位，最后以单点轨迹形式发给
-``/<ns>/follow_joint_trajectory`` 动作。
+在当前反馈角上叠加 ``joint_step_rad`` 并夹紧到关节限位，再发送 FJT。
+legacy 保留单个位置点；prepared_v1 由运动层生成完整五次首末约束，默认单步 0.02 rad / 0.4 s。
 
 对外话题/动作（``<ns>`` 取自参数 arm_namespace，默认 rebotarm）：
 - 动作 ``/<ns>/follow_joint_trajectory``：下发目标关节角；
@@ -17,10 +17,13 @@
 状态机（发布在 status 的 state 字段）：idle → active；按下空格为 stopped；
 配置 deadman_required 时，未在 input_timeout 内按过 deadman_key 的按键会被 blocked，
 只有 deadman_key 能刷新授权时间窗；超时未按键回落到 timeout，此后按键需重新按 deadman_key；
-动作服务端在 50 ms 内不可达则 unavailable，校验失败为 rejected。
+动作服务端在 50 ms 内不可达则 unavailable，校验失败为 rejected；Action 成功终结后发布 done。
 
 安全约束：终端被切到 cbreak 模式以逐字符读取输入，退出时必须恢复原终端设置；
-所有目标角都经关节限位夹紧，单次增量固定为 joint_step_rad，因此遥操作不会产生大跨度跳变。
+所有目标角都经关节限位夹紧；请求前核对执行能力和完整六轴反馈的本地接收年龄。
+反馈接收及时不代替后端源数据验证；忙时明确丢弃本次按键，不累积下一步目标。
+
+文件结构：时长编码 → 节点参数与终端设置 → 反馈/读键 → 单步发送与终态回调 → 状态发布和退出。
 """
 
 from __future__ import annotations
@@ -89,7 +92,14 @@ class TeleopKeyboardNode(Node):
             [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159],
         )
         self.declare_parameter("joint_step_rad", 0.02)
-        self.declare_parameter("trajectory_duration", 0.2)
+        self.declare_parameter("trajectory_execution_mode", 'legacy')
+        from .trajectory_capability import TrajectoryCapability
+        self._capability = TrajectoryCapability(self.get_parameter('trajectory_execution_mode').value)
+        self.declare_parameter("trajectory_duration", .4 if self._capability.expected == 'prepared_v1' else .2)
+        self._busy = False
+        self._step_generation = 0
+        self._retime_pending = None
+        self._feedback_at = 0.
         self.declare_parameter("poll_period", 0.05)
         self.declare_parameter("input_timeout", 0.5)
         self.declare_parameter("deadman_required", False)
@@ -125,11 +135,18 @@ class TeleopKeyboardNode(Node):
             FollowJointTrajectory,
             f"/{self._arm_namespace}/follow_joint_trajectory",
         )
+        from rebotarm_msgs.srv import RetimeArmTrajectory
+        self._retime_type = RetimeArmTrajectory
+        self._retime_client = self.create_client(RetimeArmTrajectory,
+            f'/{self._arm_namespace}/retime_arm_trajectory')
         self._status_pub = self.create_publisher(
             String,
             f"/{self._arm_namespace}/teleop/status",
             10,
         )
+        from rclpy.qos import DurabilityPolicy
+        self.create_subscription(String, f'/{self._arm_namespace}/trajectory_execution_mode',
+            self._capability.update, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         # 传感器数据用 BEST_EFFORT：与控制器发布端 QoS 匹配，宁可丢帧也不要阻塞。
         sensor_qos_spec = sensor_qos_kwargs()
         sensor_qos = QoSProfile(
@@ -160,9 +177,17 @@ class TeleopKeyboardNode(Node):
         for name, position in zip(msg.name, msg.position):
             if name in self._current_positions:
                 self._current_positions[str(name)] = float(position)
+        if set(self._joint_names).issubset(msg.name) and len(msg.position) >= len(msg.name):
+            self._feedback_at = time.monotonic()
 
     def _poll_key(self) -> None:
         """定时器回调：读取一个按键并完成「死锁检查 → 映射 → 限位 → 下发」流程。"""
+        if self._retime_pending is not None:
+            future, generation, deadline = self._retime_pending
+            if time.monotonic() >= deadline or generation != self._step_generation:
+                self._retime_pending = None
+                self._step_generation += 1
+                future.cancel()
         key = self._read_key()
         now = time.monotonic()
         if key is None:
@@ -173,6 +198,7 @@ class TeleopKeyboardNode(Node):
             return
         self._last_input_time = now
         if key == " ":
+            self._step_generation += 1  # 使尚在规划的按键响应失效；不产生后继运动。
             # 空格是软件级停止：本节点不再下发新目标，是否停止现有轨迹由控制器决定。
             self._publish_status("stopped", "keyboard stop requested")
             return
@@ -214,12 +240,22 @@ class TeleopKeyboardNode(Node):
         message: str,
         key: str,
     ) -> None:
-        """把一次按键结果作为单点轨迹发出。
+        """把一次按键结果按配置等级发出，并占用单步状态直到 Action 终态。
 
         只等 0.05 s 服务端：控制器不在线时立刻报 unavailable 并丢弃本次目标，
         不排队、不阻塞定时器，避免按键积压成突然的大幅运动。
-        状态发布挂在 future 回调上：目标被接受即视为 active（不等待执行完成）。
+        目标被接受只发布 active；后续结果回调才区分 done/failed 并解除本地 busy。
         """
+        if self._busy:
+            self._publish_status('rejected', 'keyboard step busy; input discarded', key=key)
+            return
+        try:
+            self._capability.require()
+            if time.monotonic()-self._feedback_at > .15:
+                raise ValueError('fresh joint feedback required')
+        except ValueError as exc:
+            self._publish_status('rejected', str(exc), key=key)
+            return
         if not self._action_client.wait_for_server(timeout_sec=0.05):
             self._publish_status("unavailable", "follow_joint_trajectory action unavailable")
             return
@@ -229,10 +265,75 @@ class TeleopKeyboardNode(Node):
         point.positions = [float(v) for v in positions]
         _set_duration(point.time_from_start, self._trajectory_duration)
         trajectory.points = [point]
+        if self._capability.expected == 'prepared_v1':
+            # 前端不实现插值数学；运动层给出完整约束，后端准备后逐周期采样。
+            from rebotarm_motion.trajectory_messages import point_to_point_message
+            trajectory = point_to_point_message(joint_names,
+                tuple(self._current_positions[name] for name in joint_names), positions,
+                self._trajectory_duration, trajectory_factory=JointTrajectory,
+                point_factory=JointTrajectoryPoint)
+            if not self._retime_client.service_is_ready():
+                self._publish_status('unavailable', 'trajectory retiming service unavailable', key=key)
+                return
+            request = self._retime_type.Request()
+            request.trajectory, request.fixed_duration = trajectory, True
+            request.velocity_scaling = request.acceleration_scaling = 1.
+            self._busy = True
+            generation = self._step_generation
+            deadline = time.monotonic()+2.
+            future = self._retime_client.call_async(request)
+            self._retime_pending = (future, generation, deadline)
+            future.add_done_callback(lambda result:self._retimed_step(result,generation,deadline,message,key))
+            return
+        self._dispatch_step(trajectory, message, key)
+
+    def _retimed_step(self, future, generation, deadline, message, key):
+        """固定时长只检查不延长；异步等待不阻塞反馈，旧按键响应不能触发发送。"""
+        try:
+            self._retime_pending = None
+            if generation != self._step_generation or time.monotonic() > deadline:
+                raise ValueError('keyboard planning canceled or exceeded 2 s')
+            result = future.result()
+            if not result.success or not result.executable:
+                raise ValueError(result.message if not result.success else 'enable and re-plan keyboard step')
+            self._dispatch_step(result.trajectory,message,key)
+        except Exception as exc:
+            self._busy = False
+            self._publish_status('rejected', str(exc), key=key)
+
+    def _dispatch_step(self, trajectory, message, key):
+        """只发送原最终消息；后端仍原子核验会话与代次。"""
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = trajectory
-        future = self._action_client.send_goal_async(goal)
-        future.add_done_callback(lambda _future: self._publish_status("active", message, key=key))
+        self._busy = True
+        try:
+            future = self._action_client.send_goal_async(goal)
+            future.add_done_callback(lambda value: self._goal_response(value, message, key))
+        except Exception as exc:
+            self._busy = False
+            self._publish_status('failed', str(exc), key=key)
+
+    def _goal_response(self, future, message, key):
+        """处理接纳或拒绝；接纳后仍保持 busy，避免运动中连续按键形成排队轨迹。"""
+        try:
+            handle = future.result()
+            if handle is None or not handle.accepted:
+                raise ValueError('keyboard trajectory goal rejected')
+            self._publish_status('active', message, key=key)
+            handle.get_result_async().add_done_callback(lambda value: self._goal_result(value, key))
+        except Exception as exc:
+            self._busy = False
+            self._publish_status('rejected', str(exc), key=key)
+
+    def _goal_result(self, future, key):
+        """释放本地单步占用，并同时核对 ROS 终态及 FJT 错误码。"""
+        self._busy = False
+        try:
+            response = future.result()
+            state = 'done' if response.status == 4 and response.result.error_code == 0 else 'failed'
+            self._publish_status(state, response.result.error_string, key=key)
+        except Exception as exc:
+            self._publish_status('failed', str(exc), key=key)
 
     def _publish_status(self, state: str, message: str, *, key: str | None = None) -> None:
         """发布一条 JSON 状态；字典键名与 state 取值都是面板依赖的对外契约。"""

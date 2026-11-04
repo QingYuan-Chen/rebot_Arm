@@ -11,7 +11,8 @@
        ``headless=True`` 启动，模型指向仿真包自带的桌面场景
        ``models/rebotarm/scene.xml``（机器人 + 桌面 + 被操作物代理）。
     2. bringup 的运动规划演示启动 ``moveit_demo.launch.py``：拉起规划节点与可选可视化，
-       使用同一命名空间与仿真时钟。
+       使用同一命名空间与仿真时钟，同时启动轨迹准备服务。
+    3. use_dashboard=true 时启动网页节点，明确绑定 MuJoCo 后端与相同轨迹执行模式。
 
 后端选择逻辑
     本文件不做后端分支：仿真节点的 ``backend`` 被固定为 ``"mujoco"``，参数不是该值时
@@ -20,7 +21,9 @@
 参数来源与安全默认值
     - ``use_fake_joint_states=false``：关节状态必须来自真实物理步进，不能用假发布器，
       否则规划会基于与仿真不一致的状态；
-    - ``use_sim_time=true``：规划与执行统一使用仿真时钟，避免墙钟漂移影响轨迹判定；
+    - ``use_sim_time=true``：规划消息与曲线执行使用仿真时钟；准备期限仍使用主机单调时钟；
+    - ``trajectory_execution_mode=prepared_v1``：日常仿真使用已验收的新路径，实机入口默认值独立；
+    - ``trajectory_trace_path``：空串禁用逐步记录，指定路径时由仿真后端写 JSONL；
     - ``use_rviz`` 默认 true，只影响可视化，不影响控制；
     - ``use_mujoco_viewer`` 默认 true，仅打开本地查看器；无显示环境设置
       use_rviz:=false use_mujoco_viewer:=false；
@@ -30,12 +33,17 @@
 
 安全说明
     启动本文件不会使能任何真实电机：真机使能始终需要显式指令与现场安全检查。
+
+对外接口与文件结构
+    generate_launch_description 返回完整仿真组合；先解析包路径和参数，再声明仿真节点、
+    MoveIt include 与可选 Dashboard。切换 legacy 只改变执行策略，不移除准备服务。
 """
 
 from __future__ import annotations
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -52,6 +60,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_rviz = LaunchConfiguration("use_rviz")
     use_mujoco_viewer = LaunchConfiguration("use_mujoco_viewer")
+    trajectory_mode = LaunchConfiguration('trajectory_execution_mode')
     # 桌面场景：机器人在原点，附带桌面与可被抓取的物体代理，便于验证抓取流程。
     upstream_model = PathJoinSubstitution(
         [simulation_share, "models", "rebotarm", "scene.xml"]
@@ -61,6 +70,13 @@ def generate_launch_description():
         [
             # 命名空间：关节状态、动作与服务名都带该前缀，必须与规划侧一致。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
+            # 软件及物理操作链验收通过；仅仿真日常默认切换，实机仍为 legacy。
+            DeclareLaunchArgument('trajectory_execution_mode', default_value='prepared_v1',
+                choices=['legacy', 'prepared_v1']),
+            DeclareLaunchArgument('use_dashboard', default_value='false'),
+            DeclareLaunchArgument('dashboard_port', default_value='8080'),
+            DeclareLaunchArgument('trajectory_trace_path', default_value=''),
+            DeclareLaunchArgument('planning_trace_path', default_value=''),
             # 可视化开关：仅影响是否打开 RViz，不改变控制链路。
             DeclareLaunchArgument("use_rviz", default_value="true"),
             # 统一使用仿真时钟；仿真推进与墙钟解耦，必须为 true。
@@ -101,6 +117,8 @@ def generate_launch_description():
                         "model_path": upstream_model,
                         "arm_namespace": arm_namespace,
                         "publish_rate_hz": publish_rate_hz,
+                        'trajectory_execution_mode': trajectory_mode,
+                        'trajectory_trace_path': LaunchConfiguration('trajectory_trace_path'),
                     }
                 ],
             ),
@@ -115,7 +133,18 @@ def generate_launch_description():
                     "arm_namespace": arm_namespace,
                     "use_fake_joint_states": "false",
                     "use_sim_time": use_sim_time,
+                    'prepare_trajectories': "true",
+                    'trajectory_execution_mode': trajectory_mode,
+                    'planning_trace_path': LaunchConfiguration('planning_trace_path'),
                 }.items(),
             ),
+            Node(package='rebotarm_dashboard', executable='TeleopStatusPanelNode',
+                name='teleop_status_panel_node', output='screen',
+                condition=IfCondition(LaunchConfiguration('use_dashboard')),
+                parameters=[{'arm_namespace': arm_namespace, 'use_sim_time': use_sim_time,
+                    'simulation_backend': 'mujoco', 'use_hardware': False,
+                    'trajectory_execution_mode': trajectory_mode,
+                    'execution_mode': 'execute', 'web_execute_enabled': True,
+                    'port': LaunchConfiguration('dashboard_port')}]),
         ]
     )

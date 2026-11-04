@@ -72,7 +72,7 @@ class VisualGraspServiceGateway:
                 len(names) != 6
                 or set(names) != {f"joint{i}" for i in range(1, 7)}
                 or not points
-                or len(points[-1].positions) != 6
+                or len(points[-1].positions) != len(names)
                 or not all(math.isfinite(value) for value in points[-1].positions)
             ):
                 return False, "plan-only response has no valid arm trajectory"

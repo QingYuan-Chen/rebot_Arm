@@ -30,6 +30,7 @@
   <!-- trajectory_msgs：JointTrajectory / JointTrajectoryPoint，组装下发的轨迹点 -->
   <exec_depend>trajectory_msgs</exec_depend>
 
+  <exec_depend>rebotarm_trajectory</exec_depend>
   <export>
     <build_type>ament_python</build_type>
   </export>

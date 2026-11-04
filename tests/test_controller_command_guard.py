@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from rebotarmcontroller.command_guard import (
+from rebotarmcontroller.runtime.command_guard import (
     CommandGuard, SafetyAction, passthrough_decision,
 )
 

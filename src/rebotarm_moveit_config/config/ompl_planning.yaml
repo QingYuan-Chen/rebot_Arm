@@ -34,6 +34,11 @@ response_adapters:
 # 设得过小会因关节状态反馈抖动而频繁拒绝规划，设得过大则可能在明显偏离的位置起规划。
 start_state_max_bounds_error: 0.1
 
+# 非串联复合组使用联合关节约束；位姿目标须先对 arm 求 IK，不为复合组冒用 IK 插件。
+gripper:
+  planner_configs: [RRTConnectkConfigDefault]
+  longest_valid_segment_fraction: 0.01
+
 # 可被规划组引用的规划器实例。arm 规划组通过下面的 planner_configs 列表选用其中若干项；
 # 只在这里声明而未列入某个规划组，RViz 里就不会出现该规划器选项。
 planner_configs:

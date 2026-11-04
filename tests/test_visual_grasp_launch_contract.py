@@ -62,7 +62,9 @@ def test_all_public_entries_expand_without_starting_processes():
             timeout=30,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert len(set(re.findall(r"^    '([^']+)':", result.stdout, re.M))) == 18
+        arguments = set(re.findall(r"^    '([^']+)':", result.stdout, re.M))
+        assert len(arguments) == 19
+        assert "trajectory_execution_mode" in arguments
 
 
 def test_retired_vision_paths_are_not_reintroduced():

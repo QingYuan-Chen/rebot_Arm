@@ -10,6 +10,60 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_moveit_plugin_lifetime_environment_is_scoped_and_preserves_user_preload(tmp_path):
+    """只展开启动描述，确认两类 MoveIt 进程使用索引中的插件，其他节点不受影响。"""
+    result = subprocess.run([sys.executable, "-", str(ROOT), str(tmp_path)], input=r'''
+import importlib.util
+import os
+from pathlib import Path
+import sys
+from unittest.mock import patch
+try:
+    from launch import LaunchContext
+    from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
+    from launch_ros.actions import Node
+except ImportError:
+    sys.exit(77)
+root, prefix = map(Path, sys.argv[1:])
+plugin = prefix / 'lib/libmoveit_simple_controller_manager.so'
+plugin.parent.mkdir()
+plugin.touch()
+spec = importlib.util.spec_from_file_location('moveit_demo', root / 'src/rebotarm_bringup/launch/moveit_demo.launch.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+context = LaunchContext()
+def text(value):
+    return perform_substitutions(context, normalize_to_list_of_substitutions(value))
+with patch.object(module, 'get_package_prefix', return_value=str(prefix)) as lookup:
+    for inherited in ('', '/existing/user.so'):
+        with patch.dict(os.environ, {'LD_PRELOAD': inherited}):
+            description = module.generate_launch_description()
+            protected = []
+            for node in description.entities:
+                if not isinstance(node, Node):
+                    continue
+                environment = {text(k): text(v) for k, v in node.additional_env or []}
+                executable = text(node.node_executable)
+                if executable in ('move_group', 'TrajectoryPreparationNode'):
+                    assert environment['LD_PRELOAD'] == ' '.join(filter(None, (str(plugin), inherited)))
+                    protected.append(executable)
+                else:
+                    assert 'LD_PRELOAD' not in environment, executable
+            assert set(protected) == {'move_group', 'TrajectoryPreparationNode'}
+        assert lookup.call_args.args == ('moveit_simple_controller_manager',)
+    plugin.unlink()
+    try:
+        module.generate_launch_description()
+    except FileNotFoundError as exc:
+        assert str(plugin) in str(exc)
+    else:
+        raise AssertionError('missing plugin must fail before processes are started')
+''', text=True, capture_output=True, timeout=30)
+    if result.returncode == 77:
+        pytest.skip("ROS 2 launch is not installed in this Python environment")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("mode", ["default", "environment", "argument"])
 def test_relocated_launches_select_independent_interpreters(tmp_path, mode):
     # A fresh interpreter also isolates these tests from other tests' ROS stubs.

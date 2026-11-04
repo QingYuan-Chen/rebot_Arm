@@ -10,6 +10,42 @@
 
 ## 职责边界
 
+### 共享轨迹内核
+
+`rebotarm_trajectory` 是 `ament_python` 纯数值库，无节点、ROS、NumPy、SDK、
+物理引擎、线程和时钟依赖，模块平铺包根目录。它拥有不可变轨迹点和分段系数、
+结构/维度/有限性/时间校验、已检查系数解码、旧阶梯索引、线性采样和 q/v/a/jerk 求值。
+motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查；控制器保留发送回执、
+执行代次、任务与资源占用；仿真保留物理时间、模式与生命周期。
+三者单向依赖共享包，控制器及仿真不导入 motion 实现。
+
+`PrepareArmTrajectory` 属于内部准备接口。公共 FJT 只执行完整六轴；网页 prepared_v1
+通过 `ExecuteTeleopMotion` 提交六轴轨迹和可选的独立夹爪目标。
+后端先预留机械臂与夹爪，motion 在 MoveItPy 同一只读场景锁内完成采样检查，
+后端原子复核会话、代次、已发送保持目标、新鲜反馈、夹爪起始状态与场景版本后使用原系数；
+机械臂新任务准入不要求连续静止窗口，停止事务仍需完成其静止确认。
+准备等待不占设备周期；已观察到的相关场景变化使曲线停止保持。本批不提供动态避障。
+模式、期限和验证边界见 [P005 执行接入](features/p005_prepared_trajectory.md)。
+
+七轴、单手指及额外携带右指的 FJT 均明确拒绝。共享包保留六轴分级插值和具名系数，
+能力契约 v3 声明六轴 FJT、网页 Action v1、独立位置夹爪及规划绑定版本。
+`GetArmPlanningState` 由后端所有者只读复制会话、六轴代次和已发送保持目标；
+共享内核 `planning.py` 编码快照、最终纳秒曲线摘要及执行/参考/失能预览用途，不读取时钟。
+最终计划先规范化起点再统一重定时；执行预约与准备复核绑定，不能再改节点或时间。
+普通 OMPL 生成最终计划，`ompl_reference` 保留虚拟起点，示教拼接和视觉实际阶段再最终绑定。
+motion 在规划阶段重定时，
+C++ MoveIt 响应插件调用独立 Python 纯计算服务；执行准备不改时间。MoveIt 保留 `arm`
+和 `gripper` 两个独立组；后者通过薄 GripperCommand 适配将左指 m 转换为双指总开口 m。
+控制器 `runtime/coordinated_trajectory.py` 持有网页组合任务，在同一设备周期登记原六轴
+轨迹与独立夹爪目标；夹爪复用原限速、到位、超时及中性释放，不参与 FJT 采样或重定时。
+整体成功等待两侧完成和清理，不承诺同时到达或总线原子同步。MuJoCo 用物理时间执行六轴
+曲线，并按实际反馈确认独立夹爪到位。网页碰撞计算副本固定闭合双指，其他 FJT/示教/视觉
+冻结新鲜真实开度；策略和真实快照分别绑定，不修改公共场景或实际反馈。关节状态桥按机械臂
+和夹爪各自源时间发布，旧夹爪不能因新机械臂帧变为新鲜。
+场景摘要仍按原频率观察，仅变化时发布持久化版本，避免重复值占用设备请求队列。
+示教仅回放六轴，夹爪记录保留查看。视觉先独立预张爪完成，再用实际开度规划和执行
+接触前六轴运动；不将位置跟踪异常解释为接触或抓取成功。
+
 ### 硬件职责（Hardware ownership）
 
 `rebotarmcontroller` 负责真实硬件通信和最后一道安全防线。
@@ -20,7 +56,7 @@
 连接、生命周期、反馈和输出均在该线程协调，失能时继续采集。
 `arm_execution.py` 持有目标和轨迹游标，`arm_trajectory.py` 持有独立任务和到位结果，
 `arm_position_control.py` 生成位置命令，`controller_kinematics.py` 以规范模型计算 FK。
-ROS 通过 manager 的提交、取消和只读进度接口交互，不推进执行时间轴。
+ROS 适配器直接接收职责组件的提交、取消和只读查询端口，不推进执行时间轴。
 临时 SDK 桥和路径注入已删除，生产控制器与运动计算不再导入厂商 Python SDK。
 `feedback_acquisition.py` 拥有反馈采集、验证缓存及只读健康判断，
 `feedback_reader.py` 装配设备分组、提供一致数值快照与兼容查询。
@@ -31,19 +67,32 @@ ROS 通过 manager 的提交、取消和只读进度接口交互，不推进执�
 置零准入和关闭验证事务，以及生命周期状态和关闭策略；通过 `LifecyclePorts`
 注入设备、反馈及执行器接口，不接收整个 manager。夹爪零位连续新帧验证仍由夹爪接口提供。
 `arm_controller.py` 负责六轴准入、保持、停靠与透传，`arm_stop.py` 按周期确认停止；
-`stationary_evidence.py` 提供独立新帧、位置极差及固定锚点证据，重复停止加入同一
-确认，稳定位置保持才可沿用原目标。量化导数、同步审计及待实机验证的策略见
+`stationary_evidence.py` 提供独立新帧、速度和完整时间窗口证据；位置仍检查有限性，
+不再以位置极差或锚点偏差判定静止。重复停止加入同一确认，两侧均确认前不释放
+联合预约；任务收尾按当前执行代次归属，稳定位置保持才可沿用原目标。量化导数、同步审计及待实机验证的策略见
 [量化反馈判定](features/quantized_feedback_safety.md)。
 停止请求等待时，运行时继续处理失能请求，旧代次的续体不能发送命令。
 重力补偿状态与计算归 `gravity_control.py`，启停、模式交接与诊断归
 `gravity_controller.py`。`controller_cycle.py` 分发采集和执行，
 `controller_protection.py` 协调设备故障清理及一次保护失能。
-全部模块平铺包根目录；C++ 后续归属见
+模块按一层职责子目录组织：`contracts/` 声明数据与能力接口，`hardware/` 负责通信与反馈，
+`runtime/` 负责设备线程、生命周期与安全协调，`arm/`、`gripper/`、`gravity/` 保留各自执行状态，
+`ros/` 负责协议与消息适配。根目录只保留节点入口、装配、配置和参数模块，`examples/` 保留原路径。
+子包不汇总导入，旧平铺模块不保留转发；Python 调用方使用新路径，ROS 名称与入口不变。
+目录整理保留既有模块依赖，公共数值函数归位及核心层 ROS 依赖清理另行规划。C++ 后续归属见
 [拆分规划](../design/controller_refactor_plan.md)。
 
 `command_guard.py` 已接管透传准入与故障保护锁存，位置边界统一读取规范 URDF。
-`HardwareManager` 只装配组件及转发公开接口，不保存业务状态、不提供可写私有转发或
-惰性装配。正式构造允许注入运行时，离线组件使用假驱动/时钟，与生产遵守同一准入路径。
+`HardwareManager` 只有构造函数，创建唯一运行时、生命周期及六个职责组件并接线，
+不提供业务方法、属性转发或动态代理。节点组合入口读取装配字段，向服务、Action、
+发布器、透传和关闭协调注入 `ros_ports.py` 声明的职责端口；端口是接口声明，直接传入
+原所有者，不实现第二层门面或复制状态。发布器只接收只读能力。正式构造允许注入运行时，
+离线组件使用假驱动/时钟，与生产遵守同一准入路径。组件间冻结端口以绑定方法装配，
+只有动态取值或参数适配使用闭包。`device_request` 统一在生命周期、六轴、夹爪和重力
+组件的命令入口，策略集中定义在 `device_requests.py`，生命周期也显式接收同一运行时。
+入队位于生命周期锁外，设备线程内的嵌套调用直接执行；同步等待编排仍在调用线程，
+关闭确认后由调用线程回收设备 worker。结构门禁限制 manager 只有装配、适配层访问
+不超出职责端口，并核对请求入口集合。
 `controller_values.py` 补充不可变六轴快照、夹爪接纳和结果，沿用既有目标、命令及回执；
 健康任务失败的 `STOP_HOLD` 与设备故障的 `PROTECTIVE_DISABLE` 均有实际执行路径。
 跨语言对照输入、输出、回执和状态顺序见[对照样本说明](features/controller_reference_samples.md)。
@@ -109,6 +158,12 @@ Action 等待到位。迟到接纳仍跟踪并取消，停止确认前不接新�
 - 示教回放设置和状态 payload
 
 `TeachReplayWorkflow` 是唯一的回放实现，负责整个回放生命周期，包括准备、dry-run token、对齐、碰撞检查、Action 回调和跟踪状态。它接收明确的快照/状态回调和 ROS 适配器；既不导入 Dashboard 模块，也不控制 HTTP 命令授权。
+
+示教在位置处理前识别输入等级：q→C0、q/v→C1、完整 q/v/a→C2。q/v 在滤波路径上生成
+派生参考速度，不补 a；示教专用 MoveIt 对齐显式转换到相同等级后，整条统一重定时和
+限值/碰撞复核，普通 MoveIt 不转换。示教包保存带等级/来源的 v5 派生文件，不覆盖旧文件。
+公共 FJT 的分级兼容规则不变。准备/拼接失败与碰撞
+未检查分别报告；正式准备不计算离线参考对照网格，限值和碰撞覆盖不能省略。
 
 已退役的 `TeachReplayNode`、`teach_replay.launch.py` 和独立录制 launch 不再作为并行命令行路径维护。录制和回放都从 Dashboard 组合入口发起，以保证始终使用同一套安全门和授权状态。
 
@@ -286,6 +341,7 @@ rebotarm_dashboard
   -> MoveIt / ROS messages / controller actions
 
 rebotarm_teach -> rebotarm_motion
+rebotarm_motion / rebotarmcontroller / rebotarm_simulation -> rebotarm_trajectory
 rebotarm_teleop -> 使用旧 interactive preview 辅助工具时依赖 rebotarm_motion
 rebotarm_vision -> 为验证和执行依赖 rebotarm_motion / MoveIt 接口
 rebotarm_bringup -> 仅依赖各包的 launch 入口和配置
@@ -408,8 +464,9 @@ RViz 拖动控制现在采用原生 MoveIt MotionPlanning 工作流。不再使�
 
 - 为纯逻辑添加单元测试
 - 变更职责归属时添加包分层测试
-- 运行 `python -m pytest tests -q`
-- 对变更过的 Python 包运行 `python -m compileall`
+- 运行 `AGENTS.md`「检查要求」中必需的分层测试和 `compileall` 检查
+- 根据改动范围和风险选择定向检查；完整回归仅在用户明确要求、重大跨包或安全关键改动、
+  发布前确认整体兼容性时运行，命令以 `AGENTS.md` 为准
 
 ### 仿真内部状态与资源
 

@@ -130,7 +130,7 @@ def test_internal_imports_launch_nodes_and_resource_owners_are_declared():
 def test_hardware_has_no_teach_file_or_workflow_dependency():
     package = ROOT / "src/rebotarmcontroller"
     assert not (package / "rebotarmcontroller/teach_recorder.py").exists()
-    for path in (package / "rebotarmcontroller").glob("*.py"):
+    for path in (package / "rebotarmcontroller").rglob("*.py"):
         source = path.read_text()
         assert "rebotarm_teach" not in source
         assert "teleop/teach_record/" not in source

@@ -17,7 +17,7 @@
     服务 ``/<ns>/gripper/set``：直接设置夹爪开口宽度并立即刷新状态。
 
 关键流程与状态：
-    ``_goal_callback`` 只拒绝空轨迹；``_execute_goal`` 用单调时钟推进插值，直到轨迹末端或被取消；
+    ``_goal_callback`` 只接纳完整六轴轨迹；``_execute_goal`` 用单调时钟推进插值，直到轨迹末端或被取消；
     订阅端（上层流程）可随时通过取消或停止服务打断。轨迹点时间戳非法时会按默认总时长做均匀回退。
 
 线程模型：
@@ -40,6 +40,8 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_srvs.srv import Trigger
 
 from rebotarm_msgs.msg import JointMotorState
@@ -116,6 +118,11 @@ class SimTrajectoryControllerNode(Node):
         self._motion_lock = threading.Lock()
         self._callback_group = ReentrantCallbackGroup()
 
+        # 轻量预演仍使用旧采样；持久化能力声明让后启动的前端也能拒绝 prepared_v1 错配。
+        self._capability_pub = self.create_publisher(String,
+            f'/{self._arm_namespace}/trajectory_execution_mode',
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self._capability_pub.publish(String(data='legacy'))
         self._joint_state_pub = self.create_publisher(JointState, f"/{self._arm_namespace}/joint_states", 10)
         self._gripper_state_pub = self.create_publisher(
             JointMotorState,
@@ -141,12 +148,14 @@ class SimTrajectoryControllerNode(Node):
         )
 
     def _goal_callback(self, goal_request) -> GoalResponse:
-        """目标准入检查：只有关节名为空的轨迹会被拒绝，其余一律接受。
+        """与正式后端保持六轴 FJT 契约；手指通过独立接口设置，不静默丢弃。
 
         保守起见这里不做范围校验——本节点只做可视化，位置越界由上层规划与安全监控负责。
         """
-        if self._recovery_lock.locked() or self._motion_lock.locked() or not goal_request.trajectory.joint_names:
-            self.get_logger().warn("rejecting empty trajectory or busy simulation controller")
+        names = goal_request.trajectory.joint_names
+        if (self._recovery_lock.locked() or self._motion_lock.locked()
+                or len(names) != 6 or set(names) != set(self._joint_names[:6])):
+            self.get_logger().warn("rejecting non-six-axis trajectory or busy simulation controller")
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 

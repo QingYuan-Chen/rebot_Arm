@@ -10,7 +10,7 @@
 #    - "use_hardware=true"：启动硬件控制器（唯一硬件入口）；robot_state_publisher订阅控制器发布的视觉关节状态；
 #    - "use_hardware=false"（默认）：不启动硬件节点，由仿真轨迹控制器发布关节状态并提供
 #      FollowJointTrajectory 动作服务；按键会反馈到 RViz 姿态，也绝不会驱动真实电机；
-#    - 键盘节点与夹爪可视化关节节点始终启动：前者读取并尝试发送目标，后者补齐夹爪关节；
+#    - 真机 prepared_v1 复用完整 MoveIt 组合提供场景和准备服务，其他分支保留本地状态链；
 #    - RViz 仅当 "use_local_rviz=true" 时启动。
 #
 #参数来源
@@ -24,7 +24,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -34,6 +34,10 @@ def generate_launch_description():
     """构造键盘入口：在真机控制器与轻量仿真轨迹控制器之间二选一。"""
     arm_namespace = LaunchConfiguration("arm_namespace")
     use_hardware = LaunchConfiguration("use_hardware")
+    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
+    use_prepared_hardware = PythonExpression([
+        "'", use_hardware, "'.lower() == 'true' and '", trajectory_mode, "' == 'prepared_v1'",
+    ])
     use_local_rviz = LaunchConfiguration("use_local_rviz")
     arm_config = LaunchConfiguration("arm_config")
     gripper_config = LaunchConfiguration("gripper_config")
@@ -80,6 +84,8 @@ def generate_launch_description():
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             # use_hardware：true=驱动真机；false=启动轻量仿真轨迹控制器。默认 false，防止误启动真机。
             DeclareLaunchArgument("use_hardware", default_value="false"),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
+                choices=["legacy", "prepared_v1"]),
             # use_local_rviz：是否启动 RViz 可视化。
             DeclareLaunchArgument("use_local_rviz", default_value="true"),
             # channel：电机总线串口设备；空串表示交由 arm.yaml/gripper.yaml 决定。
@@ -116,20 +122,45 @@ def generate_launch_description():
                     [config_share, "config", "keyboard_control.yaml"]
                 ),
             ),
-            # 真机控制器由统一底层片段提供；无硬件模式不会解析或启动该片段。
+            # 旧模式仅包含底层控制器；新模式在下一个 include 中补齐场景，不能同时启动。
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     PathJoinSubstitution(
                         [bringup_share, "launch", "hardware_controller.launch.py"]
                     )
                 ),
-                condition=IfCondition(use_hardware),
+                condition=IfCondition(PythonExpression([
+                    "'", use_hardware, "'.lower() == 'true' and not (", use_prepared_hardware, ")",
+                ])),
                 launch_arguments={
                     "arm_config": arm_config,
                     "gripper_config": gripper_config,
                     "channel": channel,
                     "joint_state_rate": joint_state_rate,
                     "arm_namespace": arm_namespace,
+                    "trajectory_execution_mode": trajectory_mode,
+                }.items(),
+            ),
+            # 复用同一硬件/MoveIt 组合；状态发布和 RViz 由该组合统一拥有。
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    PathJoinSubstitution([bringup_share, "launch", "interactive_system.launch.py"])
+                ),
+                condition=IfCondition(use_prepared_hardware),
+                launch_arguments={
+                    "use_hardware": "true",
+                    "use_moveit_preview": "true",
+                    "use_moveit_fake_joint_states": "false",
+                    "start_passive_joint_state_publisher": "false",
+                    "arm_config": arm_config,
+                    "gripper_config": gripper_config,
+                    "channel": channel,
+                    "joint_state_rate": joint_state_rate,
+                    "arm_namespace": arm_namespace,
+                    "trajectory_execution_mode": trajectory_mode,
+                    "use_local_rviz": use_local_rviz,
+                    # 保留旧键盘直接包含硬件片段时的夹持超时，不继承组合的 10 s 默认。
+                    "grasp_hold_timeout_sec": "30.0",
                 }.items(),
             ),
             # 无硬件分支的轨迹服务端：提供键盘所需的 FollowJointTrajectory，并发布可视化用的
@@ -149,6 +180,7 @@ def generate_launch_description():
                 name="gripper_visual_joint_state_node",
                 output="screen",
                 parameters=[{"arm_namespace": arm_namespace}],
+                condition=UnlessCondition(use_prepared_hardware),
             ),
             # TF 发布：订阅控制器的视觉关节状态（夹爪关节已补齐），据此计算并发布 TF。
             Node(
@@ -158,6 +190,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"robot_description": robot_description}],
                 remappings=[("/joint_states", ["/", arm_namespace, "/visual_joint_states"])],
+                condition=UnlessCondition(use_prepared_hardware),
             ),
             # 键盘输入节点：读取键盘增量并通过 prefix 保证能拿到终端 stdin。
             Node(
@@ -166,7 +199,10 @@ def generate_launch_description():
                 name="teleop_keyboard_node",
                 output="screen",
                 prefix=keyboard_prefix,
-                parameters=[common_config, keyboard_config, {"arm_namespace": arm_namespace}],
+                parameters=[common_config, keyboard_config, {
+                    "arm_namespace": arm_namespace,
+                    "trajectory_execution_mode": trajectory_mode,
+                }],
             ),
             # 可选 RViz：加载本包的标准布局 rebotarm.rviz。
             Node(
@@ -175,7 +211,9 @@ def generate_launch_description():
                 name="rviz2",
                 output="screen",
                 arguments=["-d", rviz_config],
-                condition=IfCondition(use_local_rviz),
+                condition=IfCondition(PythonExpression([
+                    "'", use_local_rviz, "'.lower() == 'true' and not (", use_prepared_hardware, ")",
+                ])),
             ),
         ]
     )

@@ -5,7 +5,7 @@
 本文记录本仓库在 Ubuntu 24.04 / ROS 2 Jazzy 上的本地运行基线。
 
 > 当前状态：P0-P6 已按用户确认的工程范围关闭，未执行项不冒充通过。
-> `HardwareManager.connect()` 只连接并保持失能，任何新机器或新一轮真机动作仍需
+> `ControllerLifecycle.connect()` 只连接并保持失能，任何新机器或新一轮真机动作仍需
 > 独立确认现场条件和授权。安装、构建、导入检查不会授权或自动启动硬件。
 
 下列命令均从当前仓库根目录执行。推荐顺序：系统依赖 → 源码构建 →
@@ -36,7 +36,7 @@ GraspNet 与 MuJoCo 的 PyYAML 固定版本分别为6.0.1和6.0.3；直接合并
 sudo apt update
 sudo apt install build-essential git python3-venv python3-pip \
   python3-colcon-common-extensions python3-vcstool python3-rosdep python3-pytest \
-  ros-jazzy-moveit ros-jazzy-moveit-simple-controller-manager \
+  ros-jazzy-moveit ros-jazzy-moveit-simple-controller-manager ros-jazzy-moveit-py \
   ros-jazzy-pinocchio ros-jazzy-cv-bridge
 source /opt/ros/jazzy/setup.bash
 # 仅在本机从未初始化rosdep时执行 sudo rosdep init
@@ -167,7 +167,9 @@ python3 scripts/setup_motorbridge_fresh_feedback.py --check-installed
 保护失能策略不变。构建保留旧版本 wheel 以便回退。
 重复安装 bootstrap 清单后也必须重新安装审查补丁并检查；不要把原始 0.4.7 用作真机运行版本。
 
-厂商 SDK 仅供历史行为和数值对照，生产控制器与 motion 无需导入或注入其路径。
+旧厂商 Python SDK 是可选历史参考，正常构建、完整测试和部署均不需要下载、安装或
+设置其路径。默认 FK 回归使用固定数值样本，只有显式模型对照会读取用户提供的旧 URDF，
+命令见[硬件执行说明](../implemented/features/hardware_execution.md#sdk-退出的离线验收)。
 需保留参考树时，使用 `third_party/rebotarm_dependencies.repos` 固定版本：
 
 ```bash
@@ -295,7 +297,7 @@ auto_enable:=false
 P0 Gate B/C 自动使能、保持与失能验收工具已于 2026-09-19 移除，不再作为日常测试步骤。
 历史报告已从工作树清理；如需追溯，可从 Git 历史恢复。它们仅用于历史审计，不代表当前硬件通过验收。
 控制器的显式使能、反馈校验、失败回滚和停止保护继续保留。
-真机操作与停机步骤见 [功能命令参考](../reference/commands/rebotarm_feature_commands.md#moveit-实机操作与停机)。
+真机操作与停机步骤见 [功能命令参考](../reference/commands/rebotarm_feature_commands.md#真机-rviz-拖动)。
 
 ## 可选：MuJoCo 强化学习
 

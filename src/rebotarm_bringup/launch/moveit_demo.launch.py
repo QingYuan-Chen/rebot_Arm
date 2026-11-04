@@ -1,6 +1,6 @@
-"""MoveIt 独立演示/调试启动文件——只做规划与可视化，不接真机执行。
+"""MoveIt 规划、可视化及可选轨迹准备服务的公共启动组合。
 
-职责：在没有任何硬件与控制器动作的前提下，拉起一套最小可用的 MoveIt 规划环境，
+职责：本文件不创建硬件控制器，独立运行时拉起一套 MoveIt 规划环境，
 用来在 RViz 里检查 URDF/SRDF、规划组、命名姿态、运动学插件与 OMPL 参数是否配好。
 上层启动组合包（真机、示教、交互、仿真）都通过 IncludeLaunchDescription 复用它，
 并用 launch 参数切换「假关节状态」与「真实关节状态」两种数据源。
@@ -15,6 +15,7 @@
 4. robot_state_publisher：订阅 /<arm_namespace>/visual_joint_states，计算并发布 TF；
 5. move_group：MoveIt 规划节点，模型与参数全部来自本包 config/ 目录；
 6. rviz2：按 rviz/moveit.rviz 打开 MotionPlanning 面板。
+另在 prepare_trajectories=true 时启动运动层准备服务，使用相同模型与场景输入。
 
 launch 参数（由上层启动组合包传入，命名必须与控制器/驱动一致）：
 - use_rviz：是否启动 rviz2，默认 true；
@@ -22,9 +23,12 @@ launch 参数（由上层启动组合包传入，命名必须与控制器/驱动
 - use_fake_joint_states：true 时用 joint_state_publisher 造假的六轴关节角；接真机或
   接仿真时上层传 false，改为消费真实反馈；
 - use_sim_time：是否使用 /clock 仿真时间，接仿真时必须为 true。
+- prepare_trajectories：是否提供 prepared_v1 内部准备服务，默认 false；不切换后端模式。
 
 安全约束：本文件不下发任何轨迹执行目标，也不启用硬件；执行权限由控制器与上层启动
 组合包掌握。这里的轨迹执行容差只用于判断规划结果能否被执行器接受，不放宽硬件保护。
+
+文件结构：launch/MoveIt 配置导入 → 模型与规划参数装配 → 公共参数 → 准备/规划/可视化节点。
 """
 
 import os
@@ -33,9 +37,10 @@ import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
+from launch_ros.parameter_descriptions import ParameterValue
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from launch_ros.substitutions import FindPackageShare
 from moveit_configs_utils import MoveItConfigsBuilder
 
@@ -73,6 +78,17 @@ def generate_launch_description():
     arm_namespace = LaunchConfiguration("arm_namespace")
     use_fake_joint_states = LaunchConfiguration("use_fake_joint_states")
     use_sim_time = LaunchConfiguration("use_sim_time")
+    trajectory_mode = LaunchConfiguration('trajectory_execution_mode')
+    prepared_mode = PythonExpression(["'", trajectory_mode, "' == 'prepared_v1'"])
+    # Jazzy 2.12.4 的 TEM 先卸载控制器插件，再释放节点回调组；弱引用的析构代码仍在
+    # 插件中，会访问已卸载地址。仅为这两个进程保留插件映射至进程退出，对象照常析构。
+    # shortcut: 待配套 MoveIt 修复插件/回调组销毁顺序并通过退出回归后移除此兼容处理。
+    controller_plugin = os.path.join(get_package_prefix("moveit_simple_controller_manager"),
+                                    "lib", "libmoveit_simple_controller_manager.so")
+    if not os.path.isfile(controller_plugin):
+        raise FileNotFoundError(controller_plugin)
+    moveit_process_env = {"LD_PRELOAD": " ".join(filter(None, (
+        controller_plugin, os.environ.get("LD_PRELOAD", ""))))}
     moveit_share = FindPackageShare("rebotarm_moveit_config")
     rviz_config = PathJoinSubstitution([moveit_share, "rviz", "moveit.rviz"])
 
@@ -108,6 +124,27 @@ def generate_launch_description():
     ompl_planning_yaml = load_yaml(
         "rebotarm_moveit_config", "config/ompl_planning.yaml"
     )
+    legacy_adapters = ompl_planning_yaml['response_adapters']
+    prepared_adapters = list(legacy_adapters)
+    prepared_adapters.insert(prepared_adapters.index('default_planning_response_adapters/ValidateSolution'),
+        'rebotarm_motion/RetimeExecutionCurve')
+    execution_adapters = {
+        'arm_namespace': arm_namespace,
+        # 参考管线复用 OMPL 参数，只保留调用方指定的虚拟起点，不能直接执行。
+        'planning_pipelines': ParameterValue(PythonExpression([
+            repr(['ompl', 'ompl_reference']), ' if ', prepared_mode, ' else ', repr(['ompl'])])),
+        'ompl_reference': dict(ompl_planning_yaml, response_adapters=prepared_adapters,
+            execution_reference=True),
+        'ompl.execution_reference': False,
+        # 默认 0.001 同时作用于 rad/m，会吞掉亚毫米夹爪路径；新模式明确保留其节点。
+        'ompl.totg.min_angle_change': ParameterValue(PythonExpression([
+            '1e-7 if ', prepared_mode, ' else 0.001']), value_type=float),
+        'ompl.response_adapters': ParameterValue(PythonExpression([
+            repr(prepared_adapters), ' if ', prepared_mode, ' else ', repr(legacy_adapters)])),
+        'moveit_controller_manager': ParameterValue(PythonExpression([
+            repr('rebotarm_motion/BoundSimpleControllerManager'), ' if ', prepared_mode, ' else ',
+            repr('moveit_simple_controller_manager/MoveItSimpleControllerManager')]), value_type=str),
+    }
 
     # 3D 传感器占位配置：列表里只放一个占位名，且 sensor_plugin 写成 "~"（无插件），
     # 等价于「已声明 3D 传感器配置但实际不接深度相机」，避免 move_group 因缺少该参数报错。
@@ -121,13 +158,13 @@ def generate_launch_description():
     #   由外部控制器管理器负责，防止规划节点越权切换控制权；
     # - allowed_execution_duration_scaling=1.2：实际执行时长最多允许为规划时长的 1.2 倍；
     # - allowed_goal_duration_margin=0.5：在 1.2 倍基础上再放宽 0.5 s 的绝对余量；
-    # - allowed_start_tolerance=0.01：轨迹起点与当前关节状态的最大允许偏差（弧度），
-    #   超过即拒绝执行，避免从错误姿态直接插补导致机械臂猛动。
+    # - allowed_start_tolerance=0.03：轨迹起点与当前关节状态的最大允许偏差（弧度），
+    #   与实机控制器普通轨迹的终点到位容差一致；超过仍拒绝执行，示教起点分档不受影响。
     trajectory_execution = {
         "moveit_manage_controllers": False,
         "trajectory_execution.allowed_execution_duration_scaling": 1.2,
         "trajectory_execution.allowed_goal_duration_margin": 0.5,
-        "trajectory_execution.allowed_start_tolerance": 0.01,
+        "trajectory_execution.allowed_start_tolerance": 0.03,
     }
     # 把 OMPL 的关键参数整理成一段文本，启动时用 LogInfo 打印。历史上 "Planning plugin name
     # is empty or not defined in namespace 'ompl'" 这类故障只表现为规划失败，这里把实际生效的
@@ -155,6 +192,23 @@ def generate_launch_description():
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             DeclareLaunchArgument("use_fake_joint_states", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            # 准备节点读取同一规范模型和场景；服务存在不等于任何后端获得执行许可。
+            DeclareLaunchArgument('prepare_trajectories', default_value='false'),
+            DeclareLaunchArgument('planning_trace_path', default_value=''),
+            DeclareLaunchArgument('trajectory_execution_mode', default_value='legacy',
+                choices=['legacy', 'prepared_v1']),
+            Node(package='rebotarm_motion', executable='TrajectoryRetimingNode',
+                name='trajectory_retiming', output='screen', condition=IfCondition(prepared_mode),
+                parameters=[{'arm_namespace': arm_namespace,
+                    'planning_trace_path': LaunchConfiguration('planning_trace_path')}]),
+            Node(
+                package='rebotarm_motion', executable='TrajectoryPreparationNode',
+                name='trajectory_preparation', output='screen',
+                additional_env=moveit_process_env,
+                condition=IfCondition(LaunchConfiguration('prepare_trajectories')),
+                parameters=[moveit_config.to_dict(), execution_adapters, sensors_3d,
+                    {'arm_namespace': arm_namespace, 'use_sim_time': use_sim_time}],
+            ),
             # 启动时把实际生效的 OMPL 规划参数打到终端，便于排查「规划失败但看不出原因」。
             LogInfo(msg="move_group planning params:\n" + planning_debug_summary),
             # 固定基座变换：world -> base_link。SRDF 里的 world_joint 描述的是同一段关系，
@@ -211,12 +265,14 @@ def generate_launch_description():
                 executable="move_group",
                 name="move_group",
                 output="screen",
+                additional_env=moveit_process_env,
                 remappings=[("/joint_states", ["/", arm_namespace, "/visual_joint_states"])],
                 parameters=[
                     moveit_config.to_dict(),
                     ompl_planning_yaml,
                     trajectory_execution,
                     sensors_3d,
+                    execution_adapters,
                     {"use_sim_time": use_sim_time},
                 ],
             ),

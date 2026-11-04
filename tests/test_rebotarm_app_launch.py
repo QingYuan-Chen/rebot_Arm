@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import yaml
 
@@ -37,6 +38,10 @@ def test_rebotarm_app_launch_exposes_simple_modes_and_profiles() -> None:
     assert "full MoveIt + web teleop workbench" in launch_text
     assert 'DeclareLaunchArgument("channel", default_value="auto")' in launch_text
     assert 'DeclareLaunchArgument("execution_mode", default_value="execute")' in launch_text
+    assert 'DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy"' in launch_text
+    assert '"trajectory_execution_mode": trajectory_mode' in launch_text
+    assert '"trajectory_execution_mode": trajectory_execution_mode' in launch_text
+    assert 'trajectory_execution_mode=trajectory_mode' in launch_text
     assert "def _resolve_channel" in launch_text
     assert 'for candidate in ("/dev/ttyACM0", "/dev/ttyACM1")' in launch_text
     assert '"use_rviz": "false"' in launch_text
@@ -76,6 +81,10 @@ def test_operator_configs_are_split_by_consumer() -> None:
     assert not (set(keyboard_params) & set(teach_params))
     assert "web_execute_enabled" in web_params
     assert "web_keyboard_default_step_rad" in web_params
+    # 随包配置不能覆盖节点已有的分模式默认值；用户自定义 YAML 仍可设置时长。
+    assert "trajectory_duration" not in keyboard_params
+    assert "web_keyboard_default_duration" not in web_params
+    assert keyboard_params["joint_step_rad"] == web_params["web_keyboard_default_step_rad"] == 0.02
     assert "replay_monitor_enabled" in teach_params
     assert "collision_check_enabled" in teach_params
     assert "joint_names" in common_params
@@ -105,6 +114,21 @@ def test_operator_configs_are_split_by_consumer() -> None:
     )
     assert "interactive_system.launch.py" in moveit_hardware
     assert "hardware_controller.launch.py" not in moveit_hardware
+    for launch_path in (
+        "moveit_hardware.launch.py", "interactive_system.launch.py",
+        "teleop_keyboard.launch.py", "teleop_system.launch.py", "bringup.launch.py",
+    ):
+        text = _read(f"src/rebotarm_bringup/launch/{launch_path}")
+        assert 'DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy"' in text
+        assert '"trajectory_execution_mode":' in text
+    visual = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
+    backend = _read("src/rebotarm_bringup/launch/includes/visual_backend.launch.py")
+    assert '"trajectory_execution_mode": "legacy"' in visual
+    assert '"trajectory_execution_mode": trajectory_mode' in backend
+    interactive = _read("src/rebotarm_bringup/launch/interactive_system.launch.py")
+    assert '"prepare_trajectories": prepare_trajectories' in interactive
+    assert "condition=IfCondition(use_moveit_stack)" in interactive
+    assert interactive.count("condition=UnlessCondition(use_moveit_stack)") == 2
 
 
 def test_launches_reference_consumer_specific_operator_configs() -> None:
@@ -133,6 +157,11 @@ def test_keyboard_no_hardware_mode_uses_one_simulated_trajectory_backend() -> No
     assert 'executable="reBotArmController"' not in keyboard
     assert "hardware_controller.launch.py" in keyboard
     assert 'parameters=[{"arm_namespace": arm_namespace}]' in keyboard
+    assert "condition=IfCondition(use_prepared_hardware)" in keyboard
+    assert "interactive_system.launch.py" in keyboard
+    assert keyboard.count("condition=UnlessCondition(use_prepared_hardware)") == 2
+    assert '"use_moveit_fake_joint_states": "false"' in keyboard
+    assert '"grasp_hold_timeout_sec": "30.0"' in keyboard
 
 
 def test_teleop_system_forwards_execution_mode_to_dashboard() -> None:
@@ -142,6 +171,8 @@ def test_teleop_system_forwards_execution_mode_to_dashboard() -> None:
     assert 'execution_mode = LaunchConfiguration("execution_mode")' in system
     assert '"execution_mode": execution_mode' in system
     assert '"web_execute_enabled": web_execute_enabled' in system
+    # 控制器所在 include 与网页参数必须收到同一模式。
+    assert system.count('"trajectory_execution_mode": trajectory_mode') == 2
 
 
 def test_dashboard_hides_and_blocks_hardware_only_commands_in_simulation() -> None:
@@ -164,7 +195,7 @@ def test_common_commands_document_recommends_one_entrypoint() -> None:
     doc = _read("docs/reference/commands/rebotarm_common_commands.md")
 
     assert "rebotarm_app.launch.py" in doc
-    assert "mode:=" not in doc
+    assert re.search(r"(?<![A-Za-z_])mode:=", doc) is None
     assert "channel:=/dev/ttyACM0" in doc
     assert "网页、键盘与示教命令" in doc
     assert "网页工作台" in doc

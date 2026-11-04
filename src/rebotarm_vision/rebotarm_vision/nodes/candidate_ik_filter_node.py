@@ -109,7 +109,7 @@ class CandidateIkFilterNode(Node):
         # 状态有效性服务名（MoveIt 的 check_state_validity）
         self.declare_parameter("collision_check_service", "/check_state_validity")
         # 碰撞检查使用的规划组：必须包含夹爪，否则夹爪与目标/桌面的干涉查不出来
-        self.declare_parameter("collision_group_name", "arm_with_gripper")
+        self.declare_parameter("collision_group_name", "")
         # 逆解使用的规划组名（只含手臂关节）
         self.declare_parameter("moveit_group_name", "arm")
         # 逆解的目标连杆（TCP 参考连杆），与 tcp_offset_xyz 配套解读

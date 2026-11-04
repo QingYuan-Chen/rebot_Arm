@@ -1,4 +1,5 @@
 """不启动 ROS 节点或连接设备，验证组件边界。"""
+import ast
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ import pytest
 import yaml
 
 from rebotarmcontroller.configuration import HardwareSettings, load_configuration, default_config
-from rebotarmcontroller.controller_contracts import MotorFeedback
+from rebotarmcontroller.contracts.controller_contracts import MotorFeedback
 
 # 批次 2 切换时，用相同输入对照旧模型和规范模型的正运动学结果。
 FK_SAMPLES = ((0.,0.,0.,0.,0.,0.), (0.,0.,-.017453292519943295,0.,0.,0.),
@@ -55,10 +56,15 @@ def test_feedback_contract_copies_values_and_is_frozen():
 
 def test_manager_and_ros_have_no_legacy_private_access():
     root=Path(__file__).resolve().parents[1]/'src/rebotarmcontroller/rebotarmcontroller'
-    for name in ('hardware_manager.py','ros_actions.py','ros_services.py','motor_passthrough.py'):
-        source=(root/name).read_text()
-        assert 'self._arm.' not in source and 'self._endpos_ctrl.' not in source
-        assert '.endpos_ctrl.' not in source
+    for name in ('hardware_manager.py','ros/ros_actions.py','ros/ros_services.py','ros/motor_passthrough.py'):
+        for node in ast.walk(ast.parse((root/name).read_text())):
+            if not isinstance(node, ast.Attribute):
+                continue
+            assert node.attr not in ('_endpos_ctrl', 'endpos_ctrl', '_motor_map', '_ctrl_map')
+            # _arm 现在是六轴职责端口，不再是旧 SDK 对象；禁止穿透其私有成员。
+            if (isinstance(node.value, ast.Attribute) and node.value.attr == '_arm'
+                    and isinstance(node.value.value, ast.Name) and node.value.value.id == 'self'):
+                assert not node.attr.startswith('_'), (name, node.lineno, node.attr)
 
 
 def test_omitted_gripper_gains_keep_legacy_loader_defaults(tmp_path):

@@ -5,15 +5,15 @@
 一路 ``/<ns>/visual_joint_states``（手腕六轴 + left_finger_joint + right_finger_joint），
 再交给负责发布机器人姿态的节点驱动 RViz 中的手指 link。
 
-在系统中的位置：只做显示用数据桥接，不参与控制回路——输出话题不被任何控制节点订阅，
-因此这里可以安全地过滤、补零而不影响真实运动。
+在系统中的位置：RViz 与 MoveIt 的真实关节状态桥。机械臂和夹爪分别发布源时间，
+不能用任一路的新帧刷新另一路旧数据，也不以初始化闭合值冒充真实反馈。
 
 QoS 约定：两个订阅都用 BEST_EFFORT + depth 10（随传感器数据流，旧帧可丢）；
 发布用 RELIABLE，保证 RViz 侧不丢帧。
 
 安全与健壮性约束：只有包含全部 ``required_arm_joint_names`` 且位置值全部有限的
 关节状态才会被转发，避免残缺/含 NaN 的反馈让 RViz 里的机器人模型跳到异常位姿；
-夹爪反馈非有限（如控制器坐标非法时返回 NaN）时保持上一次有效开口。
+夹爪反馈非有限或过期时不发布，不能重新授时旧开口。
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from .gripper_visual_model import DEFAULT_GRIPPER_LIMITS_M, gripper_opening_to_f
 
 
 class GripperVisualJointStateNode(Node):
-    """发布仅供 RViz 显示的 JointState 流的节点。
+    """为 RViz 和 MoveIt 按各自源时间发布真实 JointState 的节点。
 
     参数：
     - ``arm_namespace``：命名空间，前后斜杠会被去掉；
@@ -71,8 +71,8 @@ class GripperVisualJointStateNode(Node):
             str(name) for name in list(self.get_parameter("required_arm_joint_names").value)
         }
         self._latest_arm_state: JointState | None = None
-        # 夹爪初值取下限（闭合），保证首帧可视化不会凭空张开。
-        self._latest_gripper_position = lower
+        # 没有夹爪反馈时不伪造闭合状态。
+        self._latest_gripper_position = None
         # 残缺状态只告警一次，避免高频话题刷爆日志。
         self._warned_invalid_arm_state = False
 
@@ -121,33 +121,37 @@ class GripperVisualJointStateNode(Node):
         self._publish_visual_state(msg.header)
 
     def _on_gripper_state(self, msg: JointMotorState) -> None:
-        """缓存夹爪开口（m）并刷新可视化；NaN/Inf 时沿用上一次有效值。"""
-        if math.isfinite(float(msg.position)):
-            self._latest_gripper_position = float(msg.position)
-        # 时间戳优先跟随手臂反馈：手指是挂在末端上的，用同一帧头能减少 RViz 中各 link 的时间错位；
-        # 手臂状态还没到时退化为夹爪消息自身的帧头。
-        header = msg.header
-        if self._latest_arm_state is not None:
-            header = self._latest_arm_state.header
-        self._publish_visual_state(header)
+        """只发布新鲜有限的夹爪开口（m）；无效帧不刷新状态源时间。"""
+        stamp = msg.header.stamp.sec*1_000_000_000+msg.header.stamp.nanosec
+        age = (self.get_clock().now().nanoseconds-stamp)/1e9
+        if not math.isfinite(float(msg.position)) or stamp <= 0 or not -.05 <= age <= .15:
+            return
+        self._latest_gripper_position = float(msg.position)
+        left,right = gripper_opening_to_finger_joint_positions(msg.position,self._gripper_limits)
+        state = JointState()
+        state.header = msg.header
+        state.name = [self._left_joint,self._right_joint]
+        state.position = [left,right]
+        self._publisher.publish(state)
 
     def _publish_visual_state(self, header) -> None:
-        """合成并发布一帧可视化关节状态；手臂状态缺失或无效时不发布。"""
+        """只转发本次机械臂源帧；夹爪由自己的回调独立发布，不重新授时。"""
         if self._latest_arm_state is None or not self._valid_arm_joint_state(self._latest_arm_state):
             return
-        left, right = gripper_opening_to_finger_joint_positions(
-            self._latest_gripper_position,
-            self._gripper_limits,
-        )
         msg = JointState()
         msg.header = header
-        names, positions, velocities, efforts = self._filtered_state_parts(self._latest_arm_state)
-        msg.name = names + [self._left_joint, self._right_joint]
-        msg.position = positions + [left, right]
-        # velocity/effort 只在原消息长度匹配时整体转发；补零而不是让数组长度参差，
-        # 否则 RViz 会把错位的数据当作别的关节。
-        msg.velocity = velocities + [0.0, 0.0] if velocities else []
-        msg.effort = efforts + [0.0, 0.0] if efforts else []
+        msg.name,msg.position,msg.velocity,msg.effort = self._filtered_state_parts(self._latest_arm_state)
+        # 仿真/轻量预演可直接提供完整源帧；只转发该帧真实携带的手指，绝不补旧值。
+        source = self._latest_arm_state
+        if self._left_joint in source.name and self._right_joint in source.name:
+            for name in (self._left_joint,self._right_joint):
+                index = source.name.index(name)
+                msg.name.append(name)
+                msg.position.append(float(source.position[index]))
+                if msg.velocity:
+                    msg.velocity.append(float(source.velocity[index]))
+                if msg.effort:
+                    msg.effort.append(float(source.effort[index]))
         self._publisher.publish(msg)
 
     def _valid_arm_joint_state(self, state: JointState | None) -> bool:

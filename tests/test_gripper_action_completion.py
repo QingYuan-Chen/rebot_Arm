@@ -4,8 +4,8 @@ import sys
 from types import SimpleNamespace
 import types
 
-import rebotarmcontroller.ros_actions as ros_actions_module
-from rebotarmcontroller.ros_actions import ArmActions
+import rebotarmcontroller.ros.ros_actions as ros_actions_module
+from rebotarmcontroller.ros.ros_actions import ArmActions
 
 
 class _LongMoveHardware:
@@ -119,7 +119,7 @@ def test_gripper_action_uses_distance_related_hardware_timeout(monkeypatch) -> N
         lambda duration: clock.__setitem__(0, clock[0] + duration),
     )
     actions = ArmActions.__new__(ArmActions)
-    actions._hardware = _LongMoveHardware(clock)
+    actions._gripper = _LongMoveHardware(clock)
     actions._node = _Node()
     goal_handle = _GoalHandle()
 
@@ -129,7 +129,7 @@ def test_gripper_action_uses_distance_related_hardware_timeout(monkeypatch) -> N
     assert result.position == 0.08
     assert goal_handle.state == "succeeded"
     assert clock[0] >= 8.0
-    assert actions._hardware.active is False
+    assert actions._gripper.active is False
 
 
 def test_gripper_action_aborts_immediately_on_feedback_failure(monkeypatch) -> None:
@@ -142,7 +142,7 @@ def test_gripper_action_aborts_immediately_on_feedback_failure(monkeypatch) -> N
     )
     hardware = _FailedMoveHardware(clock)
     actions = ArmActions.__new__(ArmActions)
-    actions._hardware = hardware
+    actions._gripper = hardware
     actions._node = _Node()
     goal_handle = _GoalHandle()
 
@@ -163,7 +163,7 @@ def test_gripper_action_timeout_stops_active_hardware_command(monkeypatch) -> No
     )
     hardware = _NeverMoveHardware(clock)
     actions = ArmActions.__new__(ArmActions)
-    actions._hardware = hardware
+    actions._gripper = hardware
     actions._node = _Node()
     goal_handle = _GoalHandle()
 

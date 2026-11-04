@@ -38,6 +38,7 @@
   <exec_depend>sensor_msgs</exec_depend>
   <!-- 标准消息库：std_msgs/Header 等通用字段，经接口定义间接引用 -->
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
   <!-- 标准服务：std_srvs/Trigger 用于 enable/disable/safe_home/trajectory_stop 等无参服务 -->
   <exec_depend>std_srvs</exec_depend>
   <!-- 四元数与欧拉角/旋转矩阵互转（RPY 约定），见 conversions 模块 -->
@@ -46,6 +47,8 @@
   <exec_depend>trajectory_msgs</exec_depend>
 
   <!-- 导出构建类型，供 ament/colcon 识别本包的安装方式 -->
+  <exec_depend>rebotarm_trajectory</exec_depend>
+
   <export>
     <build_type>ament_python</build_type>
   </export>

@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rebotarmcontroller.gravity_control import (
+from rebotarmcontroller.gravity.gravity_control import (
     GravitySettings, LoopTiming, bounded_mit_command, load_gravity_model,
 )
 
@@ -98,7 +98,7 @@ def test_model_rejects_wrong_joint_coordinates_before_hardware(tmp_path):
                                       dict(lower='2.8', upper='-2.8'), dict(lower='-2.8')])
 def test_model_limit_parser_rejects_incomplete_nonfinite_or_reversed_ranges(tmp_path, attributes):
     from xml.etree import ElementTree as ET
-    from rebotarmcontroller.gravity_control import read_position_limits
+    from rebotarmcontroller.gravity.gravity_control import read_position_limits
     path = tmp_path / 'bad.urdf'
     tree = ET.parse(URDF)
     limit = tree.find("joint[@name='joint1']/limit")
@@ -110,8 +110,8 @@ def test_model_limit_parser_rejects_incomplete_nonfinite_or_reversed_ranges(tmp_
 
 
 def test_model_limit_parser_reads_values_and_rejects_duplicate_joint(tmp_path):
-    from rebotarmcontroller.gravity_control import POSITION_LIMITS, read_position_limits
-    from rebotarmcontroller.feedback_acquisition import _JOINT_POSITION_LIMITS_RAD
+    from rebotarmcontroller.gravity.gravity_control import POSITION_LIMITS, read_position_limits
+    from rebotarmcontroller.hardware.feedback_acquisition import _JOINT_POSITION_LIMITS_RAD
     path = tmp_path / 'changed.urdf'
     path.write_text(URDF.read_text().replace('lower="-2.8"', 'lower="-2.7"'))
     assert read_position_limits(path)[0] == (-2.7, 2.8)

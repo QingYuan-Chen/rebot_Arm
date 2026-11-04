@@ -1,0 +1,380 @@
+"""重力补偿计算工具: 加载动力学模型, 计算重力力矩并约束 MIT 输出.
+
+职责与位置
+    rebotarmcontroller 的纯计算层, 可离线测试, 不连接电机或创建 ROS 节点.
+    HardwareManager 装配模型与配置, GravityController 在唯一设备周期中调用计算.
+    GravityExecutionState 持有目标, 积分和拖动跟随状态; 反馈采集由反馈组件负责,
+    模式交接和发送由职责组件经生命周期及 ControllerRuntime 完成.
+
+对外接口
+    GravitySettings 和 load_gravity_model 加载配置与六轴动力学模型.
+    GravityModel 提供重力和雅可比计算; GravityExecutionState 推进补偿状态.
+    bounded_mit_command 返回有界 MIT 参数, 调用方保存成功发送后的估算总力矩.
+
+主要计算关系
+    当前关节角 q -> GravityModel.gravity(q) -> 重力前馈力矩.
+    目标角, 反馈 q/qd 和前馈力矩 -> bounded_mit_command() -> 待发送的 MIT 参数.
+
+安全与并发约束
+    MIT 的 PD(比例-微分)力矩由电机侧计算, 总力矩约束必须计入该项.
+    约束基于当前反馈的估算, 不能证明两次采样之间的实际输出; 设备效果需独立验证.
+    GravityModel 有可变 Data 缓存, 调用方须串行使用或提供独立模型实例.
+
+统一约定
+    六轴按 joint1..joint6 排列; 角度为 rad, 角速度为 rad/s, 力矩为 N·m, 时间为 s.
+    重力向量在 base_link 中表达, 额外负载质心在 end_link 中表达.
+
+文件结构(按定义顺序)
+    vector: 检查向量维数和有限性.
+    GravitySettings: 保存, 校验并从 YAML 加载补偿参数.
+    bounded_mit_command: 合并 PD 与前馈, 约束总力矩及其变化率.
+    LoopTiming: 记录周期和执行耗时, 判断连续超时.
+    GravityModel: 封装模型, 重力力矩和末端雅可比计算.
+    load_gravity_model: 构建规范六轴模型, 校验关节并加入额外负载.
+    package_file: 定位安装资源或源码工作区资源.
+    read_position_limits: 从规范 URDF 读取并校验六轴位置边界.
+    GravityExecutionState: 推进六轴积分, 目标和拖动跟随状态.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, fields
+import hashlib
+from pathlib import Path
+import xml.etree.ElementTree as ET
+
+import numpy as np
+import yaml
+
+# 模型必须保留这六个关节的名称, 顺序和坐标定义, 不能通过偏移反馈来适配模型.
+JOINT_NAMES = tuple(f"joint{i}" for i in range(1, 7))
+
+
+def vector(value, size, label):
+    """将输入转换为指定长度的一维浮点向量, 拒绝 NaN, 无穷大或维数不符.
+
+    label 用于指出出错参数; 这里只检查形状和有限性, 不检查关节限位或力矩范围.
+    """
+    result = np.asarray(value, dtype=float)
+    if result.shape != (size,) or not np.isfinite(result).all():
+        raise ValueError(f"{label} must contain {size} finite values")
+    return result
+
+
+@dataclass(frozen=True)
+class GravitySettings:
+    """不可重新赋值的补偿配置; 创建时校验, YAML 未提供的字段使用下列默认值.
+
+    积分由 GravityExecutionState.step 更新并限幅, 本类只提供参数.
+    总力矩上限来自 URDF 的 effort 字段, 不在这里另设一套默认值.
+    """
+
+    # 六轴共用的 PD 增益: kp 为刚度(N·m/rad), kd 为阻尼(N·m·s/rad).
+    kp: float = 7.
+    kd: float = .8
+    # 积分按实际 dt 累积: 增益单位 N·m/(rad·s), 积分输出限幅单位 N·m.
+    integral_gain: float = 1.
+    integral_limit_nm: float = .5
+    # 每轴总力矩变化率上限(N·m/s), 顺序与 JOINT_NAMES 一致.
+    torque_rate_limits_nm_s: tuple = (108., 108., 108., 28., 28., 28.)
+    # 重力在 base_link 中的向量(m/s²); 默认基座水平安装, 重力沿 -Z 方向.
+    gravity_xyz_m_s2: tuple = (0., 0., -9.81)
+    # URDF 已建模质量之外的额外负载: 质量为 kg, 质心为 end_link 中的坐标(m).
+    payload_mass_kg: float = 0.
+    payload_com_xyz_m: tuple = (0., 0., 0.)
+
+    def __post_init__(self):
+        """校验参数数值, MIT 协议增益范围, 以及重力和负载的基本物理约定."""
+        scalars = (self.kp, self.kd, self.integral_gain, self.integral_limit_nm,
+                   self.payload_mass_kg)
+        if not np.isfinite(scalars).all() or min(scalars) < 0 or self.kp <= 0:
+            raise ValueError("gravity settings must be finite and nonnegative; kp > 0")
+        if self.kp > 500 or self.kd > 5:
+            raise ValueError('MIT gains exceed protocol range: kp <= 500, kd <= 5')
+        if (vector(self.torque_rate_limits_nm_s, 6, 'torque rate') <= 0).any():
+            raise ValueError('torque rate limits must be positive')
+        # 校验地球重力的模长, 允许按实际安装方向配置向量, 而不强制沿 -Z.
+        gravity = vector(self.gravity_xyz_m_s2, 3, 'gravity')
+        if not 9. < np.linalg.norm(gravity) < 10.:
+            raise ValueError('gravity vector must describe Earth gravity in base_link')
+        vector(self.payload_com_xyz_m, 3, 'payload COM')
+
+    @classmethod
+    def from_yaml(cls, path):
+        """读取 YAML 顶层字段; 拒绝未知键, 避免参数拼写错误后静默使用默认值."""
+        values = yaml.safe_load(Path(path).read_text())
+        if not isinstance(values, dict):
+            raise ValueError('gravity settings must be a mapping')
+        unknown = set(values) - {f.name for f in fields(cls)}
+        if unknown:
+            raise ValueError(f'unknown gravity settings: {sorted(unknown)}')
+        return cls(**values)
+
+
+def bounded_mit_command(target, q, qd, kp, kd, feedforward, limits, rates,
+                        previous, dt):
+    """计算满足力矩幅值和变化率约束的 MIT 参数, 不向电机发送指令.
+
+    输入
+        target/q/qd: 目标关节角, 反馈关节角和角速度; 目标角速度固定为零.
+        kp/kd: 每轴 PD 增益; feedforward: 前馈力矩, 可包含重力补偿和积分修正.
+        limits/rates: 每轴力矩幅值上限, 变化率上限.
+        previous/dt: 上一周期的估算总力矩, 本周期实测时间间隔.
+        除 dt 为标量外, 其余输入均为六轴向量.
+
+    返回
+        (缩放后的 kp, 缩放后的 kd, 前馈力矩 tau_ff, 本周期估算总力矩).
+        前三项用于构造 MIT 指令, 最后一项由调用方保存为下一周期的 previous.
+
+    力矩饱和时按必要程度降低 PD 增益, 保证用于抵消 PD 的前馈力矩仍可在限幅内表示.
+    约束基于当前 q/qd 计算; 两次新鲜反馈之间的实际力矩仍需通过真机验证.
+    """
+    # 先统一形状, 避免 NumPy 广播把错误的输入维数变成看似合法的计算结果.
+    target, q, qd, kp, kd, feedforward, limits, rates, previous = [
+        vector(v, 6, label) for v, label in zip(
+            (target, q, qd, kp, kd, feedforward, limits, rates, previous),
+            ('target', 'position', 'velocity', 'kp', 'kd', 'feedforward',
+             'torque limits', 'torque rates', 'previous torque'))]
+    if not np.isfinite(dt) or dt <= 0 or (limits <= 0).any() or (rates <= 0).any():
+        raise ValueError('dt, torque limits and rates must be finite and positive')
+    if (kp < 0).any() or (kd < 0).any() or (np.abs(previous) > limits + 1e-9).any():
+        raise ValueError('invalid gains or previous torque outside limit')
+    # 1. 估算电机侧 PD 力矩: 目标速度为零, 所以阻尼项为 -kd * qd.
+    pd = vector(kp * (target - q) - kd * qd, 6, 'PD torque')
+    # 2. 先限制 PD + 前馈的总幅值, 再限制相对上一周期的变化量(rates * dt).
+    desired = np.clip(pd + feedforward, -limits, limits)
+    total = np.clip(desired, previous - rates * dt, previous + rates * dt)
+    # 3. 为前馈中的 PD 抵消项预留余量: scale 在 [0, 1] 内, 同时缩放 kp 和 kd.
+    #    使 |缩放后 PD| 不超过 limits - |total|, 避免 tau_ff = total - PD 超限.
+    scale = np.minimum(1., np.maximum(0., limits - np.abs(total)) /
+                       np.maximum(np.abs(pd), 1e-12))
+    # 当前反馈下, 缩放后的 PD 与重新计算的前馈之和仍等于已限幅的 total.
+    return kp * scale, kd * scale, total - pd * scale, total
+
+
+class LoopTiming:
+    """控制循环计时器: 记录周期间隔, 单轮执行耗时及连续超时次数.
+
+    调用方在每轮开始/结束时传入单调时钟时间; 本类不休眠, 不调度线程,
+    也不直接触发硬件保护, 只通过 faulted 暴露连续超时判据.
+    """
+
+    def __init__(self, rate_hz):
+        """校验控制频率, 初始化周期预算和耗时统计; 不调度或创建线程."""
+        if not np.isfinite(rate_hz) or rate_hz <= 0:
+            raise ValueError('control rate must be finite and positive')
+        self.period = 1. / rate_hz
+        self.last_start = None
+        self.start = None
+        self.consecutive_misses = 0
+        self.cycles = self.misses = 0
+        self.max_period = self.max_execution = 0.
+        self.last_dt = self.period
+
+    def begin(self, now):
+        """记录本轮开始时间, 并返回与上一轮开始时间的间隔 dt(秒)."""
+        # 第一轮没有历史时间, 使用配置周期; 后续使用实测间隔供积分和变化率限制使用.
+        dt = self.period if self.last_start is None else now - self.last_start
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError('control clock must advance monotonically')
+        self.last_start = self.start = now
+        self.last_dt = dt
+        self.max_period = max(self.max_period, dt)
+        return dt
+
+    def finish(self, now):
+        """记录本轮耗时与超时统计; 正常一轮会清零连续超时计数."""
+        execution = now - self.start
+        # 执行耗时超过配置周期, 或两轮开始间隔超过周期的 1.5 倍, 均计为超时.
+        missed = execution > self.period or self.last_dt > 1.5 * self.period
+        self.cycles += 1
+        self.misses += int(missed)
+        self.consecutive_misses = self.consecutive_misses + 1 if missed else 0
+        self.max_execution = max(self.max_execution, execution)
+
+    @property
+    def faulted(self):
+        """连续三轮超时即报告异常; 具体保持或保护由 GravityController 和保护组件协调."""
+        return self.consecutive_misses >= 3
+
+    def snapshot(self):
+        """返回供诊断使用的统计快照, 其中周期与执行耗时的单位均为秒."""
+        return dict(configured_rate_hz=1. / self.period, cycles=self.cycles,
+                    missed_cycles=self.misses, consecutive_misses=self.consecutive_misses,
+                    max_period_sec=self.max_period, max_execution_sec=self.max_execution)
+
+
+class GravityModel:
+    """持有六轴动力学模型及计算缓存, 提供重力力矩和末端雅可比.
+
+    由 load_gravity_model() 完成模型校验后构造; path/sha256 用于追溯模型来源,
+    effort 保存校验后的 URDF 力矩上限. 计算会更新实例内的 data 缓存, 调用方应串行使用.
+    """
+
+    def __init__(self, pin, model, path, settings, effort):
+        """保存已校验模型, 独立 Data, 来源哈希和参数, 供唯一周期串行计算."""
+        self.pin, self.model = pin, model
+        self.data = model.createData()
+        self.frame_id = model.getFrameId('end_link')
+        self.effort = effort
+        self.path = str(path.resolve())
+        self.sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.settings = settings
+
+    def gravity(self, q):
+        """按当前六轴关节角计算抵消重力所需的关节力矩 g(q), 单位 N·m."""
+        q = vector(q, 6, 'position')
+        # Pinocchio 返回值可能引用内部缓存, 复制后交给调用方, 避免后续计算覆盖旧结果.
+        return self.pin.computeGeneralizedGravity(self.model, self.data, q).copy()
+
+    def jacobian(self, q):
+        """返回 end_link 的 6×6 雅可比; 前三行为线速度, 后三行为角速度.
+
+        LOCAL_WORLD_ALIGNED: 参考点位于末端原点, 坐标轴方向与世界坐标系对齐.
+        与关节角速度相乘可得到末端空间速度, 供分析或拖动判据使用.
+        """
+        # 先更新关节雅可比和末端位姿, 再提取指定参考系下的末端雅可比.
+        self.pin.computeJointJacobians(self.model, self.data, q)
+        self.pin.updateFramePlacements(self.model, self.data)
+        return self.pin.getFrameJacobian(self.model, self.data, self.frame_id,
+                                        self.pin.LOCAL_WORLD_ALIGNED).copy()
+
+
+def load_gravity_model(path, settings):
+    """从指定 URDF 构建并校验重力模型, 返回 GravityModel.
+
+    按顺序检查六轴关节及限位, 力矩上限, 降维后的自由度和末端帧,
+    再设置重力方向并叠加额外负载. 模型不匹配时直接报错, 不自动修正坐标或限位.
+    """
+    # 延迟导入: 仅使用配置校验, 计时或指令限幅工具时, 不需要加载 Pinocchio.
+    import pinocchio as pin
+    path = Path(path)
+    # 1. 直接读取 URDF 标签, 核对机械臂关节类型, 位置范围和 effort(N·m).
+    root = ET.parse(path).getroot()
+    joints = {j.get('name'): j for j in root.findall('joint')}
+    effort = []
+    for name, bounds in zip(JOINT_NAMES, POSITION_LIMITS):
+        joint = joints.get(name)
+        if joint is None or joint.get('type') != 'revolute':
+            raise ValueError(f'{name} must be a bounded revolute joint')
+        limit = joint.find('limit')
+        actual = (float(limit.get('lower')), float(limit.get('upper')))
+        if not np.allclose(actual, bounds, atol=1e-9, rtol=0):
+            raise ValueError(f'{name} model limit {actual} differs from hardware {bounds}')
+        effort.append(float(limit.get('effort')))
+    effort = vector(effort, 6, 'effort')
+    if (effort <= 0).any():
+        raise ValueError('model effort must be positive')
+    if (effort > np.array([27., 27., 27., 7., 7., 7.])).any():
+        raise ValueError('model effort exceeds the reviewed arm torque ceilings')
+    # 2. 加载完整模型, 将夹爪关节锁定在 neutral(中性配置), 构建六轴降维模型.
+    #    只允许锁定左右手指, 不得静默移除机械臂的任何关节自由度.
+    full = pin.buildModelFromUrdf(str(path))
+    extras = list(full.names)[1:]
+    lock_names = [n for n in extras if n not in JOINT_NAMES]
+    if set(lock_names) - {'left_finger_joint', 'right_finger_joint'}:
+        raise ValueError(f'unexpected model joints: {lock_names}')
+    model = pin.buildReducedModel(full, [full.getJointId(n) for n in lock_names],
+                                  pin.neutral(full)) if lock_names else full
+    # 3. nq/nv 分别为位置, 速度维数; 二者及关节顺序都必须与六轴反馈对应.
+    if model.nq != 6 or model.nv != 6 or tuple(model.names)[1:] != JOINT_NAMES:
+        raise ValueError('model must preserve joint1..joint6 order and coordinates')
+    if not model.existFrame('end_link'):
+        raise ValueError('model is missing end_link')
+    # 4. 配置基座坐标系下的重力方向, 适配实际安装朝向.
+    model.gravity.linear = vector(settings.gravity_xyz_m_s2, 3, 'gravity')
+    if settings.payload_mass_kg:
+        # 5. 将额外负载建模为质心处的点质量, 不重复计算 URDF 已包含的夹爪质量.
+        frame = model.frames[model.getFrameId('end_link')]
+        payload = pin.Inertia(settings.payload_mass_kg,
+                              vector(settings.payload_com_xyz_m, 3, 'payload COM'),
+                              np.zeros((3, 3)))
+        # 负载质心在 end_link 中给出, 先变换到所属关节坐标系, 再叠加到该关节惯量.
+        model.inertias[frame.parentJoint] += frame.placement.act(payload)
+    return GravityModel(pin, model, path, settings, effort)
+
+
+def package_file(package, relative):
+    """定位包内资源: 优先查 ROS 安装索引, 再查当前源码工作区.
+
+    package 为包名, relative 为包内相对路径; 两处都不存在时抛出 FileNotFoundError.
+    回退路径按本仓库 src/<package>/ 的布局解析, 便于未加载 ROS 环境时进行离线测试.
+    """
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        path = Path(get_package_share_directory(package)) / relative
+        if path.is_file():
+            return path
+    except (ImportError, LookupError):
+        pass
+    # 本模块位于包内 gravity/，parents[3] 才是源码工作区的 src/。
+    path = Path(__file__).resolve().parents[3] / package / relative
+    if not path.is_file():
+        raise FileNotFoundError(f'missing {package}/{relative}')
+    return path
+
+
+def read_position_limits(path):
+    """按六轴固定顺序读取 URDF 的有限位置范围; 缺失或重复关节一律拒绝."""
+    joints = ET.parse(path).getroot().findall('joint')
+    result = []
+    for name in JOINT_NAMES:
+        matches = [joint for joint in joints if joint.get('name') == name]
+        if len(matches) != 1 or matches[0].get('type') != 'revolute':
+            raise ValueError(f'{name} must be a unique bounded revolute joint')
+        limit = matches[0].find('limit')
+        try:
+            bounds = (float(limit.get('lower')), float(limit.get('upper')))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(f'{name} is missing finite position limits') from exc
+        if not np.isfinite(bounds).all() or bounds[0] >= bounds[1]:
+            raise ValueError(f'{name} has invalid position limits')
+        result.append(bounds)
+    return tuple(result)
+
+
+# 所有控制与反馈边界共享规范模型的只读数值; 导入仅解析资源, 不连接设备.
+# 显式加载的其他动力学模型仍须与此规范范围逐轴一致, 不可借模型覆盖扩大限位.
+POSITION_LIMITS = read_position_limits(package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'))
+
+
+class GravityExecutionState:
+    """六轴重力补偿独立运行状态; 周期计算不访问电机或 ROS.
+
+    启停由 GravityController 协调, 模式设备事务经生命周期与运行时执行. ``step`` 接收已验证反馈, 重力
+    力矩和
+    末端空间速度, 按实际时间积分并返回前馈; 最后总力矩在发送成功后才更新.
+    """
+
+    def __init__(self):
+        """初始化补偿目标, 积分, 跟随及故障保持状态, 不执行模式切换或发送."""
+        self.active = False
+        self.target = None
+        self.integral = None
+        self.lock_counter = 0
+        self.last_position = None
+        self.last_total = np.zeros(6)
+        self.fault = None
+        self.hold_feedforward = None
+
+    def step(self, q, dt, gravity, spatial_velocity, settings):
+        """更新抗漂移积分和拖动跟随目标, 返回本周期前馈力矩."""
+        q = vector(q, 6, 'gravity feedback')
+        gravity = vector(gravity, 6, 'gravity torque')
+        spatial_velocity = vector(spatial_velocity, 6, 'tool velocity')
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError('gravity control dt must be finite and positive')
+        if self.target is None:
+            raise RuntimeError('gravity target unavailable')
+        if self.integral is None:
+            self.integral = np.zeros_like(q)
+        self.integral += (self.target - q) * settings.integral_gain * dt
+        cap = settings.integral_limit_nm
+        np.clip(self.integral, -cap, cap, out=self.integral)
+        if np.linalg.norm(spatial_velocity[:3]) > .04 or np.linalg.norm(spatial_velocity[3:]) > .08:
+            self.target = q.copy()
+            self.lock_counter = 0
+            self.integral *= np.exp(-dt / .2)
+        else:
+            self.lock_counter += 1
+        return gravity + self.integral

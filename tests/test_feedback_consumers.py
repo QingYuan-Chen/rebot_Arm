@@ -33,6 +33,27 @@ def test_recovered_fresh_frame_retains_gap_without_monitoring_during_outage():
     assert store.snapshot(10.31, 10_310_000_000).joint_gaps == 1
 
 
+@pytest.mark.parametrize('bad_stamp', [9., 10.2, 9.99, 0.])
+def test_bad_incoming_frame_invalidates_old_pose_even_if_monitor_only_sees_recovery(bad_stamp):
+    from test_pose_compat_protocol import monitor_node
+    from rebotarm_motion.pose_compat_node import PoseCompatNode
+    store = MotionFeedbackStore()
+    store.receive('joints', joints(10.), 10., 10_000_000_000)
+    store.receive('joints', joints(bad_stamp), 10.02, 10_020_000_000)
+    store.receive('joints', joints(10.04), 10.04, 10_040_000_000)
+    recovered = store.snapshot(10.04, 10_040_000_000)
+    assert recovered.epoch == recovered.joint_gaps == 1
+    assert recovered.joints.header.stamp.nanosec == 40_000_000
+    assert store.stop_feedback.broken_at == 10.02
+    node, run = monitor_node()
+    node._feedback_receiver = NS(snapshot=lambda: recovered)
+    node._ready = lambda: PoseCompatNode._refresh_feedback(node) or (0.,) * 6
+    run.handle = NS(accepted=True, cancel_goal_async=lambda: Future())
+    run.result = NS(done=lambda: True, result=lambda: NS(status=4, result=NS(error_code=0)))
+    node._monitor()
+    assert run.cancel and not run.done.is_set() and node.active is run
+
+
 def test_duplicate_source_stamps_age_and_outage_is_latched_once():
     store = MotionFeedbackStore()
     for t in (10., 10.1, 10.2, 10.3):

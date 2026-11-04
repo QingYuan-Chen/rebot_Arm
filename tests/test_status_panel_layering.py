@@ -1,5 +1,22 @@
 from __future__ import annotations
 
+
+def test_web_cancel_reply_is_not_a_terminal_result_and_cannot_overwrite_next_goal():
+    import threading
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates=[]
+    goal=object()
+    owner=NS(_execute_lock=threading.Lock(),_execute_goal_handle=goal,
+        _store=NS(update_teleop_status=lambda key,value:updates.append(value)))
+    future=NS(result=lambda:NS(goals_canceling=[]))
+    TeleopStatusPanelNode._on_execute_cancel_response(owner,future,goal)
+    assert updates[-1]['state']=='cancel_requested'
+    for successor in (None,object()):
+        owner._execute_goal_handle=successor
+        TeleopStatusPanelNode._on_execute_cancel_response(owner,future,goal)
+    assert len(updates)==1
+
 from rebotarm_dashboard.arm_control_client import ArmControlClient
 from rebotarm_motion.collision_precheck import (
     CollisionPrecheckConfig,
@@ -234,7 +251,7 @@ class _PreparedReplay:
         self.after_quality = _ReplayQuality()
         self.retimed_points = [
             _RetimedPoint(time_from_start=0.0, positions=(0.1, -0.1), velocities=(0.0, 0.0)),
-            _RetimedPoint(time_from_start=0.5, positions=(0.2, -0.2), velocities=(0.1, -0.1)),
+            _RetimedPoint(time_from_start=0.5, positions=(0.2, -0.2), velocities=(0.0, 0.0)),
         ]
 
 
@@ -329,7 +346,7 @@ def test_collision_prechecker_returns_pass_after_sampling_state_validity() -> No
         config=CollisionPrecheckConfig(
             enabled=True,
             service="/check_state_validity",
-            group_name="arm_with_gripper",
+            group_name="",
             max_samples=3,
             timeout_sec=1.0,
         ),
@@ -343,10 +360,10 @@ def test_collision_prechecker_returns_pass_after_sampling_state_validity() -> No
         [0.2, 0.2],
         [0.4, 0.4],
     ]
-    assert client.requests[0].group_name == "arm_with_gripper"
+    assert client.requests[0].group_name == ""
 
 
-def test_collision_prechecker_appends_default_gripper_joints_for_arm_with_gripper() -> None:
+def test_collision_prechecker_appends_actual_gripper_joints_for_full_robot() -> None:
     client = _StateValidityClient([_StateValidityResponse(valid=True)])
     prechecker = CollisionPrechecker(
         client=client,
@@ -359,7 +376,7 @@ def test_collision_prechecker_appends_default_gripper_joints_for_arm_with_grippe
         config=CollisionPrecheckConfig(
             enabled=True,
             service="/check_state_validity",
-            group_name="arm_with_gripper",
+            group_name="",
             max_samples=1,
             timeout_sec=1.0,
             default_joint_positions=(
@@ -404,7 +421,7 @@ def test_collision_prechecker_returns_collision_with_compact_contacts() -> None:
         config=CollisionPrecheckConfig(
             enabled=True,
             service="/check_state_validity",
-            group_name="arm_with_gripper",
+            group_name="",
             max_samples=10,
             timeout_sec=1.0,
         ),
@@ -937,10 +954,13 @@ def test_teach_replay_trajectory_builder_calls_moveit_alignment_with_keywords() 
     )
     calls = []
 
-    def _align(trajectory, *, current_positions, first_positions):
+    def _align(trajectory, *, current_positions, first_positions, reference_grade):
+        assert reference_grade == 'q/v'
         calls.append((trajectory, current_positions, first_positions))
         point = _TrajectoryPoint()
         point.positions = list(first_positions)
+        point.velocities = [0.]*len(first_positions)
+        point.accelerations = []
         trajectory.points.append(point)
         return 0.25
 
@@ -1004,7 +1024,9 @@ def test_moveit_start_aligner_appends_hold_plan_and_first_hold_with_joint_remap(
     assert planner.calls[0]["target_positions"] == (0.2, -0.2)
     assert trajectory.points[0].positions == [0.0, 0.0]
     assert trajectory.points[1].positions == [0.2, -0.2]
-    assert trajectory.points[1].velocities == [0.1, -0.1]
+    # 本例唯一规划点是终点，明确连接静止保持；缺 a 仍保持 C1。
+    assert trajectory.points[1].velocities == [0.0, 0.0]
+    assert trajectory.points[1].accelerations == []
     assert trajectory.points[-1].positions == [0.2, -0.2]
     assert trajectory.points[-1].velocities == [0.0, 0.0]
 

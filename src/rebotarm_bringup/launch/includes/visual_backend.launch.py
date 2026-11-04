@@ -17,6 +17,7 @@ def generate_launch_description():
     arm_namespace = LaunchConfiguration("arm_namespace")
     channel = LaunchConfiguration("channel")
     use_hardware = LaunchConfiguration("use_hardware")
+    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
     gripper_position_torque_cap_nm = LaunchConfiguration("gripper_position_torque_cap_nm")
     gripper_position_max_speed_rad_s = LaunchConfiguration("gripper_position_max_speed_rad_s")
     gripper_position_timeout_margin_sec = LaunchConfiguration("gripper_position_timeout_margin_sec")
@@ -59,6 +60,7 @@ def generate_launch_description():
                 "arm_namespace": arm_namespace,
                 "use_moveit_preview": "true",
                 "use_hardware": use_hardware,
+                "trajectory_execution_mode": trajectory_mode,
                 "channel": channel,
                 "shutdown_safe_home": shutdown_safe_home,
                 "gripper_position_torque_cap_nm": gripper_position_torque_cap_nm,

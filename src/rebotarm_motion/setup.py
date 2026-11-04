@@ -1,10 +1,13 @@
-"""运动包的构建脚本（只在编译安装期执行，不参与运行时逻辑）。
+"""运动包的 setuptools 元数据（不参与节点运行）。
+
+ROS 正式构建已改为 CMakeLists.txt 的 ament_cmake/ament_cmake_python 混合构建；
+本文件保留 Python 元数据与入口声明，修改入口时须与 CMakeLists.txt 同步。
 
 要点
     1. ``packages=find_packages(exclude=["test"])``：把包目录整体安装，排除测试目录；
     2. ``data_files`` 负责把资源索引标记、``package.xml`` 与 ``config/*.yaml`` 安装到
        ``share/`` 下对应包的共享目录中，节点运行时才能按包共享目录找到参数文件；
-    3. ``entry_points`` 声明两个可执行入口：位姿预览/执行节点与视觉就绪节点。这里注册的
+    3. ``entry_points`` 声明位姿兼容、执行、轨迹准备、重定时及既有验收入口。这里注册的
        可执行文件名（以及模块路径）是上层启动文件与测试依赖的对外接口，改名即为破坏性变更。
 """
 
@@ -37,6 +40,8 @@ setup(
         "console_scripts": [
             # 可执行名 = 模块:函数；左侧名字被上层启动文件以 executable=... 引用。
             "PoseCompatNode = rebotarm_motion.pose_compat_node:main",
+            "TrajectoryPreparationNode = rebotarm_motion.trajectory_preparation_node:main",
+            "TrajectoryRetimingNode = rebotarm_motion.trajectory_retiming_node:main",
             "PoseExecutionNode = rebotarm_motion.pose_execution_node:main",
             "rebotarm_mujoco_moveit_acceptance = rebotarm_motion.mujoco_moveit_acceptance:main",
         ],

@@ -589,7 +589,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             raw_path = Path(tmpdir) / "teach1.jsonl"
-            prepared_path = Path(tmpdir) / "teach1.prepared.jsonl"
+            prepared_path = Path(tmpdir) / "teach1.prepared.v3.jsonl"
             raw_path.write_text(encode_teach_sample(sample) + "\n", encoding="utf-8")
             prepared_path.write_text(encode_teach_sample(sample) + "\n", encoding="utf-8")
 
@@ -1025,7 +1025,9 @@ class TeachRecordingCoreTests(unittest.TestCase):
             exported = load_teach_samples(output_path)
 
             self.assertEqual(output_path, prepared_record_path(raw_path))
-            self.assertEqual(output_path.name, "teach1.prepared.jsonl")
+            self.assertEqual(output_path.name, "teach1.prepared.v5.jsonl")
+            self.assertEqual([s.accelerations for s in exported],
+                             [p.accelerations for p in prepared.retimed_points])
             self.assertGreater(len(exported), len(samples))
             self.assertTrue(all(sample.arm_state == "PREPARED_REPLAY" for sample in exported))
             self.assertEqual(exported[0].stamp, 0.0)
@@ -1297,14 +1299,9 @@ class WebRobotAssetTests(unittest.TestCase):
             root = ET.fromstring(path.read_text(encoding="utf-8"))
             groups = {group.attrib["name"]: group for group in root.findall("group")}
             self.assertIn("gripper", groups)
-            self.assertIn("arm_with_gripper", groups)
+            self.assertNotIn("arm_with_gripper", groups)
             gripper_joints = {joint.attrib["name"] for joint in groups["gripper"].findall("joint")}
             self.assertEqual(gripper_joints, {"left_finger_joint", "right_finger_joint"})
-            composite_groups = {
-                group.attrib["name"]
-                for group in groups["arm_with_gripper"].findall("group")
-            }
-            self.assertEqual(composite_groups, {"arm", "gripper"})
 
             end_effectors = {
                 ee.attrib["name"]: ee.attrib
@@ -1495,10 +1492,7 @@ def test_dashboard_unknown_gripper_feedback_does_not_render_or_command_zero():
 
     helpers = section("    const motorPosition =", "    const deg =")
     slider = section("    const updateSlider =", "    const syncPreviewFromLive =")
-    # The next handler follows setGripper; locate its declaration, not locals.
-    start = html.index("    const setGripper =")
-    end = html.index("\n    const ", start + len("    const setGripper ="))
-    command = html[start:end]
+    # 网页已移除独立夹爪入口；继续验证共享实际反馈滑条不会用零冒充缺失值。
     script = r'''
 const assert = require('node:assert/strict');
 const elements = new Map();
@@ -1512,19 +1506,93 @@ const deg = (x) => String(x);
 const previewState = {latestJoints: {gripper: {position: null}}, targets: {gripper: 0.02}};
 let fetchCalls = 0;
 const fetch = () => {fetchCalls++; throw Error('Unexpected request');};
-'''+helpers+slider+command+r'''
+'''+helpers+slider+r'''
 (async () => {
   assert.ok(Number.isNaN(motorPosition({position: null})));
   assert.equal(motorPosition({position: 0}), 0);
   updateSlider('gripper', {position: null});
   assert.equal(document.getElementById('slider-rad-gripper').textContent, '-');
   assert.equal(document.getElementById('slider-gripper').value, 0.04);
-  const result = await setGripper({confirm: false});
-  assert.equal(result.accepted, false);
-  assert.equal(fetchCalls, 0);
   updateSlider('gripper', {position: 0.01});
   assert.equal(document.getElementById('slider-gripper').value, 0.01);
 })().catch(error => {console.error(error); process.exitCode = 1;});
+'''
+    result = subprocess.run([node, "-e", script], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_dashboard_gripper_view_drives_whole_finger_joints_without_drift():
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        raise unittest.SkipTest("Node.js required for dashboard behavior test")
+    html = (ROOT / "src/rebotarm_dashboard/rebotarm_dashboard/status_panel_assets/index.html").read_text()
+
+    def section(start, end):
+        return html[html.index(start):html.index(end, html.index(start))]
+
+    helpers = section("    const motorPosition =", "    const deg =")
+    viewer = section("    const robotViewer =", "    const viewerStatus =")
+    update = section("    const jointsFromTargets =", "    initRobotViewer().catch")
+    script = r'''
+const assert = require('node:assert/strict');
+const document = {body: {dataset: {}}};
+const window = {};
+const jointLimits = {gripper: [0, 0.09]};
+const armJointNames = ['joint1'];
+const sliderNames = [...armJointNames, 'gripper'];
+const clamp = (x, low, high) => Math.max(low, Math.min(high, x));
+const scheduleRobotRender = () => {};
+function joint(name) {
+  return {name, jointValue: [0], calls: 0, setJointValue(value) {
+    this.jointValue[0] = value;
+    this.calls++;
+  }};
+}
+''' + helpers + viewer + update + r'''
+const left = joint('left_finger_joint');
+const right = joint('right_finger_joint');
+const arm = joint('joint1');
+robotViewer.robot = {joints: {joint1: arm, left_finger_joint: left, right_finger_joint: right}};
+robotViewer.gripperJoints = {left, right};
+const feedback = position => updateRobotViewer({joint1: {position: 0.2}, gripper: {position}});
+const check = half => {
+  assert.ok(Math.abs(left.jointValue[0] - half) < 1e-12);
+  assert.ok(Math.abs(right.jointValue[0] + half) < 1e-12);
+};
+feedback(0.06);
+assert.equal(left.calls, 0); // 加载完成前不更新模型。
+robotViewer.ready = true;
+for (const [position, half] of [[0, 0], [0.06, 0.03], [0.09, 0.045], [-1, 0], [1, 0.045]]) {
+  feedback(position);
+  check(half);
+}
+assert.equal(arm.jointValue[0], 0.2);
+jointLimits.gripper = [0.01, 0.08];
+for (const [position, half] of [[0.01, 0], [0.05, 0.02], [0.08, 0.035]]) {
+  feedback(position);
+  check(half);
+}
+const calls = left.calls;
+for (const position of [null, undefined, NaN, Infinity, -Infinity, '0.02']) {
+  feedback(position);
+  check(0.035);
+}
+assert.equal(left.calls, calls);
+assert.equal(right.calls, calls);
+jointLimits.gripper = [0, 0.09];
+for (let i = 0; i < 100; i++) {
+  updateRobotViewer(jointsFromTargets({joint1: 0.4, gripper: 0.06}));
+  check(0.03);
+  feedback(0);
+  check(0);
+}
+assert.equal(window.__rebotGripperDebug.leftJoint, 'left_finger_joint');
+assert.equal(window.__rebotGripperDebug.rightJoint, 'right_finger_joint');
+assert.equal(window.__rebotGripperDebug.leftPosition, 0);
+assert.equal(Math.abs(window.__rebotGripperDebug.rightPosition), 0);
 '''
     result = subprocess.run([node, "-e", script], text=True, capture_output=True)
     assert result.returncode == 0, result.stderr

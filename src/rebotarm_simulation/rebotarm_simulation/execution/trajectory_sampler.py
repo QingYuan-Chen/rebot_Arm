@@ -1,9 +1,13 @@
 """与 ROS 解耦的具名关节轨迹规范化与采样工具。
 
 模块职责：把上层（轨迹动作目标、示教回放等）给出的“具名关节轨迹点”转换成仿真包内部使用的
-规范形式，并按仿真已流逝时间做线性插值采样，供无头仿真控制器在物理时间轴上逐步执行。
+规范形式，保留旧线性采样适配；已准备多项式则通过轻量适配交给共享数值内核求值。
 
-关键约定与安全语义：
+对外接口：TrajectorySampler 处理旧具名/部分关节输入；PreparedTrajectorySampler
+只包装完整的已检查曲线，统一提供 duration 和 sample(elapsed) 的位置接口。
+
+安全约束：以下兼容输入与 cancel 规则适用于 TrajectorySampler；prepared 路径的取消和
+身份校验由后端执行所有者负责，适配器本身不拥有任务或发送权限。
 
 - 关节名必须属于六个机械臂关节的规范集合（joint1..joint6，顺序固定，见 ``ARM_JOINT_NAMES``）。
   允许只给出其中一部分关节，但此时必须显式提供其余关节的初始角度，否则无法还原完整目标向量，
@@ -15,11 +19,13 @@
 
 本模块刻意不导入任何 ROS 依赖，因此可以在未安装 ROS 的开发主机上对轨迹输入做单元测试与
 模糊测试。
+
+文件结构：已准备曲线适配器 → 具名轨迹点 → 旧轨迹规范化、取消及共享线性采样。
 """
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from rebotarm_trajectory.sampling import linear_sample
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import math
@@ -28,6 +34,21 @@ import math
 # 规范关节顺序：六个机械臂关节固定按 joint1..joint6 排列。
 # 所有内部目标向量、采样结果和示例中的“完整向量”都使用这一顺序，与外部传入顺序无关。
 from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES
+
+
+@dataclass(frozen=True)
+class PreparedTrajectorySampler:
+    """已准备曲线的协议适配；不重新补关节、拟合或改写首末边界。"""
+
+    curve: object
+
+    @property
+    def duration(self):
+        return self.curve.duration
+
+    def sample(self, elapsed):
+        """向位置控制接口提供 q；q/v/a/jerk 完整参考仍可从原曲线取得用于验收。"""
+        return self.curve.sample(elapsed)[0]
 
 
 @dataclass(frozen=True)
@@ -214,32 +235,7 @@ class TrajectorySampler:
         time = self._validate_sample_time(simulation_time)
         if self._cancelled:
             raise RuntimeError("trajectory sampling was cancelled")
-        if time >= self.duration:
-            return self._positions[-1]
-
-        # 二分定位第一个严格大于 time 的轨迹点下标，因此待插值区间必为 [upper-1, upper]。
-        upper = bisect_right(self._times, time)
-        if upper == 0:
-            # 早于第一个轨迹点：以 t=0 的初始位置作为插值区间左端。
-            lower_time = 0.0
-            lower_positions = self._initial
-        else:
-            lower_time = self._times[upper - 1]
-            lower_positions = self._positions[upper - 1]
-            if lower_time == time:
-                # 正好命中已记录的轨迹点，直接返回，避免插值引入浮点误差。
-                return lower_positions
-
-        upper_time = self._times[upper]
-        upper_positions = self._positions[upper]
-        if upper_time == lower_time:
-            # 时间严格递增时不会发生；此处仅作除零保护。
-            return upper_positions
-        fraction = (time - lower_time) / (upper_time - lower_time)
-        return tuple(
-            start + fraction * (end - start)
-            for start, end in zip(lower_positions, upper_positions)
-        )
+        return linear_sample(self._times, self._positions, self._initial, time)
 
     @staticmethod
     def _validate_sample_time(simulation_time: float) -> float:

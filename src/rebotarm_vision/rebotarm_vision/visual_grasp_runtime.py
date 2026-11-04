@@ -87,7 +87,9 @@ class VisualGraspRuntime:
                             workflow._log_diagnostic("preview", "fail", message)
                             return response
                     response.success = True
-                    response.message = "visual grasp sequence finished"
+                    response.message = ("pre-contact coordinated position sequence finished; no grasp or retreat executed"
+                        if config is not None and config.get('trajectory_execution_mode', 'legacy') == 'prepared_v1'
+                        else "visual grasp sequence finished")
                     workflow._log_diagnostic("result", "success", response.message)
                     return response
                 # 走到这里说明某个阶段失败：先按恢复策略收拾现场，再决定是否换候选

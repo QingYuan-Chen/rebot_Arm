@@ -15,6 +15,104 @@
 - 夹爪位置/抓取服务及有界保持；
 - 底层关节限位、格式和通信失败拒绝。
 
+## P005 离线连续轨迹参考
+
+本节保留第一批（`39028d1`）的历史验证。第二批已迁移共享内核并接入准备服务、
+正式控制周期和 MuJoCo；当前契约与软件/仿真结果见
+[P005 共享轨迹与 prepared_v1 执行](p005_prepared_trajectory.md)。
+实机默认仍为 legacy，尚未进行第二批对应的实机验证。
+
+第一批仅实现离线数值参考、校验及假设备交接, **没有切换生产 FJT 执行器**。
+新增实现位于 motion 的 `polynomial_trajectory.py` 和 `trajectory_preparation.py`;
+硬件控制器、网页入口、键盘配置、取消保持、保护和 `safe_home` 仍沿用原行为。
+本节的软件结果不证明真机抖动原因已经确定或修复。
+
+### 曲线与准备契约
+
+- 六轴严格按 `joint1..joint6` 重排全部位置及导数字段; 时间严格递增。
+  只有 q 使用线性参考(C0), q/v 使用三次 Hermite(C1), q/v/a 使用五次 Hermite(C2)。
+  同一轨迹混合缺失 v/a 或只有 a 没有 v 时拒绝, 不静默降级或给所有中间点补零。
+  低阶兼容只检查各段有限导数, 不能把节点处的导数跳变当作满足加速度/jerk 约束。
+- `PreparationContext` 明确携带设备会话、目标代次、最后成功发送的保持目标、反馈及其
+  观测时间、静止/使能/忙状态。静止证据由调用者提供, 不能由单帧位置推定。
+  起点修正前必须使能、静止、空闲且反馈新鲜; 反馈年龄上限 150 ms, 未来容差 5 ms。
+  按用户追加要求，取消反馈及原 t0 位置到保持目标的绝对误差门限；
+  准确规范化曲线仍须通过完整限值和碰撞检查，原始首点越限不能被起点替换掩盖。
+- 校验前将 t0 对齐保持目标, 将已提供的首尾 v/a 归零; 原中间点、时间及最终位置
+  保留。延迟的单目标显式补入 t0 保持起点; 零时长位置变化拒绝。此后生成、检查和采样
+  使用同一份系数, 控制器正式接入时不得再次修改起点或重新拟合。
+- `point_to_point` 给出静止到静止的完整五次约束, 默认 0.4 s; 最低时长提示仅用于报告,
+  不自动延时。0.02 rad / 0.2 s 的 jerk 峰值为 150 rad/s³, 超过配置 20;
+  同幅度最低时长约 0.391487 s, 0.4 s 时为 18.75 rad/s³。
+  **生产键盘仍为 0.02 rad / 0.2 s**, 本批没有更改。
+- 读取规范 URDF 位置限位与 `joint_limits.yaml` 的六轴 v/a/jerk 上限。对各段解析导数的
+  实根及端点检查位置过冲和动态极值; 缺限值、数值求解失败或非有限结果为 unknown。
+  浮点求根不是形式化区间证明, 极端病态输入仍是后续数值审查边界。
+- 碰撞沿实际重建曲线采样, 用段内最大速度约束关节空间步长不大于 0.02 rad,
+  加入内部位置极值, 不按端点距离遗漏往返, 不稀释样本。注入的检查器必须使用完整夹爪状态,
+  检查数/请求数必须等于生成样本数; 碰撞拒绝, 未知/异常/缺检查器不得生成候选。
+  这是离散覆盖, **不是连续碰撞证明**。
+- `PreparedTrajectory` 是冻结的离线候选, JSON 携带版本、原约束、同一组系数和上下文。
+  当前 Python 往返要求系数与版本生成规则精确一致; 尚不构成未来跨语言 ABI。
+  接收方须在新鲜上下文中复核会话/代次/保持目标, 变化即作废。
+  它不是硬件执行许可, 也没有实现真实 ROS 校验服务、场景快照锁定或原子接纳事务。
+
+### 离线分析入口
+
+在仓库根目录执行, 输入为 `joint_names` 与 `points` 的 JSON; 每个点含秒制
+`time_from_start`、六轴 `positions` 及可选的完整 `velocities`、`accelerations`。
+可选 `context` 对应上述 `PreparationContext`, `--now` 与 `observed_at` 使用同一离线时间源。
+
+```bash
+python3 scripts/analyze_p005_trajectory.py \
+  tests/fixtures/p005_moveit_trajectory.json \
+  --output /tmp/p005_moveit_report.json
+```
+
+报告包含规范化曲线、极值、连续性等级、原始点间隔及相对旧逐点保持/线性路径的偏差。
+工具不创建 ROS 节点或访问设备, 不连接碰撞服务; 数值通过也只能得到 unknown,
+不能拿报告发运动。超限/非法输入退出 2; 输出只允许新文件, 不覆盖旧证据。
+上述真实样本会因重建曲线 jerk 超限退出 2。
+
+### 隔离 MoveIt 实测与后续接入门槛
+
+2026-11-02, 在空闲 localhost 域 173, 无 RViz、无硬件控制器的 MoveIt demo 上,
+用完整六轴/双手指合成状态、空操作 FJT 服务端验证; SDK/串口导入被探针阻断。
+规范模型、规划和控制器配置的安装区文件与源码逐字节一致。
+
+- 实际 GetMotionPlan 返回 11 点、总时长 0.996296417 s, 点间隔约 96.3~100 ms。
+  原始 q/v/a/t 及配置摘要保存于 `tests/fixtures/p005_moveit_trajectory.json`。
+  按本方案规范化并五次重建后, 峰值速度约 0.19972 rad/s、加速度 0.64690 rad/s²,
+  jerk **66.32263 rad/s³ > 20**, 正确拒绝; 不能据此说 Ruckig 原始连续曲线本身超限。
+  2 ms 分析栅格相对旧逐点保持最大偏差约 0.01783 rad, 相对线性路径约 0.000603 rad;
+  这些是参考曲线差异, 不是实际跟踪误差。
+- 0.02 rad / 0.4 s 的完整五次单步数值及实际 MoveIt 碰撞检查通过, 检查全部 3 个样本,
+  准备耗时约 **83 ms**。隔离场景添加阻挡物后同一曲线明确返回 collision;
+  查询提供双手指固定状态, 随后移除阻挡物。
+- 当前 MoveIt 执行预算 `1.2*T + 0.5 s` 包含控制器接纳后的等待。
+  对 T=0.4 s 的空操作执行, 加 50 ms 准备等待后约 0.489 s 成功;
+  加 1 s 准备等待后约 **0.992 s 返回 TIMED_OUT**, FJT 在约 0.982 s 收到取消,
+  尚未开始模拟运动。没有放宽或关闭预算; 83 ms 单例也不是最坏耗时保证。
+- 实际 MoveIt 轨迹的五次重建可行性、校验服务与非阻塞设备线程的接入、完整场景及夹爪
+  状态绑定、校验完成后的原子代次复核, 以及准备等待与现有 MoveIt 超时预算兼容,
+  都是生产切换前的门槛。超限保持拒绝, 不自动重定时/裁剪/降级。
+  网页点对点与键盘最终目标仍为完整 C2 轨迹; 键盘保持独立起停、忙时拒绝、不排队。
+  现有 `PoseCompatNode` 仅为末点补速度零值, 属于混合缺失字段, 正式接入前须显式迁移。
+
+假设备测试通过生产 `position_tick`、位置控制和驱动发送同一份序列化系数的采样值,
+覆盖周期抖动/跳点、唯一设备线程、部分发送不确认、取消代次和迟到结果作废;
+仅测试适配器采样新曲线, 生产 `ArmExecution` 仍逐点保持。
+新增专项 **61 passed**, 分层 **26 passed**, 规定及控制器/脚本/测试编译通过。
+`HEAD@056bc11` 加本批新增文件的临时源码副本复用当前安装环境, 完整回归
+**1699 passed / 2 skipped**; 未进行独立安装区构建或真机验证。
+第一批验证时工作区全量为 **1441 passed / 260 failed / 2 skipped**, 失败来自已有的
+`hardware_manager.py` 接线引用不存在的 `FeedbackReader.get_feedback`, 当时未将该改动
+混入 P005 修复。随后按用户要求删除该多余接线, 当前工作区复测结果见
+[项目状态](../../reference/project_status.md#近期完成进展)。
+实验脚本、输入、报告及首次因缺状态而初始化失败的日志保留在本机
+`log/p005_offline_20261102/`; 修正为先启动合成状态后重新启动 MoveIt, 验证完成。
+收尾仅停止本轮进程, SIGINT 的 -2 退出保留在日志, 无残留; 未操作真机。
+
 ## 反馈状态来源与恢复
 
 六轴与夹爪共用控制器已验证缓存的读取和可用性判定。采集路径依据每个电机独立的
@@ -47,6 +145,38 @@ ROS 发布使用原子快照：数值、状态码、接收序号和反馈观测�
 夹爪首帧前使用零时间戳，不可用时米制开口为 NaN。`ArmStatus` 是当前健康快照，
 状态码和原因一起读取，其消息时间仍为发布时刻。新鲜合法的电机故障码可发布，
 动作和使能入口的健康要求仍保留。
+
+### ROS 订阅延迟的离线隔离
+
+验收端报告源数据超过 150 ms，并不能单独区分底层缓存过期、发布停顿与订阅调度
+停顿。判断时必须对齐进程内缓存观测时间、发布时刻、消息源时间、DDS 接收时间、
+回调入口和独立监测时间。同一台机器的 DDS 时间戳与源消息时间使用墙钟；回调间隔
+使用单调时钟，并检查墙钟与单调时钟的偏差是否跳变。
+
+2026-10-28 的无硬件对照在本机 rclpy `7.1.12` / `rmw_fastrtps_cpp 8.4.4` 环境
+复现了多线程接收空档。仅记录已送达消息的年龄会漏掉这一现象：恢复后收到的新帧
+可能很新鲜，但独立监测已在空档中观察到旧帧超过门限。默认订阅 QoS 事件等待参与
+这一复现；去掉事件监听或改用单线程接收的对照结果见[项目状态](../../reference/project_status.md)。
+这不是放宽门限、更新时间戳或删除生产事件诊断的依据，也不能证明此前所有真机
+过期具有同一原因。
+
+仓库提供只使用内存假缓存与生产发布器的对照工具。加载 Jazzy 和工作区 overlay，
+选择空闲非零域后运行：
+
+```bash
+python3 scripts/diagnose_feedback_latency.py --domain-id 174 \
+  --output-dir log/feedback_latency_comparison --duration 20 --with-pose
+```
+
+工具检查域中已有节点、使用专有命名空间，禁止导入 MotorBridge/串口，分别运行
+多线程与单线程订阅。它不构造硬件控制器、不发运动请求。采样先存内存、结束后写盘，
+输出发布端、订阅端 JSONL 和 `comparison.json`。`--without-qos-events` 仅供对照
+默认事件监听对等待集的影响；不修改生产节点。运行目录必须不存在，避免覆盖证据。
+源数据门限保持 150 ms，发布端比订阅端延后退出，启动发现和结束断流不计入观测窗口。
+
+后续真机验收应让专用单线程接收器持续处理反馈，把规划、碰撞查询和日志写盘放在
+接收路径之外，并同时保留控制器缓存审计。位姿兼容服务与 Action 含同步等待，不能
+直接把整个生产节点改成单线程；生产多线程等待路径的长期处理需另行验证。
 
 ## 夹爪闭合端反馈容差
 
@@ -121,8 +251,9 @@ ROS 发布使用原子快照：数值、状态码、接收序号和反馈观测�
 - FJT 接纳和起点检查归 `arm_controller.py` 与 `arm_trajectory.py`；周期线程推进并确认终点。保留
   起点 0.10 rad、终点 0.03 rad 和 2 s 沉降预算，成功反馈必须晚于末点发送。
   健康超差转实测保持，不自动失能。safe_home 使用独立任务、0.02 rad 到位容差及任务速度覆盖。
-- FJT 取消须保持命令成功发送，且后续新帧持续静止 0.1 s（位置误差不超过 0.03 rad、
-  速度不超过 0.05 rad/s），确认预算 2 s；失败报告停止未确认，不能伪称 canceled。
+- FJT 取消须保持命令成功发送，且后续新帧连续 0.2 s 速度不超过 0.05 rad/s，
+  确认预算 2 s；不检查位置极差或相对保持命令
+  的绝对误差。失败报告停止未确认，不能伪称 canceled。
   ROS Action 只复制请求、读快照和映射终态，不推进执行时间轴。发布器始终只读缓存。
   `ArmStop` 按周期推进，首次保持发送成功后才开始反馈确认；重复缓存不累计静止时间。
   运行时保存原请求的周期结果，调用侧等待事件，设备线程继续服务周期与失能请求。
@@ -182,10 +313,87 @@ ROS 发布使用原子快照：数值、状态码、接收序号和反馈观测�
 保留的进程、核对串口释放，重新启动并获取新鲜默认失能反馈。普通退出拒绝时 ROS 仍可用，
 应优先在确认基线后使用显式失能服务。强制终止无法由该软件流程拦截。
 
-`controller_kinematics.py` 使用规范六轴约化模型提供纯数值 FK；ROS Pose 转换保留在门面。
-`python3 scripts/check_controller_fk.py` 可复现相同输入对照：四组输入的位置差均为
-0 m，姿态差最大 2.29e-16 rad，属于数值舍入；本次未发现可观测的发布数值漂移。
+`controller_kinematics.py` 使用规范六轴约化模型提供纯数值 FK; ROS Pose 转换归发布和适配层。
+此前相同输入的新旧模型对照得到四组位置差均为 0 m, 姿态差最大 2.29e-16 rad,
+属于数值舍入。默认检查现使用固定样本, 不再依赖旧 URDF; 命令及边界见下节。
 规范 `joint3` 命名和 J2/J3 `+0.02 rad` 限位保持不变。
+
+### SDK 退出的离线验收
+
+`tests/fixtures/controller_fk_reference_v1.json` 的四组输入与旧 FK 对照一致。期望值由
+Pinocchio 4.1.0 直接读取固定 SDK 提交 `6a49302804f25e624995e771acb6d61896d1856d` 的
+历史 URDF 计算, 没有导入旧 SDK 实现。样本记录相对来源路径、URDF SHA-256、
+`base_link` / `end_link`、rad / m 单位, 以及旧 `join3` 到规范 `joint3` 的映射。
+只提取数值, 不复制旧模型。
+
+```bash
+# 默认检查只读取项目规范模型与固定 JSON, 不需要旧目录
+python3 scripts/check_controller_fk.py
+
+# 可选人工核验: 必须显式提供历史 URDF 路径
+python3 scripts/check_controller_fk.py --legacy-urdf /absolute/path/to/legacy.urdf
+```
+
+两种模式均报告逐样本及最大误差; 显式模式另报告实际路径和 SHA-256。位置与旋转
+误差均须严格小于 `1e-12`, 超差退出 1, 输入错误退出 2。缺样本、损坏样本或模型缺失
+都直接失败, 不回退到旧目录, 不自动生成或改写期望值。更新样本需单独评审来源与数值差异。
+
+退出验收使用 HEAD 加本轮差异组成的独立副本, 排除既有未提交内容和旧 build/install。
+在 `bwrap` 命名空间内隐藏原工作区, `/dev` 使用独立设备视图, 不暴露真实电机或串口。
+完整软件回归需要离屏仿真时只映射图形设备。原目录和设备状态不变。
+在未加载旧 overlay 的环境执行非软链接构建, 然后只加载 ROS Jazzy 及新安装区:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+/usr/bin/python3 -m colcon build --base-paths src --executor sequential
+source install/setup.bash
+REBOTARM_VERIFY_INSTALL_PREFIX="$PWD/install" \
+  python3 tests/fixtures/controller_sdk_exit_probe.py
+```
+
+安装探针运行时还须在该命名空间中隐藏副本 `src/`, 通过真实文件路径确认 controller、
+motion 模块、arm/gripper/gravity YAML 和两层 URDF 全部来自新安装区。探针拦截旧 SDK
+及 MotorBridge 导入, 只构造组件和执行 FK/IK/路径计算, 检查未连接及无设备线程。
+缺少规范资源的失败路径由 `test_pose_sdk_exit.py` 单独覆盖。上述命令本身不创建命名空间;
+必须配合该隔离步骤, 单纯从 `/tmp` 运行或阻断 Python 导入不能证明无旧文件依赖。
+
+例如, 已完成非软链接构建后, 在独立副本根目录执行以下安装探针。原工作区路径需按本机
+实际位置填写, 不得与副本相同; 所有挂载只在子进程生效:
+
+```bash
+SDK_CHECK_ROOT="$PWD"
+SDK_ORIGINAL_ROOT=/home/a/project/rebot_Arm
+test "$SDK_CHECK_ROOT" != "$SDK_ORIGINAL_ROOT" && \
+bwrap --ro-bind / / --tmpfs /tmp --bind "$SDK_CHECK_ROOT" "$SDK_CHECK_ROOT" \
+  --tmpfs "$SDK_ORIGINAL_ROOT" --tmpfs "$SDK_CHECK_ROOT/src" \
+  --dev /dev --proc /proc --unshare-pid --die-with-parent --chdir "$SDK_CHECK_ROOT" \
+  env -u PYTHONPATH -u AMENT_PREFIX_PATH -u COLCON_PREFIX_PATH \
+      -u CMAKE_PREFIX_PATH -u LD_LIBRARY_PATH \
+  bash --noprofile --norc -c 'source /opt/ros/jazzy/setup.bash &&
+    source install/setup.bash &&
+    REBOTARM_VERIFY_INSTALL_PREFIX="$PWD/install" python3 tests/fixtures/controller_sdk_exit_probe.py'
+```
+
+假设备 ROS 集成复用 `controller_batch6_ros_probe.py`, 只在空闲隔离域启动无 RViz、
+无假关节源的 MoveIt, 验证唯一 FJT、默认失能拒绝、显式使能、执行、取消保持、
+MoveIt Execute、IK 服务和位姿 Action。MoveIt 与探针需要同时启动, 不能先等待规划服务
+再启动探针: MoveIt 初始化本身需要该假控制器提供新鲜关节状态。先用 ROS 图确认域为空闲,
+再在上述设备隔离环境中执行, 安装区须来自本轮独立构建:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=189 ROS_LOCALHOST_ONLY=1
+ros2 launch rebotarm_bringup moveit_demo.launch.py use_rviz:=false use_fake_joint_states:=false &
+SDK_MOVEIT_LAUNCH_PID=$!
+python3 tests/fixtures/controller_batch6_ros_probe.py
+SDK_PROBE_RESULT=$?
+kill -INT "$SDK_MOVEIT_LAUNCH_PID"
+wait "$SDK_MOVEIT_LAUNCH_PID"
+test "$SDK_PROBE_RESULT" -eq 0
+```
+
+收尾只处理本轮启动进程, 并检查无残留。软件通过不证明反馈实时时延或新增实机验收。
 
 文件归属及唯一批次编号见[重构规划](../../design/controller_refactor_plan.md#分批交付与完成条件)。
 

@@ -6,6 +6,9 @@
 
 本机 MuJoCo 仿真、模型工具和 CPU Reach/Pick 的固定版本；默认使用系统 Python 3.12。
 本机通过用户级安装提供依赖，不再要求 MuJoCo 专属虚拟环境。
+P005 准备服务另依赖与系统 MoveIt 匹配的 `ros-jazzy-moveit-py`（本机验证 2.12.4）；
+通过 apt 安装，不从 pip 混装另一套 MoveIt。启动和验收见
+[P005 执行接入](../../implemented/features/p005_prepared_trajectory.md)。
 
 ## 依赖版本
 

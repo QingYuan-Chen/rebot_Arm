@@ -15,8 +15,8 @@ from control_msgs.action import GripperCommand
 from rebotarm_motion.pose_kinematics import JOINT_NAMES
 from hardware_regression_io import Audit
 from hardware_regression_gate import RegressionGate, SustainedSpeed
-from rebotarmcontroller.stationary_evidence import StationaryEvidence, DisabledTransitionEvidence
-from rebotarmcontroller.gripper_control import _G_POSITION_MAX_SPEED_RAD_S
+from rebotarmcontroller.runtime.stationary_evidence import StationaryEvidence, DisabledTransitionEvidence
+from rebotarmcontroller.gripper.gripper_control import _G_POSITION_MAX_SPEED_RAD_S
 
 if not __debug__:
     raise RuntimeError('现场回归不允许使用 Python 优化模式')
@@ -282,7 +282,7 @@ def stationary(target=qbase,seconds=1.,history=True,tolerance=.003):
             evidence=StationaryEvidence(window=seconds,velocity_limit=.07,joints=7)
             evidence.reset(positions)
         reason=evidence.observe(positions,velocities,stamp,now,sequences=sequences)
-        if reason in ('invalid_or_stale','source_gap','source_regressed','anchor_displacement'):
+        if reason in ('invalid_or_stale','source_gap','source_regressed'):
             raise RuntimeError('静止证据失败: '+reason)
         if evidence.confirmed(now):
             emit('stationary',target=list(map(float,target)),actual=q.tolist(),duration=seconds,
@@ -298,7 +298,7 @@ def collision_gripper():
     assert validity.wait_for_service(timeout_sec=3.)
     for alpha in np.linspace(0.,1.,21):
         health(1)
-        request=GetStateValidity.Request();request.group_name='arm_with_gripper'
+        request=GetStateValidity.Request();request.group_name=''
         request.robot_state.is_diff=False
         request.robot_state.joint_state.name=list(JOINT_NAMES)+['left_finger_joint','right_finger_joint']
         low=min(actual,base['gripper']);high=max(actual,base['gripper']+.005)

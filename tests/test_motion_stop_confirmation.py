@@ -41,11 +41,26 @@ def test_invalid_or_moving_feedback_breaks_quiet_window(position, velocity):
     assert not feedback.stationary(10., 10.5, int(10.5e9))
 
 
-def test_position_drift_is_not_stationary_even_if_velocity_reports_zero():
+def test_position_changes_do_not_reject_when_speed_and_continuity_qualify():
     feedback = StopFeedback()
-    for t,p in ((10., 0.), (10.1,.01), (10.2,.02), (10.4,.03)):
+    for t,p in ((10., 0.), (10.1,.01), (10.2,.02), (10.3,.03), (10.4,.04)):
         feedback.update(sample(t,p), t, int(t*1e9))
-    assert not feedback.stationary(10., 10.4, int(10.4e9))
+    assert feedback.stationary(10., 10.4, int(10.4e9))
+
+
+@pytest.mark.parametrize('stale', [False, True])
+def test_coordinated_pose_start_delta_does_not_replace_feedback_freshness_check(stale):
+    gripper = NS(header=NS(stamp=NS(sec=9 if stale else 10,nanosec=0)),position=.02)
+    node = NS(_feedback_receiver=NS(snapshot=lambda:NS(joints=sample(10.),gripper=gripper)),
+        get_clock=lambda:NS(now=lambda:NS(nanoseconds=10_000_000_000)))
+    if stale:
+        with pytest.raises(ValueError,match='expired'):
+            PoseExecutionNode._planning_start_state(node)
+    else:
+        result = PoseExecutionNode._planning_start_state(node,sample(10.,.01))
+        values = dict(zip(result.name,result.position))
+        assert values['joint1'] == .01
+        assert values['left_finger_joint'] == .01 and values['right_finger_joint'] == -.01
 
 
 def completed(value):

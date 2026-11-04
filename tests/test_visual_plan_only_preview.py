@@ -36,6 +36,7 @@ def _fake_motion_node():
         planner_calls.append(kwargs)
         return SimpleNamespace(success=True, message="planned", trajectory=_trajectory())
     node = SimpleNamespace(
+        _trajectory_mode='legacy',
         _planner=SimpleNamespace(plan_pose=plan_pose),
         _preview_publisher=SimpleNamespace(publish=published.append),
         get_parameter=lambda name: SimpleNamespace(value=0.1),
@@ -118,6 +119,7 @@ def test_bad_virtual_state_fails_closed():
 
 def test_moveit_request_uses_explicit_full_preview_start():
     planner = object.__new__(MoveItMotionPlanner)
+    planner._start_state_provider = None
     planner._client = SimpleNamespace(wait_for_service=lambda **kwargs: True)
     planner._group_name = "arm"
     planner._planning_pipeline = "ompl"
@@ -131,7 +133,8 @@ def test_moveit_request_uses_explicit_full_preview_start():
     start.position = [0.2] * 6
 
     request = planner.plan_pose(PoseStamped(), start_joint_state=start)
-    assert not request.motion_plan_request.start_state.is_diff
+    # 显式六轴起点仍以 diff 合入场景，保留真实手指和附着物。
+    assert request.motion_plan_request.start_state.is_diff
     assert list(request.motion_plan_request.start_state.joint_state.position) == [0.2] * 6
 
 

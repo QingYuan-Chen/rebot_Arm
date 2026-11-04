@@ -144,7 +144,9 @@ class SimControlRuntime:
             self._raw_torque_command.fill(0.0)
             self._raw_torque_requested.fill(0.0)
             self._raw_torque_deadline = float(data.time) + 0.1
-        if mode in ("gravity_comp", "hold"):
+        # position 与 hold 共用位置控制器；position→hold 保留积分和上一拍支撑力矩。
+        # 不能在静止保持时清零后等待 PI 重建重力支撑；其余模式的既有复位规则保留。
+        if mode == "gravity_comp" or (mode == "hold" and self._control_mode != "position"):
             self._arm_controller.reset()
         self._control_mode = mode
         self._apply_motor_control(model, data)
@@ -176,14 +178,17 @@ class SimControlRuntime:
         else:
             current = list(_finite_vector(targets, len(ARM_JOINT_NAMES), "joint targets"))
 
-        reached = []
+        # 整批通过后才修改目标；越界不得截断后伪报成功或留下部分更新。
         for index, joint_id in enumerate(self._joint_ids[:6]):
             lower, upper = (float(value) for value in model.jnt_range[joint_id])
-            value = min(max(current[index], lower), upper)
-            self._position_targets[index] = value
-            reached.append(value)
-        self.set_mode(model, data, "position")
-        return tuple(reached)
+            if not lower <= current[index] <= upper:
+                raise ValueError(f"joint target outside limits: {ARM_JOINT_NAMES[index]}")
+        self._position_targets[:6] = current
+        # 高频参考只更新目标，PI 的积分与力矩更新仍由配置控制频率推进。
+        # 每次写目标都调用 set_mode 会额外执行控制计算，使高频轨迹改变有效增益。
+        if self._control_mode != 'position':
+            self.set_mode(model, data, "position")
+        return tuple(current)
 
 
     def set_joint_position_targets(
@@ -229,6 +234,23 @@ class SimControlRuntime:
 
     def set_gripper_width(self, model, data, width: float) -> float:
         return self.command_gripper_width(model, data, width)
+
+    def command_gripper_position(self, model, data, width, torque_cap):
+        """独立夹爪开口命令，电机限矩按冻结传动参数折算；时间生命周期由调用者持有。"""
+        if not math.isfinite(width) or not 0 <= width <= .09:
+            raise ValueError('gripper opening outside limits')
+        p = self._motor_parameters.gripper
+        if not math.isfinite(torque_cap) or not 0 < torque_cap <= p.motor_torque_limit_nm:
+            raise ValueError('coordinated torque cap outside configured simulation capability')
+        force = torque_cap*abs(p.motor_radians_per_opening_m)*p.transmission_efficiency
+        return self.command_gripper_width(model,data,width,max_force_n=force)
+
+    def release_gripper_position(self, model, data):
+        """协同位置任务结束后中性释放；保留目标记录而将实际输出归零。"""
+        self._gripper_max_force_n = 0.
+        self._gripper_control_force.fill(0.)
+        for actuator in self._actuator_ids[-2:]:
+            data.ctrl[actuator] = 0.
 
 
     def _apply_motor_control(self, model, data) -> None:
