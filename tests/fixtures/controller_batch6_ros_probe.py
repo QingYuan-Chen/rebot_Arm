@@ -113,11 +113,27 @@ try:
     assert not wait(fjt.send_goal_async(goal(start))).accepted
     report['default_disabled_reject'] = True
     if controller.get_parameter('trajectory_execution_mode').value == 'prepared_v1':
-        from rebotarm_msgs.srv import PrepareArmTrajectory
+        from rebotarm_msgs.srv import PrepareArmTrajectory,GetArmPlanningState,RetimeArmTrajectory
         preparation = client.create_client(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory')
         assert preparation.wait_for_service(timeout_sec=20.)
+        state_client=client.create_client(GetArmPlanningState,'/rebotarm/get_arm_planning_state')
+        assert state_client.wait_for_service(timeout_sec=5.)
+        snapshot=wait(state_client.call_async(GetArmPlanningState.Request()))
+        assert snapshot.success,snapshot.message
+        state=json.loads(snapshot.state_json)
+        assert not state['executable'] and state['reason']=='disabled'
+        service=client.create_client(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory')
+        assert service.wait_for_service(timeout_sec=5.)
+        query=RetimeArmTrajectory.Request(trajectory=goal(start).trajectory,
+            velocity_scaling=1.,acceleration_scaling=1.)
+        preview=wait(service.call_async(query))
+        assert preview.success and not preview.executable,preview.message
+        report['disabled_preview']=True
     report['enable'] = trigger('enable')
     ready()
+    if controller.get_parameter('trajectory_execution_mode').value == 'prepared_v1':
+        assert not wait(fjt.send_goal_async(FollowJointTrajectory.Goal(trajectory=preview.trajectory))).accepted
+        report['preview_rejected_after_enable']=True
     target = start.copy(); target[0] += .03
     handle = wait(fjt.send_goal_async(goal(target)))
     assert handle.accepted

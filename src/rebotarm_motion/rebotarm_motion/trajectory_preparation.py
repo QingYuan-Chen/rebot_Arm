@@ -236,7 +236,8 @@ class PreparedTrajectory:
 
 
 def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=None,
-                       now=0., collision_check=None, include_reference_comparison=True):
+                       now=0., collision_check=None, include_reference_comparison=True,
+                       preserve_points=False):
     """返回候选与可审计报告; 只有完整覆盖的碰撞 pass 才产生候选.
 
     collision_check(names, positions) 由调用者注入, 应绑定其记录的规划场景与完整
@@ -249,7 +250,17 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
     if context and any(q < lo-CALC_ATOL or q > hi+CALC_ATOL
             for q,lo,hi in zip(source[0].positions, lower, upper)):
         raise ValueError('first input position outside limits')
-    points = normalize_boundaries(names, source, context, now=now) if context else source
+    if preserve_points:
+        if context is None:
+            raise ValueError('bound execution requires a hold context')
+        context.require_ready(now)
+        if source[0].time != 0 or source[0].positions != context.hold:
+            raise ValueError('planned initial hold changed; re-plan')
+        if any(v for p in (source[0], source[-1]) for v in (*p.velocities, *p.accelerations)):
+            raise ValueError('planned boundary derivatives must already match hold')
+        points = source
+    else:
+        points = normalize_boundaries(names, source, context, now=now) if context else source
     if points[0].time != 0:
         raise ValueError('explicit initial state at time zero required')
     report = dict(source_points=len(source), normalized_points=len(points),

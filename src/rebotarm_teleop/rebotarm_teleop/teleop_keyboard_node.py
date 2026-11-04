@@ -97,6 +97,8 @@ class TeleopKeyboardNode(Node):
         self._capability = TrajectoryCapability(self.get_parameter('trajectory_execution_mode').value)
         self.declare_parameter("trajectory_duration", .4 if self._capability.expected == 'prepared_v1' else .2)
         self._busy = False
+        self._step_generation = 0
+        self._retime_pending = None
         self._feedback_at = 0.
         self.declare_parameter("poll_period", 0.05)
         self.declare_parameter("input_timeout", 0.5)
@@ -133,6 +135,10 @@ class TeleopKeyboardNode(Node):
             FollowJointTrajectory,
             f"/{self._arm_namespace}/follow_joint_trajectory",
         )
+        from rebotarm_msgs.srv import RetimeArmTrajectory
+        self._retime_type = RetimeArmTrajectory
+        self._retime_client = self.create_client(RetimeArmTrajectory,
+            f'/{self._arm_namespace}/retime_arm_trajectory')
         self._status_pub = self.create_publisher(
             String,
             f"/{self._arm_namespace}/teleop/status",
@@ -176,6 +182,12 @@ class TeleopKeyboardNode(Node):
 
     def _poll_key(self) -> None:
         """定时器回调：读取一个按键并完成「死锁检查 → 映射 → 限位 → 下发」流程。"""
+        if self._retime_pending is not None:
+            future, generation, deadline = self._retime_pending
+            if time.monotonic() >= deadline or generation != self._step_generation:
+                self._retime_pending = None
+                self._step_generation += 1
+                future.cancel()
         key = self._read_key()
         now = time.monotonic()
         if key is None:
@@ -186,6 +198,7 @@ class TeleopKeyboardNode(Node):
             return
         self._last_input_time = now
         if key == " ":
+            self._step_generation += 1  # 使尚在规划的按键响应失效；不产生后继运动。
             # 空格是软件级停止：本节点不再下发新目标，是否停止现有轨迹由控制器决定。
             self._publish_status("stopped", "keyboard stop requested")
             return
@@ -259,6 +272,37 @@ class TeleopKeyboardNode(Node):
                 tuple(self._current_positions[name] for name in joint_names), positions,
                 self._trajectory_duration, trajectory_factory=JointTrajectory,
                 point_factory=JointTrajectoryPoint)
+            if not self._retime_client.service_is_ready():
+                self._publish_status('unavailable', 'trajectory retiming service unavailable', key=key)
+                return
+            request = self._retime_type.Request()
+            request.trajectory, request.fixed_duration = trajectory, True
+            request.velocity_scaling = request.acceleration_scaling = 1.
+            self._busy = True
+            generation = self._step_generation
+            deadline = time.monotonic()+2.
+            future = self._retime_client.call_async(request)
+            self._retime_pending = (future, generation, deadline)
+            future.add_done_callback(lambda result:self._retimed_step(result,generation,deadline,message,key))
+            return
+        self._dispatch_step(trajectory, message, key)
+
+    def _retimed_step(self, future, generation, deadline, message, key):
+        """固定时长只检查不延长；异步等待不阻塞反馈，旧按键响应不能触发发送。"""
+        try:
+            self._retime_pending = None
+            if generation != self._step_generation or time.monotonic() > deadline:
+                raise ValueError('keyboard planning canceled or exceeded 2 s')
+            result = future.result()
+            if not result.success or not result.executable:
+                raise ValueError(result.message if not result.success else 'enable and re-plan keyboard step')
+            self._dispatch_step(result.trajectory,message,key)
+        except Exception as exc:
+            self._busy = False
+            self._publish_status('rejected', str(exc), key=key)
+
+    def _dispatch_step(self, trajectory, message, key):
+        """只发送原最终消息；后端仍原子核验会话与代次。"""
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = trajectory
         self._busy = True

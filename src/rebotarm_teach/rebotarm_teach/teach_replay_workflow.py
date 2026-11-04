@@ -153,7 +153,8 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             ee_frame_id="end_link",
             frame_id="base_link",
             planning_service=str(self.get_parameter("moveit_planning_service").value),
-            planning_pipeline=str(self.get_parameter("moveit_planning_pipeline").value),
+            planning_pipeline=('ompl_reference' if str(self.get_parameter('trajectory_execution_mode').value)
+                == 'prepared_v1' else str(self.get_parameter("moveit_planning_pipeline").value)),
             planner_id=str(self.get_parameter("moveit_planner_id").value),
             planning_time=float(self.get_parameter("moveit_planning_time").value),
             num_attempts=int(self.get_parameter("moveit_num_planning_attempts").value),

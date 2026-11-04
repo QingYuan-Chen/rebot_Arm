@@ -105,6 +105,7 @@ class WebTeleopClient:
         gripper_goal_factory: Callable[[], Any] | None = None,
         trajectory_execution_mode: str = 'legacy',
         require_trajectory_capability: Callable[[], None] = lambda: None,
+        finalize_trajectory=None,
     ) -> None:
         """注入动作客户端与消息工厂（全部为关键字参数）。
 
@@ -129,6 +130,7 @@ class WebTeleopClient:
         self._gripper_goal_factory = gripper_goal_factory
         self._trajectory_mode = trajectory_execution_mode
         self._require_trajectory_capability = require_trajectory_capability
+        self._finalize_trajectory = finalize_trajectory
 
     def execute(
         self,
@@ -205,6 +207,9 @@ class WebTeleopClient:
             trajectory = point_to_point_message(decision.joint_names, current,
                 decision.positions, decision.duration, trajectory_factory=self._trajectory_factory,
                 point_factory=self._trajectory_point_factory)
+            if self._finalize_trajectory is None:
+                raise ValueError('final planning binding required')
+            trajectory = self._finalize_trajectory(trajectory)
         else:
             self._append_legacy_points(trajectory, current, decision)
         goal = self._follow_goal_factory()

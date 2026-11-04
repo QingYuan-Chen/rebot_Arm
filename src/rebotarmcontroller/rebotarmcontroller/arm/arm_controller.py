@@ -401,7 +401,33 @@ class ArmController:
             self._limits_revision)
 
     @device_request
-    def reserve_arm_preparation(self, deadline, *, web=False, gripper_command=()):
+    def planning_snapshot(self, mode):
+        """在设备周期之间复制保持值和代次，不预约资源、不采集或发送额外设备命令。
+
+        只有明确失能允许仅预览；断流、故障、运动或停止未确认不能冒充失能预览。
+        实际位置与保持目标不作偏差比较，沿用原反馈新鲜度条件。
+        """
+        from rebotarm_trajectory.planning import planning_state
+        self.require_available()
+        execution = self._backend.execution
+        sample = self.feedback.joint_snapshot()
+        if not -.005 <= time.monotonic()-sample.observed_at <= .15:
+            raise RuntimeError('fresh feedback required for planning')
+        if not self._lifecycle.enabled:
+            if any(status not in (0, 1) for status in sample.statuses):
+                raise RuntimeError('healthy feedback required for disabled preview')
+            return planning_state(self.trajectory_capability(mode)['revision'],
+                self._backend.requests.generations['device'], execution.generation,
+                execution.last_sent_target, executable=False, reason='disabled')
+        if (execution.reservation is not None or execution.moving
+                or (self._task_owner().task is not None and not self._task_owner().task.event.is_set())):
+            raise RuntimeError('arm resource busy; planning start unavailable')
+        sample, hold, _ = self._prepared_snapshot()
+        return planning_state(self.trajectory_capability(mode)['revision'],
+            self._backend.requests.generations['device'], execution.generation, hold, executable=True)
+
+    @device_request
+    def reserve_arm_preparation(self, deadline, *, web=False, gripper_command=(), planning=None):
         """设备线程确认空闲及新鲜反馈后预约六轴和固定夹爪，返回上下文令牌。
 
         准备期间继续发送原保持值；普通夹爪命令读取 reservation 后拒绝。
@@ -424,6 +450,10 @@ class ArmController:
             hold, sample.positions, sample.observed_at, tuple(gripper['positions']),
             gripper['generation'], gripper['raw_position'], self._scene_revision, deadline,
             self.trajectory_capability('prepared_v1')['revision'], 1 if web else 0, command)
+        # 规划快照失效时在建立预约之前拒绝；没有新运动，也无须自动 Stop 解锁。
+        from rebotarm_trajectory.planning import require_plan_context
+        require_plan_context(planning, capability_revision=token.capability,
+            session=token.session, generation=token.generation, hold=token.hold)
         execution.reservation = token
         self._lifecycle.set_execution_state('TRAJ_PREPARING')
         return token

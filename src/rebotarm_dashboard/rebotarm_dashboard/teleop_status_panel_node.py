@@ -522,6 +522,9 @@ class TeleopStatusPanelNode(Node):
             gripper_goal_factory=GripperCommand.Goal,
             trajectory_execution_mode=self._trajectory_capability.expected,
             require_trajectory_capability=self._trajectory_capability.require,
+            finalize_trajectory=lambda trajectory:self._retime_coordinated(trajectory,
+                self._trajectory_capability.require_snapshot(), True,
+                float(self.get_parameter('web_execute_max_joint_speed_rad_s').value)),
         )
         from rebotarm_msgs.srv import RetimeArmTrajectory
         from rebotarm_teleop.web_coordinated import CoordinatedWebPlans

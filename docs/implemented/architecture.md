@@ -28,7 +28,12 @@ motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查
 模式、期限和验证边界见 [P005 执行接入](features/p005_prepared_trajectory.md)。
 
 七轴、单手指及额外携带右指的 FJT 均明确拒绝。共享包保留六轴分级插值和具名系数，
-能力契约 v2 仅声明六轴 FJT、网页 Action v1 及独立位置夹爪。motion 在规划阶段重定时，
+能力契约 v3 声明六轴 FJT、网页 Action v1、独立位置夹爪及规划绑定版本。
+`GetArmPlanningState` 由后端所有者只读复制会话、六轴代次和已发送保持目标；
+共享内核 `planning.py` 编码快照、最终纳秒曲线摘要及执行/参考/失能预览用途，不读取时钟。
+最终计划先规范化起点再统一重定时；执行预约与准备复核绑定，不能再改节点或时间。
+普通 OMPL 生成最终计划，`ompl_reference` 保留虚拟起点，示教拼接和视觉实际阶段再最终绑定。
+motion 在规划阶段重定时，
 C++ MoveIt 响应插件调用独立 Python 纯计算服务；执行准备不改时间。MoveIt 保留 `arm`
 和 `gripper` 两个独立组；后者通过薄 GripperCommand 适配将左指 m 转换为双指总开口 m。
 控制器 `runtime/coordinated_trajectory.py` 持有网页组合任务，在同一设备周期登记原六轴

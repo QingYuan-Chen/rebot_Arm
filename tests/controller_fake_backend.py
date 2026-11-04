@@ -36,6 +36,11 @@ class FakeBackend:
         self.in_writer = True
         self._waiting = False
 
+    def assert_writer(self):
+        """旧行为夹具显式处于内存设备事务；与生产端口同样拒绝越过 writer 边界。"""
+        if not self.in_writer:
+            raise RuntimeError('device writer context required')
+
     @property
     def joint_names(self): return list(self._arm.joint_names)
     @property

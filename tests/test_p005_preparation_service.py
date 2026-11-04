@@ -138,3 +138,24 @@ def test_formal_preparation_skips_only_offline_comparison(monkeypatch):
     monitor=LockedMonitor()
     payload,_=SceneCollisionChecker(monitor).prepare(request(monitor),LOWER,UPPER,LIMITS)
     assert payload['curve'] and len(monitor.checked)>2
+
+
+def test_bound_preparation_checks_exact_curve_without_normalizing_or_retiming():
+    from rebotarm_trajectory.capability import make_capability
+    from rebotarm_trajectory.planning import plan_binding,planning_state
+    from rebotarm_trajectory.polynomial import TrajectoryPoint,curve_from_payload
+    import json
+    monitor=LockedMonitor();req=request(monitor)
+    cap=make_capability('prepared_v1',1,.5,1.)
+    req.capability_json=json.dumps(cap)
+    points=tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
+        p.positions,p.velocities,p.accelerations) for p in req.trajectory.points)
+    state=planning_state(cap['revision'],req.session,req.generation,req.hold_positions,executable=True)
+    req.trajectory.header.frame_id=plan_binding(cap['revision'],req.trajectory.joint_names,points,state=state)
+    payload,_=SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+    assert curve_from_payload(payload['curve']).points==points
+    req.hold_positions[0]=.01
+    monitor.checked.clear()
+    with pytest.raises(ValueError,match='re-plan'):
+        SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+    assert not monitor.checked

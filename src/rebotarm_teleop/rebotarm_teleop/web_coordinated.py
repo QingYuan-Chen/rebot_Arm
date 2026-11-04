@@ -56,6 +56,11 @@ class CoordinatedWebPlans:
         final = build_curve(message.joint_names,tuple(TrajectoryPoint(
             p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
             for p in message.points))
+        from rebotarm_trajectory.planning import decode_plan
+        plan = decode_plan(message.header.frame_id, message.joint_names, final.points,
+            capability_revision=capability['revision'])
+        if plan is None:
+            raise ValueError('final planning binding missing')
         token = uuid.uuid4().hex
         decision = replace(decision,duration=final.duration, positions=final.points[-1].positions[:6])
         with self._lock:
@@ -64,16 +69,17 @@ class CoordinatedWebPlans:
             self._plans[token] = (capability['revision'],message,decision,
                 (target_width, min(effort, capability['gripper_torque_cap_nm'])) if 'gripper_position' in payload else ())
         count = min(3000,max(2,math.ceil(final.duration/.05)))
-        return dict(accepted=True,plan_id=token,duration=final.duration,
+        return dict(accepted=True,executable=plan['purpose']=='execution',plan_id=token,duration=final.duration,
             torque_cap_nm=capability['gripper_torque_cap_nm'],joint_names=list(final.joint_names),
             keyframes=[dict(time=p.time,positions=p.positions,velocities=p.velocities,accelerations=p.accelerations)
                 for p in final.points],
             preview=[dict(time=final.duration*i/count,positions=final.sample(final.duration*i/count)[0]) for i in range(count+1)],
             gripper_position=target_width, collision_policy='web_closed',
-            message='按闭合夹爪模型检查；夹爪独立开合，不保证与机械臂同时到达')
+            message=('仅预览：使能后须重新预览。' if plan['purpose']=='preview' else '')+
+                '按闭合夹爪模型检查；夹爪独立开合，不保证与机械臂同时到达')
 
     def take(self, token, current):
-        """单次交接原计划；准备服务按预约状态规范化起点并检查实际执行曲线。"""
+        """单次交接原计划；准备只复核，不能修改已绑定的节点与时间。"""
         capability = self.capability()
         with self._lock:
             plan = self._plans.pop(str(token),None)
@@ -82,4 +88,9 @@ class CoordinatedWebPlans:
         revision,message,decision,gripper = plan
         if revision != capability['revision']:
             raise ValueError('coordinated planning capability changed; preview again')
+        from rebotarm_trajectory.planning import decode_plan
+        from rebotarm_trajectory.polynomial import TrajectoryPoint
+        decode_plan(message.header.frame_id, message.joint_names, tuple(TrajectoryPoint(
+            p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
+            for p in message.points), capability_revision=revision, require_execution=True)
         return message,decision,gripper

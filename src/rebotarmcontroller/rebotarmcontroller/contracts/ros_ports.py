@@ -143,7 +143,11 @@ class ArmCommandPort(Protocol):
         """当前设备会话与生效限值的只读版本化快照。"""
         ...
 
-    def reserve_arm_preparation(self, deadline, *, web=False, gripper_command=()):
+    def planning_snapshot(self, mode):
+        """经设备线程取得只读规划快照；不会预约或变更设备输出。"""
+        ...
+
+    def reserve_arm_preparation(self, deadline, *, web=False, gripper_command=(), planning=None):
         """约定在设备线程预留空闲静止资源并颁发不可变身份。"""
         ...
 

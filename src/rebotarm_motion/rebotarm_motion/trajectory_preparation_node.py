@@ -27,7 +27,7 @@ import time
 from .polynomial_trajectory import JOINT_NAMES, TrajectoryPoint
 from .trajectory_preparation import PreparationContext, analyze_trajectory, load_reference_limits
 from rebotarm_trajectory.joint_contract import canonical_input
-from rebotarm_trajectory.capability import decode_capability, binding
+from rebotarm_trajectory.capability import decode_capability
 
 
 def scene_revision(message):
@@ -85,9 +85,11 @@ class SceneCollisionChecker:
         capability_json = getattr(request, 'capability_json', '')
         if capability_json:
             capability = decode_capability(capability_json)
-        if trajectory.header.frame_id.startswith('rebotarm-capability:'):
-            if capability is None or trajectory.header.frame_id != binding(capability):
-                raise ValueError('planning capability changed')
+        from rebotarm_trajectory.planning import decode_plan, require_plan_context
+        planning = decode_plan(trajectory.header.frame_id, names, points,
+            capability_revision=capability['revision'] if capability else None, require_execution=True)
+        require_plan_context(planning, capability_revision=capability['revision'] if capability else '',
+            session=request.session, generation=request.generation, hold=context.hold)
         if self.config_directory is not None and capability is not None:
             from .coordinated_trajectory import effective_limits
             lower, upper, limits = effective_limits(self.config_directory, names, capability)
@@ -115,7 +117,8 @@ class SceneCollisionChecker:
                             requested_samples=len(positions))
             prepared, report = analyze_trajectory(names, points,
                 lower=lower, upper=upper, limits=limits, context=context, now=now,
-                collision_check=collision, include_reference_comparison=False)
+                collision_check=collision, include_reference_comparison=False,
+                preserve_points=planning is not None)
             if prepared is None:
                 raise ValueError(json.dumps(report, ensure_ascii=False, allow_nan=False))
             if time.monotonic() >= request.deadline_monotonic:

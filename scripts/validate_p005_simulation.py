@@ -111,7 +111,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
     from moveit_msgs.action import ExecuteTrajectory
     from shape_msgs.msg import SolidPrimitive
     from geometry_msgs.msg import Pose
-    from rebotarm_msgs.srv import PrepareArmTrajectory, RetimeArmTrajectory, SetGripper, SetMode
+    from rebotarm_msgs.srv import PrepareArmTrajectory, RetimeArmTrajectory, GetArmPlanningState, SetGripper, SetMode
     from rebotarm_motion.trajectory_messages import point_to_point_message
     from rosidl_runtime_py.convert import message_to_ordereddict
     rclpy.init()
@@ -193,6 +193,55 @@ def ros_acceptance(output, dashboard, teach_record=None):
             if name == '/rebotarm/follow_joint_trajectory']
         assert len(owners) == 1, owners
         results['graph_nodes']=nodes
+        # 先验证只读起点与最终计划绑定，再使用现有网页/MoveIt/示教入口。
+        from rebotarm_trajectory.planning import decode_state, decode_plan
+        from rebotarm_trajectory.polynomial import TrajectoryPoint,curve_from_payload
+        def numeric(message):
+            return tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
+                p.positions,p.velocities,p.accelerations) for p in message.points)
+        snapshot=call(GetArmPlanningState,'/rebotarm/get_arm_planning_state',GetArmPlanningState.Request())
+        assert snapshot.success,snapshot.message
+        state=decode_state(snapshot.state_json)
+        target=list(state['hold']);target[0]+=.005
+        request=RetimeArmTrajectory.Request(trajectory=make(target,1.).trajectory,
+            velocity_scaling=1.,acceleration_scaling=1.)
+        request.trajectory.points[0].positions[0]+=.003
+        original=message_to_ordereddict(request.trajectory)
+        final=call(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory',request)
+        assert final.success and final.executable,final.message
+        binding=decode_plan(final.trajectory.header.frame_id,names,numeric(final.trajectory),require_execution=True)
+        assert list(final.trajectory.points[0].positions)==state['hold']
+        request.planning_purpose=request.REFERENCE
+        reference=call(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory',request)
+        assert reference.success and not reference.executable,reference.message
+        assert list(reference.trajectory.points[0].positions)==list(request.trajectory.points[0].positions)
+        rejected=arm.send_goal_async(FollowJointTrajectory.Goal(trajectory=reference.trajectory));wait(rejected.done)
+        assert not rejected.result().accepted,'reference curve executed through compatibility FJT'
+        stop=call(Trigger,'/rebotarm/trajectory_stop',Trigger.Request());assert stop.success,stop.message
+        rejected=arm.send_goal_async(FollowJointTrajectory.Goal(trajectory=final.trajectory));wait(rejected.done)
+        assert not rejected.result().accepted,'idle Stop did not invalidate planning binding'
+        request.planning_purpose=request.FINAL_EXECUTION
+        final=call(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory',request)
+        assert final.success and final.executable,final.message
+        binding=decode_plan(final.trajectory.header.frame_id,names,numeric(final.trajectory),require_execution=True)
+        frozen=binding['state']
+        check=PrepareArmTrajectory.Request(trajectory=final.trajectory, session=frozen['session'],
+            generation=frozen['generation'],hold_positions=frozen['hold'],
+            feedback_positions=list(latest['joint'].position[:6]),feedback_observed_at=time.monotonic(),
+            enabled=True,gripper_positions=list(latest['joint'].position[-2:]),
+            scene_revision=latest['trajectory_scene_revision'],deadline_monotonic=time.monotonic()+2.,
+            capability_json=latest['trajectory_capabilities'])
+        checked=call(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory',check)
+        assert checked.success,checked.message
+        prepared=json.loads(checked.prepared_json)
+        curve=curve_from_payload(prepared['curve'])
+        assert curve.points==numeric(final.trajectory),'preparation changed bound final curve'
+        finish(send(arm,FollowJointTrajectory.Goal(trajectory=final.trajectory)))
+        results['planning_binding']=dict(input=original,snapshot=state,binding=binding,
+            final=message_to_ordereddict(final.trajectory),prepared=prepared,
+            reference_preserved=True,idle_stop_invalidated=True)
+        write_json(output/'planning_binding.json',results['planning_binding'])
+        pause(1.)
         if teach_record is not None:
             # 复用网页正式入口；只复制输入，绝不在用户录制文件旁生成或覆盖派生文件。
             raw=output/'teach_input.jsonl'

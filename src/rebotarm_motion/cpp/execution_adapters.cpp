@@ -3,7 +3,7 @@
  * 对外接口：RetimeExecutionCurve、BoundSimpleControllerManager 两个 pluginlib 插件。
  * 安全约束：不重写设备限值，不在执行阶段重定时；服务总期限 2 s，未知计划拒绝。
  *   RobotTrajectory 不保存 JointTrajectory header，所以仅写 header 会丢绑定。
- *   同进程只读计划缓存保存原最终数值和绑定；发送时匹配完整曲线后恢复 header。
+ *   缓存分别保存 MoveIt 重编码匹配值和服务权威纳秒轨迹；匹配后下发后者。
  *   设备重连后的旧绑定仍交后端拒绝；缓存淘汰或进程重启后须重新规划。
  * 文件结构：计划绑定缓存 → 有界服务调用 → 响应插件 → 原控制器管理器装饰器。
  */
@@ -30,7 +30,8 @@ using Handle = moveit_controller_manager::MoveItControllerHandle;
 using Status = moveit_controller_manager::ExecutionStatus;
 using Service = rebotarm_msgs::srv::RetimeArmTrajectory;
 std::mutex binding_mutex;
-std::deque<Trajectory> plans;
+struct BoundPlan { Trajectory comparison; Trajectory authoritative; bool executable; };
+std::deque<BoundPlan> plans;
 
 bool same_values(const std::vector<double>& a, const std::vector<double>& b)
 {
@@ -59,13 +60,15 @@ class RetimeExecutionCurve : public planning_interface::PlanningResponseAdapter
 {
   rclcpp::Node::SharedPtr parent_;
   std::string service_;
+  bool reference_ = false;
 public:
-  void initialize(const rclcpp::Node::SharedPtr& node, const std::string&) override
+  void initialize(const rclcpp::Node::SharedPtr& node, const std::string& parameter_namespace) override
   {
     parent_ = node;
     std::string ns = "rebotarm";
     node->get_parameter_or("arm_namespace", ns, ns);
     service_ = "/"+ns+"/retime_arm_trajectory";
+    node->get_parameter_or(parameter_namespace+".execution_reference", reference_, false);
   }
   std::string getDescription() const override { return "Retime checked execution curve"; }
   void adapt(const planning_scene::PlanningSceneConstPtr&,
@@ -92,6 +95,7 @@ public:
       res.trajectory->getRobotTrajectoryMsg(message);
       auto request = std::make_shared<Service::Request>();
       request->trajectory = message.joint_trajectory;
+      request->planning_purpose = reference_ ? Service::Request::REFERENCE : Service::Request::FINAL_EXECUTION;
       request->velocity_scaling = req.max_velocity_scaling_factor > 0 ? req.max_velocity_scaling_factor : 1.;
       request->acceleration_scaling = req.max_acceleration_scaling_factor > 0 ? req.max_acceleration_scaling_factor : 1.;
       auto future = client->async_send_request(request);
@@ -105,9 +109,8 @@ public:
       res.trajectory->setRobotTrajectoryMsg(res.trajectory->getFirstWayPoint(),response->trajectory);
       // 用 MoveIt 再编码后的值登记，覆盖它的纳秒截断和关节顺序，执行端不重新计算。
       res.trajectory->getRobotTrajectoryMsg(message);
-      message.joint_trajectory.header.frame_id = response->trajectory.header.frame_id;
       std::lock_guard<std::mutex> lock(binding_mutex);
-      plans.push_back(message.joint_trajectory);
+      plans.push_back({message.joint_trajectory, response->trajectory, response->executable});
       if (plans.size() > 128) plans.pop_front();
       RCLCPP_INFO(parent_->get_logger(), "execution curve planned: scale=%.6f final_time=%.6f s",
                   response->time_scale,res.trajectory->getDuration());
@@ -135,8 +138,11 @@ public:
     {
       std::lock_guard<std::mutex> lock(binding_mutex);
       for (auto p = plans.rbegin(); p != plans.rend(); ++p)
-        if (same_plan(*p,trajectory.joint_trajectory))
-        { bound.joint_trajectory.header.frame_id = p->header.frame_id; rejected_ = false; break; }
+        if (same_plan(p->comparison,trajectory.joint_trajectory))
+        {
+          if (p->executable) { bound.joint_trajectory = p->authoritative; rejected_ = false; }
+          break;
+        }
     }
     if (rejected_)
     {

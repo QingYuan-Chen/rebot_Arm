@@ -23,6 +23,70 @@ from rebotarm_motion.trajectory_preparation import point_to_point
 from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
 
+@pytest.mark.parametrize('grade,degree', [(0,1),(1,3),(2,5)])
+def test_final_plan_normalizes_before_retiming_and_survives_nanoseconds(grade,degree):
+    from types import SimpleNamespace
+    from rebotarm_trajectory.capability import make_capability, constraint_revision
+    from rebotarm_trajectory.planning import planning_state, decode_plan, require_plan_context
+    from rebotarm_motion.trajectory_retiming_node import retime_message
+    from rebotarm_motion.coordinated_trajectory import curve_message
+    from trajectory_msgs.msg import JointTrajectory,JointTrajectoryPoint
+    config=Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
+    revision=constraint_revision(*(config.joinpath(n).read_bytes() for n in ('rebotarm.urdf','joint_limits.yaml')))
+    cap=make_capability('prepared_v1',10,.5,1.,revision)
+    source=tuple(TrajectoryPoint(p.time,p.positions,p.velocities if grade>=1 else (),
+        p.accelerations if grade>=2 else ()) for p in point_to_point((0.,)*6,(.02,)*6,.4))
+    msg=curve_message(build_curve(JOINT_NAMES,source),trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
+    req=SimpleNamespace(trajectory=msg,capability_revision=cap['revision'],velocity_scaling=1.,
+        acceleration_scaling=1.,fixed_duration=False,planning_purpose=0)
+    state=planning_state(cap['revision'],10,7,(-.01,)*6,executable=True)
+    result,scale=retime_message(req,cap,config,state)
+    final=tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
+        p.positions,p.velocities,p.accelerations) for p in result.points)
+    assert final[0].positions == tuple(state['hold'])
+    assert build_curve(JOINT_NAMES,final).degree==degree
+    plan=decode_plan(result.header.frame_id,JOINT_NAMES,final,require_execution=True)
+    require_plan_context(plan,capability_revision=cap['revision'],session=10,generation=7,hold=state['hold'])
+    for change in (dict(session=11),dict(generation=8),dict(hold=(.001,)*6)):
+        kwargs=dict(capability_revision=cap['revision'],session=10,generation=7,hold=state['hold']);kwargs.update(change)
+        with pytest.raises(ValueError,match='re-plan'):require_plan_context(plan,**kwargs)
+    changed=(TrajectoryPoint(final[0].time,(.001,)*6,final[0].velocities,final[0].accelerations),)+final[1:]
+    with pytest.raises(ValueError,match='changed'):decode_plan(result.header.frame_id,JOINT_NAMES,changed)
+    req.fixed_duration=True
+    if grade==2:
+        with pytest.raises(ValueError,match='fixed duration'):retime_message(req,cap,config,state)
+    req.fixed_duration=False;req.planning_purpose=1
+    reference,_=retime_message(req,cap,config)
+    assert list(reference.points[0].positions)==list(msg.points[0].positions)
+    reference_points=tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
+        p.positions,p.velocities,p.accelerations) for p in reference.points)
+    with pytest.raises(ValueError,match='not executable'):
+        decode_plan(reference.header.frame_id,JOINT_NAMES,reference_points,require_execution=True)
+    req.planning_purpose=0
+    disabled=planning_state(cap['revision'],10,7,state['hold'],executable=False,reason='disabled')
+    preview,_=retime_message(req,cap,config,disabled)
+    preview_points=tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
+        p.positions,p.velocities,p.accelerations) for p in preview.points)
+    with pytest.raises(ValueError,match='not executable'):
+        decode_plan(preview.header.frame_id,JOINT_NAMES,preview_points,require_execution=True)
+
+
+def test_captured_hold_start_jerk_failures_retime_without_relaxing_limits():
+    import json
+    from rebotarm_motion.trajectory_preparation import load_reference_limits,check_curve
+    from rebotarm_motion.coordinated_trajectory import retime_curve
+    low,high,limits=load_reference_limits(Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config')
+    rows=json.loads((Path(__file__).parent/'fixtures/p005_hold_start_failures.json').read_text())
+    for row in rows:
+        points=tuple(TrajectoryPoint(p['time_from_start'],p['positions'],p['velocities'],p['accelerations']) for p in row['points'])
+        report=check_curve(build_curve(row['joint_names'],points),low,high,limits)
+        assert report['peaks']['joint3']['jerk']['absolute']==pytest.approx(row['expected_joint3_jerk'],rel=1e-9)
+        assert report['state']!='pass' and limits['joint3'].max_jerk==20.
+        final,scale=retime_curve(row['joint_names'],points,low,high,limits)
+        assert scale>1. and final.points[0].positions==points[0].positions
+        assert check_curve(final,low,high,limits)['state']=='pass'
+
+
 def test_shared_package_has_only_standard_library_imports():
     root = Path(__file__).resolve().parents[1] / 'src/rebotarm_trajectory/rebotarm_trajectory'
     for path in root.glob('*.py'):
@@ -54,7 +118,14 @@ def test_web_coordinated_plan_is_single_use():
     from rebotarm_trajectory.capability import make_capability
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
     cap = make_capability('prepared_v1',1,.5,1.)
-    plans = CoordinatedWebPlans(capability=lambda:cap,retime=lambda message,*args:message,
+    from rebotarm_trajectory.planning import plan_binding, planning_state
+    def retime(message,*args):
+        points = tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
+            p.positions,p.velocities,p.accelerations) for p in message.points)
+        message.header.frame_id = plan_binding(cap['revision'],message.joint_names,points,
+            state=planning_state(cap['revision'],1,0,(0.,)*6,executable=True))
+        return message
+    plans = CoordinatedWebPlans(capability=lambda:cap,retime=retime,
         joint_names=JOINT_NAMES,joint_limits={n:(-3.,3.) for n in JOINT_NAMES},
         trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
     current = dict.fromkeys(JOINT_NAMES,0.);current['gripper'] = .02

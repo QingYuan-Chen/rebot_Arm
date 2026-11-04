@@ -19,7 +19,10 @@
 `arm` 映射完整六轴 FJT；`gripper` 取规划末点，通过
 `/rebotarm/gripper/moveit_command`（GripperCommand）转换为独立开合，左指 m ×2 得到
 原接口的双指总开口 m，实际反馈和结果再 ÷2。规划时间按生效夹爪限速核定，不向 FJT 发送手指点。
-机械臂响应在 TOTG/Ruckig 后按执行曲线重定时，显示最终时间；后续运动带入新鲜真实
+机械臂响应在 TOTG/Ruckig 后取得后端规划快照，先规范化首点再重定时，显示最终时间。
+失能可 Plan 预览，使能后须重新 Plan；其他运动、Stop、失能、重连后旧计划拒绝 Execute。
+`ompl_reference` 仅供中间段保留虚拟起点，不可直接 Execute。插件匹配 MoveIt 重编码值后
+发送服务缓存的权威纳秒轨迹，准备不再替换首点。后续运动带入新鲜真实
 夹爪开度，执行准备全段固定它检查完整机器人和附着物。接口及兼容等级见
 [P005 接口](p005_prepared_trajectory.md#修订协同接口)。
 

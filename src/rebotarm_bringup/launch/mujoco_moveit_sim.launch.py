@@ -76,6 +76,7 @@ def generate_launch_description():
             DeclareLaunchArgument('use_dashboard', default_value='false'),
             DeclareLaunchArgument('dashboard_port', default_value='8080'),
             DeclareLaunchArgument('trajectory_trace_path', default_value=''),
+            DeclareLaunchArgument('planning_trace_path', default_value=''),
             # 可视化开关：仅影响是否打开 RViz，不改变控制链路。
             DeclareLaunchArgument("use_rviz", default_value="true"),
             # 统一使用仿真时钟；仿真推进与墙钟解耦，必须为 true。
@@ -134,6 +135,7 @@ def generate_launch_description():
                     "use_sim_time": use_sim_time,
                     'prepare_trajectories': "true",
                     'trajectory_execution_mode': trajectory_mode,
+                    'planning_trace_path': LaunchConfiguration('planning_trace_path'),
                 }.items(),
             ),
             Node(package='rebotarm_dashboard', executable='TeleopStatusPanelNode',

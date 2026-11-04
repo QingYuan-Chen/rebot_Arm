@@ -145,7 +145,8 @@ class PoseExecutionNode(Node):
             ee_frame_id=str(self.get_parameter("ee_frame_id").value),
             frame_id=str(self.get_parameter("frame_id").value),
             planning_service=str(self.get_parameter("moveit_planning_service").value),
-            planning_pipeline=str(self.get_parameter("moveit_planning_pipeline").value),
+            planning_pipeline=('ompl_reference' if self._trajectory_mode == 'prepared_v1'
+                else str(self.get_parameter("moveit_planning_pipeline").value)),
             planner_id=str(self.get_parameter("moveit_planner_id").value),
             planning_time=float(self.get_parameter("moveit_planning_time").value),
             num_attempts=int(self.get_parameter("moveit_num_planning_attempts").value),
@@ -252,6 +253,31 @@ class PoseExecutionNode(Node):
             response.success = False
             response.message = plan.message
             return response
+
+        if self._trajectory_mode == 'prepared_v1':
+            # GetMotionPlan 的 RobotTrajectory 不保留 header；独立重定时服务返回权威消息。
+            # 虚拟阶段只核定参考；真实执行阶段在前一阶段结束后绑定当前后端起点。
+            try:
+                retime = RetimeArmTrajectory.Request()
+                retime.trajectory = plan.trajectory
+                retime.velocity_scaling, retime.acceleration_scaling = velocity, acceleration
+                retime.planning_purpose = (RetimeArmTrajectory.Request.FINAL_EXECUTION
+                    if request.execute else RetimeArmTrajectory.Request.REFERENCE)
+                if not self._retime_client.service_is_ready():
+                    raise RuntimeError('trajectory retiming service unavailable')
+                future = self._retime_client.call_async(retime)
+                self._wait_future(future, 2.)
+                if not future.done():
+                    future.cancel()
+                    raise TimeoutError('trajectory retiming exceeded 2 s')
+                final = future.result()
+                if not final.success:
+                    raise ValueError(final.message)
+                from dataclasses import replace
+                plan = replace(plan, trajectory=final.trajectory)
+            except (ValueError, RuntimeError) as exc:
+                response.success, response.message = False, str(exc)
+                return response
 
         # 即使随后不执行, 也把规划结果回填, 便于调用方审查轨迹.
         response.planned_trajectory = plan.trajectory

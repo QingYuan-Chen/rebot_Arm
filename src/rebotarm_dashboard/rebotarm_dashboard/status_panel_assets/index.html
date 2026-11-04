@@ -1923,7 +1923,9 @@
         if (!result.accepted) throw new Error(result.message);
         coordinatedPlan = result;
         previewState.active = true;
-        document.getElementById('execute-preview').disabled = !webExecuteEnabled;
+        document.getElementById('execute-preview').disabled = !webExecuteEnabled || !result.executable;
+        document.getElementById('motion-result').textContent = result.executable
+          ? `计划：${fmt(result.duration,3)} s，起点已绑定` : '仅预览：使能后须重新预览';
         const start = performance.now();
         const animate = (now) => {
           if (coordinatedPlan !== result) return;
@@ -1945,6 +1947,7 @@
     const executePreviewAndGripper = async () => {
       if (!webExecuteEnabled) return;
       const plan = coordinatedPlan || await planCoordinated();
+      if (plan && !plan.executable) { window.alert('仅预览：使能后须重新预览'); return; }
       if (!plan || !window.confirm(`执行组合运动？\n机械臂时长 ${fmt(plan.duration,3)} s\n独立夹爪力矩上限 ${fmt(plan.torque_cap_nm,2)} N·m\n不保证同时到达`)) return;
       try {
         const response = await fetch('/api/execute_preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'EXECUTE',plan_id:plan.plan_id})});

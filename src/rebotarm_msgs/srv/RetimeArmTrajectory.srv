@@ -1,6 +1,6 @@
 # 文件职责：规划阶段的统一重定时，不承担执行接纳或碰撞许可。
 # 对外接口：原轨迹、规划缩放与固定时长；返回最终纳秒轨迹和能力绑定。
-# 安全约束：仅改变全轨时间及导数；非法几何、超时及能力缺失明确失败。
+# 安全约束：最终计划先绑定保持起点再统一缩放时间及导数；非法输入、超时明确失败。
 # 文件结构：规划请求 / 结论和最终轨迹；调用方总期限 2 s。
 trajectory_msgs/JointTrajectory trajectory
 float64 velocity_scaling
@@ -9,8 +9,14 @@ float64 acceleration_scaling
 float64 max_arm_speed_rad_s
 bool fixed_duration
 string capability_revision
+# 最终可执行计划绑定后端保持起点；中间参考段保留调用方指定起点。
+uint8 FINAL_EXECUTION=0
+uint8 REFERENCE=1
+uint8 planning_purpose
 ---
 bool success
 string message
 trajectory_msgs/JointTrajectory trajectory
 float64 time_scale
+# 仅最终、已使能快照的六轴计划或独立夹爪计划可执行；参考/失能预览不能下发。
+bool executable

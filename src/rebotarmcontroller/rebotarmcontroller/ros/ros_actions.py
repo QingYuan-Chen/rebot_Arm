@@ -69,6 +69,19 @@ class ArmActions:
             message.status = [status]
             self._diagnostics.publish(message)
         self._diagnostic_timer = node.create_timer(.1, publish_admission)
+        from rebotarm_msgs.srv import GetArmPlanningState
+        def get_planning_state(_request, response):
+            """只读服务走所有者设备队列；服务成功不授予执行资源。"""
+            try:
+                state = self._arm.planning_snapshot(self._trajectory_mode)
+                response.state_json = json.dumps(state, allow_nan=False)
+                response.success, response.message = True, 'ready' if state['executable'] else 'preview only: disabled'
+            except (ValueError, RuntimeError) as exc:
+                response.success, response.message = False, str(exc)
+            return response
+        self._planning_state_service = node.create_service(GetArmPlanningState,
+            f'/{namespace}/get_arm_planning_state', get_planning_state,
+            callback_group=node.reentrant_group)
         if trajectory_execution_mode == 'prepared_v1':
             from rebotarm_msgs.srv import PrepareArmTrajectory
             self._prepare_type = PrepareArmTrajectory
@@ -127,7 +140,17 @@ class ArmActions:
             deadline = received+min(2., .2*duration+.25)
             command = ((request.gripper_position, request.gripper_max_effort)
                        if web and request.move_gripper else ())
-            token = self._arm.reserve_arm_preparation(deadline, web=web, gripper_command=command)
+            from rebotarm_trajectory.planning import decode_plan
+            from rebotarm_trajectory.polynomial import TrajectoryPoint
+            points = tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
+                p.positions, p.velocities, p.accelerations) for p in request.trajectory.points)
+            planning = decode_plan(request.trajectory.header.frame_id, request.trajectory.joint_names,
+                points, capability_revision=self._arm.trajectory_capability(self._trajectory_mode)['revision'],
+                require_execution=True)
+            options = dict(web=web, gripper_command=command)
+            if planning is not None:
+                options['planning'] = planning
+            token = self._arm.reserve_arm_preparation(deadline, **options)
             # Jazzy 将同一个请求交给 GoalHandle；按请求绑定，停止后新 Goal 不能串用旧令牌。
             self._pending_preparations[id(request)] = (request, token)
             return GoalResponse.ACCEPT
@@ -161,6 +184,9 @@ class ArmActions:
         if not response.success:
             raise ValueError(response.message)
         handoff = self._arm.decode_prepared_arm_trajectory(json.loads(response.prepared_json))
+        from rebotarm_trajectory.planning import decode_plan
+        decode_plan(request.trajectory.header.frame_id, handoff.curve.joint_names, handoff.curve.points,
+            capability_revision=token.capability, require_execution=True)
         if goal_handle.is_cancel_requested:
             raise RuntimeError('trajectory canceled before atomic admission')
         # 最终复核在唯一设备线程中完成，不能用回调线程刚刚看到的状态代替它。

@@ -46,6 +46,7 @@ from rebotarm_simulation.execution.trajectory_sampler import PreparedTrajectoryS
 from rebotarm_trajectory.polynomial import curve_from_payload, TrajectoryPoint, ordered_points
 from rebotarm_trajectory.joint_contract import canonical_input
 from rebotarm_trajectory.capability import make_capability, constraint_revision
+from rebotarm_trajectory.planning import planning_state, decode_plan, require_plan_context
 from pathlib import Path
 
 
@@ -66,7 +67,7 @@ def create_node_class():
     from rclpy.clock import ClockType
     from rclpy.node import Node
     from rebotarm_msgs.msg import JointMotorState, ArmStatus
-    from rebotarm_msgs.srv import SetGripper, SetMode
+    from rebotarm_msgs.srv import SetGripper, SetMode, GetArmPlanningState
     from rosgraph_msgs.msg import Clock
     from sensor_msgs.msg import JointState
     from std_srvs.srv import Trigger
@@ -166,6 +167,8 @@ def create_node_class():
             # Gate/active lock is intentionally distinct. Lock order is always
             # gate first, then simulation; the timer only takes simulation.
             self._active = ActiveTrajectory()
+            # 跨任务代次属于后端；对象 id 只能辨认当前 Goal，不能绑定规划时的起点。
+            self._planning_generation = 0
             self._command_gate = TrajectoryCommandGate(self._active)
             self._lifecycle = ExecutionLifecycle(self._active, self._command_gate)
             self._pending_sampler: TrajectorySampler | None = None
@@ -195,6 +198,8 @@ def create_node_class():
                 float(self.get_parameter('gripper_position_torque_cap_nm').value), revision)
             self._versioned_capabilities = self.create_publisher(String,
                 f'/{namespace}/trajectory_capabilities', qos)
+            self.create_service(GetArmPlanningState, f'/{namespace}/get_arm_planning_state',
+                self._planning_state_service, callback_group=self._callback_group)
             self._physics_clock = RclpyClock(clock_type=ClockType.STEADY_TIME)
             self._capability_timer = self.create_timer(.1, self._publish_admission, clock=self._physics_clock)
             if self._trajectory_mode == 'prepared_v1':
@@ -298,6 +303,7 @@ def create_node_class():
             self._sim_access.run(lambda _sim: self._hold_current_position_unlocked())
 
         def _hold_current_position_unlocked(self) -> None:
+            self._planning_generation += 1
             self._control.hold_current_position()
             if self._gripper_task is not None and self._gripper_task['state'] == 'active':
                 self._cancel_gripper(self._gripper_task,'combination stopped')
@@ -327,7 +333,27 @@ def create_node_class():
                 self.get_logger().warning("rejected trajectory goal while controller is busy")
                 return GoalResponse.REJECT
             self._pending_sampler = sampler
+            self._planning_generation += 1
             return GoalResponse.ACCEPT
+
+        def _planning_state_service(self, _request, response):
+            """固定锁序只读命令保持值；不预约、不推进物理、不发送目标。"""
+            try:
+                with self._active._lock:
+                    if self._active.busy or self._gripper_busy() or self._stop_unconfirmed:
+                        raise RuntimeError('arm/gripper resources reserved or stop unconfirmed')
+                    with self._lock:
+                        _state, hold = self._admission_snapshot()
+                        if self._sim.control_mode not in ('position', 'hold'):
+                            raise RuntimeError('planning requires position/hold mode')
+                        snapshot = planning_state(self._execution_capability['revision'],
+                            self._execution_capability['session'], self._planning_generation,
+                            hold, executable=True)
+                response.success, response.state_json = True, json.dumps(snapshot, allow_nan=False)
+                response.message = 'ready'
+            except (ValueError, RuntimeError) as exc:
+                response.success, response.message = False, str(exc)
+            return response
 
         def _stationary_snapshot(self, *, after=None):
             """调用方持仿真锁，核验六轴及两指的完整静止窗口并返回实际状态和保持命令。
@@ -414,12 +440,16 @@ def create_node_class():
                     state, hold = self._admission_snapshot()
                     if self._sim.control_mode not in ('position', 'hold'):
                         raise RuntimeError(f'mode={self._sim.control_mode}, required=position/hold')
+                    plan = decode_plan(goal.trajectory.header.frame_id, goal.trajectory.joint_names,
+                        points, capability_revision=self._execution_capability['revision'], require_execution=True)
+                    require_plan_context(plan, capability_revision=self._execution_capability['revision'],
+                        session=self._execution_capability['session'], generation=self._planning_generation, hold=hold)
                     if not self._active.try_start(goal):
                         return GoalResponse.REJECT
                     request = self._prepare_type.Request()
                     request.trajectory = goal.trajectory
-                    # 本进程保留 goal 对象作为身份；仿真无设备重连会话，仍须逐项核对回传值。
-                    request.session = request.generation = id(goal)
+                    request.session = self._execution_capability['session']
+                    request.generation = self._planning_generation
                     request.hold_positions, request.feedback_positions = list(hold), list(state.joint_positions[:6])
                     request.feedback_observed_at = self._last_physics_wall
                     request.stationary = False  # 兼容字段，不再声明机械臂静止窗口。
@@ -463,6 +493,8 @@ def create_node_class():
                 raise ValueError(response.message)
             payload = json.loads(response.prepared_json)
             curve = curve_from_payload(payload['curve'])
+            decode_plan(request.trajectory.header.frame_id, curve.joint_names, curve.points,
+                capability_revision=self._execution_capability['revision'], require_execution=True)
             def admit():
                 """在目标锁内再取得仿真锁，复核期间不能插入物理状态或控制模式修改。"""
                 with self._lock:
@@ -473,6 +505,7 @@ def create_node_class():
                             or self._scene_revision != response.scene_revision
                             or payload['scene_revision'] != request.scene_revision
                             or context['session'] != request.session or context['generation'] != request.generation
+                            or self._planning_generation != request.generation
                             or tuple(context['hold']) != tuple(request.hold_positions)
                             or hold != tuple(request.hold_positions) or curve.points[0].positions[:6] != hold
                             or payload['gripper_generation'] != request.gripper_generation
@@ -484,6 +517,7 @@ def create_node_class():
                     # 执行起时在接纳时捕获；不能用准备开始时间让曲线跳过起始运动。
                     self._active.prepared = dict(curve=curve, start=state.simulation_time,
                         revision=response.scene_revision, fingers=tuple(request.gripper_positions))
+                    self._planning_generation += 1
                     self._active.prepared['web'] = request.gripper_collision_policy == 1
                     if request.gripper_collision_policy == 1 and goal_handle.request.move_gripper:
                         self._start_gripper(token,goal_handle.request.gripper_position,
@@ -524,10 +558,12 @@ def create_node_class():
             return CancelResponse.ACCEPT if stopped else CancelResponse.REJECT
 
         def _stop_service(self, _request, response):
-            token = self._active.token
-            stopped = self._command_gate.stop_and_hold(self._hold_current_position)
-            if not stopped:
-                self._hold_current_position()
+            # 空闲 Stop 也作废已有规划；目标锁覆盖代次更新，不能插入新预约后再保持。
+            with self._active._lock:
+                token = self._active.token
+                stopped = self._command_gate.stop_and_hold(self._hold_current_position)
+                if not stopped:
+                    self._hold_current_position()
             if self._trajectory_mode == 'prepared_v1' and stopped:
                 try:
                     self._wait_prepared_stop()
@@ -693,6 +729,7 @@ def create_node_class():
                         response.message = "trajectory active; stop or cancel it before changing mode"
                         return response
                     reached = self._sim_access.run(lambda _sim: self._control.set_mode(mode))
+                    self._planning_generation += 1
             except (TypeError, ValueError) as exc:
                 response.success = False
                 response.message = f"mode rejected: {exc}"

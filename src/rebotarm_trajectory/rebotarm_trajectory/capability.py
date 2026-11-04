@@ -30,7 +30,8 @@ def make_capability(mode, session, speed, torque, limits_revision='0'*64):
     if (not isinstance(limits_revision,str) or len(limits_revision) != 64
             or any(c not in '0123456789abcdef' for c in limits_revision)):
         raise ValueError('sha256 limits revision required')
-    data = dict(version=2, mode=mode, session=session, coefficient_versions=[1, 2],
+    data = dict(version=3, mode=mode, session=session, coefficient_versions=[1, 2],
+        planning_binding_version=1,
         joint_sets=[list(JOINT_NAMES)], teleop_action_version=1,
         gripper_execution='independent_position',
         gripper_motor_speed_rad_s=float(speed), gripper_torque_cap_nm=float(torque),

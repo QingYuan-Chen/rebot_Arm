@@ -130,6 +130,12 @@ def generate_launch_description():
         'rebotarm_motion/RetimeExecutionCurve')
     execution_adapters = {
         'arm_namespace': arm_namespace,
+        # 参考管线复用 OMPL 参数，只保留调用方指定的虚拟起点，不能直接执行。
+        'planning_pipelines': ParameterValue(PythonExpression([
+            repr(['ompl', 'ompl_reference']), ' if ', prepared_mode, ' else ', repr(['ompl'])])),
+        'ompl_reference': dict(ompl_planning_yaml, response_adapters=prepared_adapters,
+            execution_reference=True),
+        'ompl.execution_reference': False,
         # 默认 0.001 同时作用于 rad/m，会吞掉亚毫米夹爪路径；新模式明确保留其节点。
         'ompl.totg.min_angle_change': ParameterValue(PythonExpression([
             '1e-7 if ', prepared_mode, ' else 0.001']), value_type=float),
@@ -152,13 +158,13 @@ def generate_launch_description():
     #   由外部控制器管理器负责，防止规划节点越权切换控制权；
     # - allowed_execution_duration_scaling=1.2：实际执行时长最多允许为规划时长的 1.2 倍；
     # - allowed_goal_duration_margin=0.5：在 1.2 倍基础上再放宽 0.5 s 的绝对余量；
-    # - allowed_start_tolerance=0.01：轨迹起点与当前关节状态的最大允许偏差（弧度），
-    #   超过即拒绝执行，避免从错误姿态直接插补导致机械臂猛动。
+    # - allowed_start_tolerance=0.03：轨迹起点与当前关节状态的最大允许偏差（弧度），
+    #   与实机控制器普通轨迹的终点到位容差一致；超过仍拒绝执行，示教起点分档不受影响。
     trajectory_execution = {
         "moveit_manage_controllers": False,
         "trajectory_execution.allowed_execution_duration_scaling": 1.2,
         "trajectory_execution.allowed_goal_duration_margin": 0.5,
-        "trajectory_execution.allowed_start_tolerance": 0.01,
+        "trajectory_execution.allowed_start_tolerance": 0.03,
     }
     # 把 OMPL 的关键参数整理成一段文本，启动时用 LogInfo 打印。历史上 "Planning plugin name
     # is empty or not defined in namespace 'ompl'" 这类故障只表现为规划失败，这里把实际生效的
@@ -188,17 +194,19 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             # 准备节点读取同一规范模型和场景；服务存在不等于任何后端获得执行许可。
             DeclareLaunchArgument('prepare_trajectories', default_value='false'),
+            DeclareLaunchArgument('planning_trace_path', default_value=''),
             DeclareLaunchArgument('trajectory_execution_mode', default_value='legacy',
                 choices=['legacy', 'prepared_v1']),
             Node(package='rebotarm_motion', executable='TrajectoryRetimingNode',
                 name='trajectory_retiming', output='screen', condition=IfCondition(prepared_mode),
-                parameters=[{'arm_namespace': arm_namespace}]),
+                parameters=[{'arm_namespace': arm_namespace,
+                    'planning_trace_path': LaunchConfiguration('planning_trace_path')}]),
             Node(
                 package='rebotarm_motion', executable='TrajectoryPreparationNode',
                 name='trajectory_preparation', output='screen',
                 additional_env=moveit_process_env,
                 condition=IfCondition(LaunchConfiguration('prepare_trajectories')),
-                parameters=[moveit_config.to_dict(), sensors_3d,
+                parameters=[moveit_config.to_dict(), execution_adapters, sensors_3d,
                     {'arm_namespace': arm_namespace, 'use_sim_time': use_sim_time}],
             ),
             # 启动时把实际生效的 OMPL 规划参数打到终端，便于排查「规划失败但看不出原因」。

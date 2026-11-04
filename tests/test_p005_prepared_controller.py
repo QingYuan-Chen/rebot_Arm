@@ -51,6 +51,39 @@ def shutdown(manager):
     manager.lifecycle.shutdown()
 
 
+@pytest.mark.parametrize('change',['none','stop','motion','disable','reconnect'])
+def test_readonly_planning_snapshot_and_stale_plan_admission(monkeypatch,change):
+    from rebotarm_trajectory.planning import plan_binding,decode_plan
+    manager,bus=enabled_manager(monkeypatch)
+    try:
+        state=manager.arm.planning_snapshot('prepared_v1')
+        assert manager.runtime.execution.reservation is None
+        assert state['hold']==list(manager.runtime.execution.last_sent_target)
+        points=point_to_point(state['hold'],(state['hold'][0]+.01,*state['hold'][1:]),1.)
+        plan=decode_plan(plan_binding(state['capability_revision'],JOINT_NAMES,points,state=state),JOINT_NAMES,points)
+        if change=='stop':manager.arm.stop_active_motion()
+        elif change=='motion':
+            token,curve,handoff=reserve(manager)
+            task=manager.arm.admit_prepared_arm_trajectory(token,handoff)
+            assert task.event.wait(2.)
+        elif change in ('disable','reconnect'):
+            manager.lifecycle.disable()
+            preview=manager.arm.planning_snapshot('prepared_v1')
+            assert not preview['executable'] and preview['reason']=='disabled'
+            if change=='reconnect':
+                manager.lifecycle.shutdown();manager.lifecycle.connect()
+            manager.lifecycle.enable()
+        wait_until(lambda:manager.arm.admission_snapshot()['ready'],timeout=2.)
+        if change=='none':
+            token=manager.arm.reserve_arm_preparation(time.monotonic()+2.,planning=plan)
+            manager.arm.cancel_arm_preparation(token)
+        else:
+            with pytest.raises(ValueError,match='re-plan'):
+                manager.arm.reserve_arm_preparation(time.monotonic()+2.,planning=plan)
+            assert manager.runtime.execution.reservation is None
+    finally:shutdown(manager)
+
+
 def test_prepared_curve_uses_actual_writer_cycle_and_final_command_hold(monkeypatch):
     manager, bus = enabled_manager(monkeypatch)
     try:
@@ -250,7 +283,7 @@ def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
     actions._runtime = SimpleNamespace(joint_names=JOINT_NAMES)
     actions._prepare_client = SimpleNamespace(service_is_ready=lambda: True)
     actions._arm = SimpleNamespace(reserve_arm_preparation=lambda deadline,**kwargs: next(tokens),
-        cancel_arm_preparation=canceled.append)
+        cancel_arm_preparation=canceled.append,trajectory_capability=lambda mode:dict(revision='0'*64))
     actions._node = SimpleNamespace(publish_arm_status=lambda: None)
     def prepare(handle, token):
         seen.append(token)
@@ -259,7 +292,7 @@ def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
     from trajectory_msgs.msg import JointTrajectoryPoint
     requests = [FollowJointTrajectory.Goal(), FollowJointTrajectory.Goal()]
     for request in requests:
-        point = JointTrajectoryPoint();point.time_from_start.sec = 1
+        point = JointTrajectoryPoint(positions=[0.]*6);point.time_from_start.sec = 1
         request.trajectory.points = [point]
         request.trajectory.joint_names = list(JOINT_NAMES)
         assert actions.trajectory_goal_callback(request) == GoalResponse.ACCEPT

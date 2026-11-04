@@ -73,6 +73,7 @@ REQUEST_POLICIES = MappingProxyType({
     'ArmController.submit_arm_trajectory': RequestPolicy('arm'),
     # 预约/接纳按普通六轴请求排序；取消和场景变更走设备级高优先级，不能被准备阻塞。
     'ArmController.reserve_arm_preparation': RequestPolicy('arm'),
+    'ArmController.planning_snapshot': RequestPolicy('arm'),
     'ArmController.admit_prepared_arm_trajectory': RequestPolicy('arm'),
     'ArmController.cancel_arm_preparation': RequestPolicy('device', 0, 5.),
     'ArmController.update_trajectory_scene': RequestPolicy('device', 0, 5.),
