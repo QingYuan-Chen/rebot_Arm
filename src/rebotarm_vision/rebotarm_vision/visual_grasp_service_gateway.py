@@ -54,13 +54,6 @@ class VisualGraspServiceGateway:
         request.acceleration_scaling = float(_parameter(self, "acceleration_scaling").value)
         request.timeout_sec = self._motion_result_timeout_sec
         request.execute = bool(execute)
-        coordinated = (getattr(self, '_config', None) is not None
-            and self._config.get('trajectory_execution_mode', 'legacy') == 'prepared_v1')
-        request.coordinated_gripper = coordinated
-        if coordinated:
-            if stage.gripper_position_m is None:
-                return False, 'coordinated visual stage requires an explicit pre-contact opening'
-            request.gripper_opening_m = float(stage.gripper_position_m)
         request.suppress_preview = bool(not execute and not self._execution_enabled())
         state = _state_for(self)
         with state.lock:
@@ -76,8 +69,8 @@ class VisualGraspServiceGateway:
             names = list(trajectory.joint_names)
             points = list(trajectory.points)
             if (
-                len(names) != (7 if coordinated else 6)
-                or set(names) != ({f"joint{i}" for i in range(1, 7)} | ({'left_finger_joint'} if coordinated else set()))
+                len(names) != 6
+                or set(names) != {f"joint{i}" for i in range(1, 7)}
                 or not points
                 or len(points[-1].positions) != len(names)
                 or not all(math.isfinite(value) for value in points[-1].positions)

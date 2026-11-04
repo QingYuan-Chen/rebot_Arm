@@ -50,7 +50,7 @@ from rclpy.node import Node
 from control_msgs.action import FollowJointTrajectory
 from moveit_msgs.action import ExecuteTrajectory
 from moveit_msgs.srv import GetMotionPlan
-from rebotarm_msgs.action import MoveToPose
+from rebotarm_msgs.action import MoveToPose, ExecuteTeleopMotion
 from rebotarm_msgs.srv import MoveToPoseIK
 from std_srvs.srv import Trigger
 from trajectory_msgs.msg import JointTrajectoryPoint
@@ -164,7 +164,7 @@ try:
         time.sleep(.5)
         current = tuple(controller.hardware.feedback.get_joint_state()[0])
         width = controller.hardware.gripper.gripper_position_m()
-        curve = generate_schedule(current,width,(current[0]+.01,*current[1:]),width+.001,1.)
+        curve = generate_schedule(current,(current[0]+.01,*current[1:]),1.)
         service = client.create_client(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory')
         assert service.wait_for_service(timeout_sec=3.)
         query = RetimeArmTrajectory.Request(trajectory=curve_message(curve,
@@ -172,14 +172,18 @@ try:
             velocity_scaling=1.,acceleration_scaling=1.,
             capability_revision=controller.hardware.arm.trajectory_capability('prepared_v1')['revision'])
         plan = wait(service.call_async(query)); assert plan.success, plan.message
-        coordinated = FollowJointTrajectory.Goal(trajectory=plan.trajectory)
-        handle = wait(fjt.send_goal_async(coordinated)); assert handle.accepted
-        assert not wait(fjt.send_goal_async(coordinated)).accepted, 'busy goal queued'
+        teleop = ActionClient(client,ExecuteTeleopMotion,'/rebotarm/execute_teleop_motion')
+        assert teleop.wait_for_server(timeout_sec=5.)
+        coordinated = ExecuteTeleopMotion.Goal(trajectory=plan.trajectory,move_gripper=True,
+            gripper_position=width+.001,gripper_max_effort=1.)
+        handle = wait(teleop.send_goal_async(coordinated)); assert handle.accepted
+        assert not wait(teleop.send_goal_async(coordinated)).accepted, 'busy goal queued'
         done = wait(handle.get_result_async())
         assert done.status == 4 and done.result.error_code == 0, done
+        assert done.result.arm_state == done.result.gripper_state == 'succeeded', done
         assert controller.hardware.lifecycle.enabled
         report['coordinated_execute'] = [done.status,done.result.error_code]
-        # 真实 ROS Action 链覆盖残差取消与七轴→六轴交接；只改内存假电机反馈。
+        # 真实 ROS Action 链覆盖残差取消与组合→六轴交接；只改内存假电机反馈。
         motor = buses[0].motors[0]
         original_send = motor.send_pos_vel
         residuals = []
@@ -193,11 +197,11 @@ try:
                 ready()
                 current = tuple(controller.hardware.feedback.get_joint_state()[0])
                 width = controller.hardware.gripper.gripper_position_m()
-                curve = generate_schedule(current,width,(current[0]+.01,*current[1:]),width+.0002,1.)
+                curve = generate_schedule(current,(current[0]+.01,*current[1:]),1.)
                 query.trajectory = curve_message(curve,trajectory_factory=JointTrajectory,
                     point_factory=JointTrajectoryPoint)
                 plan = wait(service.call_async(query)); assert plan.success, plan.message
-                handle = wait(fjt.send_goal_async(FollowJointTrajectory.Goal(trajectory=plan.trajectory)))
+                handle = wait(teleop.send_goal_async(ExecuteTeleopMotion.Goal(trajectory=plan.trajectory,move_gripper=True,gripper_position=width+.0002,gripper_max_effort=1.)))
                 assert handle.accepted
                 deadline = time.monotonic()+2.
                 while controller.hardware.lifecycle.execution != 'TRAJ_RUNNING' and time.monotonic()<deadline:
@@ -207,6 +211,8 @@ try:
                 done = wait(handle.get_result_async())
                 assert cancel_response.goals_canceling, (residual, cancel_response, done)
                 assert done.status == 5, done
+                # 小开口可能在取消前已经独立到位；已完成侧保留成功，整体仍为取消。
+                assert done.result.arm_state == 'canceled' and done.result.gripper_state in ('failed','succeeded'), done
                 assert not controller.hardware.runtime.arm_resource_reserved
                 assert controller.hardware.arm._stop_wait is None
                 ready()

@@ -165,11 +165,11 @@ def build_visual_grasp_sequence(
         open_width, close_width = resolve_gripper_widths(config)
         max_effort = float(config.close_max_effort)
     if config.coordinated_position_only:
-        # 预张爪与到预抓取点共用轨迹；最终接近段全程保持所需开口。
-        return [VisualGraspStage(name='move_to_pregrasp', kind='move', pose=pregrasp,
-                    gripper_position_m=open_width),
-                VisualGraspStage(name='approach_grasp', kind='move', pose=grasp,
-                    gripper_position_m=open_width)]
+        # 接触前交付：先独立开爪到位，再用新鲜真实开度规划两段六轴运动。
+        return [VisualGraspStage(name='open_gripper', kind='gripper',
+                    gripper_position_m=open_width, gripper_max_effort=max_effort),
+                VisualGraspStage(name='move_to_pregrasp', kind='move', pose=pregrasp),
+                VisualGraspStage(name='approach_grasp', kind='move', pose=grasp)]
     stages: list[VisualGraspStage] = []
     if config.open_before_approach:
         stages.append(

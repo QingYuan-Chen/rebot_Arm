@@ -6,7 +6,7 @@ from json import JSONDecodeError
 from pathlib import Path
 
 from .teach_models import TeachRecordInfo, TeachSample, TeachTrajectoryEvent, TeachTrajectoryQuality
-from .teach_record_io import load_teach_samples
+from .teach_record_io import load_teach_samples, arm_replay_samples
 from .teach_replay_gates import classify_replay_start
 
 
@@ -335,7 +335,7 @@ def inspect_teach_record(
             message="record file does not exist",
         )
     try:
-        samples = load_teach_samples(record_path)
+        samples = arm_replay_samples(load_teach_samples(record_path))
     except (OSError, UnicodeError, JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         # 记录文件损坏时只报告，不猜测内容，也不让异常穿到 ROS 回调里。
         return TeachRecordInfo(
@@ -465,7 +465,7 @@ def list_teach_record_files(directory: str | Path) -> list[dict]:
         return []
     records: list[dict] = []
     for path in sorted(base.glob("*.jsonl")):
-        if path.name.endswith(".prepared.jsonl"):
+        if ".prepared." in path.name:
             continue
         stat = path.stat()
         info = teach_record_info_to_dict(inspect_teach_record(path))

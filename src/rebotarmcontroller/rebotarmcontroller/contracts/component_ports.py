@@ -10,7 +10,7 @@
     端口不复制业务状态, 也不替代运行时仲裁. 冻结字段限制能力面, 不保证回调本身线程安全.
 
 文件结构(按定义顺序)
-    ArmGripperPort: 只读固定夹爪状态，用于准备与周期复核，不授予夹爪发送权限。
+    ArmGripperPort: 固定夹爪快照及受预约身份约束的独立位置任务接口，不直接发送设备命令。
     ArmFeedbackPort: 六轴目标和停止确认所需的新鲜值查询.
     GripperFeedbackPort: 夹爪坐标与目标事务所需的缓存, 刷新和健康查询.
     GravityFeedbackPort: 重力计算所需的同组新鲜反馈和限位验证.
@@ -42,10 +42,9 @@ class ArmGripperPort:
     """
 
     snapshot: Callable[[], dict]
-    begin_coordinated: Callable = None
-    coordinated_state: Callable = None
-    send_coordinated: Callable = None
-    end_coordinated: Callable = None
+    start_position: Callable = None
+    position_state: Callable = None
+    cancel_position: Callable = None
 
 
 @dataclass(frozen=True)

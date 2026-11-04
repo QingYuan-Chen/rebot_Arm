@@ -50,28 +50,17 @@ def test_position_changes_do_not_reject_when_speed_and_continuity_qualify():
 
 @pytest.mark.parametrize('stale', [False, True])
 def test_coordinated_pose_start_delta_does_not_replace_feedback_freshness_check(stale):
-    from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-    gripper = NS(header=NS(stamp=NS(sec=9 if stale else 10, nanosec=0)), status_code=1, position=.02)
-    trajectory = JointTrajectory(joint_names=[f'joint{i}' for i in range(1, 7)]+['left_finger_joint'],
-        points=[JointTrajectoryPoint(positions=[0.]*6+[.02])])
-    calls = []
-    def retime(request):
-        calls.append(request)
-        return completed(NS(success=True, trajectory=trajectory))
-    node = NS(_trajectory_mode='prepared_v1', _capability=dict(mode='prepared_v1', revision='test'),
-        _capability_at=time.monotonic(), _feedback_receiver=NS(snapshot=lambda:NS(gripper=gripper)),
-        get_clock=lambda:NS(now=lambda:NS(nanoseconds=10_000_000_000)),
-        _retime_client=NS(wait_for_service=lambda **_:True, call_async=retime),
-        _wait_future=lambda *_:None)
-    request = NS(gripper_opening_m=.04, preview_start_joint_state=JointState())
+    gripper = NS(header=NS(stamp=NS(sec=9 if stale else 10,nanosec=0)),position=.02)
+    node = NS(_feedback_receiver=NS(snapshot=lambda:NS(joints=sample(10.),gripper=gripper)),
+        get_clock=lambda:NS(now=lambda:NS(nanoseconds=10_000_000_000)))
     if stale:
-        with pytest.raises(ValueError, match='fresh enabled gripper feedback'):
-            PoseExecutionNode._coordinate_pose_plan(node, trajectory, request, 1., 1.)
-        assert calls == []
+        with pytest.raises(ValueError,match='expired'):
+            PoseExecutionNode._planning_start_state(node)
     else:
-        # 规划左指 0.02 m 与反馈左指 0.01 m 不再触发量化差值拒绝。
-        assert PoseExecutionNode._coordinate_pose_plan(node, trajectory, request, 1., 1.) is trajectory
-        assert len(calls) == 1
+        result = PoseExecutionNode._planning_start_state(node,sample(10.,.01))
+        values = dict(zip(result.name,result.position))
+        assert values['joint1'] == .01
+        assert values['left_finger_joint'] == .01 and values['right_finger_joint'] == -.01
 
 
 def completed(value):

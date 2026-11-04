@@ -33,41 +33,20 @@ def test_shared_package_has_only_standard_library_imports():
                 assert all(alias.name.split('.')[0] in sys.stdlib_module_names for alias in node.names), path
 
 
-def test_named_coordinated_payload_mirror_validation_and_gripper_only_freeze():
+@pytest.mark.parametrize('names', [('left_finger_joint',),('left_finger_joint','right_finger_joint'),(*JOINT_NAMES,'left_finger_joint'),(*JOINT_NAMES,'right_finger_joint')])
+def test_public_fjt_rejects_fingers_without_projection(names):
     from rebotarm_trajectory.joint_contract import canonical_input
-    from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
-    points = point_to_point((.01,-.01), (.02,-.02), 2.)
-    names, result = canonical_input(('left_finger_joint','right_finger_joint'), points, (.1,)*6)
-    assert names == COORDINATED_JOINT_NAMES
-    assert result[-1].positions == (.1,)*6+(.02,)
-    decoded = curve_from_payload(build_curve(names, result).to_payload())
-    assert decoded.to_payload()['version'] == 2
-    assert decoded.sample(1.)[0] == pytest.approx((.1,)*6+(.015,))
-    with pytest.raises(ValueError, match='mirror'):
-        canonical_input(('left_finger_joint','right_finger_joint'),
-            point_to_point((.01,-.01), (.02,-.019), 2.), (.1,)*6)
-    for field in ('velocities','accelerations'):
-        from dataclasses import replace
-        invalid = (replace(points[0],**{field:(.001,0.)}),points[1])
-        with pytest.raises(ValueError,match='mirror'):
-            canonical_input(('left_finger_joint','right_finger_joint'),invalid,(.1,)*6)
+    with pytest.raises(ValueError,match='exactly'):
+        canonical_input(names,point_to_point((0.,)*len(names),(.01,)*len(names),2.))
 
 
-def test_merge_tracks_preserves_arm_derivatives_at_inserted_finger_nodes():
-    from rebotarm_motion.coordinated_trajectory import merge_tracks
-    arm = build_curve(JOINT_NAMES, point_to_point((0.,)*6,(.02,)*6,2.))
-    finger = build_curve(('left_finger_joint',), (
-        TrajectoryPoint(0.,(0.,),(0.,),(0.,)),
-        TrajectoryPoint(.5,(0.,),(0.,),(0.,)),
-        TrajectoryPoint(1.5,(.001,),(0.,),(0.,)),
-        TrajectoryPoint(2.,(.001,),(0.,),(0.,))))
-    merged = merge_tracks(arm, finger)
-    assert merged.sample(.5)[1][0] > 0
-    for stamp in np.linspace(0,2,31):
-        for order in range(4):
-            assert merged.sample(stamp)[order][:6] == pytest.approx(arm.sample(stamp)[order], abs=1e-10)
-    assert merged.sample(.25)[0][-1] == 0.
-    assert merged.sample(1.8)[1][-1] == pytest.approx(0., abs=1e-12)
+def test_arm_keyframes_preserve_explicit_dwell_and_c2():
+    from rebotarm_motion.coordinated_trajectory import generate_schedule
+    curve=generate_schedule((0.,)*6,(.02,)*6,2.,arm_keyframes=[
+        dict(time=.5,positions=(0.,)*6),dict(time=1.5,positions=(.02,)*6)])
+    assert curve.sample(.25)[0] == (0.,)*6
+    assert curve.sample(1.8)[1] == pytest.approx((0.,)*6,abs=1e-12)
+    assert curve.continuity()['position_jump'] < 1e-10 if 'position_jump' in curve.continuity() else curve.degree == 5
 
 
 def test_web_coordinated_plan_is_single_use():
@@ -79,19 +58,18 @@ def test_web_coordinated_plan_is_single_use():
         joint_names=JOINT_NAMES,joint_limits={n:(-3.,3.) for n in JOINT_NAMES},
         trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
     current = dict.fromkeys(JOINT_NAMES,0.);current['gripper'] = .02
-    payload = dict(joint_positions=dict.fromkeys(JOINT_NAMES,.02),duration=2.,gripper_position=.021,
-        gripper_keyframes=[dict(time=.5,width=.02),dict(time=1.5,width=.021)])
+    payload = dict(joint_positions=dict.fromkeys(JOINT_NAMES,.02),duration=2.,gripper_position=.021)
     preview = plans.preview(payload,current,max_delta=.2,min_duration=.1,max_duration=10.,max_speed=1.)
-    message, _ = plans.take(preview['plan_id'],current)
-    assert len(message.joint_names) == 7
+    message, _, gripper = plans.take(preview['plan_id'],current)
+    assert len(message.joint_names) == 6
     assert [p.time for p in build_curve(message.joint_names,tuple(TrajectoryPoint(
         p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
-        for p in message.points)).points] == [0.,.5,1.5,2.]
+        for p in message.points)).points] == [0.,2.]
     with pytest.raises(ValueError,match='missing'):
         plans.take(preview['plan_id'],current)
     preview = plans.preview(payload,current,max_delta=.2,min_duration=.1,max_duration=10.,max_speed=1.)
-    message, _ = plans.take(preview['plan_id'],dict(current,joint1=.01))
-    assert len(message.joint_names) == 7
+    message, _, gripper = plans.take(preview['plan_id'],dict(current,joint1=.01))
+    assert len(message.joint_names) == 6
 
 
 @pytest.mark.parametrize('level_name,ready', [('OK',True),('WARN',False),('ERROR',False),('STALE',False)])
@@ -114,45 +92,44 @@ def test_web_admission_reads_ros_byte_level_without_constructing_node(level_name
 
 def test_coordinated_teach_uses_source_time_and_preserves_raw_samples():
     from dataclasses import replace
-    from ament_index_python.packages import get_package_share_directory
     from rebotarm_trajectory.capability import make_capability, constraint_revision
     from rebotarm_teach.teach_models import TeachSample
     from rebotarm_teach.teach_preparation import prepare_teach_replay_samples
-    config = Path(get_package_share_directory('rebotarm_moveit_config'))/'config'
+    config = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
     revision = constraint_revision(*(config.joinpath(n).read_bytes() for n in ('rebotarm.urdf','joint_limits.yaml')))
     cap = make_capability('prepared_v1',1,.5,1.,revision)
     samples = [TeachSample(i*.1,JOINT_NAMES,(i*.0002,0.,0.,0.,0.,0.),(),(),{},'GRAVITY_COMP',
         format_version=2,gripper_width_m=.02+i*.00001,gripper_source_stamp=i*.1,gripper_valid=True)
         for i in range(11)]
     original = copy.deepcopy(samples)
-    result = prepare_teach_replay_samples(samples,coordinated_capability=cap,
+    result = prepare_teach_replay_samples(samples,
         smoothing_enabled=False,filter_enabled=False,resample_enabled=False)
     assert samples == original
-    assert all(len(p.positions) == 7 and len(p.velocities) == len(p.accelerations) == 7 for p in result.retimed_points)
-    assert result.retimed_points[-1].positions[-1] == pytest.approx(samples[-1].gripper_width_m/2.)
-    with pytest.raises(ValueError,match='valid source-timed'):
-        prepare_teach_replay_samples([replace(s,gripper_valid=False) for s in samples],coordinated_capability=cap)
+    assert all(len(p.positions) == 6 for p in result.retimed_points)
+    invalid_gripper = prepare_teach_replay_samples([replace(s,gripper_valid=False) for s in samples],
+        smoothing_enabled=False,filter_enabled=False,resample_enabled=False)
+    assert all(len(p.positions) == 6 for p in invalid_gripper.retimed_points)
 
 
 def test_coordinated_retiming_respects_backend_speed_and_quantized_extrema():
     from dataclasses import replace
     from rebotarm_motion.coordinated_trajectory import retime_curve
     from rebotarm_motion.trajectory_preparation import load_reference_limits, check_curve
-    from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
+    names = ('left_finger_joint',)
     config = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
-    low, high, limits = load_reference_limits(config, COORDINATED_JOINT_NAMES)
+    low, high, limits = load_reference_limits(config, names)
     limits['left_finger_joint'] = replace(limits['left_finger_joint'], max_velocity=.0045)
-    points = point_to_point((0.,)*7,(.02,)*6+(.002,),.4)
-    curve, scale = retime_curve(COORDINATED_JOINT_NAMES, points, low, high, limits)
+    points = point_to_point((0.,),(.002,),.4)
+    curve, scale = retime_curve(names, points, low, high, limits)
     assert scale > 2
     assert curve.points[-1].positions == points[-1].positions
     assert check_curve(curve,low,high,limits)['state'] == 'pass'
     assert all(abs(p.time*1e9-round(p.time*1e9)) < 1e-5 for p in curve.points)
     with pytest.raises(ValueError, match='minimum duration'):
-        retime_curve(COORDINATED_JOINT_NAMES,points,low,high,limits,fixed=True)
+        retime_curve(names,points,low,high,limits,fixed=True)
 
 
-@pytest.mark.parametrize('names', [JOINT_NAMES, (*JOINT_NAMES, 'left_finger_joint')])
+@pytest.mark.parametrize('names', [JOINT_NAMES, ('left_finger_joint',)])
 def test_fixed_stationary_plan_does_not_check_artificial_start_displacement(names):
     """恒定曲线不因额外首点扰动而被动态限值拒绝。"""
     from rebotarm_motion.coordinated_trajectory import retime_curve
@@ -172,6 +149,48 @@ def test_capability_binding_changes_on_reconnect_and_rejects_tampering():
     first['gripper_torque_cap_nm'] = 2.
     with pytest.raises(ValueError, match='revision'):
         decode_capability(first)
+
+
+def test_joint_state_bridge_never_restamps_cached_gripper_or_fabricates_zero():
+    from types import SimpleNamespace as NS
+    from sensor_msgs.msg import JointState
+    from rebotarm_msgs.msg import JointMotorState
+    from rebotarm_teleop.gripper_visual_joint_state_node import GripperVisualJointStateNode as Bridge
+    published=[]
+    owner=NS(_latest_arm_state=None,_latest_gripper_position=None,_warned_invalid_arm_state=False,
+        _required_arm_joints=set(JOINT_NAMES),_left_joint='left_finger_joint',_right_joint='right_finger_joint',
+        _gripper_limits=(0.,.09),_publisher=NS(publish=published.append),
+        get_clock=lambda:NS(now=lambda:NS(nanoseconds=10_000_000_000)))
+    owner._valid_arm_joint_state=lambda message:Bridge._valid_arm_joint_state(owner,message)
+    owner._filtered_state_parts=lambda message:Bridge._filtered_state_parts(owner,message)
+    owner._publish_visual_state=lambda header:Bridge._publish_visual_state(owner,header)
+    arm=JointState(name=list(JOINT_NAMES),position=[0.]*6)
+    arm.header.stamp.sec=10
+    Bridge._on_arm_joint_state(owner,arm)
+    assert published[-1].name==list(JOINT_NAMES)
+    finger=JointMotorState(position=.04);finger.header.stamp.sec=9;finger.header.stamp.nanosec=950_000_000
+    Bridge._on_gripper_state(owner,finger)
+    assert published[-1].name==['left_finger_joint','right_finger_joint']
+    assert published[-1].header.stamp==finger.header.stamp and list(published[-1].position)==[.02,-.02]
+    arm.header.stamp.nanosec=10_000_000
+    Bridge._on_arm_joint_state(owner,arm)
+    assert published[-1].name==list(JOINT_NAMES)
+    before=len(published);finger.header.stamp.sec=8
+    Bridge._on_gripper_state(owner,finger)
+    assert len(published)==before
+
+
+@pytest.mark.parametrize('names', [JOINT_NAMES, ('left_finger_joint',),
+    (*JOINT_NAMES,'left_finger_joint'), (*JOINT_NAMES,'right_finger_joint')])
+def test_lightweight_preview_uses_the_same_six_joint_fjt_contract(names):
+    import threading
+    from types import SimpleNamespace as NS
+    from rclpy.action import GoalResponse
+    from rebotarm_preview.rviz_preview_controller_node import SimTrajectoryControllerNode
+    owner = NS(_recovery_lock=threading.Lock(),_motion_lock=threading.Lock(),
+        _joint_names=JOINT_NAMES,get_logger=lambda:NS(warn=lambda message:None))
+    result = SimTrajectoryControllerNode._goal_callback(owner,NS(trajectory=NS(joint_names=names)))
+    assert result == (GoalResponse.ACCEPT if names == JOINT_NAMES else GoalResponse.REJECT)
 
 
 def test_five_captured_moveit_rejections_pass_only_after_planning_retime():

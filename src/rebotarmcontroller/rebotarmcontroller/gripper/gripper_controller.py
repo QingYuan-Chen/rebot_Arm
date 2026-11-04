@@ -199,58 +199,14 @@ class GripperController:
         with self._gripper_execution._gripper_lock:
             return bool(self._gripper_execution._gripper_active)
 
-    def begin_coordinated(self):
-        """设备线程接管位置协同所有权；调用者已经预约两类资源，不在此发送。"""
+    def start_reserved_position(self, token, position_m, max_effort):
+        """仅供设备事务内的组合所有者接纳；令牌身份及目标均须与原预约一致。"""
         self._backend.assert_writer()
-        self.preparation_snapshot()
-        owner = self._gripper_execution
-        with owner._gripper_lock:
-            owner._generation += 1
-            owner._gripper_active = True
-            owner._gripper_mode = 'coordinated'
-            return owner._generation
-
-    def coordinated_state(self, generation):
-        """只读新鲜原始反馈与身份；协同模式不借用要求空闲的准备快照。"""
-        sample = self.feedback.verified_sample('gripper')
-        owner = self._gripper_execution
-        with owner._gripper_lock:
-            if owner._generation != generation or owner._gripper_mode != 'coordinated' or not owner._gripper_active:
-                raise RuntimeError('coordinated gripper ownership changed')
-            failure = self._gripper_feedback_failure_reason_locked()
-            if failure or sample.state.status_code != 1:
-                raise RuntimeError(failure or 'gripper enabled feedback required')
-            return dict(raw_position=sample.state.pos, observed_at=sample.observed_at)
-
-    def send_coordinated(self, generation, finger_position):
-        """设备线程发送同一拍的左指参考；不做独立斜坡或临时裁剪曲线。"""
-        self._backend.assert_writer()
-        if not np.isfinite(finger_position) or not 0 <= finger_position <= .045:
-            raise ValueError('coordinated finger reference outside limits')
-        owner = self._gripper_execution
-        # 先读反馈再取得执行锁，保持采集事务的“反馈→夹爪”锁序。
-        self.coordinated_state(generation)
-        with owner._gripper_lock:
-            if owner._generation != generation or owner._gripper_mode != 'coordinated':
-                raise RuntimeError('coordinated gripper ownership changed')
-            self._gripper_safe_mit(-finger_position/.009, 0., _G_KP_MOVE, _G_KD_MOVE, 0.,
-                tau_limit=self.settings.gripper_position_torque_cap_nm)
-
-    def end_coordinated(self, generation):
-        """使同一协同夹爪任务停止并确认中性发送；不把失败或取消变成力控夹持。"""
-        self._backend.assert_writer()
-        owner = self._gripper_execution
-        with owner._gripper_lock:
-            if generation != owner._generation:
-                # 保护性释放可能已终结本代次；不能覆盖接替任务或把发送失败当成释放成功。
-                return (not owner._gripper_active and owner._gripper_neutral_pending is None
-                        and self._gripper_transport_error is None)
-            if not owner._gripper_active and owner._gripper_mode == 'idle':
-                return owner._gripper_neutral_pending is None and self._gripper_transport_error is None
-            owner._gripper_active = False
-            owner._gripper_mode = 'idle'
-            owner._queue_gripper_neutral_locked('coordinated position release', marks_success=False)
-            return owner._emit_pending_gripper_neutral_locked()
+        if (self._backend.execution.reservation is not token or token.collision_policy != 1
+                or token.gripper_command != (position_m, max_effort)
+                or self._gripper_execution._generation != token.gripper_generation):
+            raise RuntimeError('independent gripper command does not own the combination reservation')
+        return self._accept_position_target(position_m, max_effort)
 
     @property
     def gripper_mode(self) -> str:
@@ -469,6 +425,12 @@ class GripperController:
         self._lifecycle.require_enabled()
         if self._backend.arm_resource_reserved:
             raise RuntimeError('gripper reserved by prepared arm trajectory')
+        return self._accept_position_target(position_m, max_effort)
+
+    def _accept_position_target(self, position_m, max_effort):
+        """两类入口共用原位置逻辑；调用者已核验预约，实际输出仍由统一周期完成。"""
+        self._backend.assert_writer()
+        self._lifecycle.require_enabled()
         if not self._backend.control_loop_active:
             raise RuntimeError(
                 "gripper command requires the unified hardware control loop"
@@ -848,16 +810,8 @@ class GripperController:
         通过夹爪代次让六轴周期撤销旧碰撞检查结果并进入停止保持。
         """
         owner = self._gripper_execution
-        with owner._gripper_lock:
-            coordinated = owner._gripper_mode == 'coordinated' and owner._gripper_active
-            generation = owner._generation
-        if coordinated:
-            released = self.end_coordinated(generation)
-            with owner._gripper_lock:
-                owner.supersede_locked()
-            return released
         released = owner.release_grasp_hold(*args, **kwargs)
-        if self._backend.arm_resource_reserved and not released:
+        if self._backend.arm_resource_reserved:
             # 空闲夹爪的显式保护性释放也撤销固定状态绑定，六轴周期随后受控停止。
             with self._gripper_execution._gripper_lock:
                 self._gripper_execution.supersede_locked()

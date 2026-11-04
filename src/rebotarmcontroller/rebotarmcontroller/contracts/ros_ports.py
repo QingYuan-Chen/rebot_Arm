@@ -143,7 +143,7 @@ class ArmCommandPort(Protocol):
         """当前设备会话与生效限值的只读版本化快照。"""
         ...
 
-    def reserve_arm_preparation(self, deadline):
+    def reserve_arm_preparation(self, deadline, *, web=False, gripper_command=()):
         """约定在设备线程预留空闲静止资源并颁发不可变身份。"""
         ...
 
@@ -169,6 +169,10 @@ class ArmCommandPort(Protocol):
 
     def arm_execution_status(self, task):
         """约定返回指定任务的结果快照."""
+        ...
+
+    def teleop_execution_status(self, task):
+        """查询本组合的两侧状态；不暴露执行器或可变任务缓存。"""
         ...
 
     def safe_home(self, target=None, vlim=None, timeout_sec=None):

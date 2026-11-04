@@ -298,7 +298,7 @@ def collision_gripper():
     assert validity.wait_for_service(timeout_sec=3.)
     for alpha in np.linspace(0.,1.,21):
         health(1)
-        request=GetStateValidity.Request();request.group_name='arm_with_gripper'
+        request=GetStateValidity.Request();request.group_name=''
         request.robot_state.is_diff=False
         request.robot_state.joint_state.name=list(JOINT_NAMES)+['left_finger_joint','right_finger_joint']
         low=min(actual,base['gripper']);high=max(actual,base['gripper']+.005)

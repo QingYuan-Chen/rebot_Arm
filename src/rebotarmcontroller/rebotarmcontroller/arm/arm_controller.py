@@ -57,7 +57,7 @@ class ArmController:
         # 启动随机会话加设备代次，进程重启或重连均不能复用旧计划能力摘要。
         self._capability_session = secrets.randbits(63)
         self._arm_trajectory = ArmTrajectory(runtime.execution)
-        self._coordinated_trajectory = CoordinatedTrajectory(runtime.execution)
+        self._coordinated_trajectory = CoordinatedTrajectory(runtime.execution, self._arm_trajectory)
         self._arm_passthrough_until = None
         self._stop = ArmStop()
         self._hold_evidence = StationaryEvidence()
@@ -250,8 +250,7 @@ class ArmController:
             coordinated_stop = owner is self._coordinated_trajectory and active is not None
             reserved_stop = self._backend.execution.reservation is not None
             if coordinated_stop:
-                if not self.gripper.end_coordinated(owner.gripper_generation):
-                    raise RuntimeError('coordinated gripper neutral not confirmed')
+                owner.cancel_gripper(self.gripper)
             self._backend.cancel_trajectory()
             self._arm_passthrough_until = None
             if self._lifecycle.enabled:
@@ -343,7 +342,7 @@ class ArmController:
             raise RuntimeError('arm stop/hold confirmation pending')
 
     def _prepared_snapshot(self):
-        """设备线程读取原静止证据和已发送保持值，不借单帧制造静止。"""
+        """设备线程读取新鲜反馈和已发送保持值，不将静止窗口作为新任务准入条件。"""
         self._lifecycle.require_enabled()
         execution = self._backend.execution
         now = time.monotonic()
@@ -351,14 +350,13 @@ class ArmController:
         hold = execution.last_sent_target
         reasons = self._admission_reasons(sample, hold, now)
         if reasons:
-            raise RuntimeError('fresh stationary acknowledged hold required: '+ '; '.join(reasons))
+            raise RuntimeError('fresh acknowledged hold required: '+ '; '.join(reasons))
         if self.gripper is None:
             raise RuntimeError('fixed gripper snapshot port unavailable')
         return sample, tuple(hold), self.gripper.snapshot()
 
     def _admission_reasons(self, sample, hold, now):
         """只解释现有门限；诊断和执行准入共用判定，不能据此修改保持锚点。"""
-        execution = self._backend.execution
         reasons = []
         if not self._lifecycle.enabled:
             reasons.append('controller disabled')
@@ -368,10 +366,6 @@ class ArmController:
             reasons.append(f'mode={self._backend.mode}, required=pos_vel')
         if self.passthrough_active() or self.gravity.gravity_compensation_active():
             reasons.append('arm owned by passthrough or gravity')
-        if self._hold_generation != execution.generation:
-            reasons.append(f'hold_generation={self._hold_generation}, generation={execution.generation}')
-        if not self._hold_evidence.confirmed(now):
-            reasons.append(f'stationary evidence unavailable: {self._hold_evidence.reason}')
         age = now-sample.observed_at
         if not -.005 <= age <= .15:
             reasons.append(f'feedback_age={age:.6f}s, range=[-0.005,0.15]s')
@@ -407,8 +401,8 @@ class ArmController:
             self._limits_revision)
 
     @device_request
-    def reserve_arm_preparation(self, deadline):
-        """设备线程确认空闲静止后预约六轴和固定夹爪，返回绑定全部上下文的令牌。
+    def reserve_arm_preparation(self, deadline, *, web=False, gripper_command=()):
+        """设备线程确认空闲及新鲜反馈后预约六轴和固定夹爪，返回上下文令牌。
 
         准备期间继续发送原保持值；普通夹爪命令读取 reservation 后拒绝。
         此处不递增六轴目标代次，真正接纳才替换轨迹，取消则通过停止事务作废令牌。
@@ -421,11 +415,15 @@ class ArmController:
             raise RuntimeError('arm resource busy')
         if not np.isfinite(deadline) or time.monotonic() >= deadline or not self._scene_revision:
             raise RuntimeError('preparation deadline expired or scene unavailable')
+        command = tuple(gripper_command)
+        if command and (not web or len(command) != 2 or not np.isfinite(command).all()
+                        or not 0 <= command[0] <= .09):
+            raise ValueError('finite independent gripper opening/effort requires a web reservation')
         sample, hold, gripper = self._prepared_snapshot()
         token = ArmPreparation(self._backend.requests.generations['device'], execution.generation,
             hold, sample.positions, sample.observed_at, tuple(gripper['positions']),
             gripper['generation'], gripper['raw_position'], self._scene_revision, deadline,
-            self.trajectory_capability('prepared_v1')['revision'])
+            self.trajectory_capability('prepared_v1')['revision'], 1 if web else 0, command)
         execution.reservation = token
         self._lifecycle.set_execution_state('TRAJ_PREPARING')
         return token
@@ -436,15 +434,17 @@ class ArmController:
         from rebotarm_trajectory.polynomial import curve_from_payload
         from ..contracts.controller_values import PreparedArmHandoff
         curve = curve_from_payload(payload['curve'])
+        from rebotarm_trajectory.polynomial import JOINT_NAMES
+        if curve.joint_names != JOINT_NAMES:
+            raise ValueError('prepared execution requires six arm joints')
         # 线性规模检查留在调用线程；这里只验证载荷，不重做 motion 的生成/碰撞算法。
         for point in curve.points:
-            ArmExecution.validate_target(point.positions[:6])
-            if len(point.positions) == 7 and not 0 <= point.positions[6] <= .045:
-                raise ValueError('prepared finger outside position limits')
+            ArmExecution.validate_target(point.positions)
         context = payload['context']
         return PreparedArmHandoff(curve, context['session'], context['generation'],
             tuple(context['hold']), tuple(payload['gripper_positions']),
-            payload['gripper_generation'], payload['scene_revision'], payload.get('capability_revision', ''))
+            payload['gripper_generation'], payload['scene_revision'], payload.get('capability_revision', ''),
+            payload.get('gripper_collision_policy', 0))
 
     @device_request
     def admit_prepared_arm_trajectory(self, token, handoff):
@@ -464,19 +464,18 @@ class ArmController:
                 or handoff.scene_revision != token.scene_revision
                 or handoff.gripper_generation != token.gripper_generation
                 or handoff.gripper_positions != token.gripper_positions
+                or handoff.collision_policy != token.collision_policy
                 or gripper['generation'] != token.gripper_generation):
             raise RuntimeError('prepared trajectory context changed')
         curve = handoff.curve
-        if len(curve.joint_names) == 7 and (handoff.capability != token.capability
+        if (handoff.capability != token.capability
                 or token.capability != self.trajectory_capability('prepared_v1')['revision']):
-            raise RuntimeError('coordinated trajectory capability changed or absent')
-        if curve.points[0].positions[:6] != token.hold:
+            raise RuntimeError('trajectory capability changed')
+        if curve.points[0].positions != token.hold:
             raise ValueError('prepared initial hold mismatch')
         # 预约贯穿执行与停止确认，不能在服务成功或 Action 接纳时就解除夹爪排他。
-        if len(curve.joint_names) == 7:
-            if abs(curve.points[0].positions[6]-token.gripper_positions[0]) > 1e-9:
-                raise ValueError('prepared initial finger mismatch')
-            task = self._coordinated_trajectory.submit(curve, token.generation, self.gripper)
+        if token.collision_policy == 1:
+            task = self._coordinated_trajectory.submit(curve, token, self.gripper)
         else:
             task = self._arm_trajectory.submit_prepared(curve, token.generation)
         self._lifecycle.set_execution_state('TRAJ_RUNNING')
@@ -549,13 +548,26 @@ class ArmController:
         owner = self._coordinated_trajectory if task is self._coordinated_trajectory.task else self._arm_trajectory
         return owner.snapshot(task)
 
+    def teleop_execution_status(self, task):
+        """ROS 只读本任务的两侧结果；旧句柄不能读取后继组合的状态。"""
+        owner = self._coordinated_trajectory
+        with owner.lock:
+            if task is not owner.task:
+                return 'superseded', 'superseded'
+            # 停止时组合 tick 已冻结；仍须读取本代次夹爪的中性释放终态，不能回显旧 active。
+            if owner.gripper_generation is not None:
+                owner.gripper_state, _ = self.gripper.position_state(owner.gripper_generation)
+            return owner.arm.snapshot(owner.arm_task).state, owner.gripper_state
+
     def coordinated_tick(self):
         """唯一设备周期推进协同；普通超差受控停止，传输失败交既有保护流程。"""
         owner = self._coordinated_trajectory
         if not owner.active:
             return False
         try:
-            return owner.tick(self._backend, self.gripper, self.feedback.joint_snapshot())
+            owner.tick(self.gripper, self.feedback.joint_snapshot())
+            # 原六轴回调和独立夹爪 tick 仍各自发送；组合所有者只汇总状态。
+            return False
         except CommandTransportError:
             raise
         except (ValueError, RuntimeError) as exc:

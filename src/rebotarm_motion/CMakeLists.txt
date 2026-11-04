@@ -21,6 +21,8 @@ install(TARGETS rebotarm_execution_adapters LIBRARY DESTINATION lib)
 function(python_entry name module)
   set(entry "${CMAKE_CURRENT_BINARY_DIR}/${name}")
   file(WRITE "${entry}" "#!${Python3_EXECUTABLE}\nfrom ${module} import main\nif __name__ == '__main__':\n    main()\n")
+  # 符号链接安装指向构建目录，生成的脚本本身也必须可执行。
+  file(CHMOD "${entry}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
   install(PROGRAMS "${entry}" DESTINATION lib/${PROJECT_NAME})
 endfunction()
 python_entry(PoseCompatNode rebotarm_motion.pose_compat_node)

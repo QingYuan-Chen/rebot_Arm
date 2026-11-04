@@ -48,6 +48,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/ExecuteGrasp.action"
   "action/MoveRelative.action"
   "action/MoveToPose.action"
+  "action/ExecuteTeleopMotion.action"
 # DEPENDENCIES 声明生成代码要链接/导入的上游接口包，必须与上面 find_package 的
 # 列表完全一致，漏写会导致生成的消息模块在运行时 import 失败。
   DEPENDENCIES builtin_interfaces geometry_msgs std_msgs sensor_msgs trajectory_msgs

@@ -6,6 +6,7 @@
     用例中的少量 Action 替身只隔离协议竞态，周期与发送用例仍运行正式所有者。
 文件结构：就绪与交接夹具 → 正式周期/上下文/夹爪测试 → 发送失败与延迟
     → Goal 身份及迟到响应 → legacy 接替、场景变化和取消回执顺序。
+历史参数 dimensions=7 现在表示六轴加独立夹爪组合，不表示七轴 FJT。
 """
 from dataclasses import replace
 import time
@@ -39,7 +40,8 @@ def reserve(manager, duration=.4):
     curve = build_curve(JOINT_NAMES, point_to_point(token.hold, target, duration))
     payload = dict(curve=curve.to_payload(), context=dict(session=token.session,
         generation=token.generation, hold=token.hold), gripper_positions=token.gripper_positions,
-        gripper_generation=token.gripper_generation, scene_revision=token.scene_revision)
+        gripper_generation=token.gripper_generation, scene_revision=token.scene_revision,
+        capability_revision=token.capability)
     return token, curve, manager.arm.decode_prepared_arm_trajectory(payload)
 
 
@@ -102,7 +104,7 @@ def test_stationary_hold_residual_allows_two_checked_trajectories_without_reanch
             assert manager.runtime.execution.last_sent_target==hold
             payload=prepared.to_payload()
             payload.update(gripper_positions=token.gripper_positions,gripper_generation=token.gripper_generation,
-                scene_revision=token.scene_revision)
+                scene_revision=token.scene_revision,capability_revision=token.capability)
             task=manager.arm.admit_prepared_arm_trajectory(token,manager.arm.decode_prepared_arm_trajectory(payload))
             assert task.event.wait(3.)
             assert task.result.state=='succeeded'
@@ -111,7 +113,7 @@ def test_stationary_hold_residual_allows_two_checked_trajectories_without_reanch
         shutdown(manager)
 
 
-@pytest.mark.parametrize('change', ['scene', 'gripper', 'hold', 'deadline', 'disable', 'reconnect'])
+@pytest.mark.parametrize('change', ['scene', 'gripper', 'hold', 'capability', 'missing_capability', 'deadline', 'disable', 'reconnect'])
 def test_stale_handoff_never_starts_after_context_change(monkeypatch, change):
     manager, bus = enabled_manager(monkeypatch)
     try:
@@ -122,6 +124,8 @@ def test_stale_handoff_never_starts_after_context_change(monkeypatch, change):
             handoff = replace(handoff, gripper_generation=token.gripper_generation+1)
         elif change == 'hold':
             handoff = replace(handoff, hold=(.1,)*6)
+        elif change in ('capability','missing_capability'):
+            handoff = replace(handoff,capability='wrong' if change == 'capability' else '')
         elif change == 'deadline':
             token = replace(token, deadline=time.monotonic()-.1)
         elif change == 'disable':
@@ -243,8 +247,9 @@ def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
     actions._trajectory_mode = 'prepared_v1'
     actions._pending_preparations = {}
     actions._lifecycle = SimpleNamespace(ready_for_motion=True)
+    actions._runtime = SimpleNamespace(joint_names=JOINT_NAMES)
     actions._prepare_client = SimpleNamespace(service_is_ready=lambda: True)
-    actions._arm = SimpleNamespace(reserve_arm_preparation=lambda deadline: next(tokens),
+    actions._arm = SimpleNamespace(reserve_arm_preparation=lambda deadline,**kwargs: next(tokens),
         cancel_arm_preparation=canceled.append)
     actions._node = SimpleNamespace(publish_arm_status=lambda: None)
     def prepare(handle, token):
@@ -256,6 +261,7 @@ def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
     for request in requests:
         point = JointTrajectoryPoint();point.time_from_start.sec = 1
         request.trajectory.points = [point]
+        request.trajectory.joint_names = list(JOINT_NAMES)
         assert actions.trajectory_goal_callback(request) == GoalResponse.ACCEPT
     expected = [actions._pending_preparations[id(request)][1] for request in requests]
     for request in reversed(requests):
@@ -280,7 +286,7 @@ def test_action_wait_cancels_late_service_without_decoding_or_admitting(reason):
     actions._trajectory_mode = 'prepared_v1'
     actions._arm = SimpleNamespace(trajectory_capability=lambda mode: {})
     token = SimpleNamespace(session=1, generation=2, hold=(0.,)*6, feedback=(0.,)*6,
-        observed_at=time.monotonic(), gripper_positions=(0.,0.), gripper_generation=0,
+        observed_at=time.monotonic(), gripper_positions=(0.,0.), gripper_generation=0, collision_policy=0,
         scene_revision='a', deadline=time.monotonic()+(-1. if reason=='deadline' else 1.))
     goal = SimpleNamespace(request=SimpleNamespace(trajectory=JointTrajectory()),
         is_cancel_requested=reason=='cancel')
@@ -330,18 +336,18 @@ def test_action_cancel_invalidates_owner_before_returning_acceptance():
     assert canceled == [(token, False)]
 
 
-def coordinated_reserve(manager, duration=.4, finger=.0005):
-    """构造七轴已检查交接，假总线以 MIT 参考更新位置；不替代真实动力学验收。"""
-    from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
-    token = manager.arm.reserve_arm_preparation(time.monotonic()+2.)
-    start = (*token.hold, token.gripper_positions[0])
-    target = (start[0]+.02, *start[1:6], finger)
-    curve = build_curve(COORDINATED_JOINT_NAMES, point_to_point(start, target, duration))
-    payload = dict(curve=curve.to_payload(), context=dict(session=token.session,
-        generation=token.generation, hold=token.hold), gripper_positions=token.gripper_positions,
-        gripper_generation=token.gripper_generation, scene_revision=token.scene_revision,
-        capability_revision=token.capability)
-    return token, curve, manager.arm.decode_prepared_arm_trajectory(payload)
+def coordinated_reserve(manager, duration=.4, finger=.005):
+    """网页组合：六轴已检查曲线与独立夹爪目标，不存在第七轴参考。"""
+    token = manager.arm.reserve_arm_preparation(time.monotonic()+2.,web=True,
+        gripper_command=(finger*2.,1.))
+    start = token.hold
+    target = (start[0]+.02,*start[1:])
+    curve = build_curve(JOINT_NAMES,point_to_point(start,target,duration))
+    payload = dict(curve=curve.to_payload(),context=dict(session=token.session,
+        generation=token.generation,hold=token.hold),gripper_positions=token.gripper_positions,
+        gripper_generation=token.gripper_generation,scene_revision=token.scene_revision,
+        capability_revision=token.capability,gripper_collision_policy=1)
+    return token,curve,manager.arm.decode_prepared_arm_trajectory(payload)
 
 
 def follow_gripper(bus, monkeypatch):
@@ -354,27 +360,46 @@ def follow_gripper(bus, monkeypatch):
     monkeypatch.setattr(motor, 'send_mit', send)
 
 
-def test_coordinated_delay_uses_one_reference_time_for_both_actuators():
+def test_combination_observes_independent_children_without_reference_resampling():
     from rebotarmcontroller.runtime.coordinated_trajectory import CoordinatedTrajectory
+    from rebotarmcontroller.arm.arm_trajectory import ArmTrajectory
     from rebotarmcontroller.arm.arm_execution import ArmExecution
-    from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
     execution = ArmExecution();execution.running = True
-    times = iter((10.,10.29,10.291))
-    owner = CoordinatedTrajectory(execution,clock=lambda:next(times))
-    curve = build_curve(COORDINATED_JOINT_NAMES,
-        point_to_point((0.,)*7,(.02,0.,0.,0.,0.,0.,.0005),.4))
-    expected = curve.sample(.29)[0]
-    arm_sent, finger_sent = [], []
-    gripper = SimpleNamespace(begin_coordinated=lambda:1,end_coordinated=lambda generation:True,
-        coordinated_state=lambda generation:dict(raw_position=-expected[-1]/.009,observed_at=10.29),
-        send_coordinated=lambda generation,q:finger_sent.append(q))
-    task = owner.submit(curve,execution.generation,gripper)
-    assert owner.tick(SimpleNamespace(send_position_target=arm_sent.append),gripper,
-        SimpleNamespace(positions=expected[:6],observed_at=10.29))
-    assert len(arm_sent) == len(finger_sent) == 1
-    assert arm_sent[0].positions == pytest.approx(expected[:6])
-    assert finger_sent == pytest.approx(expected[-1:])
-    assert not task.event.is_set() and task.sent_at is None
+    arm = ArmTrajectory(execution,clock=lambda:10.)
+    owner = CoordinatedTrajectory(execution,arm)
+    curve = build_curve(JOINT_NAMES,point_to_point((0.,)*6,(.02,)*6,.4))
+    registered = []
+    gripper = SimpleNamespace(start_position=lambda *args:registered.append(args) or 3,
+        position_state=lambda generation:('active',''),cancel_position=lambda *a,**k:None)
+    token = SimpleNamespace(generation=execution.generation,gripper_command=(.02,1.))
+    task = owner.submit(curve,token,gripper)
+    owner.tick(gripper,SimpleNamespace(positions=(0.,)*6,observed_at=10.1))
+    assert registered == [(token,.02,1.)]
+    assert owner.gripper_generation == 3 and not task.event.is_set()
+    owner.stopping(task)
+    owner.finish(task,'canceled','stopped')
+    assert arm.task.event.is_set() and arm.task.result.state == 'canceled'
+
+
+def test_combination_admission_rolls_back_gripper_before_any_device_cycle(monkeypatch):
+    from rebotarmcontroller.runtime.coordinated_trajectory import CoordinatedTrajectory
+    from rebotarmcontroller.arm.arm_trajectory import ArmTrajectory
+    from rebotarmcontroller.arm.arm_execution import ArmExecution
+    execution = ArmExecution(); execution.running = True
+    arm = ArmTrajectory(execution)
+    owner = CoordinatedTrajectory(execution,arm)
+    curve = build_curve(JOINT_NAMES,point_to_point((0.,)*6,(.02,)*6,.4))
+    calls = []
+    def reject(*args):
+        raise RuntimeError('admission invalidated')
+    monkeypatch.setattr(arm,'submit_prepared',reject)
+    gripper = SimpleNamespace(start_position=lambda *args: 9,
+        cancel_position=lambda reason,**kwargs:calls.append(kwargs))
+    with pytest.raises(RuntimeError,match='admission invalidated'):
+        owner.submit(curve,SimpleNamespace(generation=execution.generation,
+            gripper_command=(.02,1.)),gripper)
+    assert calls == [dict(expected_generation=9)]
+    assert owner.task is None and not execution.moving and execution.last_sent_target is None
 
 
 def test_coordinated_writer_sends_both_tracks_and_releases_only_after_neutral(monkeypatch):
@@ -462,6 +487,9 @@ def test_cancel_with_stationary_residual_releases_resources_and_allows_next_goal
         time.sleep(.04)
         manager.arm.stop_active_motion(task)
         assert task.event.is_set() and task.result.state == 'canceled'
+        if dimensions == 7:  # 历史参数名：现在表示六轴加独立夹爪组合，不是七轴 FJT。
+            arm_state, gripper_state = manager.arm.teleop_execution_status(task)
+            assert arm_state == 'canceled' and gripper_state == 'failed'
         assert not manager.runtime.arm_resource_reserved
         assert manager.arm._stop_wait is None
         hold = tuple(manager.runtime.execution.last_sent_target)
@@ -492,7 +520,7 @@ def test_old_coordinated_terminal_cannot_finalize_next_task(monkeypatch, previou
             original = manager.arm.gripper
             def fail_coordinated_state(generation):
                 raise RuntimeError('injected coordinated state failure')
-            manager.arm.gripper = replace(original, coordinated_state=fail_coordinated_state)
+            manager.arm.gripper = replace(original, position_state=fail_coordinated_state)
         assert old.event.wait(3.) and old.result.state == previous_result
         if previous_result == 'aborted':
             manager.arm.gripper = original

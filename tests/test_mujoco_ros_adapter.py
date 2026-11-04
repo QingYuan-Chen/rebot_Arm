@@ -61,6 +61,7 @@ class _LegacySimulation:
 def test_sim_stationary_snapshot_accepts_hold_residual_but_still_requires_quiet_fresh_window(residual):
     """不构造 ROS 节点或物理模型，只调用正式方法核对准入条件。"""
     from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
+    snapshot=create_node_class()._stationary_snapshot
     hold=(0.,)*6
     positions=(residual,0.,0.,0.,0.,0.,.01,-.01)
     samples=[SimpleNamespace(simulation_time=t,joint_positions=positions,joint_velocities=(0.,)*8,
@@ -69,7 +70,6 @@ def test_sim_stationary_snapshot_accepts_hold_residual_but_still_requires_quiet_
     owner=SimpleNamespace(_sim=SimpleNamespace(get_state=lambda:samples[-1],
         get_control_status=lambda:SimpleNamespace(joint_targets=hold)),
         _sample_history=samples,_last_physics_wall=time.monotonic())
-    snapshot=create_node_class()._stationary_snapshot
     state,returned_hold=snapshot(owner)
     assert state is samples[-1] and returned_hold==hold
     # 六轴与双指位置跨越旧量化门限，只要速度窗口合格仍可继续。
@@ -90,6 +90,26 @@ def test_ros_mode_surface_excludes_raw_torque():
     assert normalize_ros_control_mode("gravity_comp") == "gravity_comp"
     with pytest.raises(ValueError, match="raw_torque"):
         normalize_ros_control_mode("raw_torque")
+
+
+def test_independent_gripper_requires_a_new_physics_frame_after_final_target():
+    """即使小开口已在到位容差内，也不能用最终目标发送前的反馈报告成功。"""
+    from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
+    state = SimpleNamespace(simulation_time=1.,gripper_width=0.)
+    events = []
+    sim = SimpleNamespace(get_state=lambda:state,
+        command_gripper_position=lambda *args:events.append(('target',*args)),
+        release_gripper_position=lambda:events.append(('neutral',)))
+    task = dict(state='active',start=0.,initial=0.,target=.0001,speed=.01,effort=1.,deadline=2.)
+    owner = SimpleNamespace(_gripper_task=task)
+    advance = create_node_class()._advance_gripper
+    advance(owner,sim)
+    advance(owner,sim)  # 重读同一物理帧不算新反馈。
+    assert task['state'] == 'active' and all(e[0]=='target' for e in events)
+    state.simulation_time=1.002
+    state.gripper_width=.0001
+    advance(owner,sim)
+    assert task['state']=='succeeded' and events[-1]==('neutral',)
 
 
 def test_ros_control_api_starts_home_hold_and_tracks_positions_with_legacy_core():
@@ -430,14 +450,14 @@ def test_ros_adapter_configures_home_hold_and_bounded_diagnostics():
 
 def test_ros_adapter_trajectory_lifecycle_explicitly_enters_position_and_hold():
     source = Path("src/rebotarm_simulation/rebotarm_simulation/ros/mujoco_ros_node.py").read_text()
-    execute_body = source.split("def _execute_goal(self, goal_handle):", 1)[1].split(
+    execute_body = source.split("def _execute_goal(self, goal_handle, *, web=False):", 1)[1].split(
         "\n        def _timer_callback", 1
     )[0]
     assert "self._control.command_joint_positions(desired)" in execute_body
     assert "self._finish_prepared(sampler)" in execute_body
     finish_body = source.split("def _finish_prepared(self, sampler):", 1)[1].split("def _cancel_callback", 1)[0]
     assert "self._control.command_joint_positions(sampler.sample(sampler.duration)[:6])" in finish_body
-    assert "sim.release_gripper_position()" in finish_body
+    assert "sim.release_gripper_position()" in source
     assert "if self._trajectory_mode == 'prepared_v1' else self._hold_current_position()" in execute_body
     assert "GOAL_TOLERANCE_VIOLATED" in execute_body
     assert "self._command_gate.stop_and_hold(self._hold_current_position)" in execute_body

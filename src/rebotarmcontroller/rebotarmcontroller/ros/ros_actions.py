@@ -23,6 +23,7 @@ import time
 from control_msgs.action import FollowJointTrajectory, GripperCommand
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from trajectory_msgs.msg import JointTrajectoryPoint
+from rebotarm_msgs.action import ExecuteTeleopMotion
 
 from ..contracts.ros_ports import RuntimeStatePort, LifecycleStatePort, JointFeedbackPort, ArmCommandPort, GripperCommandPort
 
@@ -86,6 +87,17 @@ class ArmActions:
             execute_callback=self.execute_gripper_command,
             goal_callback=self.goal_callback, cancel_callback=self.cancel_gripper_command,
             callback_group=node.reentrant_group)
+        self._moveit_gripper_server = ActionServer(
+            node, GripperCommand, f'/{namespace}/gripper/moveit_command',
+            execute_callback=lambda goal: self.execute_gripper_command(goal, moveit=True),
+            goal_callback=self.goal_callback, cancel_callback=self.cancel_gripper_command,
+            callback_group=node.reentrant_group)
+        if trajectory_execution_mode == 'prepared_v1':
+            self._teleop_server = ActionServer(
+                node, ExecuteTeleopMotion, f'/{namespace}/execute_teleop_motion',
+                execute_callback=lambda goal: self.execute_follow_joint_trajectory(goal, web=True),
+                goal_callback=lambda request: self.trajectory_goal_callback(request, web=True),
+                cancel_callback=self.cancel_follow_joint_trajectory, callback_group=node.reentrant_group)
 
     def goal_callback(self, _request):
         """只按当前 ready_for_motion 做第一层准入; 实际提交仍要在设备线程重新校验."""
@@ -93,12 +105,15 @@ class ArmActions:
                 and not (self._trajectory_mode == 'prepared_v1' and self._runtime.arm_resource_reserved)
                 else GoalResponse.REJECT)
 
-    def trajectory_goal_callback(self, request):
+    def trajectory_goal_callback(self, request, *, web=False):
         """准备路径先占用资源；忙时直接拒绝，不能积累尚未执行的 Goal。"""
         received = time.monotonic()
-        if self._trajectory_mode == 'legacy':
-            return self.goal_callback(request)
         try:
+            if (len(request.trajectory.joint_names) != 6
+                    or set(request.trajectory.joint_names) != set(self._runtime.joint_names)):
+                raise ValueError('FJT requires exactly joint1..joint6; use independent gripper command')
+            if self._trajectory_mode == 'legacy':
+                return self.goal_callback(request)
             if not self._lifecycle.ready_for_motion:
                 snapshot = self._arm.admission_snapshot()
                 raise RuntimeError('controller not ready: '+ '; '.join(snapshot['reasons']))
@@ -110,11 +125,13 @@ class ArmActions:
                 raise ValueError(f'trajectory duration={duration}, required range=[0,300] s')
             # 从收到 Goal 而非服务调用开始计时；准备消耗也必须留在 MoveIt 的总预算内。
             deadline = received+min(2., .2*duration+.25)
-            token = self._arm.reserve_arm_preparation(deadline)
+            command = ((request.gripper_position, request.gripper_max_effort)
+                       if web and request.move_gripper else ())
+            token = self._arm.reserve_arm_preparation(deadline, web=web, gripper_command=command)
             # Jazzy 将同一个请求交给 GoalHandle；按请求绑定，停止后新 Goal 不能串用旧令牌。
             self._pending_preparations[id(request)] = (request, token)
             return GoalResponse.ACCEPT
-        except (ValueError, RuntimeError, IndexError) as exc:
+        except (ValueError, RuntimeError, IndexError, AttributeError, TypeError) as exc:
             if hasattr(self._node, 'get_logger'):
                 self._node.get_logger().warning(f'FJT goal rejected: {exc}')
             return GoalResponse.REJECT
@@ -126,9 +143,11 @@ class ArmActions:
         request.session, request.generation = token.session, token.generation
         request.hold_positions, request.feedback_positions = list(token.hold), list(token.feedback)
         request.feedback_observed_at = token.observed_at
-        request.stationary = request.enabled = True
+        request.stationary = False  # 兼容字段；机械臂准入不再声称已有静止证据。
+        request.enabled = True
         request.gripper_positions = list(token.gripper_positions)
         request.gripper_generation = token.gripper_generation
+        request.gripper_collision_policy = token.collision_policy
         request.scene_revision, request.deadline_monotonic = token.scene_revision, token.deadline
         request.capability_json = json.dumps(self._arm.trajectory_capability(self._trajectory_mode), allow_nan=False)
         future = self._prepare_client.call_async(request)
@@ -163,14 +182,14 @@ class ArmActions:
         """接纳取消意图; 执行回调随后携带本目标代次取消."""
         return CancelResponse.ACCEPT
 
-    def execute_follow_joint_trajectory(self, goal_handle):
+    def execute_follow_joint_trajectory(self, goal_handle, *, web=False):
         """复制 ROS 轨迹为数值请求, 等待专属任务并发布缓存反馈.
 
         事件完成后按任务终态映射 succeeded / canceled / aborted; 末点已发送不等于到位.
         取消与异常仅撤销本句柄, 不能覆盖接替目标; 停止未确认时保留失败原因.
         本回调允许等待, 因此需要可重入组与仍在运行的多线程执行器.
         """
-        result = FollowJointTrajectory.Result()
+        result = ExecuteTeleopMotion.Result() if web else FollowJointTrajectory.Result()
         task = None
         pending = (self._pending_preparations.get(id(goal_handle.request))
             if self._trajectory_mode == 'prepared_v1' else None)
@@ -191,6 +210,10 @@ class ArmActions:
             if self._trajectory_mode == 'prepared_v1':
                 if token is None:
                     raise RuntimeError('trajectory was not reserved')
+                if web:
+                    goal_handle.publish_feedback(ExecuteTeleopMotion.Feedback(
+                        stage='preparing',gripper_state='not_started',
+                        gripper_position=self._gripper.gripper_position_m()))
                 task = self._prepare_follow_goal(goal_handle, token)
             else:
                 task = self._arm.submit_arm_trajectory(names, points, times)
@@ -202,17 +225,15 @@ class ArmActions:
                 status = self._arm.arm_execution_status(task)
                 pos, vel, _ = self._feedback.get_cached_joint_state()
                 actual = dict(zip(self._runtime.joint_names, zip(pos, vel)))
-                desired = dict(zip((*self._runtime.joint_names, 'left_finger_joint'), status.desired))
-                if 'left_finger_joint' in names:
-                    # ROS 反馈沿用公开开口与电机速度换算，不由适配器重新计算控制量。
-                    width = self._gripper.gripper_position_m()
-                    _, raw_velocity, _, _ = self._gripper.get_gripper_state()
-                    actual['left_finger_joint'] = (width/2., -float(raw_velocity)*.009)
-                    actual['right_finger_joint'] = (-width/2., float(raw_velocity)*.009)
-                    if 'left_finger_joint' in desired:
-                        desired['right_finger_joint'] = -desired['left_finger_joint']
-                feedback = FollowJointTrajectory.Feedback()
-                feedback.joint_names = names
+                desired = dict(zip(self._runtime.joint_names, status.desired))
+                feedback = ExecuteTeleopMotion.Feedback() if web else FollowJointTrajectory.Feedback()
+                if web:
+                    feedback.stage = 'stopping' if status.state == 'stopping' else 'executing'
+                    feedback.arm_progress = status.progress
+                    _, feedback.gripper_state = self._arm.teleop_execution_status(task)
+                    feedback.gripper_position = self._gripper.gripper_position_m()
+                else:
+                    feedback.joint_names = names
                 feedback.actual = JointTrajectoryPoint()
                 feedback.actual.positions = [float(actual[name][0]) for name in names]
                 feedback.actual.velocities = [float(actual[name][1]) for name in names]
@@ -221,11 +242,14 @@ class ArmActions:
                     last = goal_handle.request.trajectory.points[-1].time_from_start
                     elapsed_ns = round(status.progress*(last.sec*1_000_000_000+last.nanosec))
                     feedback.desired.time_from_start.sec, feedback.desired.time_from_start.nanosec = divmod(elapsed_ns,1_000_000_000)
-                    feedback.error.positions = [a-d for a,d in zip(
-                        feedback.actual.positions, feedback.desired.positions)]
+                    if not web:
+                        feedback.error.positions = [a-d for a,d in zip(
+                            feedback.actual.positions, feedback.desired.positions)]
                 goal_handle.publish_feedback(feedback)
                 task.event.wait(.05)
             status = self._arm.arm_execution_status(task)
+            if web:
+                result.arm_state, result.gripper_state = self._arm.teleop_execution_status(task)
             result.error_string = status.message
             result.error_code = (result.SUCCESSFUL if status.state == 'succeeded' else
                 result.GOAL_TOLERANCE_VIOLATED if status.state == 'tolerance' else result.INVALID_GOAL)
@@ -250,6 +274,8 @@ class ArmActions:
                     stopped = False
                     exc = RuntimeError(f'{exc}; stop unconfirmed: {stop_error}')
             result.error_code, result.error_string = result.INVALID_GOAL, str(exc)
+            if web:
+                result.arm_state, result.gripper_state = ('failed', 'not_started') if task is None else self._arm.teleop_execution_status(task)
             if token is not None and task is None and goal_handle.is_cancel_requested and stopped:
                 goal_handle.canceled()
             else:
@@ -267,7 +293,7 @@ class ArmActions:
         self._node.publish_arm_status()
         return result
 
-    def execute_gripper_command(self, goal_handle):
+    def execute_gripper_command(self, goal_handle, *, moveit=False):
         """把毫米制开口与力矩交给夹爪组件, 以返回代次轮询本目标终态.
 
         取消携带 expected_generation, 旧回调不能释放接替目标. 位置成功由执行器在中性发送后给出.
@@ -281,14 +307,14 @@ class ArmActions:
                 goal_handle.canceled()
                 return result
             goal = goal_handle.request.command
-            generation = self._gripper.set_gripper_target(goal.position, goal.max_effort)
+            generation = self._gripper.set_gripper_target(goal.position * (2. if moveit else 1.), goal.max_effort)
             while True:
                 if goal_handle.is_cancel_requested and not canceled:
                     self._gripper.cancel_gripper_position_command(
                         'gripper action canceled', expected_generation=generation)
                     canceled = True
                 state, reason = self._gripper.gripper_execution_status(generation)
-                result.position = self._gripper.gripper_position_m()
+                result.position = self._gripper.gripper_position_m() / (2. if moveit else 1.)
                 result.effort = self._gripper.get_gripper_state()[2]
                 result.reached_goal = state == 'succeeded'
                 # 堵转不代表到位; 位置命令的到位/超时只由周期执行器判定.

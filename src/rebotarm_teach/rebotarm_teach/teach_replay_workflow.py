@@ -161,6 +161,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             # 仅用于起始对齐这一段关节空间规划，不参与示教轨迹本身的重定时。
             goal_position_tolerance=0.005,
             goal_orientation_tolerance=0.02,
+            start_state_provider=self._planning_start_state,
         )
         # 状态有效性查询服务客户端：用于下发前的碰撞预检（服务名由参数给出）。
         self._state_validity_client = self.create_client(
@@ -236,8 +237,6 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             for name, data in snapshot.joints.items()
             if name in self._joint_names and "position" in data
         }
-        if 'gripper' in snapshot.joints and 'position' in snapshot.joints['gripper']:
-            current_positions['left_finger_joint'] = snapshot.joints['gripper']['position']/2.
         info = inspect_teach_record(
             path,
             current_positions=current_positions if current_positions else None,
@@ -345,7 +344,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             resample_rate_hz=float(self.get_parameter("resample_rate_hz").value),
             retime_enabled=True,
             replay_speed=replay_speed,
-            max_velocity_rad_s=self._max_replay_velocity_limits(tuple(samples[0].joint_names) if samples else ()),
+            max_velocity_rad_s=self._max_replay_velocity_limits(self._joint_names if samples else ()),
             # 重定时的加速度/急动度上限（rad/s^2、rad/s^3），超限会被拉长轨迹时间。
             max_acceleration_rad_s2=float(self.get_parameter("max_replay_acceleration_rad_s2").value),
             max_jerk_rad_s3=float(self.get_parameter("max_replay_jerk_rad_s3").value),
@@ -355,9 +354,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             large_motion_span_rad=float(self.get_parameter("large_motion_span_rad").value),
             large_motion_total_rad=float(self.get_parameter("large_motion_total_rad").value),
             large_motion_max_speed=float(self.get_parameter("large_motion_max_speed").value),
-            coordinated_capability=(self._trajectory_capability() if samples and
-                (any(s.format_version >= 2 for s in samples) or 'left_finger_joint' in samples[0].joint_names)
-                and self._trajectory_capability is not None else None),
+
         )
 
 
@@ -657,6 +654,16 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         """
         return self._teach_replay_settings_provider.from_payload(payload, max_error=max_error)
 
+    def _planning_start_state(self, arm_start=None):
+        """补齐真实手指，使用 diff 起点保留 MoveIt 场景附着物。"""
+        from sensor_msgs.msg import JointState
+        snapshot = self._snapshot()
+        values = {n:float(snapshot.joints[n]['position']) for n in self._joint_names}
+        if arm_start is not None:
+            values.update(zip(arm_start.name,arm_start.position))
+        values.update(self._collision_default_joint_positions(self._joint_names))
+        return JointState(name=list(values),position=list(values.values()))
+
     def _build_teach_replay_trajectory(self, samples, start_band: str, settings: dict[str, float | int]) -> JointTrajectory:
         """由原始样本构建最终下发的关节轨迹（预处理 + 起始段 + 录制段 + 末尾保持）。
 
@@ -673,11 +680,6 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             for name, data in snapshot.joints.items()
             if "position" in data
         }
-        coordinated = 'left_finger_joint' in first.joint_names
-        if coordinated:
-            if 'gripper' not in current_map:
-                raise ValueError('fresh gripper feedback required for coordinated teach replay')
-            current_map['left_finger_joint'] = current_map['gripper']/2.
         result = self._teach_replay_trajectory_builder.build(
             prepared=prepared,
             current_positions=current_map,
@@ -702,16 +704,19 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             ),
             moveit_start_alignment=self._append_moveit_start_alignment,
         )
-        if coordinated:
-            if self._retime_trajectory is None or self._trajectory_capability is None:
-                raise ValueError('coordinated teach retiming interface unavailable')
-            if result.trajectory.points and (result.trajectory.points[0].time_from_start.sec
-                    or result.trajectory.points[0].time_from_start.nanosec):
-                first_point = JointTrajectoryPoint(positions=list(current_map[n] for n in first.joint_names),
-                    velocities=[0.]*7, accelerations=[0.]*7)
-                result.trajectory.points.insert(0,first_point)
-            return self._retime_trajectory(result.trajectory,self._trajectory_capability(),False,
-                float(self.get_parameter('max_replay_velocity_rad_s').value))
+        if self._trajectory_capability is not None and self._retime_trajectory is not None:
+            capability = self._trajectory_capability()
+            if capability['mode'] == 'prepared_v1':
+                # 原六轴等级不变，但最终拼接曲线仍须按执行插值重新核定时间，不能只检查离散差分。
+                if result.trajectory.points and (result.trajectory.points[0].time_from_start.sec
+                        or result.trajectory.points[0].time_from_start.nanosec):
+                    first_point = JointTrajectoryPoint(positions=[current_map[n] for n in first.joint_names])
+                    for field in ('velocities','accelerations'):
+                        if getattr(result.trajectory.points[0],field):
+                            setattr(first_point,field,[0.]*6)
+                    result.trajectory.points.insert(0,first_point)
+                return self._retime_trajectory(result.trajectory,capability,False,
+                    float(self.get_parameter('max_replay_velocity_rad_s').value))
         return result.trajectory
 
     def _append_final_hold(self, trajectory: JointTrajectory, *, final_hold_sec: float) -> None:
@@ -739,10 +744,6 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             trajectory = self._active_teach_replay_trajectory
             started_at = self._active_teach_replay_started_at
         if goal_handle is None:
-            return
-        if trajectory is not None and 'left_finger_joint' in trajectory.joint_names:
-            # 协同后端按两侧反馈源时间核对实际五次参考。旧监控按 Goal 响应时刻及线性
-            # 近似取时，不应与准备时间、米制夹爪混用而误判；协同仍受正式周期跟踪保护。
             return
         decision = self._replay_runtime_monitor.check(
             trajectory=trajectory,

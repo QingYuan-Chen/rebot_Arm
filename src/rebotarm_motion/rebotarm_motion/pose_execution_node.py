@@ -151,6 +151,7 @@ class PoseExecutionNode(Node):
             num_attempts=int(self.get_parameter("moveit_num_planning_attempts").value),
             goal_position_tolerance=float(self.get_parameter("goal_position_tolerance").value),
             goal_orientation_tolerance=float(self.get_parameter("goal_orientation_tolerance").value),
+            start_state_provider=self._planning_start_state,
         )
         self.create_service(
             ExecutePose,
@@ -228,9 +229,8 @@ class PoseExecutionNode(Node):
                 response.message = "explicit preview start is forbidden for execution"
                 return response
             if (
-                len(preview_start.name) != (7 if request.coordinated_gripper else 6)
-                or set(preview_start.name) != ({f"joint{i}" for i in range(1, 7)} |
-                    ({'left_finger_joint'} if request.coordinated_gripper else set()))
+                len(preview_start.name) != 6
+                or set(preview_start.name) != {f"joint{i}" for i in range(1, 7)}
                 or len(preview_start.position) != len(preview_start.name)
                 or not all(math.isfinite(value) for value in preview_start.position)
             ):
@@ -242,23 +242,16 @@ class PoseExecutionNode(Node):
         acceleration = float(request.acceleration_scaling) or float(
             self.get_parameter("default_acceleration_scaling").value
         )
-        planner = self._planner.plan_coordinated_pose if request.coordinated_gripper else self._planner.plan_pose
-        plan = planner(
+        plan = self._planner.plan_pose(
             request.target_pose,
             velocity_scaling=velocity,
             acceleration_scaling=acceleration,
             **({"start_joint_state": preview_start} if preview_start.name else {}),
-            **({'gripper_opening_m':request.gripper_opening_m} if request.coordinated_gripper else {}),
         )
         if not plan.success or plan.trajectory is None:
             response.success = False
             response.message = plan.message
             return response
-
-        if request.coordinated_gripper:
-            from dataclasses import replace
-            plan = replace(plan, trajectory=self._coordinate_pose_plan(
-                plan.trajectory, request, velocity, acceleration))
 
         # 即使随后不执行, 也把规划结果回填, 便于调用方审查轨迹.
         response.planned_trajectory = plan.trajectory
@@ -365,41 +358,6 @@ class PoseExecutionNode(Node):
             return
         self._capability, self._capability_at = capability, time.monotonic()
 
-    def _coordinate_pose_plan(self, trajectory, request, velocity, acceleration):
-        """复核七轴关节规划与反馈可用性，再在规划阶段统一重定时。
-
-        虚拟起点只用于纯预览；真实执行使用独立接收器的新鲜开口。最终接近段给相同
-        开口即可生成恒定夹爪参考。下发的仍是唯一 FJT，执行准备负责联合碰撞检查。
-        """
-        from .feedback_receiver import stamp_ns
-        capability = self._capability
-        if (self._trajectory_mode != 'prepared_v1' or capability is None
-                or capability['mode'] != 'prepared_v1' or time.monotonic()-self._capability_at > 1.):
-            raise ValueError('fresh matching prepared_v1 capability required for visual coordination')
-        target = float(request.gripper_opening_m)
-        if not math.isfinite(target) or not 0 <= target <= .09:
-            raise ValueError('gripper total opening must be in [0,0.09] m')
-        if not request.preview_start_joint_state.name:
-            sample = self._feedback_receiver.snapshot().gripper
-            if (sample is None or sample.status_code != 1
-                    or not -.05 <= (self.get_clock().now().nanoseconds-stamp_ns(sample))/1e9 <= .15):
-                raise ValueError('fresh enabled gripper feedback required for coordinated planning')
-        if 'left_finger_joint' not in trajectory.joint_names or not trajectory.points:
-            raise ValueError('coordinated joint planning returned no finger track')
-        started = time.monotonic()
-        if not self._retime_client.wait_for_service(timeout_sec=.1):
-            raise RuntimeError('coordinated retiming service unavailable')
-        query = RetimeArmTrajectory.Request(trajectory=trajectory, velocity_scaling=velocity,
-            acceleration_scaling=acceleration, capability_revision=capability['revision'])
-        future = self._retime_client.call_async(query)
-        self._wait_future(future, max(0., 2.-(time.monotonic()-started)))
-        if not future.done() or time.monotonic()-started > 2.:
-            future.cancel()
-            raise TimeoutError('coordinated planning retiming exceeded 2 s')
-        response = future.result()
-        if response is None or not response.success:
-            raise ValueError(getattr(response, 'message', 'coordinated retiming returned no response'))
-        return response.trajectory
 
     def _publish_trajectory_preview(
         self,
@@ -527,6 +485,26 @@ class PoseExecutionNode(Node):
         # 4, 5, 6 分别为成功, 已取消, 已中止; 三者仅表示动作终结, 不代表反馈已静止.
         return (future.done() and not future.cancelled()
                 and int(future.result().status) in (4, 5, 6))
+
+    def _planning_start_state(self, arm_start=None):
+        """规划使用两路新鲜实际反馈；虚拟预览仅替换六轴，不覆盖真实夹爪或附着物。"""
+        from sensor_msgs.msg import JointState
+        snapshot = self._feedback_receiver.snapshot()
+        now = self.get_clock().now().nanoseconds
+        for message in (snapshot.joints, snapshot.gripper):
+            if message is None:
+                raise ValueError('fresh arm and gripper feedback required for planning')
+            stamp = message.header.stamp.sec*1_000_000_000+message.header.stamp.nanosec
+            if stamp <= 0 or not -.05 <= (now-stamp)/1e9 <= .15:
+                raise ValueError('arm or gripper feedback expired before planning')
+        values = dict(zip(snapshot.joints.name,snapshot.joints.position))
+        if arm_start is not None:
+            values.update(zip(arm_start.name,arm_start.position))
+        width = float(snapshot.gripper.position)
+        if not math.isfinite(width) or not 0 <= width <= .09:
+            raise ValueError('invalid actual gripper opening')
+        values.update(left_finger_joint=width/2.,right_finger_joint=-width/2.)
+        return JointState(name=list(values),position=list(values.values()))
 
     def _hardware_idle(self, now):
         """真机需有新鲜, 无故障的控制器空闲状态; 仿真由动作和关节反馈确认停止."""

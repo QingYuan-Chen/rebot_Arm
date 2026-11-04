@@ -22,11 +22,6 @@ sensor_msgs/JointState preview_start_joint_state
 # 再通过 PublishTrajectoryPreview 一次发布，避免 RViz 在阶段边界反复重启动画。
 # 该字段不影响 execute=true 的真实执行路径。
 bool suppress_preview
-# prepared_v1 的接触前位置协同；默认 false 保持既有六轴接口。
-# true 时运动层将实际/虚拟起点开口与本次位姿移动合为同一条七轴曲线。
-bool coordinated_gripper
-# 双指总开口 m；协同夹爪限矩仅取启动能力，不接受逐请求覆盖。
-float64 gripper_opening_m
 ---
 # ── 响应 ──────────────────────────────────────────────────────────
 # 本次请求是否成功。规划失败、动作服务器不可用、目标被拒或执行超时都为 false。

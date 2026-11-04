@@ -2,6 +2,7 @@
 import threading
 import time
 from types import SimpleNamespace
+import pytest
 
 from builtin_interfaces.msg import Time
 from control_msgs.action import FollowJointTrajectory, GripperCommand
@@ -73,6 +74,25 @@ class CancelAfterSubmission:
     def canceled(self): self.state = 'canceled'
 
 
+@pytest.mark.parametrize('moveit,factor', [(False,1.), (True,2.)])
+def test_gripper_protocol_preserves_total_opening_and_converts_moveit_left_finger(moveit, factor):
+    """同一独立执行器只接受总开口；MoveIt 的反馈和结果仍使用左指坐标。"""
+    actions = ArmActions.__new__(ArmActions)
+    submitted, feedback = [], []
+    actions._gripper = SimpleNamespace(
+        set_gripper_target=lambda width, effort: submitted.append((width,effort)) or 7,
+        gripper_execution_status=lambda generation: ('succeeded',''),
+        gripper_position_m=lambda: .06, get_gripper_state=lambda: (0.,0.,.5))
+    goal = SimpleNamespace(request=GripperCommand.Goal(),is_cancel_requested=False,
+        publish_feedback=feedback.append,succeed=lambda:None,abort=lambda:pytest.fail('unexpected abort'))
+    goal.request.command.position = .03
+    goal.request.command.max_effort = 1.
+    result = actions.execute_gripper_command(goal,moveit=moveit)
+    assert submitted == [(.03*factor,1.)]
+    assert result.reached_goal and result.position == .06/factor
+    assert feedback[-1].position == .06/factor and feedback[-1].reached_goal
+
+
 def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeypatch):
     assembly, opened = make_local_manager(monkeypatch)
     node = RegistrationNode()
@@ -94,7 +114,9 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
     assert not opened and not assembly.runtime.writer_active
     gripper = node.actions['/ports/gripper/command']
     trajectory = node.actions['/ports/follow_joint_trajectory']
-    assert gripper.goal_callback(None) == trajectory.goal_callback(None) == GoalResponse.REJECT
+    arm_request = FollowJointTrajectory.Goal()
+    arm_request.trajectory.joint_names = list(assembly.runtime.joint_names)
+    assert gripper.goal_callback(None) == trajectory.goal_callback(arm_request) == GoalResponse.REJECT
     observed, device_threads = [], []
     assembly.lifecycle.connect()
     submit = assembly.runtime.requests.submit
@@ -128,7 +150,7 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
         trigger('enable')
         assert observed == [dict(resource='device', priority=5, ttl=5., invalidate=('device',))]
         assert node.publishers['/ports/arm_status'][-1].enabled
-        assert gripper.goal_callback(None) == trajectory.goal_callback(None) == GoalResponse.ACCEPT
+        assert gripper.goal_callback(None) == trajectory.goal_callback(arm_request) == GoalResponse.ACCEPT
         observed.clear()
         trigger('trajectory_stop')
         assert observed == [dict(resource='device', priority=0, ttl=5., invalidate=())]

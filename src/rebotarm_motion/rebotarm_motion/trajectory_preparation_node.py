@@ -8,7 +8,7 @@
     (载荷, 场景版本)；main 注册 /<namespace>/prepare_arm_trajectory 服务和
     trajectory_scene_revision 持久化话题。服务成功仅表示准备通过，不启动运动。
 安全约束
-    六轴请求固定夹爪，协同请求逐样本更新镜像双指；保留附着物并检查全机器人。
+    仅准备六轴；普通请求固定真实夹爪，网页请求仅在局部副本中使用闭合模型。
     不修改场景、不拥有执行资源、不访问设备；场景不匹配、超时、碰撞或未知均失败。
     期限使用主机单调时钟，与仿真 /clock 分开；耗时检查不得放入后端设备周期。
     场景版本是轮询已观察到的状态，执行端负责变化后的停止，不提供动态避障保证。
@@ -69,6 +69,10 @@ class SceneCollisionChecker:
         fingers = tuple(float(value) for value in request.gripper_positions)
         if len(fingers) != 2 or not all(math.isfinite(value) for value in fingers):
             raise ValueError('complete finite fixed gripper state required')
+        policy = getattr(request, 'gripper_collision_policy', 0)
+        if policy not in (0, 1):
+            raise ValueError('unknown gripper collision policy')
+        collision_fingers = (0., 0.) if policy == 1 else fingers
         trajectory = request.trajectory
         if not 0 < len(trajectory.points) <= 10_000:
             raise ValueError('trajectory point budget exceeded')
@@ -81,10 +85,7 @@ class SceneCollisionChecker:
         capability_json = getattr(request, 'capability_json', '')
         if capability_json:
             capability = decode_capability(capability_json)
-        if len(names) == 7:
-            if capability is None or trajectory.header.frame_id != binding(capability):
-                raise ValueError('coordinated planning capability missing or mismatched')
-        elif trajectory.header.frame_id.startswith('rebotarm-capability:'):
+        if trajectory.header.frame_id.startswith('rebotarm-capability:'):
             if capability is None or trajectory.header.frame_id != binding(capability):
                 raise ValueError('planning capability changed')
         if self.config_directory is not None and capability is not None:
@@ -104,8 +105,7 @@ class SceneCollisionChecker:
                     if time.monotonic() >= request.deadline_monotonic:
                         raise TimeoutError('trajectory preparation deadline expired')
                     values = dict(zip(names, q))
-                    left = values.get('left_finger_joint', fingers[0])
-                    values.update(left_finger_joint=left, right_finger_joint=-left)
+                    values.update(zip(('left_finger_joint', 'right_finger_joint'), collision_fingers))
                     state.joint_positions = values
                     state.update()
                     # 空组检查全部连杆，包含当前样本双指与环境/自身碰撞。
@@ -115,7 +115,7 @@ class SceneCollisionChecker:
                             requested_samples=len(positions))
             prepared, report = analyze_trajectory(names, points,
                 lower=lower, upper=upper, limits=limits, context=context, now=now,
-                collision_check=collision, start_finger=fingers[0])
+                collision_check=collision)
             if prepared is None:
                 raise ValueError(json.dumps(report, ensure_ascii=False, allow_nan=False))
             if time.monotonic() >= request.deadline_monotonic:
@@ -123,7 +123,8 @@ class SceneCollisionChecker:
             payload = prepared.to_payload()
             # 六轴准备上下文之外的绑定也必须原样带回，后端不能只采信 success 字段。
             payload.update(scene_revision=revision, gripper_positions=fingers,
-                           gripper_generation=request.gripper_generation)
+                           gripper_generation=request.gripper_generation,
+                           gripper_collision_policy=policy)
             if capability is not None:
                 payload['capability_revision'] = capability['revision']
             return payload, revision

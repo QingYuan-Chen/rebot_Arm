@@ -18,7 +18,7 @@ from rebotarm_trajectory.capability import decode_capability, binding
 
 
 def retime_message(request, capability, config_directory):
-    """数值入口不创建节点；右指核验后省去从动行，保留单夹爪请求维度。"""
+    """数值入口不创建节点；六轴执行曲线和单左指规划预算分别核定，拒绝七轴。"""
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
     capability = decode_capability(capability)
     if request.capability_revision and request.capability_revision != capability['revision']:
@@ -28,10 +28,11 @@ def retime_message(request, capability, config_directory):
         raise ValueError('FJT effort is not a torque-cap override')
     points = tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
         p.positions,p.velocities,p.accelerations) for p in trajectory.points)
-    names, points = canonical_input(trajectory.joint_names,points,(0.,)*6)
-    if not any(name.startswith('joint') for name in trajectory.joint_names):
+    if tuple(trajectory.joint_names) == ('left_finger_joint',):
+        # 仅为 MoveIt 独立夹爪规划核定预算；执行映射为 GripperCommand，绝不送入 FJT。
         names = ('left_finger_joint',)
-        points = tuple(TrajectoryPoint(p.time,p.positions[-1:],p.velocities[-1:],p.accelerations[-1:]) for p in points)
+    else:
+        names, points = canonical_input(trajectory.joint_names,points)
     if points[0].time != 0.:
         raise ValueError('planning requires an explicit initial point at time zero')
     low, high, limits = effective_limits(config_directory,names,capability)

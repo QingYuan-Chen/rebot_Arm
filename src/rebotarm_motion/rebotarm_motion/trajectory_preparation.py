@@ -4,15 +4,15 @@
     在运动层把点约束变成可核验曲线，检查段内限值和完整碰撞采样覆盖。
     本文件不创建 ROS 节点；正式服务通过注入碰撞检查器复用同一准备流程。
 对外接口
-    PreparationContext 描述会话、目标代次和静止保持证据；normalize_boundaries
+    PreparationContext 描述会话、目标代次和保持快照；normalize_boundaries
     规范化首末约束；point_to_point 生成静止到静止约束；analyze_trajectory
     返回 (PreparedTrajectory 或 None, 报告)。load_reference_limits 读取现有限值。
 安全约束
-    新鲜静止时将起点对齐已发送保持命令，不以实际位置与保持值的误差单独拒绝。
+    新鲜反馈下将起点对齐已发送保持命令，不以实际位置与保持值的误差单独拒绝。
     对齐后的准确曲线仍须完整限值及碰撞检查；不得修改中间导数或原有时间。
     超限、未知或碰撞检查覆盖不足均不能生成候选；不自动拉长时长、裁剪或降级。
     候选不是执行许可：正式服务另外绑定场景/夹爪，后端在所有者事务内复核后接纳。
-    observed_at/now 使用同源单调秒；反馈采集与静止证据由执行后端负责。
+    observed_at/now 使用同源单调秒；反馈采集和资源预约由执行后端负责。
 文件结构
     限值读取 → 准备上下文 → 边界规范化与点对点约束 → 极值/参考分析 → 冻结候选
     → 完整准备流程。报告保留离线分析字段，不能将数值对照当作物理跟踪证据。
@@ -31,7 +31,7 @@ from .polynomial_trajectory import (
     curve_from_payload, ordered_points, vector6,
 )
 from .trajectory_runtime_limits import load_joint_runtime_limits
-from rebotarm_trajectory.polynomial import canonical_names, finite_vector, COORDINATED_JOINT_NAMES
+from rebotarm_trajectory.polynomial import canonical_names, finite_vector
 
 
 MAX_AGE = .15
@@ -73,30 +73,27 @@ class PreparationContext:
             raise ValueError('finite feedback observation time required')
 
     def require_ready(self, now):
-        """静止必须来自既有证据, 不能从单份反馈自行推断."""
+        """检查反馈新鲜度和资源状态；不要求机械臂连续静止窗口。"""
         if not math.isfinite(now) or not -.005 <= now - self.observed_at <= MAX_AGE:
             raise ValueError('fresh feedback required')
-        if not self.enabled or not self.stationary or self.busy:
-            raise ValueError('enabled stationary idle hold required')
+        if not self.enabled or self.busy:
+            raise ValueError('enabled idle hold required')
 
 
-def normalize_boundaries(joint_names, points, context, *, now, start_finger=None):
+def normalize_boundaries(joint_names, points, context, *, now):
     """校验前明确调整起止边界; 其后不得再改点或时间."""
     context.require_ready(now)
     points = list(ordered_points(joint_names, points))
     names = canonical_names(joint_names)
     hold = context.hold
-    if names == COORDINATED_JOINT_NAMES:
-        if start_finger is None or not math.isfinite(start_finger) or not 0 <= start_finger <= .045:
-            raise ValueError('finite initial finger position required')
-        hold = (*hold, start_finger)
+    if names != JOINT_NAMES:
+        raise ValueError('execution preparation requires six arm joints')
     first = points[0]
     zeros = (0.,) * len(names)
     if first.time == 0:
         if len(points) == 1 and first.positions != hold:
             raise ValueError('zero-duration position change forbidden')
         # 六轴从已发送保持命令连续起步，残差不设单独门限；随后检查整条规范化曲线。
-        # 夹爪起点同样取预约状态，规范化后仍须检查整条曲线和碰撞。
         points[0] = replace(first, positions=hold)
     else:
         # 首点晚于零时刻时显式补起点；导数字段是否存在仍沿用输入的兼容等级。
@@ -239,7 +236,7 @@ class PreparedTrajectory:
 
 
 def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=None,
-                       now=0., collision_check=None, start_finger=None):
+                       now=0., collision_check=None):
     """返回候选与可审计报告; 只有完整覆盖的碰撞 pass 才产生候选.
 
     collision_check(names, positions) 由调用者注入, 应绑定其记录的规划场景与完整
@@ -251,8 +248,7 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
     if context and any(q < lo-CALC_ATOL or q > hi+CALC_ATOL
             for q,lo,hi in zip(source[0].positions, lower, upper)):
         raise ValueError('first input position outside limits')
-    points = normalize_boundaries(names, source, context, now=now,
-        start_finger=start_finger) if context else source
+    points = normalize_boundaries(names, source, context, now=now) if context else source
     if points[0].time != 0:
         raise ValueError('explicit initial state at time zero required')
     report = dict(source_points=len(source), normalized_points=len(points),
@@ -288,5 +284,5 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
     report['state'] = ('pass' if context is not None and collision.get('state') == 'pass'
                        else 'rejected' if collision.get('state') == 'collision' else 'unknown')
     if context is None:
-        report['reason'] = 'no stationary hold context; curve analysis only'
+        report['reason'] = 'no hold context; curve analysis only'
     return (PreparedTrajectory(curve, context) if report['state'] == 'pass' else None), report

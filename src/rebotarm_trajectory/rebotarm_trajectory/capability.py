@@ -9,7 +9,7 @@
 import hashlib
 import json
 import math
-from .polynomial import JOINT_NAMES, COORDINATED_JOINT_NAMES
+from .polynomial import JOINT_NAMES
 
 
 def constraint_revision(*documents):
@@ -30,8 +30,9 @@ def make_capability(mode, session, speed, torque, limits_revision='0'*64):
     if (not isinstance(limits_revision,str) or len(limits_revision) != 64
             or any(c not in '0123456789abcdef' for c in limits_revision)):
         raise ValueError('sha256 limits revision required')
-    data = dict(version=1, mode=mode, session=session, coefficient_versions=[1, 2],
-        joint_sets=[list(JOINT_NAMES), list(COORDINATED_JOINT_NAMES), ['left_finger_joint']],
+    data = dict(version=2, mode=mode, session=session, coefficient_versions=[1, 2],
+        joint_sets=[list(JOINT_NAMES)], teleop_action_version=1,
+        gripper_execution='independent_position',
         gripper_motor_speed_rad_s=float(speed), gripper_torque_cap_nm=float(torque),
         finger_speed_m_s=float(speed)*.009, limits_revision=limits_revision)
     data['revision'] = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(',', ':')).encode()).hexdigest()

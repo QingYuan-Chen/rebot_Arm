@@ -9,7 +9,8 @@
   ROS 消息类型，可以在没有 ROS 运行时的环境下做单元测试。
 
 对外交互（客户端由调用方注入）：
-- 关节动作 ``/<ns>/follow_joint_trajectory``：legacy 接收旧离散点，prepared_v1 接收完整五次首末约束；
+- 关节动作：legacy 使用 ``/<ns>/follow_joint_trajectory``；prepared_v1 使用
+  ``/<ns>/execute_teleop_motion`` 提交六轴五次约束和可选独立夹爪目标；
 - 夹爪动作 ``/<ns>/gripper/command``：接收目标开口与最大力矩；
 - 触发器服务 ``/<ns>/trajectory_stop``：请求硬件控制器停止当前轨迹。
 
@@ -226,7 +227,7 @@ class WebTeleopClient:
             "trajectory": trajectory,
         }
 
-    def send_planned(self, trajectory, decision, *, feedback_callback=None):
+    def send_planned(self, trajectory, decision, *, gripper=(), feedback_callback=None):
         """提交已预览的准确联合消息；不再插值、改时长或发送独立夹爪 Action。"""
         self._require_trajectory_capability()
         if self._trajectory_mode != 'prepared_v1':
@@ -235,6 +236,9 @@ class WebTeleopClient:
             raise ValueError('follow_joint_trajectory action unavailable')
         goal = self._follow_goal_factory()
         goal.trajectory = trajectory
+        goal.move_gripper = bool(gripper)
+        if gripper:
+            goal.gripper_position, goal.gripper_max_effort = gripper
         return dict(accepted=True,decision=decision,response=decision_response(decision),
             status=dict(state='submitted',message='联合轨迹已提交，等待控制器接纳',duration=decision.duration),
             trajectory=trajectory,goal_future=self._action_client.send_goal_async(goal,

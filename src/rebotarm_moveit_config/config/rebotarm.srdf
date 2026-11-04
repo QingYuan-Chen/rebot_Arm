@@ -22,13 +22,6 @@
     <joint name="right_finger_joint" />
   </group>
 
-  <!-- 复合规划组 arm_with_gripper：合并 arm 与 gripper，
-       供需要同时考虑手臂与夹爪占用空间的规划与碰撞检查使用。 -->
-  <group name="arm_with_gripper">
-    <group name="arm" />
-    <group name="gripper" />
-  </group>
-
   <!-- 末端执行器声明：名称 gripper，安装于 end_link，所属组 gripper，父规划组 arm；
        MoveIt 据此计算抓取姿态并支持附着物体。 -->
   <end_effector name="gripper" parent_link="end_link" group="gripper" parent_group="arm" />

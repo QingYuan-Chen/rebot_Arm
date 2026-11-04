@@ -28,7 +28,7 @@ rebotarm_grasp_candidate_ik_filter:
     target_frame: base_link
     moveit_ik_service: /compute_ik
     collision_check_service: /check_state_validity
-    collision_group_name: arm_with_gripper
+    collision_group_name: ""
     moveit_group_name: arm
     ee_frame_id: end_link
 
@@ -60,4 +60,4 @@ launch:
   executor_input_topic: /grasp/filtered_plan
   candidate_joint_state_topic: '/{arm_namespace}/visual_joint_states'
   candidate_collision_check_service: /check_state_validity
-  candidate_collision_group_name: arm_with_gripper
+  candidate_collision_group_name: ""

@@ -60,6 +60,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from control_msgs.action import FollowJointTrajectory, GripperCommand
+from rebotarm_msgs.action import ExecuteTeleopMotion
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
@@ -280,9 +281,9 @@ class TeleopStatusPanelNode(Node):
         # moveit_start_skip_threshold（rad）：当前位形与轨迹首点误差小于该值就跳过规划，只保留保持点。
         self.declare_parameter("moveit_start_skip_threshold", 0.005)
         # moveit_group_name：规划用的规划组名；collision_group_name：碰撞预检用的规划组名，
-        # 取 "arm_with_gripper" 时会自动补齐夹爪指关节（见 _collision_default_joint_positions）。
+        # 空碰撞组检查全机器人，示教补齐新鲜真实夹爪（见 _collision_default_joint_positions）。
         self.declare_parameter("moveit_group_name", "arm")
-        self.declare_parameter("collision_group_name", "arm_with_gripper")
+        self.declare_parameter("collision_group_name", "")
         # moveit_planning_service / moveit_planning_pipeline / moveit_planner_id：规划服务名、
         # 流水线 id（ompl）与规划器 id（空串表示交给 MoveIt 选默认规划器）。
         self.declare_parameter("moveit_planning_service", "/plan_kinematic_path")
@@ -446,8 +447,8 @@ class TeleopStatusPanelNode(Node):
         # 关节轨迹动作与夹爪动作：名称空间与控制器侧保持一致，缺一不可。
         self._action_client = ActionClient(
             self,
-            FollowJointTrajectory,
-            f"/{self._arm_namespace}/follow_joint_trajectory",
+            ExecuteTeleopMotion if self._trajectory_capability.expected == 'prepared_v1' else FollowJointTrajectory,
+            f"/{self._arm_namespace}/" + ('execute_teleop_motion' if self._trajectory_capability.expected == 'prepared_v1' else 'follow_joint_trajectory'),
         )
         self._gripper_action_client = ActionClient(
             self,
@@ -516,7 +517,7 @@ class TeleopStatusPanelNode(Node):
             joint_velocity_limits=self._joint_velocity_limits,
             trajectory_factory=JointTrajectory,
             trajectory_point_factory=JointTrajectoryPoint,
-            follow_goal_factory=FollowJointTrajectory.Goal,
+            follow_goal_factory=ExecuteTeleopMotion.Goal if self._trajectory_capability.expected == 'prepared_v1' else FollowJointTrajectory.Goal,
             gripper_action_client=self._gripper_action_client,
             gripper_goal_factory=GripperCommand.Goal,
             trajectory_execution_mode=self._trajectory_capability.expected,
@@ -556,7 +557,7 @@ class TeleopStatusPanelNode(Node):
             snapshot=self._store.snapshot,
             publish_status=self._store.update_teleop_status,
             collision_defaults=self._collision_default_joint_positions,
-            action_client=self._action_client,
+            action_client=ActionClient(self, FollowJointTrajectory, f"/{self._arm_namespace}/follow_joint_trajectory"),
             trajectory_stop_client=self._trajectory_stop_client,
             request_stop=self._request_controller_trajectory_stop,
             trajectory_capability=self._trajectory_capability.require_snapshot,
@@ -784,25 +785,14 @@ class TeleopStatusPanelNode(Node):
         return self._teach_workflow.record_info(record_path)
 
     def _collision_default_joint_positions(self, joint_names: tuple[str, ...]) -> tuple[tuple[str, float], ...]:
-        """为碰撞预检补齐夹爪指关节位置，返回 ``((关节名, 位置), ...)``。
-
-        计划组为 "arm_with_gripper" 时，状态有效性查询也要求给出夹爪指关节的角度；
-        调用方传入的关节列表若已含手指关节就无需补齐（返回空元组）。位置按当前夹爪
-        开口换算成左右手指关节角，取不到实时反馈时退回仿真开口值，避免查询因缺值失败。
-        位置单位：手指关节为 m 级的平移量，正负成对，保证两指对称开合。
-        """
-        if str(self.get_parameter("collision_group_name").value) != "arm_with_gripper":
-            return ()
-        if {"left_finger_joint", "right_finger_joint"}.issubset(set(joint_names)):
-            return ()
-        joints = self._store.snapshot().joints
-        gripper_state = joints.get("gripper", {})
-        gripper_position = gripper_state.get("position", self._sim_gripper_position)
-        left, right = gripper_opening_to_finger_joint_positions(
-            float(gripper_position),
-            self._gripper_limits,
-        )
-        return (("left_finger_joint", left), ("right_finger_joint", right))
+        """示教使用新鲜真实开度；网页的闭合策略只在新 Action 的准备副本中生效。"""
+        stamp = getattr(self,'_gripper_source_ns',0)
+        if stamp <= 0 or not -.05 <= (self.get_clock().now().nanoseconds-stamp)/1e9 <= .15:
+            raise ValueError('fresh actual gripper feedback required for teach collision checking')
+        width = float(self._store.snapshot().joints['gripper']['position'])
+        if not math.isfinite(width):
+            raise ValueError('invalid actual gripper opening')
+        return (("left_finger_joint",width/2.),("right_finger_joint",-width/2.))
 
     def _target_runtime(self) -> str:
         """当前目标运行环境标识："hardware" 表示真实硬件，"simulation" 表示仿真。"""
@@ -1132,7 +1122,7 @@ class TeleopStatusPanelNode(Node):
                 tuple(current_positions[name] for name in decision.joint_names),
                 decision.positions, decision.duration, trajectory_factory=JointTrajectory,
                 point_factory=JointTrajectoryPoint)
-        goal = FollowJointTrajectory.Goal()
+        goal = ExecuteTeleopMotion.Goal() if self._trajectory_capability.expected == 'prepared_v1' else FollowJointTrajectory.Goal()
         goal.trajectory = trajectory
         with self._web_keyboard_lock:
             # HTTP 请求可能并发到达；先原子占用，再异步发送，不能等 Goal 回执才标 busy。
@@ -1226,8 +1216,8 @@ class TeleopStatusPanelNode(Node):
             try:
                 if str(payload.get('confirm','')).upper() != 'EXECUTE':
                     raise ValueError('missing EXECUTE confirmation')
-                trajectory,decision = self._coordinated_plans.take(payload['plan_id'],current_positions)
-                execution = self._web_teleop_client.send_planned(trajectory,decision,
+                trajectory,decision,gripper = self._coordinated_plans.take(payload['plan_id'],current_positions)
+                execution = self._web_teleop_client.send_planned(trajectory,decision,gripper=gripper,
                     feedback_callback=lambda message:self._on_coordinated_feedback(message,decision))
                 execution['goal_future'].add_done_callback(lambda fut:self._on_execute_goal_response(fut,decision))
                 self._store.update_teleop_status('web_execute',execution['status'])
@@ -1312,7 +1302,7 @@ class TeleopStatusPanelNode(Node):
         )
         future = result.get("cancel_future")
         if future is not None:
-            future.add_done_callback(self._on_execute_cancel_response)
+            future.add_done_callback(lambda fut:self._on_execute_cancel_response(fut,goal_handle))
         self._store.update_teleop_status("web_execute", result["status"])
         if result.get("clear_goal_handle"):
             # 客户端明确要求清空句柄：说明该目标已不再有效，继续留着会让下次停止操作瞄错对象。
@@ -1450,21 +1440,20 @@ class TeleopStatusPanelNode(Node):
         msg.status_code = 1
         self._sim_gripper_state_pub.publish(msg)
 
-    def _on_execute_cancel_response(self, future) -> None:
-        """关节运动取消请求的回调：区分"取消已被接受"与"目标在取消前就跑完了"。"""
+    def _on_execute_cancel_response(self, future, goal_handle) -> None:
+        """取消响应只表示请求处理；整体终态只由本 Goal 的 Result 确认。"""
         try:
             response = future.result()
             goals_canceling = len(getattr(response, "goals_canceling", []))
+            message = ('trajectory cancel accepted; waiting for task result' if goals_canceling
+                else 'cancel response has no accepted goal; waiting for task result')
         except Exception as exc:
-            self._store.update_teleop_status("web_execute", {"state": "failed", "message": str(exc)})
-            return
-        state = "cancel_requested" if goals_canceling else "done"
-        message = (
-            "trajectory cancel accepted"
-            if goals_canceling
-            else "trajectory already finished before cancel"
-        )
-        self._store.update_teleop_status("web_execute", {"state": state, "message": message})
+            message = f'cancel response failed; waiting for task result: {exc}'
+        with self._execute_lock:
+            # Result 已到或已有后继任务时，迟到取消响应不得覆盖它们的显示状态。
+            if self._execute_goal_handle is not goal_handle:
+                return
+            self._store.update_teleop_status("web_execute", {"state": "cancel_requested", "message": message})
 
     def _on_execute_goal_response(self, future, decision: WebExecuteDecision) -> None:
         """关节运动目标受理回调：保存目标句柄（供停止使用）并注册最终结果回调。"""
@@ -1500,11 +1489,14 @@ class TeleopStatusPanelNode(Node):
         feedback = message.feedback
         stamp = feedback.desired.time_from_start
         elapsed = stamp.sec+stamp.nanosec*1e-9
-        self._store.update_teleop_status('web_execute', dict(state='executing',
-            message='联合轨迹执行中', duration=decision.duration,
+        stage = feedback.stage
+        self._store.update_teleop_status('web_execute', dict(state=stage,
+            message={'preparing':'正在准备六轴轨迹','executing':'机械臂与独立夹爪执行中',
+                'stopping':'正在停止组合任务'}.get(stage,stage),
+            gripper_state=feedback.gripper_state, gripper_position=feedback.gripper_position, duration=decision.duration,
             progress=min(1.,elapsed/decision.duration) if decision.duration > 0 else 0.,
-            desired=dict(zip(feedback.joint_names,feedback.desired.positions)),
-            actual=dict(zip(feedback.joint_names,feedback.actual.positions))))
+            desired=dict(zip(self._joint_names,feedback.desired.positions)),
+            actual=dict(zip(self._joint_names,feedback.actual.positions))))
 
     def _on_execute_result(self, future, decision: WebExecuteDecision) -> None:
         """关节运动最终结果回调，并统一释放目标句柄。
@@ -1538,6 +1530,7 @@ class TeleopStatusPanelNode(Node):
             {
                 "state": state,
                 "message": f"trajectory result status={status}, error_code={error_code}: {error_string}",
+                "arm_state": getattr(result,"arm_state",""), "gripper_state": getattr(result,"gripper_state",""),
                 "max_delta": decision.max_delta,
                 "max_delta_limit": decision.max_delta_limit,
                 "duration": decision.duration,
@@ -1570,6 +1563,7 @@ class TeleopStatusPanelNode(Node):
         界面固定按 "gripper" 读取夹爪数据，而不同固件可能用 joint7 之类的名字发布，
         因此这里做一次别名写入，保证显示不依赖具体发布方的命名。
         """
+        self._gripper_source_ns = msg.header.stamp.sec*1_000_000_000+msg.header.stamp.nanosec
         joint_name = str(msg.joint_name).strip() or "gripper"
         self._store.update_motor_state(
             joint_name=joint_name,

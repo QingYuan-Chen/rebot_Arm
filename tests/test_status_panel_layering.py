@@ -1,5 +1,22 @@
 from __future__ import annotations
 
+
+def test_web_cancel_reply_is_not_a_terminal_result_and_cannot_overwrite_next_goal():
+    import threading
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates=[]
+    goal=object()
+    owner=NS(_execute_lock=threading.Lock(),_execute_goal_handle=goal,
+        _store=NS(update_teleop_status=lambda key,value:updates.append(value)))
+    future=NS(result=lambda:NS(goals_canceling=[]))
+    TeleopStatusPanelNode._on_execute_cancel_response(owner,future,goal)
+    assert updates[-1]['state']=='cancel_requested'
+    for successor in (None,object()):
+        owner._execute_goal_handle=successor
+        TeleopStatusPanelNode._on_execute_cancel_response(owner,future,goal)
+    assert len(updates)==1
+
 from rebotarm_dashboard.arm_control_client import ArmControlClient
 from rebotarm_motion.collision_precheck import (
     CollisionPrecheckConfig,
@@ -329,7 +346,7 @@ def test_collision_prechecker_returns_pass_after_sampling_state_validity() -> No
         config=CollisionPrecheckConfig(
             enabled=True,
             service="/check_state_validity",
-            group_name="arm_with_gripper",
+            group_name="",
             max_samples=3,
             timeout_sec=1.0,
         ),
@@ -343,10 +360,10 @@ def test_collision_prechecker_returns_pass_after_sampling_state_validity() -> No
         [0.2, 0.2],
         [0.4, 0.4],
     ]
-    assert client.requests[0].group_name == "arm_with_gripper"
+    assert client.requests[0].group_name == ""
 
 
-def test_collision_prechecker_appends_default_gripper_joints_for_arm_with_gripper() -> None:
+def test_collision_prechecker_appends_actual_gripper_joints_for_full_robot() -> None:
     client = _StateValidityClient([_StateValidityResponse(valid=True)])
     prechecker = CollisionPrechecker(
         client=client,
@@ -359,7 +376,7 @@ def test_collision_prechecker_appends_default_gripper_joints_for_arm_with_grippe
         config=CollisionPrecheckConfig(
             enabled=True,
             service="/check_state_validity",
-            group_name="arm_with_gripper",
+            group_name="",
             max_samples=1,
             timeout_sec=1.0,
             default_joint_positions=(
@@ -404,7 +421,7 @@ def test_collision_prechecker_returns_collision_with_compact_contacts() -> None:
         config=CollisionPrecheckConfig(
             enabled=True,
             service="/check_state_validity",
-            group_name="arm_with_gripper",
+            group_name="",
             max_samples=10,
             timeout_sec=1.0,
         ),

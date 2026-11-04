@@ -75,6 +75,7 @@ class MoveItMotionPlanner:
         num_attempts: int,
         goal_position_tolerance: float,
         goal_orientation_tolerance: float,
+        start_state_provider=None,
     ) -> None:
         """保存规划配置并创建服务客户端.
 
@@ -92,6 +93,7 @@ class MoveItMotionPlanner:
         - ``goal_orientation_tolerance``: 末端姿态各轴容差, 单位 rad.
         """
         self._node = node
+        self._start_state_provider = start_state_provider
         self._group_name = group_name
         self._ee_frame_id = ee_frame_id
         self._frame_id = frame_id
@@ -149,9 +151,9 @@ class MoveItMotionPlanner:
 
         request = GetMotionPlan.Request()
         motion_request = request.motion_plan_request
-        # 七轴关节目标采用复合组；六轴与单夹爪仍保留各自规划组。
-        motion_request.group_name = ('arm_with_gripper' if 'left_finger_joint' in joint_names
-            and any(name.startswith('joint') for name in joint_names) else self._group_name)
+        if self._start_state_provider is not None:
+            start_joint_state = self._start_state_provider(start_joint_state)
+        motion_request.group_name = self._group_name
         motion_request.pipeline_id = self._planning_pipeline
         motion_request.planner_id = self._planner_id
         motion_request.num_planning_attempts = self._num_attempts
@@ -162,7 +164,7 @@ class MoveItMotionPlanner:
         # diff 语义: 起点取"当前状态", 不使用规划场景里缓存的旧起点.
         motion_request.start_state.is_diff = True
         if start_joint_state is not None and start_joint_state.name:
-            motion_request.start_state.is_diff = False
+            motion_request.start_state.is_diff = True
             motion_request.start_state.joint_state = start_joint_state
         constraints = Constraints()
         # 容差下限: 0 容差会让关节约束退化成等式, 在采样类规划器上几乎必然无解.
@@ -178,51 +180,6 @@ class MoveItMotionPlanner:
             constraints.joint_constraints.append(joint_constraint)
         motion_request.goal_constraints = [constraints]
         return self._call_plan_service(request)
-
-    def plan_coordinated_pose(self, pose, *, gripper_opening_m, velocity_scaling=.1,
-                              acceleration_scaling=.1, start_joint_state=None):
-        """先对六轴 arm 求 IK，再对七轴构造关节目标；复合组不配置六轴 IK 插件。"""
-        import math
-        from moveit_msgs.srv import GetPositionIK
-        from sensor_msgs.msg import JointState
-        from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
-        width = float(gripper_opening_m)
-        if not math.isfinite(width) or not 0 <= width <= .09:
-            return MotionPlanResult(False, 'invalid coordinated opening', None)
-        client = self._node.create_client(GetPositionIK, '/compute_ik')
-        try:
-            if not client.wait_for_service(timeout_sec=.5):
-                return MotionPlanResult(False, 'arm IK service unavailable', None)
-            request = GetPositionIK.Request()
-            query = request.ik_request
-            query.group_name, query.ik_link_name = 'arm', self._ee_frame_id
-            query.pose_stamped, query.avoid_collisions = pose, True
-            query.timeout = Duration(seconds=min(self._planning_time, 1.)).to_msg()
-            # IK 在目标夹爪几何上检查；规划的真实起点仍由 MoveIt 当前状态或显式虚拟起点提供。
-            initial = dict(zip(start_joint_state.name,start_joint_state.position)) if start_joint_state is not None else {}
-            initial.update(left_finger_joint=width/2.,right_finger_joint=-width/2.)
-            query.robot_state.is_diff = True
-            query.robot_state.joint_state = JointState(name=list(initial), position=list(initial.values()))
-            future = client.call_async(request)
-            deadline = time.monotonic()+self._planning_time+1.
-            while rclpy.ok() and not future.done() and time.monotonic() < deadline:
-                time.sleep(.005)
-            if not future.done():
-                future.cancel()
-                return MotionPlanResult(False, 'arm IK timed out', None)
-            response = future.result()
-            if response is None or response.error_code.val != 1:
-                return MotionPlanResult(False, 'arm IK rejected coordinated target', None)
-            positions = dict(zip(response.solution.joint_state.name,response.solution.joint_state.position))
-            positions['left_finger_joint'] = width/2.
-            if not all(name in positions for name in COORDINATED_JOINT_NAMES):
-                return MotionPlanResult(False, 'arm IK returned incomplete solution', None)
-            return self.plan_joint_positions(joint_names=COORDINATED_JOINT_NAMES,
-                target_positions=tuple(positions[n] for n in COORDINATED_JOINT_NAMES),tolerance=1e-5,
-                velocity_scaling=velocity_scaling, acceleration_scaling=acceleration_scaling,
-                start_joint_state=start_joint_state)
-        finally:
-            self._node.destroy_client(client)
 
     def plan_preview(self, preview: Any) -> MotionPlanResult:
         """按预览对象的位姿目标规划(末端笛卡尔位姿约束).
@@ -276,6 +233,8 @@ class MoveItMotionPlanner:
         ``velocity_scaling`` / ``acceleration_scaling`` 夹到 [0.01, 1.0], 默认 0.1.
         ``start_joint_state`` 仅供调用层构造连续纯规划预览; 为空时仍使用当前状态.
         """
+        if self._start_state_provider is not None:
+            start_joint_state = self._start_state_provider(start_joint_state)
         if not self._client.wait_for_service(timeout_sec=0.5):
             return MotionPlanResult(
                 success=False,
@@ -297,7 +256,7 @@ class MoveItMotionPlanner:
             motion_request.start_state.is_diff = True
         else:
             # 指定完整的虚拟臂状态; 规划服务不得再将其与当前假关节状态混用.
-            motion_request.start_state.is_diff = False
+            motion_request.start_state.is_diff = True
             motion_request.start_state.joint_state = start_joint_state
         motion_request.goal_constraints = [self._build_pose_constraints(pose)]
 

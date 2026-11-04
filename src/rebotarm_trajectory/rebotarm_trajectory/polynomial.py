@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 import math
 
 JOINT_NAMES = tuple(f'joint{i}' for i in range(1, 7))
-COORDINATED_JOINT_NAMES = (*JOINT_NAMES, 'left_finger_joint')
 CALC_ATOL = 1e-9
 
 
@@ -38,12 +37,12 @@ def finite_vector(values, size=None):
 
 
 def canonical_names(names):
-    """只接受已支持的完整机构集合；右指从动关系由消息边界另行校验。"""
+    """六轴执行曲线或单夹爪规划预算；单夹爪曲线不能作为 FJT 执行。"""
     names = tuple(names)
-    for supported in (JOINT_NAMES, COORDINATED_JOINT_NAMES, ('left_finger_joint',)):
+    for supported in (JOINT_NAMES, ('left_finger_joint',)):
         if len(names) == len(supported) and set(names) == set(supported):
             return supported
-    raise ValueError('exactly joint1..joint6, coordinated joints or left_finger_joint required')
+    raise ValueError('exactly joint1..joint6 or planning-only left_finger_joint required')
 
 
 def vector6(values):

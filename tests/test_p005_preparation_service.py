@@ -99,26 +99,24 @@ def test_one_read_lock_and_copied_attached_state_cover_every_curve_sample():
     assert all(item['left_finger_joint']==.01 and item['right_finger_joint']==-.01 for item in monitor.checked)
 
 
-def test_coordinated_collision_batch_moves_both_fingers_in_one_snapshot():
-    import json
-    from pathlib import Path
-    from rebotarm_trajectory.capability import make_capability, binding, constraint_revision
-    from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
-    config = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
-    revision = constraint_revision(*(config.joinpath(n).read_bytes() for n in ('rebotarm.urdf','joint_limits.yaml')))
-    cap = make_capability('prepared_v1',1,.5,1.,revision)
+def test_web_closed_collision_policy_preserves_actual_snapshot_and_public_scene():
     monitor = LockedMonitor()
     req = request(monitor)
-    from rebotarm_motion.coordinated_trajectory import generate_schedule, curve_message
-    req.trajectory = curve_message(generate_schedule((0.,)*6,.02,(.02,0.,0.,0.,0.,0.),.0208,1.),
-        trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
-    req.trajectory.header.frame_id,req.capability_json = binding(cap),json.dumps(cap)
-    SceneCollisionChecker(monitor,config).prepare(req,LOWER,UPPER,LIMITS)
-    assert monitor.entries == 1
-    left = [item['left_finger_joint'] for item in monitor.checked]
-    assert max(left)-min(left) >= .0004-1e-12
-    assert max(abs(a-b) for a,b in zip(left,left[1:])) <= .00018+1e-12
-    assert all(item['right_finger_joint'] == -item['left_finger_joint'] for item in monitor.checked)
+    req.gripper_collision_policy = req.WEB_CLOSED
+    payload,_ = SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+    assert payload['gripper_positions'] == (.01,-.01)
+    assert payload['gripper_collision_policy'] == req.WEB_CLOSED
+    assert all(item['left_finger_joint'] == item['right_finger_joint'] == 0. for item in monitor.checked)
+    assert monitor.scene.current_state.joint_positions == {}
+
+
+@pytest.mark.parametrize('names', [('left_finger_joint',),(*tuple(f'joint{i}' for i in range(1,7)),'left_finger_joint'),(*tuple(f'joint{i}' for i in range(1,7)),'right_finger_joint')])
+def test_prepare_rejects_gripper_fjt_before_collision(names):
+    monitor=LockedMonitor();req=request(monitor)
+    req.trajectory.joint_names=list(names)
+    with pytest.raises(ValueError,match='exactly'):
+        SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+    assert not monitor.checked
 
 
 @pytest.mark.parametrize('damage', ['scene','deadline','mixed','limits'])

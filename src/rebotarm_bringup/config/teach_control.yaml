@@ -59,7 +59,7 @@
     use_moveit_start_align: true
     moveit_start_skip_threshold: 0.005
     moveit_group_name: arm
-    collision_group_name: arm_with_gripper
+    collision_group_name: ""
     moveit_planning_service: /plan_kinematic_path
     moveit_planning_pipeline: ompl
     moveit_planner_id: ""

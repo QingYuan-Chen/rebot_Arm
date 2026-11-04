@@ -1,10 +1,11 @@
-"""网页联合计划与一次性执行令牌适配。
+"""网页六轴预览与独立夹爪目标的一次性执行令牌适配。
 
 文件职责：校验操作员关键点，调用运动层生成及重定时，保存可预览的准确最终消息。
 对外接口：CoordinatedWebPlans.preview/take；take 只交接原消息，不发送或重建轨迹。
 安全约束：无设备访问；能力变化拒绝；固定时长不自动延长。
-    独立夹爪的逐请求力矩不能进入协同路径。执行准入与碰撞仍由正式后端负责。
-文件结构：计划缓存 → 联合预览 → 单次交接与上下文复核。
+    夹爪只保存单次开合目标与独立接口力矩，不插值、不参与机械臂重定时。
+    执行准入与闭合模型碰撞检查仍由正式后端负责。
+文件结构：计划缓存 → 六轴预览及夹爪目标 → 单次交接与能力复核。
 """
 from dataclasses import replace
 import math
@@ -27,17 +28,17 @@ class CoordinatedWebPlans:
         capability = self.capability()
         if capability['mode'] != 'prepared_v1':
             raise ValueError('coordinated motion requires explicit prepared_v1 mode')
-        if 'max_effort' in payload or 'torque_cap' in payload:
-            raise ValueError('coordinated torque cap is fixed by startup configuration')
         decision = validate_web_execute_request(dict(payload,confirm='EXECUTE'), joint_names=self.names,
             current_positions=current,joint_limits=self.limits,max_delta_rad=max_delta,
             min_duration=min_duration,max_duration=max_duration)
         if not decision.accepted:
             raise ValueError(decision.message)
-        width = float(current['gripper'])
-        target_width = float(payload['gripper_position'])
-        if not all(math.isfinite(q) and 0 <= q <= .09 for q in (width,target_width)):
+        target_width = float(payload.get('gripper_position',0.))
+        effort = float(payload.get('max_effort',0.))
+        if not math.isfinite(target_width) or not 0 <= target_width <= .09 or not math.isfinite(effort) or effort < 0:
             raise ValueError('finite gripper total opening in [0,0.09] m required')
+        if payload.get('gripper_keyframes'):
+            raise ValueError('gripper keyframes are unsupported; use one independent opening target')
         for item in payload.get('arm_keyframes',[]) or []:
             check = validate_web_execute_request(dict(payload,confirm='EXECUTE',
                 joint_positions=dict(zip(self.names,item['positions']))),joint_names=self.names,
@@ -46,11 +47,11 @@ class CoordinatedWebPlans:
             if not check.accepted:
                 raise ValueError(f'arm keyframe: {check.message}')
         start = tuple(current[n] for n in self.names)
-        curve = generate_schedule(start,width,decision.positions,target_width,decision.duration,
-            arm_keyframes=payload.get('arm_keyframes'),gripper_keyframes=payload.get('gripper_keyframes'))
+        curve = generate_schedule(start,decision.positions,decision.duration,
+            arm_keyframes=payload.get('arm_keyframes'))
         message = curve_message(curve,trajectory_factory=self.trajectory_factory,point_factory=self.point_factory)
         message = self.retime(message,capability, bool(payload.get('fixed_duration',False)),max_speed)
-        # 显示和执行均用服务返回后的纳秒点，不拿原始时长或独立动画冒充联合计划。
+        # 显示和执行均用服务返回后的六轴纳秒点，夹爪预览只表示独立目标。
         from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
         final = build_curve(message.joint_names,tuple(TrajectoryPoint(
             p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
@@ -60,14 +61,16 @@ class CoordinatedWebPlans:
         with self._lock:
             if len(self._plans) >= 32:
                 self._plans.pop(next(iter(self._plans)))
-            self._plans[token] = (capability['revision'],message,decision)
+            self._plans[token] = (capability['revision'],message,decision,
+                (target_width, min(effort, capability['gripper_torque_cap_nm'])) if 'gripper_position' in payload else ())
         count = min(3000,max(2,math.ceil(final.duration/.05)))
         return dict(accepted=True,plan_id=token,duration=final.duration,
             torque_cap_nm=capability['gripper_torque_cap_nm'],joint_names=list(final.joint_names),
             keyframes=[dict(time=p.time,positions=p.positions,velocities=p.velocities,accelerations=p.accelerations)
                 for p in final.points],
             preview=[dict(time=final.duration*i/count,positions=final.sample(final.duration*i/count)[0]) for i in range(count+1)],
-            message='联合计划已生成；执行前仍须通过碰撞准备与后端准入')
+            gripper_position=target_width, collision_policy='web_closed',
+            message='按闭合夹爪模型检查；夹爪独立开合，不保证与机械臂同时到达')
 
     def take(self, token, current):
         """单次交接原计划；准备服务按预约状态规范化起点并检查实际执行曲线。"""
@@ -76,7 +79,7 @@ class CoordinatedWebPlans:
             plan = self._plans.pop(str(token),None)
         if plan is None:
             raise ValueError('coordinated preview missing; preview again')
-        revision,message,decision = plan
+        revision,message,decision,gripper = plan
         if revision != capability['revision']:
             raise ValueError('coordinated planning capability changed; preview again')
-        return message,decision
+        return message,decision,gripper

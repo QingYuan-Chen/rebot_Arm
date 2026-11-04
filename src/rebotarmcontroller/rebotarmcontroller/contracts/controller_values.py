@@ -33,6 +33,7 @@ class PreparedArmHandoff:
     gripper_generation: int
     scene_revision: str
     capability: str = ''
+    collision_policy: int = 0
 
     def __deepcopy__(self, memo):
         """内部构造保证曲线及数值字段不可变；队列复制无需再次遍历全部多项式系数。"""
@@ -59,6 +60,8 @@ class ArmPreparation:
     scene_revision: str
     deadline: float
     capability: str = ''
+    collision_policy: int = 0
+    gripper_command: tuple = ()
 
     def __deepcopy__(self, memo):
         """接纳用对象身份核对预约，不能把队列复制后的同值对象当成新令牌。"""

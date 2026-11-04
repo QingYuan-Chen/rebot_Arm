@@ -176,10 +176,9 @@ class HardwareManager:
         self.gripper.bind(feedback=gripper_feedback_port, protection=protection_port)
         # 准备所需的夹爪快照仍由夹爪组件核验；manager 只绑定方法，不保存第二份状态。
         arm_gripper_port = ArmGripperPort(snapshot=self.gripper.preparation_snapshot,
-            begin_coordinated=self.gripper.begin_coordinated,
-            coordinated_state=self.gripper.coordinated_state,
-            send_coordinated=self.gripper.send_coordinated,
-            end_coordinated=self.gripper.end_coordinated)
+            start_position=self.gripper.start_reserved_position,
+            position_state=self.gripper.gripper_execution_status,
+            cancel_position=self.gripper.cancel_gripper_position_command)
         self.arm.bind(cycle=cycle_port, feedback=arm_feedback_port, gravity=gravity_arm_port,
                       protection=protection_port, gripper=arm_gripper_port)
         self.gravity.bind(arm=arm_gravity_port, cycle=cycle_port, feedback=gravity_feedback_port, protection=protection_port)

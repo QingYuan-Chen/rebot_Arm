@@ -4,9 +4,10 @@
 唯一串口/总线会话、已校验反馈和最后一道执行安全检查. 支持 Ubuntu 24.04 / ROS 2 Jazzy.
 当前实施及验收范围以[项目状态](../../docs/reference/project_status.md)为准.
 
-P005 协同位置路径由 `runtime/coordinated_trajectory.py` 持有整体任务，唯一设备周期
-取一次参考时间，复用六轴和夹爪组件的发送与反馈。七轴执行不建立第二条夹爪斜坡；
-部分发送失败保留真实回执，停止确认前不释放两侧资源。夹爪整体结束中性释放，
+P005 网页组合路径由 `runtime/coordinated_trajectory.py` 持有整体任务，同一设备周期
+登记六轴曲线和独立夹爪目标，复用原六轴采样及夹爪限速、到位、超时和中性释放。
+FJT 只接受完整六轴；网页 prepared_v1 使用 `/rebotarm/execute_teleop_motion`。
+整体成功等待两侧完成与清理，不保证同时到达；部分发送失败保留真实回执，停止确认前不释放两侧资源。
 机械臂保持命令终点；健康任务失败不自动失能。接口见
 [P005 协同位置](../../docs/implemented/features/p005_prepared_trajectory.md#修订协同接口)。
 
@@ -66,7 +67,7 @@ rebotarmcontroller/
 │   │   ├── device_requests.py        # 有界队列、优先级、资源与代次
 │   │   ├── lifecycle.py              # 连接、使能、失能、模式、置零与关闭
 │   │   ├── controller_cycle.py       # 反馈与六轴、夹爪、重力周期协调
-│   │   ├── coordinated_trajectory.py # 协同任务、同周期参考与整体终态
+│   │   ├── coordinated_trajectory.py # 网页组合预约、两侧独立推进与整体终态
 │   │   ├── controller_protection.py  # 故障协调、保护失能和恢复确认
 │   │   ├── command_guard.py          # 透传准入、故障决策与保护锁存
 │   │   └── stationary_evidence.py    # 新鲜独立反馈与速度窗口证据
@@ -86,7 +87,7 @@ rebotarmcontroller/
 │   │   └── gravity_control.py        # 动力学模型、力矩约束与补偿计算
 │   ├── ros/                         # ROS 协议与消息适配
 │   │   ├── ros_services.py           # 生命周期、停止、夹爪等 Service
-│   │   ├── ros_actions.py            # FJT 和夹爪 Action
+│   │   ├── ros_actions.py            # 六轴 FJT、网页组合及独立/MoveIt 夹爪 Action
 │   │   ├── ros_publishers.py         # JointState、JointMotorState、ArmStatus
 │   │   ├── motor_passthrough.py      # 受准入及租约约束的命令订阅
 │   │   └── conversions.py            # ROS 位姿与矩阵转换

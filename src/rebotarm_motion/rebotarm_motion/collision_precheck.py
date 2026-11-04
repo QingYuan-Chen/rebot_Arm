@@ -170,6 +170,8 @@ class CollisionPrechecker:
             request = self._request_factory()
             request.group_name = str(config.group_name)
             request.robot_state.joint_state.name = list(joint_names)
+            # 完整关节值作为场景差量，保留已存在的附着物；不能用空附着物列表清空场景状态。
+            request.robot_state.is_diff = True
             request.robot_state.joint_state.position = [float(v) for v in positions]
             future = self._client.call_async(request)
             # 本模块不持有 executor, 用轮询 + 短休眠等待服务返回; 0.01 s 兼顾响应速度与开销.

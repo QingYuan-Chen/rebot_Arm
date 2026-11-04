@@ -7,9 +7,29 @@ perform quality analysis or replay gating.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from .teach_models import PreparedTeachReplay, TeachSample
+
+
+def arm_replay_samples(samples):
+    """只在派生副本按名提取六轴，原文件及夹爪元数据保持可查看。"""
+    names = tuple(f'joint{i}' for i in range(1,7))
+    result = []
+    for sample in samples:
+        if set(sample.joint_names).issubset(names) and len(sample.joint_names) < 6:
+            # 数值预处理保留旧的局部维度分析；正式 FJT 仍只接纳完整六轴。
+            result.append(sample)
+            continue
+        if len(set(sample.joint_names)) != len(sample.joint_names) or not set(names).issubset(sample.joint_names):
+            raise ValueError('record must contain all six arm joints')
+        order = [sample.joint_names.index(n) for n in names]
+        result.append(replace(sample,joint_names=names,
+            positions=tuple(sample.positions[i] for i in order),
+            velocities=tuple(sample.velocities[i] for i in order) if sample.velocities else (),
+            efforts=tuple(sample.efforts[i] for i in order) if sample.efforts else ()))
+    return result
 
 
 def is_quit_key(key: str | None, *, quit_key: str = "q") -> bool:
@@ -96,8 +116,8 @@ def prepared_record_path(raw_path: str | Path) -> Path:
     """
     path = Path(raw_path)
     if path.suffix:
-        return path.with_name(f"{path.stem}.prepared{path.suffix}")
-    return path.with_name(f"{path.name}.prepared.jsonl")
+        return path.with_name(f"{path.stem}.prepared.v3{path.suffix}")
+    return path.with_name(f"{path.name}.prepared.v3.jsonl")
 
 
 def write_prepared_teach_record(
@@ -119,9 +139,6 @@ def write_prepared_teach_record(
     下游一眼看出该文件不是手工示教采集的原始记录。
     """
     target = Path(output_path) if output_path is not None else prepared_record_path(raw_path)
-    coordinated = bool(prepared.samples and 'left_finger_joint' in prepared.samples[0].joint_names)
-    if output_path is None and coordinated:
-        target = target.with_name(target.stem+'.v2'+target.suffix)
     if target.resolve() == Path(raw_path).resolve():
         raise ValueError('derived teach record must not overwrite raw recording')
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +154,7 @@ def write_prepared_teach_record(
                 efforts=(),
                 motor_status={},
                 arm_state="PREPARED_REPLAY",
-                format_version=2 if coordinated else 1,
+                format_version=3,
             )
             for point in prepared.retimed_points
         ]

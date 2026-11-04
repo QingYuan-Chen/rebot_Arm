@@ -236,10 +236,10 @@ def ros_acceptance(output, dashboard):
                 break
         assert planned is not None,results
         results['moveit_execution']='pass'
-        for group in ('arm_with_gripper','gripper'):
+        for group in ('gripper',):
             pause(.8)
             current=dict(zip(latest['joint'].name,latest['joint'].position))
-            selected=(*names,'left_finger_joint') if group=='arm_with_gripper' else ('left_finger_joint',)
+            selected=('left_finger_joint',)
             req=GetMotionPlan.Request();plan=req.motion_plan_request
             plan.group_name=group;plan.pipeline_id='ompl';plan.num_planning_attempts=1
             plan.allowed_planning_time=3.;plan.max_velocity_scaling_factor=.1
@@ -277,17 +277,42 @@ def ros_acceptance(output, dashboard):
         current['joint1']+=.02
         width=dict(zip(latest['joint'].name,latest['joint'].position))['left_finger_joint']*2.
         joint_plan=post('/api/preview_coordinated',dict(joint_positions=current,duration=1.2,
-            gripper_position=width+.001,gripper_keyframes=[dict(time=.3,width=width),
-                dict(time=.9,width=width+.001),dict(time=1.2,width=width+.001)]))
+            gripper_position=width+.001,arm_keyframes=[dict(time=.6,positions=list(current.values())),dict(time=1.2,positions=list(current.values()))]))
         assert joint_plan['accepted'],joint_plan
-        assert len(joint_plan['joint_names'])==7 and len(joint_plan['keyframes'])==4,joint_plan
+        assert len(joint_plan['joint_names'])==6 and len(joint_plan['keyframes'])==3,joint_plan
         write_json(output/'web_coordinated_plan.json',joint_plan)
         submitted=post('/api/execute_preview',dict(confirm='EXECUTE',plan_id=joint_plan['plan_id']))
         assert submitted['accepted'],submitted
         pause(joint_plan['duration']+1.)
         results['web_coordinated']=status()['teleop']['web_execute']
         assert results['web_coordinated']['state']=='done',results['web_coordinated']
-        # 新格式原始记录仍是六轴加独立源时刻；经过现有网页 dry-run/execute 派生七轴。
+        assert results['web_coordinated']['arm_state']=='succeeded',results['web_coordinated']
+        assert results['web_coordinated']['gripper_state']=='succeeded',results['web_coordinated']
+        # 所有手指 FJT 都必须直接拒绝，不能静默投影。
+        for extra in (['left_finger_joint'],[*names,'left_finger_joint'],[*names,'right_finger_joint']):
+            invalid=make(list(latest['joint'].position[:6]),1.)
+            invalid.trajectory.joint_names=extra
+            future=arm.send_goal_async(invalid);wait(future.done)
+            assert not future.result().accepted,extra
+        results['finger_fjt_rejected']=True
+        # 网页组合取消并等待资源释放，再执行仅关节，旧任务不得覆盖后继。
+        from rebotarm_msgs.action import ExecuteTeleopMotion
+        teleop=ActionClient(node,ExecuteTeleopMotion,'/rebotarm/execute_teleop_motion')
+        target=list(latest['joint'].position[:6]);target[0]+=.01
+        combined=ExecuteTeleopMotion.Goal(trajectory=make(target,2.).trajectory,
+            move_gripper=True,gripper_position=.01,gripper_max_effort=1.)
+        handle=send(teleop,combined)
+        wait(lambda:bool(feedbacks[id(handle)]),1.)
+        future=handle.cancel_goal_async();wait(future.done)
+        canceled=finish(handle,success=False);assert canceled.status==5,str(canceled)
+        assert canceled.result.arm_state in ('canceled','failed'),str(canceled)
+        assert canceled.result.gripper_state in ('failed','not_started'),str(canceled)
+        pause(.8)
+        target=list(latest['joint'].position[:6]);target[0]+=.005
+        done=finish(send(teleop,ExecuteTeleopMotion.Goal(trajectory=make(target,1.).trajectory)))
+        assert done.result.arm_state=='succeeded' and done.result.gripper_state=='not_requested',str(done)
+        results['web_cancel_and_next']=message_to_ordereddict(done)
+        # 新格式保留夹爪数据供查看，正式回放只派生六轴，不修改原始记录。
         pause(.8)
         current=dict(zip(latest['joint'].name,latest['joint'].position))
         raw=output/'coordinated_teach.jsonl'
@@ -329,78 +354,36 @@ def ros_acceptance(output, dashboard):
             pose=model.pose(q)
             return PoseTarget(tuple(pose.translation),tuple(pin.Quaternion(pose.rotation).coeffs()))
         width=current['left_finger_joint']*2.+.0004
-        stages=build_visual_grasp_sequence(pose_for(.003),pose_for(.006),
+        # 目标须超过节点的位姿容差；亚毫米目标会让 IK 在容差内任选解，无法稳定验证移动。
+        stages=build_visual_grasp_sequence(pose_for(.03),pose_for(.06),
             VisualGraspSequenceConfig(coordinated_position_only=True,open_position_m=width))
         config=dict(trajectory_execution_mode='prepared_v1',execution_mode='plan_only',
-            target_frame='base_link',acceleration_scaling=.1,move_velocity_scaling=.1,
-            approach_velocity_scaling=.1,retreat_velocity_scaling=.1)
+            target_frame='base_link',acceleration_scaling=.03,move_velocity_scaling=.03,
+            approach_velocity_scaling=.03,retreat_velocity_scaling=.03)
         def visual_call(key,request,timeout):
+            if key=='gripper':
+                return call(SetGripper,'/rebotarm/gripper/set',request,timeout),''
             service,path=(ExecutePose,'execute_pose') if key=='execute_pose' else (PublishTrajectoryPreview,'publish_trajectory_preview')
             return call(service,'/rebotarm/motion_execution/'+path,request,timeout),''
         visual_state=VisualGraspState()
         gateway=VisualGraspServiceGateway(state=visual_state,config=config,
             io_gateway=SimpleNamespace(call=visual_call))
-        for stage in stages:
+        ok,message=gateway._call_gripper(stages[0]);assert ok,message
+        pause(.5)
+        for stage in stages[1:]:
             ok,message=gateway._send_execute_pose(stage,execute=False)
             assert ok,message
         assert len(visual_state.preview_trajectories)==2 and not visual_state.preview_gripper_events
-        assert all(len(t.joint_names)==7 for t in visual_state.preview_trajectories)
+        assert all(len(t.joint_names)==6 for t in visual_state.preview_trajectories)
         ok,message=gateway._publish_preview_sequence();assert ok,message
         gateway._execution_mode='execute'
-        for stage in stages:
+        ok,message=gateway._call_gripper(stages[0]);assert ok,message
+        for stage in stages[1:]:
             pause(.8)
             ok,message=gateway._send_execute_pose(stage,execute=True)
             assert ok,message
         results['visual_precontact']=dict(stages=[s.name for s in stages],message=message,
             preview_tracks=[message_to_ordereddict(t) for t in visual_state.preview_trajectories])
-        # 障碍位于左指外侧扫掠体：起点无碰撞、张开后碰撞，固定手指检查会漏掉此反例。
-        import struct
-        from ament_index_python.packages import get_package_share_directory
-        from rebotarm_motion.coordinated_trajectory import generate_schedule,curve_message
-        pause(.8)
-        current=dict(zip(latest['joint'].name,latest['joint'].position))
-        mesh=Path(get_package_share_directory('rebotarm_moveit_config'))/'meshes/left_finger.stl'
-        data=mesh.read_bytes();count=struct.unpack_from('<I',data,80)[0]
-        faces=[[struct.unpack_from('<3f',data,84+50*i+12+12*j) for j in range(3)] for i in range(count)]
-        face=max(faces,key=lambda vertices:sum(v[1] for v in vertices)/3.)
-        center=[sum(v[i] for v in face)/3. for i in range(3)]
-        center[1]+=current['left_finger_joint']+.002
-        obj=CollisionObject(id='p005_finger_sweep');obj.header.frame_id='end_link'
-        obj.primitives=[SolidPrimitive(type=SolidPrimitive.SPHERE,dimensions=[.0002])]
-        pose=Pose();pose.position.x,pose.position.y,pose.position.z=center;pose.orientation.w=1.
-        obj.primitive_poses=[pose];obj.operation=CollisionObject.ADD
-        scene=ApplyPlanningScene.Request();scene.scene.is_diff=True;scene.scene.world.collision_objects=[obj]
-        revision=latest['trajectory_scene_revision']
-        assert call(ApplyPlanningScene,'/apply_planning_scene',scene).success
-        wait(lambda:latest['trajectory_scene_revision']!=revision)
-        try:
-            validity=GetStateValidity.Request();validity.robot_state.joint_state=latest['joint']
-            validity.robot_state.is_diff=False
-            initial_valid=call(GetStateValidity,'/check_state_validity',validity)
-            assert initial_valid.valid,initial_valid
-            positions=list(validity.robot_state.joint_state.position)
-            for index,name in enumerate(validity.robot_state.joint_state.name):
-                if name=='left_finger_joint':positions[index]=current[name]+.002
-                if name=='right_finger_joint':positions[index]=-current['left_finger_joint']-.002
-            validity.robot_state.joint_state.position=positions
-            swept=call(GetStateValidity,'/check_state_validity',validity)
-            assert not swept.valid,'moving-finger obstacle fixture did not intersect its sweep'
-            start=tuple(current[n] for n in names);width=current['left_finger_joint']*2.
-            curve=generate_schedule(start,width,start,width+.008,1.)
-            query=RetimeArmTrajectory.Request(trajectory=curve_message(curve,
-                trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint),
-                velocity_scaling=1.,acceleration_scaling=1.,
-                capability_revision=json.loads(latest['trajectory_capabilities'])['revision'])
-            planned=call(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory',query)
-            assert planned.success,planned.message
-            rejected=finish(send(arm,FollowJointTrajectory.Goal(trajectory=planned.trajectory)),success=False)
-            assert rejected.status!=4 and 'collision' in rejected.result.error_string,str(rejected)
-            results['moving_finger_collision']=message_to_ordereddict(rejected)
-        finally:
-            obj.operation=CollisionObject.REMOVE
-            scene.scene.world.collision_objects=[obj]
-            assert call(ApplyPlanningScene,'/apply_planning_scene',scene).success
-            pause(.8)
         # 显式取消并等新帧静止确认，之后继续接纳。
         target=list(latest['joint'].position[:6]);target[0]+=.03
         handle=send(arm,make(target,2.))

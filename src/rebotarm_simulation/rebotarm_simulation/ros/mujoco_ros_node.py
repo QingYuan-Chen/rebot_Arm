@@ -57,7 +57,8 @@ DEFAULT_HOME_JOINT_POSITIONS = (0.0, -0.8, -1.0, 0.3, 0.0, 0.0)
 def create_node_class():
     """延迟导入 ROS 并返回具体节点类；仅导入本模块不会创建节点或仿真实例。"""
     import rclpy
-    from control_msgs.action import FollowJointTrajectory
+    from control_msgs.action import FollowJointTrajectory, GripperCommand
+    from rebotarm_msgs.action import ExecuteTeleopMotion
     from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
     from rclpy.action import ActionServer, CancelResponse, GoalResponse
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
@@ -172,7 +173,8 @@ def create_node_class():
             self._scene_revision = ''
             # 待准备请求与已接纳曲线分开保存，服务返回之前物理周期仍保持当前位置。
             self._preparation = None
-            self._coordinated_active = False
+            self._gripper_task = None
+            self._gripper_reservation = None
             self._sample_history = deque(maxlen=512)
             self._last_physics_wall = time.monotonic()
             self._stop_unconfirmed = False
@@ -227,6 +229,21 @@ def create_node_class():
                 execute_callback=self._execute_goal,
                 callback_group=self._callback_group,
             )
+            self._gripper_servers = []
+            for suffix,moveit in (('command',False),('moveit_command',True)):
+                self._gripper_servers.append(ActionServer(self,GripperCommand,
+                    f'/{namespace}/gripper/{suffix}',
+                    goal_callback=self._gripper_goal_callback,
+                    cancel_callback=lambda goal: CancelResponse.ACCEPT,
+                    execute_callback=lambda goal,m=moveit:self._execute_gripper(goal,moveit=m),
+                    callback_group=self._callback_group))
+            if self._trajectory_mode == 'prepared_v1':
+                self._teleop_server = ActionServer(self,ExecuteTeleopMotion,
+                    f'/{namespace}/execute_teleop_motion',
+                    goal_callback=lambda goal:self._goal_callback(goal,web=True),
+                    cancel_callback=self._cancel_callback,
+                    execute_callback=lambda goal:self._execute_goal(goal,web=True),
+                    callback_group=self._callback_group)
             self.create_service(
                 Trigger,
                 f"/{self._arm_namespace}/trajectory_stop",
@@ -282,18 +299,21 @@ def create_node_class():
 
         def _hold_current_position_unlocked(self) -> None:
             self._control.hold_current_position()
-            if self._coordinated_active:
-                self._sim.release_gripper_position()
-                self._coordinated_active = False
+            if self._gripper_task is not None and self._gripper_task['state'] == 'active':
+                self._cancel_gripper(self._gripper_task,'combination stopped')
 
         def _apply_target_threadsafe(self, operation) -> None:
             self._sim_access.run(lambda _sim: operation())
 
-        def _goal_callback(self, goal_request):
+        def _goal_callback(self, goal_request, *, web=False):
             token = goal_request
             try:
+                if len(goal_request.trajectory.joint_names) != 6 or set(goal_request.trajectory.joint_names) != set(ARM_JOINT_NAMES):
+                    raise ValueError('FJT requires exactly six arm joints; use independent gripper command')
+                if self._gripper_busy():
+                    raise RuntimeError('independent gripper busy')
                 if self._trajectory_mode == 'prepared_v1':
-                    return self._reserve_prepared_goal(goal_request)
+                    return self._reserve_prepared_goal(goal_request,web=web)
                 sampler = trajectory_to_sampler(
                     goal_request.trajectory,
                     initial_positions=self._current_arm_positions(),
@@ -332,6 +352,19 @@ def create_node_class():
             # 静止窗口比较实际反馈；实际位置与命令保持值的残差不单独阻断下一次请求。
             return state, hold
 
+        def _admission_snapshot(self):
+            """准入只要求新鲜物理反馈及夹爪静止，不要求机械臂积累静止窗口。"""
+            state = self._sim.get_state()
+            cutoff = state.simulation_time-.2
+            samples = [item for item in self._sample_history if item.simulation_time >= cutoff-.0021]
+            if (time.monotonic()-self._last_physics_wall > .15 or len(samples) < 3
+                    or samples[-1].simulation_time-samples[0].simulation_time < .2-1e-9):
+                raise RuntimeError('fresh complete gripper stationary window required')
+            if any(abs(item.joint_velocities[index]) > .00045
+                   for item in samples for index in (6, 7)):
+                raise RuntimeError('gripper stationary evidence unavailable')
+            return state, tuple(self._sim.get_control_status().joint_targets)
+
         def _publish_admission(self):
             """发布只读准入证据；物理状态和能力不代表任何一次 REJECT 的准确原因。"""
             self._versioned_capabilities.publish(String(data=json.dumps(self._execution_capability, allow_nan=False)))
@@ -341,7 +374,7 @@ def create_node_class():
                     reasons.append('arm/gripper resources reserved or stop unconfirmed')
                 with self._lock:
                     try:
-                        self._stationary_snapshot()
+                        self._admission_snapshot()
                     except RuntimeError as exc:
                         reasons.append(str(exc))
                     if self._sim.control_mode not in ('position','hold'):
@@ -359,9 +392,12 @@ def create_node_class():
                 values=[KeyValue(key='scene_revision',value=self._scene_revision)])]
             self._diagnostic_pub.publish(message)
 
-        def _reserve_prepared_goal(self, goal):
+        def _reserve_prepared_goal(self, goal, *, web=False):
             """先校验输入，再按固定锁序预约空闲资源；忙时拒绝，不累积键盘或网页目标。"""
             received = time.monotonic()
+            if web and goal.move_gripper:
+                validate_gripper_width(goal.gripper_position)
+                validate_gripper_force(goal.gripper_max_effort)
             if not self._prepare_client.service_is_ready():
                 raise RuntimeError('preparation service unavailable')
             if not self._scene_revision:
@@ -372,10 +408,10 @@ def create_node_class():
             if not 0 < len(points) <= self._max_points or points[-1].time > self._max_duration:
                 raise ValueError('trajectory point or duration budget exceeded')
             with self._active._lock:
-                if self._active.busy:
+                if self._active.busy or self._gripper_busy():
                     raise RuntimeError('arm/gripper resources reserved')
                 with self._lock:
-                    state, hold = self._stationary_snapshot()
+                    state, hold = self._admission_snapshot()
                     if self._sim.control_mode not in ('position', 'hold'):
                         raise RuntimeError(f'mode={self._sim.control_mode}, required=position/hold')
                     if not self._active.try_start(goal):
@@ -386,9 +422,11 @@ def create_node_class():
                     request.session = request.generation = id(goal)
                     request.hold_positions, request.feedback_positions = list(hold), list(state.joint_positions[:6])
                     request.feedback_observed_at = self._last_physics_wall
-                    request.stationary = request.enabled = True
+                    request.stationary = False  # 兼容字段，不再声明机械臂静止窗口。
+                    request.enabled = True
                     request.gripper_positions = list(state.joint_positions[-2:])
                     request.gripper_generation = 0
+                    request.gripper_collision_policy = 1 if web else 0
                     request.scene_revision = self._scene_revision
                     request.capability_json = json.dumps(self._execution_capability, allow_nan=False)
                     request.deadline_monotonic = received+min(2., .2*points[-1].time+.25)
@@ -428,7 +466,7 @@ def create_node_class():
             def admit():
                 """在目标锁内再取得仿真锁，复核期间不能插入物理状态或控制模式修改。"""
                 with self._lock:
-                    state, hold = self._stationary_snapshot()
+                    state, hold = self._admission_snapshot()
                     context = payload['context']
                     if (self._sim.control_mode not in ('position', 'hold')
                             or time.monotonic() >= request.deadline_monotonic
@@ -438,16 +476,19 @@ def create_node_class():
                             or tuple(context['hold']) != tuple(request.hold_positions)
                             or hold != tuple(request.hold_positions) or curve.points[0].positions[:6] != hold
                             or payload['gripper_generation'] != request.gripper_generation
-                            or tuple(payload['gripper_positions']) != tuple(request.gripper_positions)):
+                            or tuple(payload['gripper_positions']) != tuple(request.gripper_positions)
+                            or payload.get('gripper_collision_policy',0) != request.gripper_collision_policy
+                            or payload.get('capability_revision') != self._execution_capability['revision']
+                            or tuple(curve.joint_names) != tuple(ARM_JOINT_NAMES)):
                         raise RuntimeError('prepared simulation context changed')
-                    if len(curve.joint_names) == 7 and (
-                            payload.get('capability_revision') != self._execution_capability['revision']
-                            or abs(curve.points[0].positions[6]-request.gripper_positions[0]) > 1e-9):
-                        raise RuntimeError('prepared coordinated capability or initial finger changed')
                     # 执行起时在接纳时捕获；不能用准备开始时间让曲线跳过起始运动。
                     self._active.prepared = dict(curve=curve, start=state.simulation_time,
                         revision=response.scene_revision, fingers=tuple(request.gripper_positions))
-                    self._coordinated_active = len(curve.joint_names) == 7
+                    self._active.prepared['web'] = request.gripper_collision_policy == 1
+                    if request.gripper_collision_policy == 1 and goal_handle.request.move_gripper:
+                        self._start_gripper(token,goal_handle.request.gripper_position,
+                            goal_handle.request.gripper_max_effort)
+                        self._active.prepared['gripper'] = self._gripper_task
                     self._preparation = None
             outcome = self._command_gate.apply_with_reason(token,
                 lambda: goal_handle.is_cancel_requested, admit, self._hold_current_position)
@@ -474,9 +515,6 @@ def create_node_class():
             """末点已由物理周期送出；原命令终点保持，协同夹爪中性释放后才完成。"""
             def finish(sim):
                 self._control.command_joint_positions(sampler.sample(sampler.duration)[:6])
-                if len(sampler.curve.joint_names) == 7:
-                    sim.release_gripper_position()
-                    self._coordinated_active = False
             self._sim_access.run(finish)
 
         def _cancel_callback(self, _goal_handle):
@@ -534,22 +572,108 @@ def create_node_class():
             msg.status = [item]
             self._diagnostic_pub.publish(msg)
 
-        def _gripper_service(self, request, response):
+        def _gripper_busy(self):
+            return (self._gripper_reservation is not None or
+                self._gripper_task is not None and self._gripper_task['state'] in ('active','releasing'))
+
+        def _start_gripper(self, owner, width, effort):
+            """调用方持目标锁及仿真锁；内部预约身份不能越过另一任务的资源。"""
+            width = validate_gripper_width(width)
+            validate_gripper_force(effort)
+            if self._active.busy and self._active.token is not owner:
+                raise RuntimeError('gripper reserved by arm task')
+            if self._gripper_task is not None and self._gripper_task['state'] in ('active','releasing'):
+                raise RuntimeError('gripper busy')
+            state = self._sim.get_state()
+            speed = self._execution_capability['gripper_motor_speed_rad_s']*.018
+            self._gripper_task = dict(owner=owner,start=state.simulation_time,initial=state.gripper_width,
+                target=width,speed=speed,deadline=state.simulation_time+abs(width-state.gripper_width)/speed+1.5,
+                effort=min(effort if effort > 0 else 1.,self._execution_capability['gripper_torque_cap_nm']),
+                state='active',reason='')
+            return self._gripper_task
+
+        def _cancel_gripper(self, task, reason):
+            """只取消本任务；中性释放后等待新物理帧确认静止才释放资源。"""
+            if task is not self._gripper_task or task['state'] != 'active':
+                return
+            self._sim.release_gripper_position()
+            task.update(state='releasing',reason=reason,released=self._sim.get_state().simulation_time)
+
+        def _advance_gripper(self, sim):
+            task = self._gripper_task
+            if task is None or task['state'] not in ('active','releasing'):
+                return
+            state = sim.get_state()
+            if task['state'] == 'releasing':
+                if state.simulation_time-task['released'] >= .2 and max(abs(v) for v in state.joint_velocities[-2:]) <= .00045:
+                    task['state'] = 'failed'
+                return
+            elapsed = state.simulation_time-task['start']
+            distance = min(abs(task['target']-task['initial']),task['speed']*elapsed)
+            target = task['initial']+math.copysign(distance,task['target']-task['initial'])
+            sim.command_gripper_position(target,task['effort'])
+            if distance >= abs(task['target']-task['initial']):
+                task.setdefault('sent_at',state.simulation_time)
+                # 与六轴末点相同：必须先送出最终目标，再用后续物理帧确认，不能用发送前反馈提前成功。
+                if state.simulation_time > task['sent_at'] and abs(state.gripper_width-task['target']) <= .12*.018:
+                    sim.release_gripper_position()
+                    task['state'] = 'succeeded'
+            if task['state'] == 'active' and state.simulation_time >= task['deadline']:
+                self._cancel_gripper(task,'gripper goal timeout')
+
+        def _gripper_goal_callback(self, request):
+            with self._active._lock:
+                if self._active.busy or self._gripper_busy():
+                    return GoalResponse.REJECT
+                self._gripper_reservation = request
+                return GoalResponse.ACCEPT
+
+        def _execute_gripper(self, goal, *, moveit=False):
+            result = GripperCommand.Result()
+            owner = self._gripper_reservation
             try:
-                width = validate_gripper_width(request.position)
-                max_force = validate_gripper_force(request.max_effort)
                 with self._active._lock:
-                    # 从准备到停止确认都固定夹爪；不能只在“正在采样曲线”时才拒绝夹爪运动。
-                    if self._trajectory_mode == 'prepared_v1' and self._active.busy:
-                        raise ValueError('fixed gripper reserved by arm trajectory')
-                    reached = self._sim_access.run(lambda _sim:
-                        self._control.command_gripper_width(width, max_force_n=max_force))
-            except (TypeError, ValueError):
+                    task = self._sim_access.run(lambda sim:self._start_gripper(owner,
+                        goal.request.command.position*(2. if moveit else 1.),goal.request.command.max_effort))
+                while rclpy.ok():
+                    with self._active._lock:
+                        if goal.is_cancel_requested:
+                            self._sim_access.run(lambda sim:self._cancel_gripper(task,'gripper action canceled'))
+                        state = self._sim_access.run(lambda sim:sim.get_state())
+                        result.position = state.gripper_width/(2. if moveit else 1.)
+                        result.reached_goal = task['state'] == 'succeeded'
+                        feedback = GripperCommand.Feedback(position=result.position,reached_goal=result.reached_goal)
+                        goal.publish_feedback(feedback)
+                        if task['state'] in ('succeeded','failed'):
+                            if result.reached_goal: goal.succeed()
+                            elif goal.is_cancel_requested: goal.canceled()
+                            else: goal.abort()
+                            return result
+                    time.sleep(.01)
+                raise RuntimeError('simulation shutting down')
+            except Exception as exc:
+                self.get_logger().error(f'gripper execution failed: {exc}')
+                if self._gripper_task is not None and self._gripper_task['owner'] is owner:
+                    self._sim_access.run(lambda sim:self._cancel_gripper(self._gripper_task,str(exc)))
+                goal.abort()
+                return result
+            finally:
+                if self._gripper_reservation is owner:
+                    self._gripper_reservation = None
+
+        def _gripper_service(self, request, response):
+            task = None
+            try:
+                with self._active._lock:
+                    if self._active.busy or self._gripper_busy():
+                        raise RuntimeError('gripper resources reserved')
+                    task = self._sim_access.run(lambda sim:self._start_gripper(object(),request.position,request.max_effort))
+                while rclpy.ok() and task['state'] in ('active','releasing'):
+                    time.sleep(.01)
+                response.success = task['state'] == 'succeeded'
+            except (TypeError,ValueError,RuntimeError):
                 response.success = False
-                response.reached_position = 0.0
-                return response
-            response.success = True
-            response.reached_position = float(reached)
+            response.reached_position = self._sim_access.run(lambda sim:sim.get_state().gripper_width)
             return response
 
         def _mode_service(self, request, response):
@@ -562,7 +686,7 @@ def create_node_class():
             try:
                 # 与准备占用使用同一锁，避免检查空闲后被新 Goal 抢入再切换模式。
                 with self._active._lock:
-                    if self._active.busy:
+                    if self._active.busy or self._gripper_busy():
                         response.success = False
                         response.message = "trajectory active; stop or cancel it before changing mode"
                         return response
@@ -591,14 +715,16 @@ def create_node_class():
                 result.error_string = "simulation trajectory is no longer active"
             return result
 
-        def _execute_goal(self, goal_handle):
+        def _execute_goal(self, goal_handle, *, web=False):
             """协调反馈和终态；prepared_v1 的实际目标采样由物理定时器唯一推进。"""
             # rclpy does not promise that the goal-request wrapper passed to
             # admission and the one exposed by the goal handle are identical.
             # Preserve the admission token so cleanup cannot leave the server
             # permanently busy after an otherwise valid goal.
             token = self._active.token
-            result = FollowJointTrajectory.Result()
+            result = ExecuteTeleopMotion.Result() if web else FollowJointTrajectory.Result()
+            grip = None
+            completed = False
             sampler, self._pending_sampler = self._pending_sampler, None
             if sampler is None and self._trajectory_mode == 'legacy':
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
@@ -608,8 +734,13 @@ def create_node_class():
                 return result
             try:
                 if self._trajectory_mode == 'prepared_v1':
+                    if web:
+                        goal_handle.publish_feedback(ExecuteTeleopMotion.Feedback(stage='preparing',
+                            gripper_state='not_started',gripper_position=self._sim_access.run(
+                                lambda sim:sim.get_state().gripper_width)))
                     sampler = self._prepare_sampler(goal_handle, token)
                     start_time = self._active.prepared['start']
+                    grip = self._active.prepared.get('gripper')
                 else:
                     start_time = self._sim_access.run(lambda sim: sim.get_state().simulation_time)
                 feedback_limiter = FeedbackRateLimiter(self._feedback_rate_hz)
@@ -638,28 +769,37 @@ def create_node_class():
                     state = command["state"]
                     elapsed = command["elapsed"]
                     desired = command["desired"]
-                    feedback = FollowJointTrajectory.Feedback()
-                    coordinated = isinstance(sampler, PreparedTrajectorySampler) and len(sampler.curve.joint_names) == 7
-                    feedback.joint_names = list(sampler.curve.joint_names if isinstance(sampler, PreparedTrajectorySampler) else ARM_JOINT_NAMES)
-                    feedback.desired = JointTrajectoryPoint()
-                    feedback.actual = JointTrajectoryPoint()
-                    feedback.error = JointTrajectoryPoint()
+                    feedback = ExecuteTeleopMotion.Feedback() if web else FollowJointTrajectory.Feedback()
+                    if web:
+                        feedback.stage = 'executing'
+                        feedback.arm_progress = min(1.,elapsed/sampler.duration) if sampler.duration else 1.
+                        grip = self._active.prepared.get('gripper')
+                        feedback.gripper_state = grip['state'] if grip else 'not_requested'
+                        feedback.gripper_position = state.gripper_width
+                    else:
+                        feedback.joint_names = list(ARM_JOINT_NAMES)
                     feedback.desired.positions = list(desired)
                     elapsed_ns = round(min(sampler.duration,max(0.,elapsed))*1e9)
                     feedback.desired.time_from_start.sec, feedback.desired.time_from_start.nanosec = divmod(elapsed_ns,1_000_000_000)
-                    actual = tuple(state.joint_positions[:7 if coordinated else 6])
+                    actual = tuple(state.joint_positions[:6])
                     feedback.actual.positions = list(actual)
-                    feedback.actual.velocities = list(state.joint_velocities[:len(actual)])
-                    feedback.error.positions = [d - a for d, a in zip(desired, actual)]
+                    feedback.actual.velocities = list(state.joint_velocities[:6])
+                    if not web:
+                        feedback.error.positions = [d-a for d,a in zip(desired,actual)]
                     settling = self._settling_policy.evaluate(
                         sampler.sample(sampler.duration)[:6],
                         actual[:6],
                         tuple(state.joint_velocities[:6]),
                         max(0.0, elapsed - sampler.duration),
                     ) if elapsed >= sampler.duration else "tracking"
-                    if coordinated and settling == 'succeeded':
-                        if abs(actual[-1]-sampler.sample(sampler.duration)[-1])/.009 > .12:
-                            settling = ('timed_out' if elapsed-sampler.duration >= self._settling_policy.time_tolerance_sec else 'settling')
+                    if web:
+                        grip = self._active.prepared.get('gripper')
+                        result.arm_state = 'succeeded' if settling == 'succeeded' else 'running'
+                        result.gripper_state = grip['state'] if grip else 'not_requested'
+                        if grip and grip['state'] in ('failed','releasing'):
+                            raise RuntimeError(grip['reason'] or 'independent gripper failed')
+                        if settling == 'succeeded' and grip and grip['state'] != 'succeeded':
+                            settling = 'settling'
                     if self._trajectory_mode == 'prepared_v1' and settling == 'succeeded':
                         active = self._active.prepared
                         if active is None or active.get('sent_at') is None or state.simulation_time <= active['sent_at']:
@@ -684,6 +824,7 @@ def create_node_class():
                             return self._terminate_goal(goal_handle, result, completion)
                         result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
                         result.error_string = "simulation trajectory finished"
+                        completed = True
                         return result
                     if settling == "timed_out":
                         self._command_gate.stop_and_hold(self._hold_current_position)
@@ -720,6 +861,14 @@ def create_node_class():
                 result.error_string = f"simulation trajectory execution failed: {exc}"
                 return result
             finally:
+                if web:
+                    # 闸门正常完成时会清空活动槽；保留本任务句柄，避免丢失夹爪真实结果。
+                    if completed:
+                        result.arm_state = 'succeeded'
+                    elif result.arm_state != 'succeeded':
+                        result.arm_state = 'canceled' if goal_handle.is_cancel_requested else 'failed'
+                    result.gripper_state = (grip['state'] if grip else
+                        'not_started' if goal_handle.request.move_gripper else 'not_requested')
                 # 停止证据不足时保留 token；只有后续显式停止确认才能恢复资源可用。
                 if self._stop_unconfirmed:
                     self._retained_stop_token = token
@@ -732,7 +881,13 @@ def create_node_class():
         def _timer_callback(self) -> None:
             """物理定时器串行推进仿真；一个定时回调含多步时也在每个物理步重采参考。"""
             if self._trajectory_mode == 'legacy':
-                state = self._sim_access.run(lambda sim: sim.step(self._steps_per_tick))
+                def legacy_step(sim):
+                    for _ in range(self._steps_per_tick):
+                        self._advance_gripper(sim)
+                        state = sim.step()
+                    return state
+                with self._active._lock:
+                    state = self._sim_access.run(legacy_step)
             else:
                 # 锁序固定为目标闸门 -> 仿真；每个物理步按当前仿真时间采样，不积压旧目标。
                 with self._active._lock:
@@ -744,17 +899,10 @@ def create_node_class():
                                 curve = active['curve']
                                 elapsed = current.simulation_time-active['start']
                                 target = curve.sample(elapsed)[0]
-                                coordinated = len(curve.joint_names) == 7
-                                invalid = (max(abs(a-b) for a,b in zip(current.joint_positions[:6],target[:6])) > .03
-                                    or (coordinated and abs(current.joint_positions[6]-target[6])/.009 > .12))
-                                if invalid:
-                                    self._command_gate.stop_and_hold(self._hold_current_position)
-                                else:
-                                    self._control.command_joint_positions(target[:6])
-                                    if coordinated:
-                                        sim.command_coordinated_gripper(target[6],self._execution_capability['gripper_torque_cap_nm'])
-                                    if elapsed >= curve.duration:
-                                        active.setdefault('sent_at',current.simulation_time)
+                                self._control.command_joint_positions(target)
+                                if elapsed >= curve.duration:
+                                    active.setdefault('sent_at',current.simulation_time)
+                            self._advance_gripper(sim)
                             state = sim.step()
                             # 记录与静止窗口都使用真正推进后的物理帧，而不是 ROS 重复发布频率。
                             self._trace.record(state, sim.get_control_status(), active)
@@ -798,6 +946,10 @@ def create_node_class():
         def destroy_node(self):
             """释放动作服务端与仿真实例。"""
             self._action_server.destroy()
+            for server in self._gripper_servers:
+                server.destroy()
+            if hasattr(self,'_teleop_server'):
+                self._teleop_server.destroy()
             self._trace.close()
             self._sim_access.run(lambda sim: sim.close())
             return super().destroy_node()

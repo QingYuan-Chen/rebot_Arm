@@ -15,10 +15,13 @@
 - RViz 原生 MotionPlanning Plan/Execute；
 - 示教起点对齐和运行时跟踪安全门。
 
-`prepared_v1` 支持 `arm`、`gripper` 和 `arm_with_gripper` Plan/Execute，统一映射到唯一
-FJT。复合组用联合关节目标；协同位姿先对 `arm` 求 IK，再构造七轴关节目标，不给复合组
-冒用六轴 IK。规划响应在 TOTG/Ruckig 后按执行曲线统一重定时，显示的是最终时间；执行准备
-仍复核动态双指碰撞、能力和设备上下文。接口及兼容等级见 [P005 协同接口](p005_prepared_trajectory.md#修订协同接口)。
+`prepared_v1` 保留 `arm`、`gripper` 两组独立 Plan/Execute，移除 `arm_with_gripper`。
+`arm` 映射完整六轴 FJT；`gripper` 取规划末点，通过
+`/rebotarm/gripper/moveit_command`（GripperCommand）转换为独立开合，左指 m ×2 得到
+原接口的双指总开口 m，实际反馈和结果再 ÷2。规划时间按生效夹爪限速核定，不向 FJT 发送手指点。
+机械臂响应在 TOTG/Ruckig 后按执行曲线重定时，显示最终时间；后续运动带入新鲜真实
+夹爪开度，执行准备全段固定它检查完整机器人和附着物。接口及兼容等级见
+[P005 接口](p005_prepared_trajectory.md#修订协同接口)。
 
 ## 验证结果
 

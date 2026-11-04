@@ -589,7 +589,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             raw_path = Path(tmpdir) / "teach1.jsonl"
-            prepared_path = Path(tmpdir) / "teach1.prepared.jsonl"
+            prepared_path = Path(tmpdir) / "teach1.prepared.v3.jsonl"
             raw_path.write_text(encode_teach_sample(sample) + "\n", encoding="utf-8")
             prepared_path.write_text(encode_teach_sample(sample) + "\n", encoding="utf-8")
 
@@ -1025,7 +1025,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             exported = load_teach_samples(output_path)
 
             self.assertEqual(output_path, prepared_record_path(raw_path))
-            self.assertEqual(output_path.name, "teach1.prepared.jsonl")
+            self.assertEqual(output_path.name, "teach1.prepared.v3.jsonl")
             self.assertGreater(len(exported), len(samples))
             self.assertTrue(all(sample.arm_state == "PREPARED_REPLAY" for sample in exported))
             self.assertEqual(exported[0].stamp, 0.0)
@@ -1297,14 +1297,9 @@ class WebRobotAssetTests(unittest.TestCase):
             root = ET.fromstring(path.read_text(encoding="utf-8"))
             groups = {group.attrib["name"]: group for group in root.findall("group")}
             self.assertIn("gripper", groups)
-            self.assertIn("arm_with_gripper", groups)
+            self.assertNotIn("arm_with_gripper", groups)
             gripper_joints = {joint.attrib["name"] for joint in groups["gripper"].findall("joint")}
             self.assertEqual(gripper_joints, {"left_finger_joint", "right_finger_joint"})
-            composite_groups = {
-                group.attrib["name"]
-                for group in groups["arm_with_gripper"].findall("group")
-            }
-            self.assertEqual(composite_groups, {"arm", "gripper"})
 
             end_effectors = {
                 ee.attrib["name"]: ee.attrib

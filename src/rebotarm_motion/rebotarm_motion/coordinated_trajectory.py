@@ -1,17 +1,17 @@
-"""协同轨道合并与规划阶段统一重定时。
+"""六轴关键点生成与规划阶段曲线重定时。
 
-文件职责：将独立关键点轨道合为相同时间轴，解析检查并对全轨一次缩放。
-对外接口：merge_tracks、retime_curve 返回可审阅的最终数值曲线与缩放倍数。
+文件职责：生成六轴关键点轨迹，解析检查并对机械臂曲线一次缩放。
+对外接口：generate_schedule、retime_curve 返回可审阅的数值曲线与缩放倍数；
+    单左指曲线仅供 MoveIt 规划时核定独立开合预算，不是可执行 FJT。
 安全约束：位置与相对时序不改变；固定时长拒绝超限；纳秒编码后重新检查。
     这里不接纳运动，不读取设备，不替代执行准备中的上下文与碰撞核验。
-文件结构：轨道合并 → 边界规范化 → 重定时与最终复核。
+文件结构：有效限值 → 六轴关键点 → 消息编码 → 边界规范化 → 重定时与最终复核。
 """
 
 from dataclasses import replace
 import math
 from .polynomial_trajectory import build_curve, TrajectoryPoint, JOINT_NAMES
 from .trajectory_preparation import check_curve
-from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
 from rebotarm_trajectory.capability import decode_capability, constraint_revision
 
 
@@ -35,49 +35,25 @@ def effective_limits(config_directory, names, capability):
     return low, high, limits
 
 
-def merge_tracks(arm, finger):
-    """在所有节点精确取原轨道 q/v/a；新增节点不会让另一条轨道停顿。"""
-    if arm.joint_names != JOINT_NAMES or finger.joint_names != ('left_finger_joint',):
-        raise ValueError('arm and independent finger tracks required')
-    if arm.degree != 5 or finger.degree != 5:
-        raise ValueError('complete q/v/a tracks required for generated coordination')
-    stamps = sorted(set((*arm.times, *finger.times)))
-    points = []
-    for stamp in stamps:
-        a, g = arm.sample(stamp), finger.sample(stamp)
-        points.append(TrajectoryPoint(stamp, *(a[k]+g[k] for k in range(3))))
-    return build_curve(COORDINATED_JOINT_NAMES, points)
-
-
-def generate_schedule(start, start_width, target, target_width, duration, *, arm_keyframes=None,
-                      gripper_keyframes=None):
-    """生成两条显式位置轨道；界面的开口为双指总开口，内部只保存左指米制坐标。
-
-    新关键点默认是声明的静止关键点，可显式给出 v/a 通过点；这不是修补旧 FJT 缺失导数。
-    末关键点早于全轨终点时补恒定停留，不把另一条轨道的新节点当作停止指令。
-    """
+def generate_schedule(start, target, duration, *, arm_keyframes=None):
+    """仅生成六轴关键点曲线；夹爪目标不参与插值或重定时。"""
     if not math.isfinite(duration) or not 0 < duration <= 300.:
         raise ValueError('schedule duration must be in (0,300] s')
-    def track(names, initial, final, keyframes, finger=False):
-        zeros = (0.,)*len(names)
-        points = [TrajectoryPoint(0., initial, zeros, zeros)]
-        records = keyframes if keyframes is not None else [dict(time=duration,positions=final)]
-        if not isinstance(records,list) or not 0 < len(records) <= 1000:
-            raise ValueError('one to 1000 explicit keyframes required')
-        for item in records:
-            position = (float(item['width'])/2.,) if finger and 'width' in item else tuple(item['positions'])
-            points.append(TrajectoryPoint(float(item['time']),position,
-                tuple(item.get('velocities',zeros)),tuple(item.get('accelerations',zeros))))
-        if points[-1].time > duration:
-            raise ValueError('keyframe after schedule end')
-        if points[-1].time < duration:
-            if any((*points[-1].velocities,*points[-1].accelerations)):
-                raise ValueError('constant dwell requires zero endpoint derivatives')
-            points.append(TrajectoryPoint(duration,points[-1].positions,zeros,zeros))
-        return build_curve(names,points)
-    arm = track(JOINT_NAMES,start,target,arm_keyframes)
-    finger = track(('left_finger_joint',),(float(start_width)/2.,),(float(target_width)/2.,),gripper_keyframes,True)
-    return merge_tracks(arm,finger)
+    zeros = (0.,)*6
+    points = [TrajectoryPoint(0., start, zeros, zeros)]
+    records = arm_keyframes if arm_keyframes is not None else [dict(time=duration,positions=target)]
+    if not isinstance(records,list) or not 0 < len(records) <= 1000:
+        raise ValueError('one to 1000 explicit arm keyframes required')
+    for item in records:
+        points.append(TrajectoryPoint(float(item['time']), tuple(item['positions']),
+            tuple(item.get('velocities',zeros)), tuple(item.get('accelerations',zeros))))
+    if points[-1].time > duration:
+        raise ValueError('keyframe after schedule end')
+    if points[-1].time < duration:
+        if any((*points[-1].velocities,*points[-1].accelerations)):
+            raise ValueError('constant dwell requires zero endpoint derivatives')
+        points.append(TrajectoryPoint(duration,points[-1].positions,zeros,zeros))
+    return build_curve(JOINT_NAMES,points)
 
 
 def curve_message(curve, *, trajectory_factory, point_factory):
@@ -90,25 +66,6 @@ def curve_message(curve, *, trajectory_factory, point_factory):
         point.time_from_start.sec,point.time_from_start.nanosec = divmod(round(p.time*1e9),1_000_000_000)
         result.points.append(point)
     return result
-
-
-def sampled_c2_points(times, positions):
-    """对新采样记录生成明确的 q/v/a 约束；旧 FJT 仍按原字段等级处理。
-
-    导数来自非均匀源时间上的中心差分，首末静止连接；最终五次段的极值由重定时逐段复核。
-    不把记录中的缺失导数直接填成中间零值，也不声称离散测量本身就是 C2 曲线。
-    """
-    import numpy as np
-    stamps = np.asarray(times,dtype=float)
-    values = np.asarray(positions,dtype=float)
-    if (len(stamps) < 2 or len(stamps) != len(values) or not np.isfinite(stamps).all()
-            or not np.isfinite(values).all() or np.any(np.diff(stamps) <= 0)):
-        raise ValueError('finite strictly increasing recorded source time required')
-    velocity = np.gradient(values,stamps,axis=0,edge_order=2 if len(stamps) > 2 else 1)
-    acceleration = np.gradient(velocity,stamps,axis=0,edge_order=2 if len(stamps) > 2 else 1)
-    velocity[[0,-1]],acceleration[[0,-1]] = 0.,0.
-    return tuple(TrajectoryPoint(float(t-stamps[0]),tuple(q),tuple(v),tuple(a))
-        for t,q,v,a in zip(stamps,values,velocity,acceleration))
 
 
 def boundary_points(names, points):
