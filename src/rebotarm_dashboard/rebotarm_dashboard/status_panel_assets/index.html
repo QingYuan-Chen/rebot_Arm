@@ -807,9 +807,21 @@
             </div>
           </div>
           <div class="execute-row">
+            <details>
+              <summary>联合时间轴与关键点（可选）</summary>
+              <p>空白时机械臂与夹爪同时起停。关键点时间单位 s；夹爪为双指总开口 m。重复位置表示停留，各轨道可以分别延迟和多次运动。</p>
+              <label>机械臂关键点（六轴 rad，默认各点平滑起停）<textarea id="arm-keyframes" rows="3" placeholder='[{"time":1,"positions":[0,-0.8,-1,0.3,0,0]}]'></textarea></label>
+              <label>夹爪关键点（总开口 m）<textarea id="gripper-keyframes" rows="3" placeholder='[{"time":1,"width":0.01},{"time":2,"width":0.01},{"time":3,"width":0.02}]'></textarea></label>
+              <label><input type="checkbox" id="fixed-duration">固定时长（超限拒绝；默认统一重定时）</label>
+            </details>
+            <button class="tool-button" id="preview-coordinated" type="button">联合轨迹预览</button>
+            <div id="coordinated-plan-status">联合轨迹需要 prepared_v1 模式。</div>
+            <div id="admission-status">再次执行条件：未知</div>
             <div class="execute-status" id="execute-status">当前仅预览。拖动目标滑条后，再确认执行。</div>
             <div>
               <button class="tool-button execute-button" id="execute-preview" type="button" disabled>执行关节 + 夹爪</button>
+              <button class="tool-button" id="execute-arm-only" type="button">仅执行关节</button>
+              <button class="tool-button" id="execute-gripper-only" type="button">独立夹爪</button>
               <button class="tool-button stop-button" id="stop-execute" type="button" disabled>停止</button>
             </div>
           </div>
@@ -1788,6 +1800,9 @@
       viewerStatus('3D 视图已连接：正在跟随关节和夹爪状态');
     };
     const exitPreviewToLive = (message = '已切换为实时反馈。') => {
+      coordinatedPlan = null;
+      cancelAnimationFrame(previewAnimation);
+      previewState.targets = {};
       previewState.active = false;
       document.getElementById('web-teleop-card').classList.remove('preview-active');
       document.getElementById('execute-preview').disabled = true;
@@ -2033,34 +2048,57 @@
         return { accepted: false, message: error.message };
       }
     };
-    // 关节 + 夹爪的组合执行：夹爪目标取预览值，没有预览值时退回实时反馈值。
-    // 关节差值低于 1e-5 视为无变化，跳过关节请求，避免发送空动作；
-    // 多步动作在同一个确认框里一次性说明，避免连续弹窗打断操作员。
-    const executePreviewAndGripper = async () => {
-      const gripperTarget = Number(previewState.targets.gripper);
-      const gripperLive = motorPosition(previewState.latestJoints.gripper);
-      const gripperPosition = Number.isFinite(gripperTarget) ? gripperTarget : gripperLive;
-      const armDelta = maxPreviewDelta();
-      const confirmed = window.confirm(
-        `执行预览目标？\n` +
-        `关节和夹爪会通过现有安全接口发送。\n` +
-        `最大关节差值: ${fmt(armDelta)} rad\n` +
-        `执行时长: ${fmt(executeSettings.duration, 2)} s\n` +
-        `夹爪: ${Number.isFinite(gripperPosition) ? fmt(gripperPosition) + ' m' : '不可用'}`
-      );
-      if (!confirmed) return;
-      if (armDelta > 1e-5) {
-        const armResult = await executePreview({ confirm: false });
-        if (armResult && armResult.accepted === false) return;
-      }
-      if (Number.isFinite(gripperPosition) && webExecuteEnabled) {
-        const gripperResult = await setGripper({ confirm: false });
-        if (gripperResult && gripperResult.accepted === false) {
-          exitPreviewToLive(`夹爪命令未被接收：${gripperResult.message || '-'}`);
-          return;
+    let coordinatedPlan = null;
+    let previewAnimation = 0;
+    const planCoordinated = async () => {
+      const status = document.getElementById('coordinated-plan-status');
+      coordinatedPlan = null;
+      cancelAnimationFrame(previewAnimation);
+      try {
+        const targets = previewArmTargets();
+        if (targets.missing.length) throw new Error(`缺少实时反馈：${targets.missing.join(', ')}`);
+        const width = previewState.targets.gripper ?? motorPosition(previewState.latestJoints.gripper);
+        const payload = {joint_positions: targets.result, gripper_position: width,
+          duration: executeSettings.duration, fixed_duration: document.getElementById('fixed-duration').checked};
+        for (const [id,key] of [['arm-keyframes','arm_keyframes'],['gripper-keyframes','gripper_keyframes']]) {
+          const text = document.getElementById(id).value.trim();
+          if (text) payload[key] = JSON.parse(text);
         }
+        status.textContent = '正在生成联合计划...';
+        const response = await fetch('/api/preview_coordinated', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const result = await response.json();
+        if (!result.accepted) throw new Error(result.message);
+        coordinatedPlan = result;
+        status.textContent = `最终时长 ${fmt(result.duration,3)} s；协同夹爪固定力矩上限 ${fmt(result.torque_cap_nm,2)} N·m。执行时继续核验碰撞和准入。`;
+        previewState.active = true;
+        document.getElementById('execute-preview').disabled = !webExecuteEnabled;
+        const start = performance.now();
+        const animate = (now) => {
+          if (coordinatedPlan !== result) return;
+          const t = Math.min(result.duration,(now-start)/1000);
+          const sample = result.preview.find(p => p.time >= t) || result.preview.at(-1);
+          const targets = Object.fromEntries(result.joint_names.slice(0,6).map((n,i)=>[n,sample.positions[i]]));
+          targets.gripper = 2*sample.positions[6];
+          updateRobotViewer(jointsFromTargets(targets));
+          if (t < result.duration) previewAnimation = requestAnimationFrame(animate);
+        };
+        previewAnimation = requestAnimationFrame(animate);
+        return result;
+      } catch(error) {
+        status.textContent = `联合计划拒绝：${error.message}`;
+        return null;
       }
-      exitPreviewToLive('命令已发送，左侧模型和滑条改为跟随实时反馈。');
+    };
+    // 一个组合按钮只提交一个已预览 FJT；不并发或串行拼接两个独立任务。
+    const executePreviewAndGripper = async () => {
+      if (!webExecuteEnabled) return;
+      const plan = coordinatedPlan || await planCoordinated();
+      if (!plan || !window.confirm(`执行联合计划？\n最终时长 ${fmt(plan.duration,3)} s\n夹爪固定力矩上限 ${fmt(plan.torque_cap_nm,2)} N·m`)) return;
+      try {
+        const response = await fetch('/api/execute_preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'EXECUTE',plan_id:plan.plan_id})});
+        const result = await response.json();
+        exitPreviewToLive(result.message || (result.accepted ? '联合轨迹已提交，等待接纳。' : '联合轨迹被拒绝。'));
+      } catch(error) { exitPreviewToLive(`联合请求失败：${error.message}`); }
     };
     // 示教轨迹检查（dry-run）：只向后端提交检查请求，不下发任何真实轨迹。
     // 检查结果保存在本地，回放时会作为令牌原样送回后端，
@@ -2403,6 +2441,11 @@
     bindTeachReplaySetting('teach-replay-speed', 'teach-replay-speed-number', 'replaySpeed', 0.1, 1.0, 1);
     sliderNames.forEach((name) => {
       document.getElementById(`preview-${name}`).addEventListener('input', (event) => {
+        coordinatedPlan = null;
+        cancelAnimationFrame(previewAnimation);
+        if (!previewState.active) {
+          previewState.targets = Object.fromEntries(sliderNames.map(n=>[n,motorPosition(previewState.latestJoints[n])]));
+        }
         const [min, max] = jointLimits[name] || [-3.1416, 3.1416];
         previewState.targets[name] = clamp(event.target.value, min, max);
         updateSlider(name, { position: previewState.targets[name] }, 'preview');
@@ -2422,6 +2465,12 @@
     });
     document.getElementById('sync-preview').addEventListener('click', syncPreviewFromLive);
     document.getElementById('execute-preview').addEventListener('click', executePreviewAndGripper);
+    document.getElementById('preview-coordinated').addEventListener('click', planCoordinated);
+    document.getElementById('execute-arm-only').addEventListener('click', executePreview);
+    document.getElementById('execute-gripper-only').addEventListener('click', setGripper);
+    ['arm-keyframes','gripper-keyframes','fixed-duration','execute-duration','execute-speed'].forEach(id=>{
+      document.getElementById(id).addEventListener('input',()=>{coordinatedPlan=null;cancelAnimationFrame(previewAnimation);});
+    });
     document.getElementById('stop-execute').addEventListener('click', stopExecute);
     document.getElementById('arm-safe-home').addEventListener('click', () => runArmCommand('safe_home', '回安全位'));
     document.getElementById('arm-enable').addEventListener('click', () => runArmCommand('enable', '使能'));
@@ -2500,7 +2549,16 @@
       // 停止按钮只在此刻确实有执行动作时才可点（active/accepted），
       // 保证“能停下”和“有东西可停”一致。
       const webExecuteState = statusObj(data.teleop.web_execute).state || '-';
-      document.getElementById('stop-execute').disabled = !['active', 'accepted'].includes(String(webExecuteState).toLowerCase());
+      document.getElementById('stop-execute').disabled = !['submitted','active','accepted','executing'].includes(String(webExecuteState).toLowerCase());
+      if (!previewState.active && ['submitted','accepted','executing','done','failed','rejected','canceled'].includes(webExecuteState)) {
+        const execution = statusObj(data.teleop.web_execute);
+        document.getElementById('execute-status').textContent = `${webExecuteState}：${execution.message || ''}`
+          + (Number.isFinite(execution.progress) ? `；整体进度 ${fmt(100*execution.progress,1)}%` : '');
+      }
+      const admission = statusObj(data.teleop.trajectory_admission);
+      const freshAdmission = Date.now()/1000-Number(admission.received_at) <= 1;
+      document.getElementById('admission-status').textContent = !freshAdmission ? '再次执行条件：未知（快照过期）'
+        : `再次执行条件：${admission.ready ? '就绪' : '未就绪'}；${admission.message || ''}。此快照不是某次 REJECT 的原因。`;
       ['arm-safe-home', 'arm-enable', 'arm-disable'].forEach((id) => {
         const button = document.getElementById(id);
         if (button) button.disabled = !useHardware || isCheckMode || !webExecuteEnabled || isReplayArmCommandLocked(replayStatus);

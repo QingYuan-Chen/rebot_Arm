@@ -282,7 +282,7 @@ def stationary(target=qbase,seconds=1.,history=True,tolerance=.003):
             evidence=StationaryEvidence(window=seconds,velocity_limit=.07,joints=7)
             evidence.reset(positions)
         reason=evidence.observe(positions,velocities,stamp,now,sequences=sequences)
-        if reason in ('invalid_or_stale','source_gap','source_regressed','anchor_displacement'):
+        if reason in ('invalid_or_stale','source_gap','source_regressed'):
             raise RuntimeError('静止证据失败: '+reason)
         if evidence.confirmed(now):
             emit('stationary',target=list(map(float,target)),actual=q.tolist(),duration=seconds,

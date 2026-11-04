@@ -26,7 +26,7 @@ moveit_simple_controller_manager:
     # 是否作为默认控制器：规划组没有显式指定控制器时使用它。
     default: true
     # 该控制器负责的关节，顺序与控制器期望的轨迹关节顺序一致，名称必须与 URDF/SRDF 完全一致。
-    # 注意这里不含夹爪：夹爪走独立的夹爪通道，不由 MoveIt 轨迹执行管理。
+    # 一个控制器覆盖完整七自由度，也接受 arm/gripper 的完整机构子集，只有一个 FJT。
     joints:
       - joint1
       - joint2
@@ -34,3 +34,4 @@ moveit_simple_controller_manager:
       - joint4
       - joint5
       - joint6
+      - left_finger_joint

@@ -37,9 +37,10 @@ import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
+from launch_ros.parameter_descriptions import ParameterValue
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from launch_ros.substitutions import FindPackageShare
 from moveit_configs_utils import MoveItConfigsBuilder
 
@@ -77,6 +78,17 @@ def generate_launch_description():
     arm_namespace = LaunchConfiguration("arm_namespace")
     use_fake_joint_states = LaunchConfiguration("use_fake_joint_states")
     use_sim_time = LaunchConfiguration("use_sim_time")
+    trajectory_mode = LaunchConfiguration('trajectory_execution_mode')
+    prepared_mode = PythonExpression(["'", trajectory_mode, "' == 'prepared_v1'"])
+    # Jazzy 2.12.4 的 TEM 先卸载控制器插件，再释放节点回调组；弱引用的析构代码仍在
+    # 插件中，会访问已卸载地址。仅为这两个进程保留插件映射至进程退出，对象照常析构。
+    # shortcut: 待配套 MoveIt 修复插件/回调组销毁顺序并通过退出回归后移除此兼容处理。
+    controller_plugin = os.path.join(get_package_prefix("moveit_simple_controller_manager"),
+                                    "lib", "libmoveit_simple_controller_manager.so")
+    if not os.path.isfile(controller_plugin):
+        raise FileNotFoundError(controller_plugin)
+    moveit_process_env = {"LD_PRELOAD": " ".join(filter(None, (
+        controller_plugin, os.environ.get("LD_PRELOAD", ""))))}
     moveit_share = FindPackageShare("rebotarm_moveit_config")
     rviz_config = PathJoinSubstitution([moveit_share, "rviz", "moveit.rviz"])
 
@@ -112,6 +124,21 @@ def generate_launch_description():
     ompl_planning_yaml = load_yaml(
         "rebotarm_moveit_config", "config/ompl_planning.yaml"
     )
+    legacy_adapters = ompl_planning_yaml['response_adapters']
+    prepared_adapters = list(legacy_adapters)
+    prepared_adapters.insert(prepared_adapters.index('default_planning_response_adapters/ValidateSolution'),
+        'rebotarm_motion/RetimeExecutionCurve')
+    execution_adapters = {
+        'arm_namespace': arm_namespace,
+        # 默认 0.001 同时作用于 rad/m，会吞掉亚毫米夹爪路径；新模式明确保留其节点。
+        'ompl.totg.min_angle_change': ParameterValue(PythonExpression([
+            '1e-7 if ', prepared_mode, ' else 0.001']), value_type=float),
+        'ompl.response_adapters': ParameterValue(PythonExpression([
+            repr(prepared_adapters), ' if ', prepared_mode, ' else ', repr(legacy_adapters)])),
+        'moveit_controller_manager': ParameterValue(PythonExpression([
+            repr('rebotarm_motion/BoundSimpleControllerManager'), ' if ', prepared_mode, ' else ',
+            repr('moveit_simple_controller_manager/MoveItSimpleControllerManager')]), value_type=str),
+    }
 
     # 3D 传感器占位配置：列表里只放一个占位名，且 sensor_plugin 写成 "~"（无插件），
     # 等价于「已声明 3D 传感器配置但实际不接深度相机」，避免 move_group 因缺少该参数报错。
@@ -161,9 +188,15 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             # 准备节点读取同一规范模型和场景；服务存在不等于任何后端获得执行许可。
             DeclareLaunchArgument('prepare_trajectories', default_value='false'),
+            DeclareLaunchArgument('trajectory_execution_mode', default_value='legacy',
+                choices=['legacy', 'prepared_v1']),
+            Node(package='rebotarm_motion', executable='TrajectoryRetimingNode',
+                name='trajectory_retiming', output='screen', condition=IfCondition(prepared_mode),
+                parameters=[{'arm_namespace': arm_namespace}]),
             Node(
                 package='rebotarm_motion', executable='TrajectoryPreparationNode',
                 name='trajectory_preparation', output='screen',
+                additional_env=moveit_process_env,
                 condition=IfCondition(LaunchConfiguration('prepare_trajectories')),
                 parameters=[moveit_config.to_dict(), sensors_3d,
                     {'arm_namespace': arm_namespace, 'use_sim_time': use_sim_time}],
@@ -224,12 +257,14 @@ def generate_launch_description():
                 executable="move_group",
                 name="move_group",
                 output="screen",
+                additional_env=moveit_process_env,
                 remappings=[("/joint_states", ["/", arm_namespace, "/visual_joint_states"])],
                 parameters=[
                     moveit_config.to_dict(),
                     ompl_planning_yaml,
                     trajectory_execution,
                     sensors_3d,
+                    execution_adapters,
                     {"use_sim_time": use_sim_time},
                 ],
             ),

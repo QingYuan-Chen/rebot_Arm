@@ -20,6 +20,8 @@
   <!-- 规划配置构建工具：在启动时组装规划器所需的模型/语义/运动学参数 -->
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
+  <!-- 执行插件亦由启动链按 ament 索引定位，保持其映射覆盖 ROS 回调组析构。 -->
+  <exec_depend>moveit_simple_controller_manager</exec_depend>
   <exec_depend>moveit_ros_planning</exec_depend>
   <exec_depend>moveit_ros_planning_interface</exec_depend>
   <exec_depend>moveit_ros_visualization</exec_depend>

@@ -107,6 +107,7 @@ class TeachRecorderNode(Node):
         )
         self._arm_namespace = str(self.get_parameter("arm_namespace").value).strip("/")
         self._joint_names = tuple(str(v) for v in self.get_parameter("joint_names").value)
+        self._latest_gripper_state = None
         self._record_path = Path(str(self.get_parameter("record_path").value))
         self._record_path.parent.mkdir(parents=True, exist_ok=True)
         self._handle = None
@@ -188,6 +189,8 @@ class TeachRecorderNode(Node):
                 self._on_motor_state,
                 sensor_qos,
             )
+        self.create_subscription(JointMotorState,f'/{self._arm_namespace}/gripper/state',
+            lambda message:setattr(self,'_latest_gripper_state',message),sensor_qos)
         self._gravity_start_client = self.create_client(
             Trigger,
             f"/{self._arm_namespace}/gravity_compensation/start",
@@ -464,6 +467,20 @@ class TeachRecorderNode(Node):
             return
         if sample is None:
             return
+        from dataclasses import replace
+        import math
+        gripper = self._latest_gripper_state
+        source_ns = stamp_nanoseconds(gripper.header.stamp) if gripper is not None else None
+        arm_ns = stamp_nanoseconds(joint_state.header.stamp)
+        timeout_ns = int(float(self.get_parameter('feedback_timeout_sec').value)*1e9)
+        valid = (gripper is not None and source_ns is not None
+            and 0 <= self.get_clock().now().nanoseconds-source_ns <= timeout_ns
+            and abs(arm_ns-source_ns) <= timeout_ns
+            and int(gripper.status_code) in (0,1) and math.isfinite(gripper.position)
+            and 0 <= gripper.position <= .09)
+        sample = replace(sample,format_version=2,gripper_width_m=float(gripper.position) if valid else None,
+            gripper_source_stamp=(source_ns-self._recording_started_ns)/1e9 if source_ns is not None else None,
+            gripper_valid=valid)
         sample_stamp = sample.stamp
         if self._first_sample_stamp is None:
             self._first_sample_stamp = sample_stamp

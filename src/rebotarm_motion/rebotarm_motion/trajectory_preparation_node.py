@@ -8,7 +8,7 @@
     (载荷, 场景版本)；main 注册 /<namespace>/prepare_arm_trajectory 服务和
     trajectory_scene_revision 持久化话题。服务成功仅表示准备通过，不启动运动。
 安全约束
-    固定完整夹爪状态并保留附着物，检查全机器人而非仅 arm 规划组。
+    六轴请求固定夹爪，协同请求逐样本更新镜像双指；保留附着物并检查全机器人。
     不修改场景、不拥有执行资源、不访问设备；场景不匹配、超时、碰撞或未知均失败。
     期限使用主机单调时钟，与仿真 /clock 分开；耗时检查不得放入后端设备周期。
     场景版本是轮询已观察到的状态，执行端负责变化后的停止，不提供动态避障保证。
@@ -26,6 +26,8 @@ import time
 
 from .polynomial_trajectory import JOINT_NAMES, TrajectoryPoint
 from .trajectory_preparation import PreparationContext, analyze_trajectory, load_reference_limits
+from rebotarm_trajectory.joint_contract import canonical_input
+from rebotarm_trajectory.capability import decode_capability, binding
 
 
 def scene_revision(message):
@@ -52,8 +54,9 @@ def scene_revision(message):
 class SceneCollisionChecker:
     """一个 read_only 临界区覆盖全部采样；RobotState 是局部副本。"""
 
-    def __init__(self, monitor):
+    def __init__(self, monitor, config_directory=None):
         self.monitor = monitor
+        self.config_directory = config_directory
 
     def prepare(self, request, lower, upper, limits):
         """在请求期限内返回完整检查结果；任何异常交由服务回调转成明确失败响应。"""
@@ -71,6 +74,24 @@ class SceneCollisionChecker:
             raise ValueError('trajectory point budget exceeded')
         points = tuple(TrajectoryPoint(p.time_from_start.sec + p.time_from_start.nanosec*1e-9,
             p.positions, p.velocities, p.accelerations) for p in trajectory.points)
+        if any(p.effort for p in trajectory.points):
+            raise ValueError('FJT effort is not a supported per-request torque limit')
+        names, points = canonical_input(trajectory.joint_names, points, context.hold)
+        capability = None
+        capability_json = getattr(request, 'capability_json', '')
+        if capability_json:
+            capability = decode_capability(capability_json)
+        if len(names) == 7:
+            if capability is None or trajectory.header.frame_id != binding(capability):
+                raise ValueError('coordinated planning capability missing or mismatched')
+        elif trajectory.header.frame_id.startswith('rebotarm-capability:'):
+            if capability is None or trajectory.header.frame_id != binding(capability):
+                raise ValueError('planning capability changed')
+        if self.config_directory is not None and capability is not None:
+            from .coordinated_trajectory import effective_limits
+            lower, upper, limits = effective_limits(self.config_directory, names, capability)
+        elif set(limits) != set(names):
+            raise ValueError('matching joint limits required for preparation')
         # 整批共用一个场景快照，不能逐点释放锁后把不同环境的检查结果拼成一次通过。
         with self.monitor.read_only() as scene:
             revision = scene_revision(scene.planning_scene_message)
@@ -82,17 +103,19 @@ class SceneCollisionChecker:
                 for q in positions:
                     if time.monotonic() >= request.deadline_monotonic:
                         raise TimeoutError('trajectory preparation deadline expired')
-                    state.joint_positions = dict(zip((*names, 'left_finger_joint',
-                        'right_finger_joint'), (*q, *fingers)))
+                    values = dict(zip(names, q))
+                    left = values.get('left_finger_joint', fingers[0])
+                    values.update(left_finger_joint=left, right_finger_joint=-left)
+                    state.joint_positions = values
                     state.update()
-                    # 空组检查全部连杆，包含固定夹爪与环境/自身碰撞。
+                    # 空组检查全部连杆，包含当前样本双指与环境/自身碰撞。
                     if scene.is_state_colliding(state, '', False):
                         return dict(state='collision')
                 return dict(state='pass', checked_samples=len(positions),
                             requested_samples=len(positions))
-            prepared, report = analyze_trajectory(trajectory.joint_names, points,
+            prepared, report = analyze_trajectory(names, points,
                 lower=lower, upper=upper, limits=limits, context=context, now=now,
-                collision_check=collision)
+                collision_check=collision, start_finger=fingers[0])
             if prepared is None:
                 raise ValueError(json.dumps(report, ensure_ascii=False, allow_nan=False))
             if time.monotonic() >= request.deadline_monotonic:
@@ -101,6 +124,8 @@ class SceneCollisionChecker:
             # 六轴准备上下文之外的绑定也必须原样带回，后端不能只采信 success 字段。
             payload.update(scene_revision=revision, gripper_positions=fingers,
                            gripper_generation=request.gripper_generation)
+            if capability is not None:
+                payload['capability_revision'] = capability['revision']
             return payload, revision
 
 
@@ -145,23 +170,30 @@ def main(args=None):
             '/planning_scene': '/monitored_planning_scene',
             '/monitored_planning_scene': f'/{namespace}/preparation_scene'})
     monitor = robot.get_planning_scene_monitor()
-    checker = SceneCollisionChecker(monitor)
-    limits = load_reference_limits(Path(get_package_share_directory('rebotarm_moveit_config'))/'config')
+    config_directory = Path(get_package_share_directory('rebotarm_moveit_config'))/'config'
+    checker = SceneCollisionChecker(monitor, config_directory)
+    limits = load_reference_limits(config_directory)
     qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
     publisher = node.create_publisher(String, f'/{namespace}/trajectory_scene_revision', qos)
     lock = threading.RLock()
     initialized = False
 
+    last_revision = None
+
     def publish_revision():
         """先取得完整场景，再发布摘要；尚未初始化时不能为准备请求提供空场景许可。"""
-        nonlocal initialized
+        nonlocal initialized, last_revision
         started = time.monotonic()
         with lock:
             if not initialized:
                 initialized = monitor.request_planning_scene_state('/get_planning_scene')
             if initialized:
                 with monitor.read_only() as scene:
-                    publisher.publish(String(data=scene_revision(scene.planning_scene_message)))
+                    revision = scene_revision(scene.planning_scene_message)
+                # 持久化话题已保留最新值。重复摘要不能挤占设备线程的停止/使能请求队列。
+                if revision != last_revision:
+                    publisher.publish(String(data=revision))
+                    last_revision = revision
         elapsed = time.monotonic()-started
         if elapsed > .03:
             node.get_logger().warning(f'scene revision elapsed={elapsed:.4f}s')

@@ -16,16 +16,19 @@ float64[6] feedback_positions
 float64 feedback_observed_at
 bool stationary
 bool enabled
-# 固定 left_finger_joint/right_finger_joint，单位 m；与夹爪任务代次一起绑定。
+# 预约时 left_finger_joint/right_finger_joint，单位 m；与夹爪任务代次一起绑定。
+# 六轴请求全程冻结此状态；七轴请求从该状态开始按联合曲线移动两指。
 float64[2] gripper_positions
 uint64 gripper_generation
 # 碰撞环境、附着物及碰撞规则的摘要；普通关节反馈不参与该版本。
 string scene_revision
+# 版本化生效能力 JSON；七轴计划必须绑定其 revision，六轴旧请求仍保持兼容。
+string capability_json
 # 从 Goal 接收起计算的绝对单调期限，响应晚到不得启动执行。
 float64 deadline_monotonic
 ---
 bool success
 string message
-# 精确系数、六轴上下文及夹爪/场景绑定；失败时不可采信或执行此字段。
+# 精确具名系数、两侧执行上下文及能力/场景绑定；失败时不可采信或执行此字段。
 string prepared_json
 string scene_revision

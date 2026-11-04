@@ -135,6 +135,14 @@ class ArmCommandPort(Protocol):
         """约定停止匹配任务并等待保持确认, 旧任务取消不能覆盖新目标."""
         ...
 
+    def admission_snapshot(self):
+        """只读缓存准入诊断；不在 ROS 发布线程发设备请求。"""
+        ...
+
+    def trajectory_capability(self, mode):
+        """当前设备会话与生效限值的只读版本化快照。"""
+        ...
+
     def reserve_arm_preparation(self, deadline):
         """约定在设备线程预留空闲静止资源并颁发不可变身份。"""
         ...
@@ -147,8 +155,8 @@ class ArmCommandPort(Protocol):
         """约定设备线程原子复核身份后接纳同一份系数。"""
         ...
 
-    def cancel_arm_preparation(self, token):
-        """约定撤销本身份并等待停止保持确认。"""
+    def cancel_arm_preparation(self, token, *, wait_for_stop=True):
+        """撤销本身份；可只等撤销接纳，停止确认仍由设备周期持有并推进。"""
         ...
 
     def update_trajectory_scene(self, revision):

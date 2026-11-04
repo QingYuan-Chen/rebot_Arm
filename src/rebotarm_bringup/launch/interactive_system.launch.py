@@ -4,8 +4,8 @@
 #
 #后端选择逻辑（互斥，同一条启动里只会生效一个）：
 #
-#- use_moveit_preview=true：包含 MoveIt 配置包自带的 demo 启动文件，由它提供"move_group"、假的关节状态与规划能力（纯预览，不接硬件）；
-#- use_moveit_preview=false：本文件自己拉起机器人状态发布、被动关节状态发布与可选的真实控制器节点，由 "use_hardware" 决定是否打开硬件通道。
+#- use_moveit_preview=true：复用 MoveIt 组合；接硬件时只使用真实反馈，无硬件时可选择假状态；
+#- use_moveit_preview=false：默认只提供状态与可选硬件；硬件 prepared_v1 自动复用 MoveIt 场景和准备服务。
 #
 #关键话题约定：机器人模型订阅 "/<arm_namespace>/visual_joint_states"（可视化用的关节状态，可能来自控制器反馈，也可能由假状态源填充）；"/<arm_namespace>/joint_states"则是控制器/仿真后端发布的执行侧关节状态。
 #
@@ -54,6 +54,14 @@ def generate_launch_description():
     use_local_rviz = LaunchConfiguration("use_local_rviz")
     use_moveit_preview = LaunchConfiguration("use_moveit_preview")
     use_hardware = LaunchConfiguration("use_hardware")
+    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
+    # 新模式必须有完整规划场景；复用同一 MoveIt 组合，状态发布器随组合互斥。
+    prepare_trajectories = PythonExpression([
+        "'", use_hardware, "'.lower() == 'true' and '", trajectory_mode, "' == 'prepared_v1'",
+    ])
+    use_moveit_stack = PythonExpression([
+        "'", use_moveit_preview, "'.lower() == 'true' or (", prepare_trajectories, ")",
+    ])
     joint_state_rate = LaunchConfiguration("joint_state_rate")
     hardware_feedback_rate_hz = LaunchConfiguration("hardware_feedback_rate_hz")
     gripper_position_torque_cap_nm = LaunchConfiguration("gripper_position_torque_cap_nm")
@@ -130,10 +138,12 @@ def generate_launch_description():
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             # 是否在本文件内启动 RViz
             DeclareLaunchArgument("use_local_rviz", default_value="true"),
-            # 是否改用 MoveIt demo 预览栈（关掉硬件通道与被动状态源）
+            # 是否提供 MoveIt 栈；硬件通道仍只由 use_hardware 决定。
             DeclareLaunchArgument("use_moveit_preview", default_value="false"),
             # 是否打开真实硬件通道：默认 false，必须显式开启
             DeclareLaunchArgument("use_hardware", default_value="false"),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
+                choices=["legacy", "prepared_v1"]),
             # 规划与执行使用的基座坐标系
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             # 末端（法兰）坐标系名
@@ -147,15 +157,17 @@ def generate_launch_description():
                 "rviz_config",
                 default_value=PathJoinSubstitution([bringup_share, "rviz", "interactive_system.rviz"]),
             ),
-            # 预览模式：包含 MoveIt demo 启动文件（提供 move_group 与假状态），不接真实控制器
+            # MoveIt 及准备服务共享唯一场景，硬件分支禁止假关节状态。
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     PathJoinSubstitution([bringup_share, "launch", "moveit_demo.launch.py"])
                 ),
-                condition=IfCondition(use_moveit_preview),
+                condition=IfCondition(use_moveit_stack),
                 launch_arguments={
                     "use_rviz": "false",
                     "arm_namespace": arm_namespace,
+                    "prepare_trajectories": prepare_trajectories,
+                    "trajectory_execution_mode": trajectory_mode,
                     "use_fake_joint_states": PythonExpression(
                         [
                             "'false' if '",
@@ -189,6 +201,7 @@ def generate_launch_description():
                     "grasp_hold_timeout_sec": grasp_hold_timeout_sec,
                     "cmd_arbitration": cmd_arbitration,
                     "arm_namespace": arm_namespace,
+                    "trajectory_execution_mode": trajectory_mode,
                     "frame_id": frame_id,
                     "ee_frame_id": ee_frame_id,
                 }.items(),
@@ -201,7 +214,7 @@ def generate_launch_description():
                 name="gripper_visual_joint_state_node",
                 output="screen",
                 parameters=[{"arm_namespace": arm_namespace}],
-                condition=UnlessCondition(use_moveit_preview),
+                condition=UnlessCondition(use_moveit_stack),
             ),
             # 机器人状态发布：用 URDF 把 /visual_joint_states 转成 TF；
             # 订阅被重映射到带命名空间的可视化关节状态话题，避免与执行侧 /joint_states 混用
@@ -212,7 +225,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"robot_description": robot_description}],
                 remappings=[("/joint_states", ["/", arm_namespace, "/visual_joint_states"])],
-                condition=UnlessCondition(use_moveit_preview),
+                condition=UnlessCondition(use_moveit_stack),
             ),
             # 被动关节状态源：只在无硬件、非 MoveIt 预览且显式开启时发布假关节状态。
             # MoveIt 预览由 moveit_demo.launch.py 自己提供同一话题，必须互斥，避免两个发布器竞争。

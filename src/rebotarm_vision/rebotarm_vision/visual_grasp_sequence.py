@@ -81,6 +81,8 @@ class VisualGraspSequenceConfig:
     gripper_command: GripperCommand | None = None
     retreat_policy: RetreatPolicyConfig = RetreatPolicyConfig()
     include_safe_home: bool = False
+    # prepared_v1 仅交付接触前位置协同，不能顺势进入夹持或撤退。
+    coordinated_position_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,12 @@ def build_visual_grasp_sequence(
     else:
         open_width, close_width = resolve_gripper_widths(config)
         max_effort = float(config.close_max_effort)
+    if config.coordinated_position_only:
+        # 预张爪与到预抓取点共用轨迹；最终接近段全程保持所需开口。
+        return [VisualGraspStage(name='move_to_pregrasp', kind='move', pose=pregrasp,
+                    gripper_position_m=open_width),
+                VisualGraspStage(name='approach_grasp', kind='move', pose=grasp,
+                    gripper_position_m=open_width)]
     stages: list[VisualGraspStage] = []
     if config.open_before_approach:
         stages.append(

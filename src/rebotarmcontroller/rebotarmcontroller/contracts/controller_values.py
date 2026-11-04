@@ -32,6 +32,7 @@ class PreparedArmHandoff:
     gripper_positions: tuple
     gripper_generation: int
     scene_revision: str
+    capability: str = ''
 
     def __deepcopy__(self, memo):
         """内部构造保证曲线及数值字段不可变；队列复制无需再次遍历全部多项式系数。"""
@@ -43,7 +44,7 @@ class ArmPreparation:
     """六轴所有者颁发的准备身份，跨线程复制仍保留同一令牌。
 
     hold/feedback 为六轴 rad；gripper_positions 为模型两指的 m，raw_position 为
-    夹爪电机 rad，分别用于碰撞和原始反馈漂移核验。observed_at/deadline 为单调秒。
+    夹爪电机 rad，分别用于碰撞和原始反馈诊断。observed_at/deadline 为单调秒。
     generation 属于六轴目标，gripper_generation 属于夹爪任务，session 属于设备会话。
     """
 
@@ -57,6 +58,7 @@ class ArmPreparation:
     gripper_raw_position: float
     scene_revision: str
     deadline: float
+    capability: str = ''
 
     def __deepcopy__(self, memo):
         """接纳用对象身份核对预约，不能把队列复制后的同值对象当成新令牌。"""

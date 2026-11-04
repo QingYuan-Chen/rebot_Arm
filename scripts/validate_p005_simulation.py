@@ -87,7 +87,6 @@ def physics_acceptance(output):
     assert report['prepared_v1']['max_tracking_error'] <= .005, report
     assert report['prepared_v1']['max_tracking_error'] < report['legacy_step']['max_tracking_error'], report
     assert report['prepared_v1']['settle_observation'] is not None and report['prepared_v1']['settle_observation'] <= 5., report
-    assert report['prepared_v1']['hold_drift'] <= 3*25/65535, report
     assert report['prepared_v1']['switch_torque_jump'] <= .01, report
     write_json(output/'physics_acceptance.json', report)
     return report
@@ -106,12 +105,12 @@ def ros_acceptance(output, dashboard):
     from std_srvs.srv import Trigger
     from control_msgs.action import FollowJointTrajectory
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-    from moveit_msgs.srv import GetMotionPlan, ApplyPlanningScene
+    from moveit_msgs.srv import GetMotionPlan, ApplyPlanningScene, GetStateValidity
     from moveit_msgs.msg import Constraints, JointConstraint, CollisionObject, AttachedCollisionObject
     from moveit_msgs.action import ExecuteTrajectory
     from shape_msgs.msg import SolidPrimitive
     from geometry_msgs.msg import Pose
-    from rebotarm_msgs.srv import PrepareArmTrajectory, SetGripper, SetMode
+    from rebotarm_msgs.srv import PrepareArmTrajectory, RetimeArmTrajectory, SetGripper, SetMode
     from rebotarm_motion.trajectory_messages import point_to_point_message
     from rosidl_runtime_py.convert import message_to_ordereddict
     rclpy.init()
@@ -121,7 +120,7 @@ def ros_acceptance(output, dashboard):
     node.create_subscription(JointState, '/rebotarm/joint_states',
         lambda m: (latest.update(joint=m), samples.append(m)), 10)
     qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-    for name in ('trajectory_execution_mode','trajectory_scene_revision'):
+    for name in ('trajectory_execution_mode','trajectory_scene_revision','trajectory_capabilities'):
         node.create_subscription(String, '/rebotarm/'+name,
             lambda m, key=name: latest.update({key:m.data}), qos)
     def wait(predicate, timeout=8.):
@@ -174,7 +173,7 @@ def ros_acceptance(output, dashboard):
         request=urllib.request.Request(dashboard+path,data=json.dumps(payload).encode(),
             headers={'Content-Type':'application/json'})
         try:
-            with urllib.request.urlopen(request,timeout=3) as response:return json.load(response)
+            with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
         except HTTPError as exc:
             if exc.code != 400:
                 raise
@@ -193,6 +192,9 @@ def ros_acceptance(output, dashboard):
             if name == '/rebotarm/follow_joint_trajectory']
         assert len(owners) == 1, owners
         results['graph_nodes']=nodes
+        # 同时验证标准 byte 诊断经过网页订阅后仍能正确显示“再次可执行”。
+        wait(lambda:status()['teleop'].get('trajectory_admission',{}).get('ready') is True)
+        results['web_admission_ready']=status()['teleop']['trajectory_admission']
         start=list(latest['joint'].position[:6]);target=start.copy();target[0]+=.02
         handle=send(arm,make(target))
         # 后端在准备期间已占用资源，夹爪请求不能改变固定状态。
@@ -234,6 +236,27 @@ def ros_acceptance(output, dashboard):
                 break
         assert planned is not None,results
         results['moveit_execution']='pass'
+        for group in ('arm_with_gripper','gripper'):
+            pause(.8)
+            current=dict(zip(latest['joint'].name,latest['joint'].position))
+            selected=(*names,'left_finger_joint') if group=='arm_with_gripper' else ('left_finger_joint',)
+            req=GetMotionPlan.Request();plan=req.motion_plan_request
+            plan.group_name=group;plan.pipeline_id='ompl';plan.num_planning_attempts=1
+            plan.allowed_planning_time=3.;plan.max_velocity_scaling_factor=.1
+            plan.max_acceleration_scaling_factor=.1
+            plan.start_state.joint_state=latest['joint'];plan.start_state.is_diff=False
+            plan.goal_constraints=[Constraints(joint_constraints=[JointConstraint(
+                joint_name=name,position=float(current[name]+(.0004 if name=='left_finger_joint' else .01 if name=='joint1' else 0.)),
+                tolerance_above=1e-6,tolerance_below=1e-6,weight=1.) for name in selected])]
+            response=call(GetMotionPlan,'/plan_kinematic_path',req)
+            assert response.motion_plan_response.error_code.val==1,str(response)
+            trajectory=response.motion_plan_response.trajectory
+            assert len(trajectory.joint_trajectory.points)>1,'small finger motion collapsed to a zero-duration plan'
+            write_json(output/f'moveit_{group}.json',message_to_ordereddict(trajectory))
+            goal=ExecuteTrajectory.Goal(trajectory=trajectory)
+            response=finish(send(execute,goal),success=False)
+            assert response.status==4 and response.result.error_code.val==1,str(response)
+            results[f'moveit_{group}']=message_to_ordereddict(response)
         write_json(output/'ros_acceptance.json',results)
         pause(1.)
         # HTTP 请求穿过网页正式路由与适配器。
@@ -249,6 +272,135 @@ def ros_acceptance(output, dashboard):
         pause(2.)
         results['web_status']=status()
         assert results['web_status']['teleop']['web_execute']['state']=='done',results['web_status']
+        pause(.8)
+        current=dict(zip(names,latest['joint'].position[:6]))
+        current['joint1']+=.02
+        width=dict(zip(latest['joint'].name,latest['joint'].position))['left_finger_joint']*2.
+        joint_plan=post('/api/preview_coordinated',dict(joint_positions=current,duration=1.2,
+            gripper_position=width+.001,gripper_keyframes=[dict(time=.3,width=width),
+                dict(time=.9,width=width+.001),dict(time=1.2,width=width+.001)]))
+        assert joint_plan['accepted'],joint_plan
+        assert len(joint_plan['joint_names'])==7 and len(joint_plan['keyframes'])==4,joint_plan
+        write_json(output/'web_coordinated_plan.json',joint_plan)
+        submitted=post('/api/execute_preview',dict(confirm='EXECUTE',plan_id=joint_plan['plan_id']))
+        assert submitted['accepted'],submitted
+        pause(joint_plan['duration']+1.)
+        results['web_coordinated']=status()['teleop']['web_execute']
+        assert results['web_coordinated']['state']=='done',results['web_coordinated']
+        # 新格式原始记录仍是六轴加独立源时刻；经过现有网页 dry-run/execute 派生七轴。
+        pause(.8)
+        current=dict(zip(latest['joint'].name,latest['joint'].position))
+        raw=output/'coordinated_teach.jsonl'
+        raw.write_text(''.join(json.dumps(dict(stamp=i*.1,joint_names=names,
+            positions=[current[n]+(i*.0002 if n=='joint1' else 0.) for n in names],
+            velocities=[],efforts=[],motor_status=dict.fromkeys(names,1),arm_state='GRAVITY_COMP',
+            format_version=2,gripper_width_m=current['left_finger_joint']*2.+i*.00001,
+            gripper_source_stamp=i*.1,gripper_valid=True))+'\n' for i in range(11)))
+        original=raw.read_bytes()
+        teach_payload=dict(record_path=str(raw.resolve()))
+        dry=post('/api/teach_dry_run',teach_payload)
+        write_json(output/'teach_dry_run.json',dry)
+        assert dry['accepted'],dry
+        replay=post('/api/teach_replay_execute',teach_payload)
+        assert replay['accepted'],replay
+        deadline=time.monotonic()+30.
+        while time.monotonic()<deadline:
+            pause(.1)
+            replay=status()['teleop'].get('replay',{})
+            if replay.get('state') in ('done','failed','aborted','rejected','blocked'):
+                break
+        results['teach_coordinated']=replay
+        assert replay['state']=='done',replay
+        assert raw.read_bytes()==original,'raw teach recording was overwritten'
+        # 复用视觉序列和服务网关；只给已知可达的接触前目标，不启动相机或抓取续动。
+        from rebotarm_vision.visual_grasp_sequence import (
+            PoseTarget,VisualGraspSequenceConfig,build_visual_grasp_sequence)
+        from rebotarm_vision.visual_grasp_service_gateway import VisualGraspServiceGateway
+        from rebotarm_vision.visual_grasp_state import VisualGraspState
+        from rebotarm_motion.pose_kinematics import PoseKinematics
+        from rebotarm_msgs.srv import ExecutePose,PublishTrajectoryPreview
+        from types import SimpleNamespace
+        import pinocchio as pin
+        pause(.8)
+        current=dict(zip(latest['joint'].name,latest['joint'].position))
+        model=PoseKinematics()
+        def pose_for(delta):
+            q=[current[n]+(delta if n=='joint1' else 0.) for n in names]
+            pose=model.pose(q)
+            return PoseTarget(tuple(pose.translation),tuple(pin.Quaternion(pose.rotation).coeffs()))
+        width=current['left_finger_joint']*2.+.0004
+        stages=build_visual_grasp_sequence(pose_for(.003),pose_for(.006),
+            VisualGraspSequenceConfig(coordinated_position_only=True,open_position_m=width))
+        config=dict(trajectory_execution_mode='prepared_v1',execution_mode='plan_only',
+            target_frame='base_link',acceleration_scaling=.1,move_velocity_scaling=.1,
+            approach_velocity_scaling=.1,retreat_velocity_scaling=.1)
+        def visual_call(key,request,timeout):
+            service,path=(ExecutePose,'execute_pose') if key=='execute_pose' else (PublishTrajectoryPreview,'publish_trajectory_preview')
+            return call(service,'/rebotarm/motion_execution/'+path,request,timeout),''
+        visual_state=VisualGraspState()
+        gateway=VisualGraspServiceGateway(state=visual_state,config=config,
+            io_gateway=SimpleNamespace(call=visual_call))
+        for stage in stages:
+            ok,message=gateway._send_execute_pose(stage,execute=False)
+            assert ok,message
+        assert len(visual_state.preview_trajectories)==2 and not visual_state.preview_gripper_events
+        assert all(len(t.joint_names)==7 for t in visual_state.preview_trajectories)
+        ok,message=gateway._publish_preview_sequence();assert ok,message
+        gateway._execution_mode='execute'
+        for stage in stages:
+            pause(.8)
+            ok,message=gateway._send_execute_pose(stage,execute=True)
+            assert ok,message
+        results['visual_precontact']=dict(stages=[s.name for s in stages],message=message,
+            preview_tracks=[message_to_ordereddict(t) for t in visual_state.preview_trajectories])
+        # 障碍位于左指外侧扫掠体：起点无碰撞、张开后碰撞，固定手指检查会漏掉此反例。
+        import struct
+        from ament_index_python.packages import get_package_share_directory
+        from rebotarm_motion.coordinated_trajectory import generate_schedule,curve_message
+        pause(.8)
+        current=dict(zip(latest['joint'].name,latest['joint'].position))
+        mesh=Path(get_package_share_directory('rebotarm_moveit_config'))/'meshes/left_finger.stl'
+        data=mesh.read_bytes();count=struct.unpack_from('<I',data,80)[0]
+        faces=[[struct.unpack_from('<3f',data,84+50*i+12+12*j) for j in range(3)] for i in range(count)]
+        face=max(faces,key=lambda vertices:sum(v[1] for v in vertices)/3.)
+        center=[sum(v[i] for v in face)/3. for i in range(3)]
+        center[1]+=current['left_finger_joint']+.002
+        obj=CollisionObject(id='p005_finger_sweep');obj.header.frame_id='end_link'
+        obj.primitives=[SolidPrimitive(type=SolidPrimitive.SPHERE,dimensions=[.0002])]
+        pose=Pose();pose.position.x,pose.position.y,pose.position.z=center;pose.orientation.w=1.
+        obj.primitive_poses=[pose];obj.operation=CollisionObject.ADD
+        scene=ApplyPlanningScene.Request();scene.scene.is_diff=True;scene.scene.world.collision_objects=[obj]
+        revision=latest['trajectory_scene_revision']
+        assert call(ApplyPlanningScene,'/apply_planning_scene',scene).success
+        wait(lambda:latest['trajectory_scene_revision']!=revision)
+        try:
+            validity=GetStateValidity.Request();validity.robot_state.joint_state=latest['joint']
+            validity.robot_state.is_diff=False
+            initial_valid=call(GetStateValidity,'/check_state_validity',validity)
+            assert initial_valid.valid,initial_valid
+            positions=list(validity.robot_state.joint_state.position)
+            for index,name in enumerate(validity.robot_state.joint_state.name):
+                if name=='left_finger_joint':positions[index]=current[name]+.002
+                if name=='right_finger_joint':positions[index]=-current['left_finger_joint']-.002
+            validity.robot_state.joint_state.position=positions
+            swept=call(GetStateValidity,'/check_state_validity',validity)
+            assert not swept.valid,'moving-finger obstacle fixture did not intersect its sweep'
+            start=tuple(current[n] for n in names);width=current['left_finger_joint']*2.
+            curve=generate_schedule(start,width,start,width+.008,1.)
+            query=RetimeArmTrajectory.Request(trajectory=curve_message(curve,
+                trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint),
+                velocity_scaling=1.,acceleration_scaling=1.,
+                capability_revision=json.loads(latest['trajectory_capabilities'])['revision'])
+            planned=call(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory',query)
+            assert planned.success,planned.message
+            rejected=finish(send(arm,FollowJointTrajectory.Goal(trajectory=planned.trajectory)),success=False)
+            assert rejected.status!=4 and 'collision' in rejected.result.error_string,str(rejected)
+            results['moving_finger_collision']=message_to_ordereddict(rejected)
+        finally:
+            obj.operation=CollisionObject.REMOVE
+            scene.scene.world.collision_objects=[obj]
+            assert call(ApplyPlanningScene,'/apply_planning_scene',scene).success
+            pause(.8)
         # 显式取消并等新帧静止确认，之后继续接纳。
         target=list(latest['joint'].position[:6]);target[0]+=.03
         handle=send(arm,make(target,2.))

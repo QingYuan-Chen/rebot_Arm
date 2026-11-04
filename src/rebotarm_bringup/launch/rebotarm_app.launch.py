@@ -77,6 +77,7 @@ def _panel_node(
     web_execute_enabled: str,
     execution_mode: str,
     panel_mode: str,
+    trajectory_execution_mode: str,
 ):
     """构造网页遥操作状态面板节点。
 
@@ -100,6 +101,7 @@ def _panel_node(
                 "use_hardware": _as_bool(use_hardware),
                 "execution_mode": execution_mode,
                 "panel_mode": panel_mode,
+                "trajectory_execution_mode": trajectory_execution_mode,
             },
         ],
     )
@@ -121,6 +123,7 @@ def _launch_setup(context, *args, **kwargs):
     panel = _bool_text(LaunchConfiguration("panel").perform(context))
     web_execute_enabled = _bool_text(LaunchConfiguration("web_execute_enabled").perform(context))
     execution_mode = LaunchConfiguration("execution_mode").perform(context).strip().lower()
+    trajectory_mode = LaunchConfiguration("trajectory_execution_mode").perform(context)
     hardware_feedback_rate_hz = LaunchConfiguration("hardware_feedback_rate_hz").perform(context)
     gripper_position_torque_cap_nm = LaunchConfiguration("gripper_position_torque_cap_nm").perform(context)
     gripper_position_max_speed_rad_s = LaunchConfiguration("gripper_position_max_speed_rad_s").perform(context)
@@ -148,6 +151,7 @@ def _launch_setup(context, *args, **kwargs):
             PythonLaunchDescriptionSource(moveit_launch),
             launch_arguments={
                 "arm_namespace": arm_namespace,
+                "trajectory_execution_mode": trajectory_mode,
                 "channel": resolved_channel,
                 "use_rviz": "false",
                 "hardware_feedback_rate_hz": hardware_feedback_rate_hz,
@@ -199,6 +203,7 @@ def _launch_setup(context, *args, **kwargs):
                 execution_mode=execution_mode,
                 # control：面板处于可下发控制命令的模式（区别于只读状态展示）
                 panel_mode="control",
+                trajectory_execution_mode=trajectory_mode,
             )
         )
 
@@ -229,6 +234,9 @@ def generate_launch_description():
             DeclareLaunchArgument("record_path", default_value=""),
             # 机械臂命名空间（话题前缀）
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
+            # 模式同时传给后端和网页；不能只切换其中一端。
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
+                choices=["legacy", "prepared_v1"]),
             # 串口通道：auto 表示自动探测 ttyACM0/ttyACM1
             DeclareLaunchArgument("channel", default_value="auto"),
             # 真机入口：默认 true，且传 false 会被 _launch_setup 拒绝

@@ -22,7 +22,7 @@ from rebotarm_motion.polynomial_trajectory import (
     JOINT_NAMES, TrajectoryPoint as Point, build_curve, curve_from_payload,
 )
 from rebotarm_motion.trajectory_preparation import (
-    START_SPAN, PreparationContext, PreparedTrajectory, analyze_trajectory,
+    PreparationContext, PreparedTrajectory, analyze_trajectory,
     check_curve, compare_reference, load_reference_limits, minimum_point_to_point_duration,
     normalize_boundaries, point_to_point,
 )
@@ -209,10 +209,10 @@ def test_normalize_once_preserves_middle_timestamps_and_target():
     assert points[1] == source[1]
     assert points[-1] == Point(1., TARGET, ZERO, ZERO)
     assert source[0].velocities == (.1,) * 6
-    with pytest.raises(ValueError, match='first point outside'):
-        normalize_boundaries(JOINT_NAMES,
-            (Point(0., tuple(v + START_SPAN * 2 for v in START)), Point(1., TARGET)),
-            context(), now=10.)
+    shifted = normalize_boundaries(JOINT_NAMES,
+        (Point(0., tuple(v + .003 for v in START)), Point(1., TARGET)), context(), now=10.)
+    assert shifted[0].positions == START
+    assert shifted[-1].positions == TARGET
 
 
 def test_delayed_single_target_gets_explicit_hold_origin_and_zero_time_motion_rejected():
@@ -226,11 +226,23 @@ def test_delayed_single_target_gets_explicit_hold_origin_and_zero_time_motion_re
 
 
 @pytest.mark.parametrize('changes', [dict(enabled=False), dict(busy=True), dict(stationary=False),
-    dict(observed_at=9.8), dict(observed_at=10.1),
-    dict(feedback=tuple(v + .01 for v in START))])
+    dict(observed_at=9.8), dict(observed_at=10.1)])
 def test_bad_hold_evidence_prevents_preparation(changes):
     with pytest.raises(ValueError):
         analyze(context=context(**changes))
+
+
+@pytest.mark.parametrize('residual', [.003, .01])
+def test_stationary_residual_does_not_gate_checked_curve_or_reanchor_hold(residual):
+    feedback = tuple(v+residual for v in START)
+    snapshot = context(feedback=feedback)
+    prepared, report = analyze(points=point_to_point(feedback,TARGET,1.),context=snapshot)
+    assert report['state'] == 'pass'
+    assert prepared.curve.points[0].positions == START
+    assert prepared.context.hold == START
+    assert prepared.context.feedback == feedback
+    with pytest.raises(ValueError,match='first input position outside limits'):
+        analyze(points=point_to_point((4.,)*6,TARGET,1.),context=snapshot)
 
 
 @pytest.mark.parametrize('collision_check', [None,

@@ -93,7 +93,8 @@ class ControllerCycle:
             self._expire_passthrough()
             # 夹爪几何绑定在本周期输出之前复核；失效时先交给六轴停止保持事务接管。
             self.arm.check_prepared_context()
-            if not self.arm.passthrough_active():
+            coordinated = self.arm.coordinated_tick()
+            if not coordinated and not self.arm.passthrough_active():
                 arm_callback(arm, dt)
         except CommandTransportError as exc:
             self.protection.protect(str(exc), category="COMMAND")
@@ -105,7 +106,8 @@ class ControllerCycle:
             self.protection.protect(feedback_failure)
             return
         self.arm.update_task(self.feedback.joint_snapshot())
-        self.gripper.tick()
+        if not coordinated:
+            self.gripper.tick()
         error = self.gripper.transport_error()
         if error is not None:
             self.protection.protect(error, category="COMMAND")

@@ -522,6 +522,15 @@ class TeleopStatusPanelNode(Node):
             trajectory_execution_mode=self._trajectory_capability.expected,
             require_trajectory_capability=self._trajectory_capability.require,
         )
+        from rebotarm_msgs.srv import RetimeArmTrajectory
+        from rebotarm_teleop.web_coordinated import CoordinatedWebPlans
+        self._retime_type = RetimeArmTrajectory
+        self._retime_client = self.create_client(RetimeArmTrajectory,
+            f'/{self._arm_namespace}/retime_arm_trajectory')
+        self._coordinated_plans = CoordinatedWebPlans(
+            capability=self._trajectory_capability.require_snapshot,retime=self._retime_coordinated,
+            joint_names=self._joint_names,joint_limits=self._joint_limits,
+            trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
         # 当前 web 执行目标句柄（供"停止"按钮取消）与其互斥锁：动作回调与 HTTP 线程并发访问。
         self._calibration_client = CalibrationClient(
             self.create_client(CalibrationCommand, '/rebotarm_handeye_capture/command'),
@@ -550,6 +559,8 @@ class TeleopStatusPanelNode(Node):
             action_client=self._action_client,
             trajectory_stop_client=self._trajectory_stop_client,
             request_stop=self._request_controller_trajectory_stop,
+            trajectory_capability=self._trajectory_capability.require_snapshot,
+            retime_trajectory=self._retime_coordinated,
         )
         # 传感类话题用 BEST_EFFORT + KEEP_LAST：丢帧可接受，但要尽量拿到最新帧而不是积压旧帧。
         sensor_qos_spec = sensor_qos_kwargs()
@@ -574,6 +585,10 @@ class TeleopStatusPanelNode(Node):
         self.create_subscription(ArmStatus, f"/{self._arm_namespace}/arm_status", self._on_arm_status, arm_status_qos)
         self.create_subscription(String, f'/{self._arm_namespace}/trajectory_execution_mode',
             self._trajectory_capability.update, arm_status_qos)
+        self.create_subscription(String, f'/{self._arm_namespace}/trajectory_capabilities',
+            self._trajectory_capability.update_snapshot, arm_status_qos)
+        from diagnostic_msgs.msg import DiagnosticArray
+        self.create_subscription(DiagnosticArray, '/diagnostics', self._on_admission_diagnostic, 10)
         # 三条遥操作状态流：通用状态、录制状态、回放状态，内容可能是 JSON 也可能是纯文本。
         self.create_subscription(String, f"/{self._arm_namespace}/teleop/status", lambda msg: self._on_status("status", msg), 10)
         self.create_subscription(String, f"/{self._arm_namespace}/teleop/recording_status", lambda msg: self._on_status("recording", msg), 10)
@@ -1207,6 +1222,18 @@ class TeleopStatusPanelNode(Node):
             for name, data in snapshot.joints.items()
             if "position" in data
         }
+        if 'plan_id' in payload:
+            try:
+                if str(payload.get('confirm','')).upper() != 'EXECUTE':
+                    raise ValueError('missing EXECUTE confirmation')
+                trajectory,decision = self._coordinated_plans.take(payload['plan_id'],current_positions)
+                execution = self._web_teleop_client.send_planned(trajectory,decision,
+                    feedback_callback=lambda message:self._on_coordinated_feedback(message,decision))
+                execution['goal_future'].add_done_callback(lambda fut:self._on_execute_goal_response(fut,decision))
+                self._store.update_teleop_status('web_execute',execution['status'])
+                return execution['response']
+            except (ValueError,RuntimeError,KeyError) as exc:
+                return dict(accepted=False,message=str(exc))
         execution = self._web_teleop_client.execute(
             payload,
             current_positions=current_positions,
@@ -1223,6 +1250,49 @@ class TeleopStatusPanelNode(Node):
         future.add_done_callback(lambda fut: self._on_execute_goal_response(fut, decision))
         self._store.update_teleop_status("web_execute", execution["status"])
         return decision_response(decision)
+
+    def _retime_coordinated(self, trajectory, capability, fixed, max_speed):
+        """HTTP 规划线程等待纯计算服务；ROS 执行器继续处理响应，不占设备周期。"""
+        deadline = time.monotonic()+2.
+        if not self._retime_client.service_is_ready():
+            raise ValueError('planning retiming service unavailable')
+        request = self._retime_type.Request()
+        request.trajectory,request.fixed_duration = trajectory,fixed
+        request.velocity_scaling = request.acceleration_scaling = 1.
+        request.max_arm_speed_rad_s = float(max_speed)
+        request.capability_revision = capability['revision']
+        future = self._retime_client.call_async(request)
+        while not future.done():
+            if time.monotonic() >= deadline:
+                future.cancel()
+                raise ValueError('planning retiming exceeded total 2 s deadline')
+            time.sleep(.002)
+        response = future.result()
+        if not response.success:
+            raise ValueError(response.message)
+        return response.trajectory
+
+    def _handle_preview_coordinated(self, payload):
+        """联合预览只生成计划，不经过执行网关或下发设备；执行另需显式确认。"""
+        current = {name:float(data['position']) for name,data in self._store.snapshot().joints.items()
+            if 'position' in data}
+        try:
+            return self._coordinated_plans.preview(payload,current,
+                max_delta=float(self.get_parameter('web_execute_max_delta_rad').value),
+                min_duration=float(self.get_parameter('web_execute_min_duration').value),
+                max_duration=float(self.get_parameter('web_execute_max_duration').value),
+                max_speed=float(self.get_parameter('web_execute_max_joint_speed_rad_s').value))
+        except (ValueError,RuntimeError,KeyError,TypeError) as exc:
+            return dict(accepted=False,message=str(exc))
+
+    def _on_admission_diagnostic(self, message):
+        """当前快照只表示是否可再次请求，不能冒充某次无原因 REJECT 的准确原因。"""
+        for status in message.status:
+            if status.name == f'{self._arm_namespace}/trajectory_admission':
+                self._store.update_teleop_status('trajectory_admission',dict(
+                    # Jazzy 的 byte 字段在 Python 中是 bytes，应与同类型消息常量比较。
+                    ready=status.level == status.OK,message=status.message,received_at=time.time(),
+                    values={item.key:item.value for item in status.values}))
 
     def _handle_stop_execute(self) -> dict:
         """停止 Web 触发的关节运动：总是先请求控制器级急停，再取消动作目标。
@@ -1425,6 +1495,17 @@ class TeleopStatusPanelNode(Node):
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(lambda fut: self._on_execute_result(fut, decision))
 
+    def _on_coordinated_feedback(self, message, decision):
+        """整体进度来自后端参考时刻；HTTP 提交时刻不冒充曲线执行起点。"""
+        feedback = message.feedback
+        stamp = feedback.desired.time_from_start
+        elapsed = stamp.sec+stamp.nanosec*1e-9
+        self._store.update_teleop_status('web_execute', dict(state='executing',
+            message='联合轨迹执行中', duration=decision.duration,
+            progress=min(1.,elapsed/decision.duration) if decision.duration > 0 else 0.,
+            desired=dict(zip(feedback.joint_names,feedback.desired.positions)),
+            actual=dict(zip(feedback.joint_names,feedback.actual.positions))))
+
     def _on_execute_result(self, future, decision: WebExecuteDecision) -> None:
         """关节运动最终结果回调，并统一释放目标句柄。
 
@@ -1443,7 +1524,7 @@ class TeleopStatusPanelNode(Node):
             with self._execute_lock:
                 self._execute_goal_handle = None
             return
-        if error_code == FollowJointTrajectory.Result.SUCCESSFUL:
+        if status == 4 and error_code == FollowJointTrajectory.Result.SUCCESSFUL:
             state = "done"
         elif status == 5:
             # 5 是动作终态 CANCELED：轨迹没跑完但也不是控制器报错，需与 failed 区分开。

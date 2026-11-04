@@ -44,6 +44,9 @@ from rebotarm_simulation.ros.message_codec import validate_gripper_width
 from rebotarm_simulation.execution.trajectory_sampler import ARM_JOINT_NAMES, NamedTrajectoryPoint, TrajectorySampler
 from rebotarm_simulation.execution.trajectory_sampler import PreparedTrajectorySampler
 from rebotarm_trajectory.polynomial import curve_from_payload, TrajectoryPoint, ordered_points
+from rebotarm_trajectory.joint_contract import canonical_input
+from rebotarm_trajectory.capability import make_capability, constraint_revision
+from pathlib import Path
 
 
 from rebotarm_simulation.execution.control_api import SimulationControlApi, normalize_ros_control_mode
@@ -169,6 +172,7 @@ def create_node_class():
             self._scene_revision = ''
             # 待准备请求与已接纳曲线分开保存，服务返回之前物理周期仍保持当前位置。
             self._preparation = None
+            self._coordinated_active = False
             self._sample_history = deque(maxlen=512)
             self._last_physics_wall = time.monotonic()
             self._stop_unconfirmed = False
@@ -177,6 +181,20 @@ def create_node_class():
             self._capability_publisher = self.create_publisher(String,
                 f'/{namespace}/trajectory_execution_mode', qos)
             self._capability_publisher.publish(String(data=self._trajectory_mode))
+            self.declare_parameter('gripper_position_max_speed_rad_s', .5)
+            self.declare_parameter('gripper_position_torque_cap_nm', 1.)
+            import secrets
+            from ament_index_python.packages import get_package_share_directory
+            directory = Path(get_package_share_directory('rebotarm_moveit_config'))/'config'
+            revision = constraint_revision(*(directory.joinpath(name).read_bytes()
+                for name in ('rebotarm.urdf','joint_limits.yaml')))
+            self._execution_capability = make_capability(self._trajectory_mode, secrets.randbits(63),
+                float(self.get_parameter('gripper_position_max_speed_rad_s').value),
+                float(self.get_parameter('gripper_position_torque_cap_nm').value), revision)
+            self._versioned_capabilities = self.create_publisher(String,
+                f'/{namespace}/trajectory_capabilities', qos)
+            self._physics_clock = RclpyClock(clock_type=ClockType.STEADY_TIME)
+            self._capability_timer = self.create_timer(.1, self._publish_admission, clock=self._physics_clock)
             if self._trajectory_mode == 'prepared_v1':
                 from rebotarm_msgs.srv import PrepareArmTrajectory
                 self._prepare_type = PrepareArmTrajectory
@@ -185,7 +203,6 @@ def create_node_class():
                 self.create_subscription(String, f'/{namespace}/trajectory_scene_revision',
                     self._scene_changed, qos, callback_group=self._callback_group)
             self._timer_callback_group = MutuallyExclusiveCallbackGroup()
-            self._physics_clock = RclpyClock(clock_type=ClockType.STEADY_TIME)
             self._stamp = MonotonicStamp()
             # 只读反馈话题：关节状态、夹爪状态与仿真时钟。队列深度 10 足以吸收
             # 短暂抖动，仿真时间由 /clock 统一对外，供 use_sim_time 的节点对齐。
@@ -265,6 +282,9 @@ def create_node_class():
 
         def _hold_current_position_unlocked(self) -> None:
             self._control.hold_current_position()
+            if self._coordinated_active:
+                self._sim.release_gripper_position()
+                self._coordinated_active = False
 
         def _apply_target_threadsafe(self, operation) -> None:
             self._sim_access.run(lambda _sim: operation())
@@ -280,8 +300,8 @@ def create_node_class():
                     max_points=self._max_points,
                     max_duration_sec=self._max_duration,
                 )
-            except (TypeError, ValueError, RuntimeError):
-                self.get_logger().warning("rejected invalid trajectory goal")
+            except (TypeError, ValueError, RuntimeError) as exc:
+                self.get_logger().warning(f"FJT goal rejected: {exc}")
                 return GoalResponse.REJECT
             if not self._active.try_start(token):
                 self.get_logger().warning("rejected trajectory goal while controller is busy")
@@ -302,35 +322,62 @@ def create_node_class():
                     or samples[-1].simulation_time-samples[0].simulation_time < .2-1e-9
                     or (after is not None and samples[0].simulation_time <= after)):
                 raise RuntimeError('fresh complete stationary window required')
-            bounds = (3*25/65535,)*6+(3*25/65535*.009,)*2
             speeds = (.05,)*6+(.00045,)*2
-            for index, (span, speed) in enumerate(zip(bounds, speeds)):
-                values = [item.joint_positions[index] for item in samples]
-                if (max(values)-min(values) > span
-                        or any(abs(item.joint_velocities[index]) > speed for item in samples)):
-                    raise RuntimeError('stationary arm and fixed gripper required')
+            for index, speed in enumerate(speeds):
+                if any(abs(item.joint_velocities[index]) > speed for item in samples):
+                    raise RuntimeError(f'{state.joint_names[index]} stationary evidence:'
+                        f' speed={max(abs(item.joint_velocities[index]) for item in samples):.9f}'
+                        f' > {speed:.9f}')
             hold = tuple(self._sim.get_control_status().joint_targets)
-            if max(abs(a-b) for a,b in zip(hold, state.joint_positions[:6])) > bounds[0]:
-                raise RuntimeError('feedback outside acknowledged hold span')
+            # 静止窗口比较实际反馈；实际位置与命令保持值的残差不单独阻断下一次请求。
             return state, hold
+
+        def _publish_admission(self):
+            """发布只读准入证据；物理状态和能力不代表任何一次 REJECT 的准确原因。"""
+            self._versioned_capabilities.publish(String(data=json.dumps(self._execution_capability, allow_nan=False)))
+            reasons = []
+            with self._active._lock:
+                if self._active.busy or self._stop_unconfirmed:
+                    reasons.append('arm/gripper resources reserved or stop unconfirmed')
+                with self._lock:
+                    try:
+                        self._stationary_snapshot()
+                    except RuntimeError as exc:
+                        reasons.append(str(exc))
+                    if self._sim.control_mode not in ('position','hold'):
+                        reasons.append(f'mode={self._sim.control_mode}, required=position/hold')
+                if self._trajectory_mode == 'prepared_v1':
+                    if not self._scene_revision:
+                        reasons.append('scene revision unavailable')
+                    if not self._prepare_client.service_is_ready():
+                        reasons.append('preparation service unavailable')
+            message = DiagnosticArray()
+            message.header.stamp = self.get_clock().now().to_msg()
+            message.status = [DiagnosticStatus(name=f'{self._arm_namespace}/trajectory_admission',hardware_id='simulation',
+                level=DiagnosticStatus.WARN if reasons else DiagnosticStatus.OK,
+                message='; '.join(reasons) if reasons else 'ready',
+                values=[KeyValue(key='scene_revision',value=self._scene_revision)])]
+            self._diagnostic_pub.publish(message)
 
         def _reserve_prepared_goal(self, goal):
             """先校验输入，再按固定锁序预约空闲资源；忙时拒绝，不累积键盘或网页目标。"""
             received = time.monotonic()
-            if not self._prepare_client.service_is_ready() or not self._scene_revision:
-                return GoalResponse.REJECT
+            if not self._prepare_client.service_is_ready():
+                raise RuntimeError('preparation service unavailable')
+            if not self._scene_revision:
+                raise RuntimeError('scene revision unavailable')
             points = tuple(TrajectoryPoint(duration_to_seconds(p.time_from_start), p.positions,
                 p.velocities, p.accelerations) for p in goal.trajectory.points)
-            ordered_points(goal.trajectory.joint_names, points)
+            canonical_input(goal.trajectory.joint_names, points, self._current_arm_positions())
             if not 0 < len(points) <= self._max_points or points[-1].time > self._max_duration:
-                return GoalResponse.REJECT
+                raise ValueError('trajectory point or duration budget exceeded')
             with self._active._lock:
                 if self._active.busy:
-                    return GoalResponse.REJECT
+                    raise RuntimeError('arm/gripper resources reserved')
                 with self._lock:
                     state, hold = self._stationary_snapshot()
                     if self._sim.control_mode not in ('position', 'hold'):
-                        return GoalResponse.REJECT
+                        raise RuntimeError(f'mode={self._sim.control_mode}, required=position/hold')
                     if not self._active.try_start(goal):
                         return GoalResponse.REJECT
                     request = self._prepare_type.Request()
@@ -343,6 +390,7 @@ def create_node_class():
                     request.gripper_positions = list(state.joint_positions[-2:])
                     request.gripper_generation = 0
                     request.scene_revision = self._scene_revision
+                    request.capability_json = json.dumps(self._execution_capability, allow_nan=False)
                     request.deadline_monotonic = received+min(2., .2*points[-1].time+.25)
                     self._preparation = (goal, request)
                     self._pending_sampler = None
@@ -388,14 +436,18 @@ def create_node_class():
                             or payload['scene_revision'] != request.scene_revision
                             or context['session'] != request.session or context['generation'] != request.generation
                             or tuple(context['hold']) != tuple(request.hold_positions)
-                            or hold != tuple(request.hold_positions) or curve.points[0].positions != hold
+                            or hold != tuple(request.hold_positions) or curve.points[0].positions[:6] != hold
                             or payload['gripper_generation'] != request.gripper_generation
-                            or tuple(payload['gripper_positions']) != tuple(request.gripper_positions)
-                            or max(abs(a-b) for a,b in zip(state.joint_positions[-2:], request.gripper_positions)) > 3*25/65535*.009):
+                            or tuple(payload['gripper_positions']) != tuple(request.gripper_positions)):
                         raise RuntimeError('prepared simulation context changed')
+                    if len(curve.joint_names) == 7 and (
+                            payload.get('capability_revision') != self._execution_capability['revision']
+                            or abs(curve.points[0].positions[6]-request.gripper_positions[0]) > 1e-9):
+                        raise RuntimeError('prepared coordinated capability or initial finger changed')
                     # 执行起时在接纳时捕获；不能用准备开始时间让曲线跳过起始运动。
                     self._active.prepared = dict(curve=curve, start=state.simulation_time,
                         revision=response.scene_revision, fingers=tuple(request.gripper_positions))
+                    self._coordinated_active = len(curve.joint_names) == 7
                     self._preparation = None
             outcome = self._command_gate.apply_with_reason(token,
                 lambda: goal_handle.is_cancel_requested, admit, self._hold_current_position)
@@ -417,6 +469,15 @@ def create_node_class():
                     time.sleep(.01)
             self._stop_unconfirmed = True
             raise RuntimeError('simulation stop/hold unconfirmed')
+
+        def _finish_prepared(self, sampler):
+            """末点已由物理周期送出；原命令终点保持，协同夹爪中性释放后才完成。"""
+            def finish(sim):
+                self._control.command_joint_positions(sampler.sample(sampler.duration)[:6])
+                if len(sampler.curve.joint_names) == 7:
+                    sim.release_gripper_position()
+                    self._coordinated_active = False
+            self._sim_access.run(finish)
 
         def _cancel_callback(self, _goal_handle):
             stopped = self._command_gate.stop_and_hold(self._hold_current_position)
@@ -578,21 +639,31 @@ def create_node_class():
                     elapsed = command["elapsed"]
                     desired = command["desired"]
                     feedback = FollowJointTrajectory.Feedback()
-                    feedback.joint_names = list(ARM_JOINT_NAMES)
+                    coordinated = isinstance(sampler, PreparedTrajectorySampler) and len(sampler.curve.joint_names) == 7
+                    feedback.joint_names = list(sampler.curve.joint_names if isinstance(sampler, PreparedTrajectorySampler) else ARM_JOINT_NAMES)
                     feedback.desired = JointTrajectoryPoint()
                     feedback.actual = JointTrajectoryPoint()
                     feedback.error = JointTrajectoryPoint()
                     feedback.desired.positions = list(desired)
-                    actual = tuple(state.joint_positions[:6])
+                    elapsed_ns = round(min(sampler.duration,max(0.,elapsed))*1e9)
+                    feedback.desired.time_from_start.sec, feedback.desired.time_from_start.nanosec = divmod(elapsed_ns,1_000_000_000)
+                    actual = tuple(state.joint_positions[:7 if coordinated else 6])
                     feedback.actual.positions = list(actual)
-                    feedback.actual.velocities = list(state.joint_velocities[:6])
+                    feedback.actual.velocities = list(state.joint_velocities[:len(actual)])
                     feedback.error.positions = [d - a for d, a in zip(desired, actual)]
                     settling = self._settling_policy.evaluate(
-                        sampler.sample(sampler.duration),
-                        actual,
+                        sampler.sample(sampler.duration)[:6],
+                        actual[:6],
                         tuple(state.joint_velocities[:6]),
                         max(0.0, elapsed - sampler.duration),
                     ) if elapsed >= sampler.duration else "tracking"
+                    if coordinated and settling == 'succeeded':
+                        if abs(actual[-1]-sampler.sample(sampler.duration)[-1])/.009 > .12:
+                            settling = ('timed_out' if elapsed-sampler.duration >= self._settling_policy.time_tolerance_sec else 'settling')
+                    if self._trajectory_mode == 'prepared_v1' and settling == 'succeeded':
+                        active = self._active.prepared
+                        if active is None or active.get('sent_at') is None or state.simulation_time <= active['sent_at']:
+                            settling = 'settling'
                     if feedback_limiter.should_publish(
                         time.monotonic(), final=settling in ("succeeded", "timed_out")
                     ):
@@ -603,8 +674,7 @@ def create_node_class():
                             token,
                             lambda: goal_handle.is_cancel_requested,
                             self._hold_current_position,
-                            lambda: (self._sim_access.run(lambda _sim:
-                                self._control.command_joint_positions(sampler.sample(sampler.duration)))
+                            lambda: (self._finish_prepared(sampler)
                                 if self._trajectory_mode == 'prepared_v1' else self._hold_current_position(),
                                 goal_handle.succeed()),
                         )
@@ -671,11 +741,20 @@ def create_node_class():
                             active = self._active.prepared
                             if active is not None and not self._active.cancel_requested:
                                 current = sim.get_state()
-                                if max(abs(a-b) for a,b in zip(current.joint_positions[-2:], active['fingers'])) > 3*25/65535*.009:
+                                curve = active['curve']
+                                elapsed = current.simulation_time-active['start']
+                                target = curve.sample(elapsed)[0]
+                                coordinated = len(curve.joint_names) == 7
+                                invalid = (max(abs(a-b) for a,b in zip(current.joint_positions[:6],target[:6])) > .03
+                                    or (coordinated and abs(current.joint_positions[6]-target[6])/.009 > .12))
+                                if invalid:
                                     self._command_gate.stop_and_hold(self._hold_current_position)
                                 else:
-                                    target = active['curve'].sample(current.simulation_time-active['start'])[0]
-                                    self._control.command_joint_positions(target)
+                                    self._control.command_joint_positions(target[:6])
+                                    if coordinated:
+                                        sim.command_coordinated_gripper(target[6],self._execution_capability['gripper_torque_cap_nm'])
+                                    if elapsed >= curve.duration:
+                                        active.setdefault('sent_at',current.simulation_time)
                             state = sim.step()
                             # 记录与静止窗口都使用真正推进后的物理帧，而不是 ROS 重复发布频率。
                             self._trace.record(state, sim.get_control_status(), active)

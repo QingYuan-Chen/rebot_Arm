@@ -8,6 +8,7 @@
 
 安全与并发约束
     先确认本代保持已发送, 再累计其后的新鲜连续证据; 超时不等于已经停稳.
+    静止只检查实际反馈窗口的速度，不以位置极差或保持命令残差判定停止。
     停止轮询只读缓存且不睡眠; 确认后可在同一设备线程继续交接.
     旧任务和失效代次不能撤销新任务.
 
@@ -57,7 +58,8 @@ class ArmStop:
         self.result = StopResult("stopping", generation=generation,
                                  target=tuple(float(v) for v in target))
         self.deadline = self.clock() + 2.
-        self.evidence.reset(target)
+        # 命令目标只用于发送与代次绑定，不能作为静止窗口的绝对位置锚点。
+        self.evidence.reset()
 
     def sent(self, generation):
         """仅为匹配代次记录首次成功发送时间, 之后的新帧才可用于确认."""
@@ -67,7 +69,7 @@ class ArmStop:
 
     def abort(self, message):
         """终结尚在等待的停止事务, 保留明确失败原因, 不执行失能."""
-        if self.pending:
+        if self.result.state in ('stopping', 'confirmed'):
             self.result = replace(self.result, state="aborted", message=message)
 
     def update(self, positions, velocities, observed_at, *, generation, enabled, sequences=None):
@@ -77,6 +79,9 @@ class ArmStop:
         失能, 代次变化, 断流或源回退终止旧确认; 重复帧不累计静止窗口.
         超时仅记录保持未确认, 具体恢复由上层处理, 不在这里改变设备状态.
         """
+        # 联合停止仍在等夹爪时，机械臂已确认的一侧也要持续核验最新静止证据。
+        if self.result.state == 'confirmed':
+            self.result = replace(self.result, state='stopping', message='')
         if not self.pending:
             return self.result
         if not enabled or generation != self.result.generation:

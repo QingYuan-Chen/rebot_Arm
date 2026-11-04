@@ -5,7 +5,7 @@
 本文记录本仓库在 Ubuntu 24.04 / ROS 2 Jazzy 上的本地运行基线。
 
 > 当前状态：P0-P6 已按用户确认的工程范围关闭，未执行项不冒充通过。
-> `HardwareManager.connect()` 只连接并保持失能，任何新机器或新一轮真机动作仍需
+> `ControllerLifecycle.connect()` 只连接并保持失能，任何新机器或新一轮真机动作仍需
 > 独立确认现场条件和授权。安装、构建、导入检查不会授权或自动启动硬件。
 
 下列命令均从当前仓库根目录执行。推荐顺序：系统依赖 → 源码构建 →
@@ -297,7 +297,7 @@ auto_enable:=false
 P0 Gate B/C 自动使能、保持与失能验收工具已于 2026-09-19 移除，不再作为日常测试步骤。
 历史报告已从工作树清理；如需追溯，可从 Git 历史恢复。它们仅用于历史审计，不代表当前硬件通过验收。
 控制器的显式使能、反馈校验、失败回滚和停止保护继续保留。
-真机操作与停机步骤见 [功能命令参考](../reference/commands/rebotarm_feature_commands.md#moveit-实机操作与停机)。
+真机操作与停机步骤见 [功能命令参考](../reference/commands/rebotarm_feature_commands.md#真机-rviz-拖动)。
 
 ## 可选：MuJoCo 强化学习
 

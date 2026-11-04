@@ -34,7 +34,8 @@ class TrajectoryTrace:
             tuple(status.joint_targets), (0.,)*6, (0.,)*6, (0.,)*6)
         self.stream.write(json.dumps(dict(time=state.simulation_time, elapsed=elapsed,
             reference=reference, q=state.joint_positions, v=state.joint_velocities,
-            error=tuple(a-b for a,b in zip(reference[0],state.joint_positions[:6])),
+            joint_names=list(active['curve'].joint_names) if active else list(state.joint_names[:6]),
+            error=tuple(a-b for a,b in zip(reference[0],state.joint_positions)),
             effort=state.actuator_forces, mode=status.mode), allow_nan=False)+'\n')
 
     def close(self):

@@ -30,6 +30,7 @@ def generate_launch_description():
     # 先取出全部 LaunchConfiguration 句柄：它们是“延迟求值”的替换表达式，在声明DeclareLaunchArgument 之前就可以安全引用，真正取值发生在启动阶段。
     arm_namespace = LaunchConfiguration("arm_namespace")
     use_hardware = LaunchConfiguration("use_hardware")
+    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
     use_local_rviz = LaunchConfiguration("use_local_rviz")
     channel = LaunchConfiguration("channel")
     panel = LaunchConfiguration("panel")
@@ -51,6 +52,8 @@ def generate_launch_description():
             # use_hardware=false（默认）：无真机/只演练流程；true 时才由被包含的启动
             # 文件拉起硬件控制器。真机分支不会自动使能电机。
             DeclareLaunchArgument("use_hardware", default_value="false"),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
+                choices=["legacy", "prepared_v1"]),
             # use_local_rviz：是否随键盘遥操作一起打开本机 RViz，便于直接观察机械臂。
             DeclareLaunchArgument("use_local_rviz", default_value="true"),
             # channel：电机总线通道覆盖值；空串表示交给机械臂配置文件或自动探测。
@@ -104,6 +107,7 @@ def generate_launch_description():
                 launch_arguments={
                     "arm_namespace": arm_namespace,
                     "use_hardware": use_hardware,
+                    "trajectory_execution_mode": trajectory_mode,
                     "use_local_rviz": use_local_rviz,
                     "channel": channel,
                     "common_config": common_config,
@@ -156,6 +160,7 @@ def generate_launch_description():
                         "execution_mode": execution_mode,
                         "record_path": record_path,
                         "use_hardware": use_hardware,
+                        "trajectory_execution_mode": trajectory_mode,
                     },
                 ],
             ),

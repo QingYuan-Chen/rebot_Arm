@@ -1,0 +1,14 @@
+<!--
+  文件职责：登记执行曲线重定时和能力绑定的 MoveIt 插件。
+  对外接口：下列两个 pluginlib 类名由 prepared_v1 启动配置引用。
+  安全约束：不新增执行 Action；原 simple controller manager 继续负责 FJT 发送。
+  文件结构：共享库及其响应适配器、控制器管理器声明。
+-->
+<library path="rebotarm_execution_adapters">
+  <class name="rebotarm_motion/RetimeExecutionCurve" type="rebotarm_motion::RetimeExecutionCurve" base_class_type="planning_interface::PlanningResponseAdapter">
+    <description>统一重定时执行曲线，并保留计划能力绑定。</description>
+  </class>
+  <class name="rebotarm_motion/BoundSimpleControllerManager" type="rebotarm_motion::BoundSimpleControllerManager" base_class_type="moveit_controller_manager::MoveItControllerManager">
+    <description>委托原 simple_controller_manager，仅在发送前恢复已规划的能力绑定。</description>
+  </class>
+</library>

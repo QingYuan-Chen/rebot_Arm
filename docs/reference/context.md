@@ -69,6 +69,14 @@ MuJoCo remains a separate backend owned by `rebotarm_simulation`; neither backen
 opens real hardware. The teach package owns record preparation and replay policy,
 while MuJoCo teach-preview execution and Viewer lifecycle belong to simulation.
 
+Prepared position coordination uses one named curve for six arm joints (rad) and
+the left finger (m), with the right finger mirrored. Motion owns generation,
+planning-time retiming and the full-scene collision snapshot; each backend owns
+resource reservation, feedback, sending receipts and the overall
+terminal result. The sole public action remains FollowJointTrajectory. Real
+hardware stays disabled by default and uses legacy until user field validation.
+See [P005 coordination](../implemented/features/p005_prepared_trajectory.md#修订协同接口).
+
 The general visual-grasp entrypoint waits for an explicit execute request.
 Stopping drains old requests and requires fresh stationary feedback before new
 execution is allowed. A healthy real arm keeps enabled hold after a recoverable

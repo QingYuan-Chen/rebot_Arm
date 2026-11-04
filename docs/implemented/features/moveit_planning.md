@@ -15,6 +15,11 @@
 - RViz 原生 MotionPlanning Plan/Execute；
 - 示教起点对齐和运行时跟踪安全门。
 
+`prepared_v1` 支持 `arm`、`gripper` 和 `arm_with_gripper` Plan/Execute，统一映射到唯一
+FJT。复合组用联合关节目标；协同位姿先对 `arm` 求 IK，再构造七轴关节目标，不给复合组
+冒用六轴 IK。规划响应在 TOTG/Ruckig 后按执行曲线统一重定时，显示的是最终时间；执行准备
+仍复核动态双指碰撞、能力和设备上下文。接口及兼容等级见 [P005 协同接口](p005_prepared_trajectory.md#修订协同接口)。
+
 ## 验证结果
 
 包分层测试、轨迹安全测试和 MoveIt launch 检查覆盖当前职责边界。真机 Execute 必须存在 `moveit_simple_controller_manager` 和唯一控制器 Action server。

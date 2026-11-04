@@ -25,6 +25,7 @@ from .gripper_execution import GripperExecution
 from ..contracts.controller_contracts import CachedMotorFeedback as _CachedMotorFeedback
 from ..hardware.feedback_acquisition import _FeedbackValidationError
 from .gripper_control import _G_ANGLE_OPEN
+from .gripper_control import _G_KP_MOVE, _G_KD_MOVE
 from .gripper_control import _G_CLOSED_FEEDBACK_TOL_RAD
 from .gripper_control import _G_COORDINATE_TOL_RAD
 from .gripper_control import _G_DEFAULT_FORCE
@@ -43,7 +44,7 @@ from .gripper_control import _G_VERIFIED_OPEN_LIMIT_M
 from .gripper_control import _G_ZERO_VERIFY_SAMPLES
 from .gripper_control import _G_ZERO_VERIFY_TIMEOUT_SEC
 from ..runtime.device_requests import device_request
-from ..runtime.stationary_evidence import StationaryEvidence, POSITION_SPAN
+from ..runtime.stationary_evidence import StationaryEvidence
 import numpy as np
 import time
 from ..controller_parameters import (
@@ -188,7 +189,7 @@ class GripperController:
                     or not self._stationary.confirmed(time.monotonic())):
                 raise RuntimeError('fresh stationary idle gripper required')
             width = float(np.clip(sample.state.pos / _G_ANGLE_OPEN * _G_MAX_DIST_M, 0., _G_MAX_DIST_M))
-            # 碰撞模型使用左右手指的米制坐标，漂移核验保留未裁剪的电机原始角度。
+            # 碰撞模型使用左右手指的米制坐标，原始电机角保留在快照中供诊断。
             return dict(positions=(width/2, -width/2), raw_position=sample.state.pos,
                         generation=self._gripper_execution._generation)
 
@@ -197,6 +198,59 @@ class GripperController:
         """在执行锁内查询位置, 抓取或保持是否活动."""
         with self._gripper_execution._gripper_lock:
             return bool(self._gripper_execution._gripper_active)
+
+    def begin_coordinated(self):
+        """设备线程接管位置协同所有权；调用者已经预约两类资源，不在此发送。"""
+        self._backend.assert_writer()
+        self.preparation_snapshot()
+        owner = self._gripper_execution
+        with owner._gripper_lock:
+            owner._generation += 1
+            owner._gripper_active = True
+            owner._gripper_mode = 'coordinated'
+            return owner._generation
+
+    def coordinated_state(self, generation):
+        """只读新鲜原始反馈与身份；协同模式不借用要求空闲的准备快照。"""
+        sample = self.feedback.verified_sample('gripper')
+        owner = self._gripper_execution
+        with owner._gripper_lock:
+            if owner._generation != generation or owner._gripper_mode != 'coordinated' or not owner._gripper_active:
+                raise RuntimeError('coordinated gripper ownership changed')
+            failure = self._gripper_feedback_failure_reason_locked()
+            if failure or sample.state.status_code != 1:
+                raise RuntimeError(failure or 'gripper enabled feedback required')
+            return dict(raw_position=sample.state.pos, observed_at=sample.observed_at)
+
+    def send_coordinated(self, generation, finger_position):
+        """设备线程发送同一拍的左指参考；不做独立斜坡或临时裁剪曲线。"""
+        self._backend.assert_writer()
+        if not np.isfinite(finger_position) or not 0 <= finger_position <= .045:
+            raise ValueError('coordinated finger reference outside limits')
+        owner = self._gripper_execution
+        # 先读反馈再取得执行锁，保持采集事务的“反馈→夹爪”锁序。
+        self.coordinated_state(generation)
+        with owner._gripper_lock:
+            if owner._generation != generation or owner._gripper_mode != 'coordinated':
+                raise RuntimeError('coordinated gripper ownership changed')
+            self._gripper_safe_mit(-finger_position/.009, 0., _G_KP_MOVE, _G_KD_MOVE, 0.,
+                tau_limit=self.settings.gripper_position_torque_cap_nm)
+
+    def end_coordinated(self, generation):
+        """使同一协同夹爪任务停止并确认中性发送；不把失败或取消变成力控夹持。"""
+        self._backend.assert_writer()
+        owner = self._gripper_execution
+        with owner._gripper_lock:
+            if generation != owner._generation:
+                # 保护性释放可能已终结本代次；不能覆盖接替任务或把发送失败当成释放成功。
+                return (not owner._gripper_active and owner._gripper_neutral_pending is None
+                        and self._gripper_transport_error is None)
+            if not owner._gripper_active and owner._gripper_mode == 'idle':
+                return owner._gripper_neutral_pending is None and self._gripper_transport_error is None
+            owner._gripper_active = False
+            owner._gripper_mode = 'idle'
+            owner._queue_gripper_neutral_locked('coordinated position release', marks_success=False)
+            return owner._emit_pending_gripper_neutral_locked()
 
     @property
     def gripper_mode(self) -> str:
@@ -250,9 +304,7 @@ class GripperController:
                 return
             self._gripper_feedback_error = None
             if (status != 1 or self._gripper_execution._gripper_active
-                    or abs(velocity) > .05
-                    or (self._stationary.anchor is not None
-                        and abs(position-self._stationary.anchor[0]) > POSITION_SPAN)):
+                    or abs(velocity) > .05):
                 self._stationary.reset((position,))
             self._stationary.observe((position,), (velocity,), timestamp, time.monotonic())
         if recovered:
@@ -748,6 +800,7 @@ class GripperController:
         except Exception as exc:
             if isinstance(exc,CommandTransportError):
                 self._gripper_transport_error = str(exc)
+                raise
             raise RuntimeError(f"gripper MIT command failed: {exc}") from exc
 
     def _fail_active_gripper_command_locked(self, *args, **kwargs):
@@ -794,7 +847,16 @@ class GripperController:
         保护性释放不受六轴预约的普通运动门禁阻塞；释放改变固定几何时，
         通过夹爪代次让六轴周期撤销旧碰撞检查结果并进入停止保持。
         """
-        released = self._gripper_execution.release_grasp_hold(*args, **kwargs)
+        owner = self._gripper_execution
+        with owner._gripper_lock:
+            coordinated = owner._gripper_mode == 'coordinated' and owner._gripper_active
+            generation = owner._generation
+        if coordinated:
+            released = self.end_coordinated(generation)
+            with owner._gripper_lock:
+                owner.supersede_locked()
+            return released
+        released = owner.release_grasp_hold(*args, **kwargs)
         if self._backend.arm_resource_reserved and not released:
             # 空闲夹爪的显式保护性释放也撤销固定状态绑定，六轴周期随后受控停止。
             with self._gripper_execution._gripper_lock:

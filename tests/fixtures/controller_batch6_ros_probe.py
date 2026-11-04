@@ -28,6 +28,13 @@ class FakeBus(HandleController):
     def add_damiao_motor(self, number, feedback, model):
         motor = super().add_damiao_motor(number, feedback, model)
         motor.state.pos = -.017453292519943295 if number == 3 else -4. if number == 7 else 0.
+        if number == 7:
+            original = motor.send_mit
+            def send(*args):
+                original(*args)
+                if args[2] > 0:
+                    motor.state.pos = args[0]
+            motor.send_mit = send
         return motor
 
 def fake_only(channel, baud):
@@ -78,6 +85,13 @@ try:
         result = wait(connection.call_async(Trigger.Request()))
         assert result.success, result.message
         return result.message
+    def ready():
+        if controller.get_parameter('trajectory_execution_mode').value != 'prepared_v1':
+            return
+        deadline = time.monotonic()+5.
+        while not controller.hardware.arm.admission_snapshot()['ready'] and time.monotonic()<deadline:
+            time.sleep(.02)
+        assert controller.hardware.arm.admission_snapshot()['ready'], controller.hardware.arm.admission_snapshot()
     fjt = ActionClient(client, FollowJointTrajectory, '/rebotarm/follow_joint_trajectory')
     assert fjt.wait_for_server(timeout_sec=10.)
     time.sleep(1.)
@@ -98,13 +112,19 @@ try:
         return value
     assert not wait(fjt.send_goal_async(goal(start))).accepted
     report['default_disabled_reject'] = True
+    if controller.get_parameter('trajectory_execution_mode').value == 'prepared_v1':
+        from rebotarm_msgs.srv import PrepareArmTrajectory
+        preparation = client.create_client(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory')
+        assert preparation.wait_for_service(timeout_sec=20.)
     report['enable'] = trigger('enable')
+    ready()
     target = start.copy(); target[0] += .03
     handle = wait(fjt.send_goal_async(goal(target)))
     assert handle.accepted
     completed = wait(handle.get_result_async())
     assert completed.status == 4 and completed.result.error_code == 0, completed
     report['fjt_execute'] = [completed.status, completed.result.error_code]
+    ready()
     start = controller.hardware.feedback.get_joint_state()[0]
     target = start.copy(); target[0] += .02
     handle = wait(fjt.send_goal_async(goal(target, 2.)))
@@ -115,6 +135,7 @@ try:
     assert completed.status == 5, completed
     report['fjt_cancel'] = completed.result.error_string
     assert controller.hardware.lifecycle.enabled
+    ready()
     planner = client.create_client(GetMotionPlan, '/plan_kinematic_path')
     assert planner.wait_for_service(timeout_sec=15.)
     start = controller.hardware.feedback.get_joint_state()[0]
@@ -135,7 +156,74 @@ try:
     assert completed.status == 4 and completed.result.error_code.val == 1, completed
     report['moveit_execute'] = [completed.status, completed.result.error_code.val]
     report['planned_points'] = len(value.trajectory.joint_trajectory.points)
+    ready()
+    if controller.get_parameter('trajectory_execution_mode').value == 'prepared_v1':
+        from rebotarm_msgs.srv import RetimeArmTrajectory
+        from rebotarm_motion.coordinated_trajectory import generate_schedule, curve_message
+        from trajectory_msgs.msg import JointTrajectory
+        time.sleep(.5)
+        current = tuple(controller.hardware.feedback.get_joint_state()[0])
+        width = controller.hardware.gripper.gripper_position_m()
+        curve = generate_schedule(current,width,(current[0]+.01,*current[1:]),width+.001,1.)
+        service = client.create_client(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory')
+        assert service.wait_for_service(timeout_sec=3.)
+        query = RetimeArmTrajectory.Request(trajectory=curve_message(curve,
+            trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint),
+            velocity_scaling=1.,acceleration_scaling=1.,
+            capability_revision=controller.hardware.arm.trajectory_capability('prepared_v1')['revision'])
+        plan = wait(service.call_async(query)); assert plan.success, plan.message
+        coordinated = FollowJointTrajectory.Goal(trajectory=plan.trajectory)
+        handle = wait(fjt.send_goal_async(coordinated)); assert handle.accepted
+        assert not wait(fjt.send_goal_async(coordinated)).accepted, 'busy goal queued'
+        done = wait(handle.get_result_async())
+        assert done.status == 4 and done.result.error_code == 0, done
+        assert controller.hardware.lifecycle.enabled
+        report['coordinated_execute'] = [done.status,done.result.error_code]
+        # 真实 ROS Action 链覆盖残差取消与七轴→六轴交接；只改内存假电机反馈。
+        motor = buses[0].motors[0]
+        original_send = motor.send_pos_vel
+        residuals = []
+        try:
+            for residual in (.003, .01):
+                def offset_send(position, velocity):
+                    original_send(position, velocity)
+                    motor.state.pos = position+residual
+                motor.send_pos_vel = offset_send
+                time.sleep(.3)
+                ready()
+                current = tuple(controller.hardware.feedback.get_joint_state()[0])
+                width = controller.hardware.gripper.gripper_position_m()
+                curve = generate_schedule(current,width,(current[0]+.01,*current[1:]),width+.0002,1.)
+                query.trajectory = curve_message(curve,trajectory_factory=JointTrajectory,
+                    point_factory=JointTrajectoryPoint)
+                plan = wait(service.call_async(query)); assert plan.success, plan.message
+                handle = wait(fjt.send_goal_async(FollowJointTrajectory.Goal(trajectory=plan.trajectory)))
+                assert handle.accepted
+                deadline = time.monotonic()+2.
+                while controller.hardware.lifecycle.execution != 'TRAJ_RUNNING' and time.monotonic()<deadline:
+                    time.sleep(.005)
+                assert controller.hardware.lifecycle.execution == 'TRAJ_RUNNING'
+                cancel_response = wait(handle.cancel_goal_async())
+                done = wait(handle.get_result_async())
+                assert cancel_response.goals_canceling, (residual, cancel_response, done)
+                assert done.status == 5, done
+                assert not controller.hardware.runtime.arm_resource_reserved
+                assert controller.hardware.arm._stop_wait is None
+                ready()
+                start = controller.hardware.feedback.get_joint_state()[0]
+                target = start.copy();target[0] += .01
+                handle = wait(fjt.send_goal_async(goal(target,1.)))
+                assert handle.accepted
+                done = wait(handle.get_result_async())
+                assert done.status == 4 and done.result.error_code == 0, done
+                ready()
+                assert not controller.hardware.runtime.arm_resource_reserved
+                residuals.append(dict(residual=residual, coordinated_cancel=5, next_arm_execution=4))
+        finally:
+            motor.send_pos_vel = original_send
+        report['residual_cancel_and_next_goal'] = residuals
     time.sleep(.5)
+    ready()
     ik = client.create_client(MoveToPoseIK, '/rebotarm/move_to_pose_ik')
     assert ik.wait_for_service(timeout_sec=5.)
     request = MoveToPoseIK.Request()
@@ -147,6 +235,7 @@ try:
     while compat.active is not None and time.monotonic()<deadline:
         time.sleep(.02)
     assert compat.active is None
+    ready()
     pose = ActionClient(client, MoveToPose, '/rebotarm/move_to_pose')
     assert pose.wait_for_server(timeout_sec=5.)
     value = MoveToPose.Goal()

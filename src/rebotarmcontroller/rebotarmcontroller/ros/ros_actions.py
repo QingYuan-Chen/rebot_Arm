@@ -10,7 +10,7 @@
 
 安全与并发约束
     准入检查不能替代设备线程中的再次检查; 取消携带任务身份或代次.
-    六轴取消等待保持确认; 夹爪失败/释放状态按执行器查询映射, 不能把取消回执等同到位.
+    六轴取消回调先撤销许可并回接纳，任务终态仍等待保持确认；不能把取消回执等同停稳。
 
 文件结构(按定义顺序)
     ArmActions: 将 ROS Action 协议映射到原组件的数值任务与查询端口, 不拥有执行状态.
@@ -48,6 +48,26 @@ class ArmActions:
         self._capability_publisher = node.create_publisher(
             String, f'/{namespace}/trajectory_execution_mode', qos)
         self._capability_publisher.publish(String(data=trajectory_execution_mode))
+        self._versioned_capabilities = node.create_publisher(
+            String, f'/{namespace}/trajectory_capabilities', qos)
+        from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+        self._diagnostics = node.create_publisher(DiagnosticArray, '/diagnostics', 10)
+
+        def publish_admission():
+            """只读数值缓存；标准诊断不替代 Action 因果信息，也不改变电机故障码。"""
+            capability = self._arm.trajectory_capability(self._trajectory_mode)
+            self._versioned_capabilities.publish(String(data=json.dumps(capability, allow_nan=False)))
+            snapshot = self._arm.admission_snapshot()
+            status = DiagnosticStatus(name=f'{namespace}/trajectory_admission', hardware_id='trajectory',
+                level=DiagnosticStatus.OK if snapshot['ready'] else DiagnosticStatus.WARN,
+                message='ready' if snapshot['ready'] else '; '.join(snapshot['reasons']))
+            status.values = [KeyValue(key=key, value=json.dumps(value, ensure_ascii=False))
+                for key,value in snapshot.items()]
+            message = DiagnosticArray()
+            message.header.stamp = node.get_clock().now().to_msg()
+            message.status = [status]
+            self._diagnostics.publish(message)
+        self._diagnostic_timer = node.create_timer(.1, publish_admission)
         if trajectory_execution_mode == 'prepared_v1':
             from rebotarm_msgs.srv import PrepareArmTrajectory
             self._prepare_type = PrepareArmTrajectory
@@ -79,19 +99,24 @@ class ArmActions:
         if self._trajectory_mode == 'legacy':
             return self.goal_callback(request)
         try:
-            if not self._lifecycle.ready_for_motion or not self._prepare_client.service_is_ready():
-                return GoalResponse.REJECT
+            if not self._lifecycle.ready_for_motion:
+                snapshot = self._arm.admission_snapshot()
+                raise RuntimeError('controller not ready: '+ '; '.join(snapshot['reasons']))
+            if not self._prepare_client.service_is_ready():
+                raise RuntimeError('trajectory preparation service unavailable')
             last = request.trajectory.points[-1].time_from_start
             duration = last.sec+last.nanosec*1e-9
             if not math.isfinite(duration) or not 0 <= duration <= 300.:
-                return GoalResponse.REJECT
+                raise ValueError(f'trajectory duration={duration}, required range=[0,300] s')
             # 从收到 Goal 而非服务调用开始计时；准备消耗也必须留在 MoveIt 的总预算内。
             deadline = received+min(2., .2*duration+.25)
             token = self._arm.reserve_arm_preparation(deadline)
             # Jazzy 将同一个请求交给 GoalHandle；按请求绑定，停止后新 Goal 不能串用旧令牌。
             self._pending_preparations[id(request)] = (request, token)
             return GoalResponse.ACCEPT
-        except (ValueError, RuntimeError, IndexError):
+        except (ValueError, RuntimeError, IndexError) as exc:
+            if hasattr(self._node, 'get_logger'):
+                self._node.get_logger().warning(f'FJT goal rejected: {exc}')
             return GoalResponse.REJECT
 
     def _prepare_follow_goal(self, goal_handle, token):
@@ -105,6 +130,7 @@ class ArmActions:
         request.gripper_positions = list(token.gripper_positions)
         request.gripper_generation = token.gripper_generation
         request.scene_revision, request.deadline_monotonic = token.scene_revision, token.deadline
+        request.capability_json = json.dumps(self._arm.trajectory_capability(self._trajectory_mode), allow_nan=False)
         future = self._prepare_client.call_async(request)
         while not future.done():
             if goal_handle.is_cancel_requested or time.monotonic() >= token.deadline:
@@ -128,7 +154,7 @@ class ArmActions:
             if pending is not None and pending[0] is goal.request:
                 try:
                     # 撤销所有者令牌先于取消回执，已排队的接纳也不能越过取消。
-                    self._arm.cancel_arm_preparation(pending[1])
+                    self._arm.cancel_arm_preparation(pending[1], wait_for_stop=False)
                 except RuntimeError as exc:
                     self._node.get_logger().error(f'trajectory cancel stop unconfirmed: {exc}')
         return CancelResponse.ACCEPT
@@ -175,14 +201,26 @@ class ArmActions:
                     break
                 status = self._arm.arm_execution_status(task)
                 pos, vel, _ = self._feedback.get_cached_joint_state()
-                order = [self._runtime.joint_names.index(name) for name in names]
+                actual = dict(zip(self._runtime.joint_names, zip(pos, vel)))
+                desired = dict(zip((*self._runtime.joint_names, 'left_finger_joint'), status.desired))
+                if 'left_finger_joint' in names:
+                    # ROS 反馈沿用公开开口与电机速度换算，不由适配器重新计算控制量。
+                    width = self._gripper.gripper_position_m()
+                    _, raw_velocity, _, _ = self._gripper.get_gripper_state()
+                    actual['left_finger_joint'] = (width/2., -float(raw_velocity)*.009)
+                    actual['right_finger_joint'] = (-width/2., float(raw_velocity)*.009)
+                    if 'left_finger_joint' in desired:
+                        desired['right_finger_joint'] = -desired['left_finger_joint']
                 feedback = FollowJointTrajectory.Feedback()
                 feedback.joint_names = names
                 feedback.actual = JointTrajectoryPoint()
-                feedback.actual.positions = [float(pos[i]) for i in order]
-                feedback.actual.velocities = [float(vel[i]) for i in order]
+                feedback.actual.positions = [float(actual[name][0]) for name in names]
+                feedback.actual.velocities = [float(actual[name][1]) for name in names]
                 if status.desired:
-                    feedback.desired.positions = [status.desired[i] for i in order]
+                    feedback.desired.positions = [desired[name] for name in names]
+                    last = goal_handle.request.trajectory.points[-1].time_from_start
+                    elapsed_ns = round(status.progress*(last.sec*1_000_000_000+last.nanosec))
+                    feedback.desired.time_from_start.sec, feedback.desired.time_from_start.nanosec = divmod(elapsed_ns,1_000_000_000)
                     feedback.error.positions = [a-d for a,d in zip(
                         feedback.actual.positions, feedback.desired.positions)]
                 goal_handle.publish_feedback(feedback)
@@ -230,7 +268,7 @@ class ArmActions:
         return result
 
     def execute_gripper_command(self, goal_handle):
-        """把米制开口与力矩交给夹爪组件, 以返回代次轮询本目标终态.
+        """把毫米制开口与力矩交给夹爪组件, 以返回代次轮询本目标终态.
 
         取消携带 expected_generation, 旧回调不能释放接替目标. 位置成功由执行器在中性发送后给出.
         Action 的 stalled 固定为 False; 普通位置到位不能作为堵转抓取证据.

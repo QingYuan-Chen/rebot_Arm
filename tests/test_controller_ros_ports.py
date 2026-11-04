@@ -25,6 +25,7 @@ class RegistrationNode:
     def __init__(self):
         self.services, self.actions, self.subscriptions, self.publishers = {}, {}, {}, {}
         self.messages = []
+        self.timers = []
 
     def create_service(self, kind, name, callback, **kwargs):
         self.services[name] = callback
@@ -39,8 +40,12 @@ class RegistrationNode:
         return SimpleNamespace(publish=messages.append)
 
     def create_timer(self, period, callback, **kwargs):
-        self.tick = callback
+        self.timers.append(callback)
         return callback
+
+    def tick(self):
+        for callback in self.timers:
+            callback()
 
     def get_clock(self):
         nanoseconds = time.time_ns()
@@ -48,7 +53,7 @@ class RegistrationNode:
             sec=nanoseconds//10**9, nanosec=nanoseconds % 10**9)))
 
     def get_logger(self):
-        return SimpleNamespace(error=self.messages.append, warn=self.messages.append,
+        return SimpleNamespace(error=self.messages.append, warn=self.messages.append, warning=self.messages.append,
                                info=self.messages.append)
 
 

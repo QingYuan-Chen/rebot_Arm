@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 from rebotarm_motion.trajectory_time_parameterization import parameterize_teach_samples
 
@@ -540,6 +541,7 @@ def prepare_teach_replay_samples(
     large_motion_span_rad: float = 0.8,
     large_motion_total_rad: float = 2.5,
     large_motion_max_speed: float = 1.0,
+    coordinated_capability=None,
 ) -> PreparedTeachReplay:
     """生成真实回放要执行的预处理轨迹：原始 → 平滑 → 低通滤波 → 重采样 → 重定时。
 
@@ -568,6 +570,14 @@ def prepare_teach_replay_samples(
     安全语义：真实回放决策必须基于 ``after_quality``（重定时后的质量，等于 ``retimed_quality``）；
     ``before_quality`` 只用于展示"处理前有多差"。
     """
+    if samples and (any(s.format_version >= 2 for s in samples)
+                    or 'left_finger_joint' in samples[0].joint_names):
+        return _prepare_coordinated_samples(samples,capability=coordinated_capability,
+            smoothing_enabled=smoothing_enabled,smoothing_window=smoothing_window,
+            filter_enabled=filter_enabled,filter_cutoff_hz=filter_cutoff_hz,
+            filter_sample_rate_hz=filter_sample_rate_hz,resample_enabled=resample_enabled,
+            resample_rate_hz=resample_rate_hz,replay_speed=replay_speed,
+            max_velocity=max_velocity_rad_s,max_acceleration=max_acceleration_rad_s2,max_jerk=max_jerk_rad_s3)
     max_joint_span, total_joint_motion = _motion_scope(samples)
     # 回放倍速只允许减速（≤1.0），避免上层误配置出比示教更快的回放。
     requested_speed = min(max(float(replay_speed), 0.01), 1.0)
@@ -677,6 +687,84 @@ def prepare_teach_replay_samples(
             time_parameterization.message if time_parameterization is not None else "retime disabled"
         ),
     )
+
+
+def _prepare_coordinated_samples(samples, *, capability, smoothing_enabled, smoothing_window,
+        filter_enabled, filter_cutoff_hz, filter_sample_rate_hz, resample_enabled, resample_rate_hz,replay_speed,
+        max_velocity,max_acceleration,max_jerk):
+    """第二版派生七轴记录：按夹爪真实源时间对齐，统一预处理并生成明确 C2 约束。"""
+    from pathlib import Path
+    import numpy as np
+    from ament_index_python.packages import get_package_share_directory
+    from rebotarm_trajectory.polynomial import JOINT_NAMES, COORDINATED_JOINT_NAMES
+    from rebotarm_motion.coordinated_trajectory import sampled_c2_points, retime_curve, effective_limits
+    if capability is None:
+        raise ValueError('versioned prepared_v1 capability required for coordinated teach replay')
+    lifted = []
+    if samples[0].joint_names == COORDINATED_JOINT_NAMES:
+        lifted = list(samples)
+    else:
+        source = {}
+        last_stamp = -math.inf
+        for sample in samples:
+            if (sample.joint_names != JOINT_NAMES or not sample.gripper_valid
+                    or sample.gripper_width_m is None or sample.gripper_source_stamp is None
+                    or not math.isfinite(sample.gripper_width_m) or not 0 <= sample.gripper_width_m <= .09
+                    or not math.isfinite(sample.gripper_source_stamp) or sample.gripper_source_stamp < last_stamp):
+                raise ValueError('complete valid source-timed gripper recording required; no fabricated track')
+            if sample.gripper_source_stamp in source and source[sample.gripper_source_stamp] != sample.gripper_width_m/2.:
+                raise ValueError('gripper value changed without new source timestamp')
+            source[sample.gripper_source_stamp] = sample.gripper_width_m/2.
+            last_stamp = sample.gripper_source_stamp
+        times = tuple(source)
+        if len(times) < 2:
+            raise ValueError('at least two distinct gripper source frames required')
+        for sample in samples:
+            if times[0] <= sample.stamp <= times[-1]:
+                finger = float(np.interp(sample.stamp,times,tuple(source.values())))
+                lifted.append(replace(sample,joint_names=COORDINATED_JOINT_NAMES,
+                    positions=(*sample.positions,finger),velocities=(),efforts=(),format_version=2))
+    if len(lifted) < 2:
+        raise ValueError('insufficient common arm/gripper source time coverage')
+    def quality(values):
+        # 旧质量页的 rad 指标只评估六轴；夹爪以米制限位和实际速度在统一数值检查中评估。
+        return analyze_teach_trajectory([replace(s,joint_names=JOINT_NAMES,positions=s.positions[:6],
+            velocities=s.velocities[:6],efforts=s.efforts[:6]) for s in values])
+    raw_quality = quality(lifted)
+    values = smooth_teach_samples(lifted,window=smoothing_window) if smoothing_enabled else lifted
+    if filter_enabled and len(values) > 2:
+        values = lowpass_filter_teach_samples(values,sample_rate_hz=filter_sample_rate_hz,cutoff_hz=filter_cutoff_hz)
+    filtered_quality = quality(values)
+    if resample_enabled:
+        values = resample_teach_samples(values,rate_hz=resample_rate_hz)
+    points = sampled_c2_points([s.stamp for s in values],[s.positions for s in values])
+    # 回放倍速只在规划阶段作用于所有轨道；最终共同缩放遵守实际能力和纳秒复核。
+    if not math.isfinite(float(replay_speed)) or float(replay_speed) <= 0:
+        raise ValueError('finite positive replay speed required')
+    speed = min(1.,max(.01,float(replay_speed)))
+    points = tuple(replace(p,time=p.time/speed,velocities=tuple(v*speed for v in p.velocities),
+        accelerations=tuple(a*speed**2 for a in p.accelerations)) for p in points)
+    directory = Path(get_package_share_directory('rebotarm_moveit_config'))/'config'
+    low,high,limits = effective_limits(directory,COORDINATED_JOINT_NAMES,capability)
+    for index,name in enumerate(JOINT_NAMES):
+        velocity = (max_velocity[name] if isinstance(max_velocity,dict) else max_velocity[index]
+            if isinstance(max_velocity,(tuple,list)) else max_velocity)
+        if not all(math.isfinite(v) and v > 0 for v in (velocity,max_acceleration,max_jerk)):
+            raise ValueError('finite positive teach arm dynamic limits required')
+        limit = limits[name]
+        limits[name] = replace(limit,max_velocity=min(limit.max_velocity,velocity),
+            max_acceleration=min(limit.max_acceleration,max_acceleration),max_jerk=min(limit.max_jerk,max_jerk))
+    curve,scale = retime_curve(COORDINATED_JOINT_NAMES,points,low,high,limits)
+    retimed = [RetimedTeachPoint(p.time,p.positions,index,p.velocities,p.accelerations) for index,p in enumerate(curve.points)]
+    output = [replace(values[min(i,len(values)-1)],stamp=p.time,positions=p.positions,
+        velocities=p.velocities,joint_names=COORDINATED_JOINT_NAMES,format_version=2) for i,p in enumerate(curve.points)]
+    return PreparedTeachReplay(samples=output,raw_quality=raw_quality,filtered_quality=filtered_quality,
+        retimed_quality=quality(output),smoothing_applied=smoothing_enabled,filter_applied=filter_enabled,
+        resample_applied=resample_enabled,retime_applied=True,smoothing_window=smoothing_window,
+        filter_cutoff_hz=filter_cutoff_hz,filter_sample_rate_hz=filter_sample_rate_hz,resample_rate_hz=resample_rate_hz,
+        retimed_points=retimed,requested_replay_speed=speed,effective_replay_speed=speed/scale,
+        time_parameterization_requested_method='prepared_v1',time_parameterization_used_method='coordinated_c2',
+        time_parameterization_message='source-time aligned; unified quantized retiming; raw record preserved')
 
 
 def prepared_teach_replay_to_dict(prepared: PreparedTeachReplay) -> dict:

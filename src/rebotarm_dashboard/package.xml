@@ -38,7 +38,9 @@
   <!-- 轨迹消息：回放与点动执行时构造/校验轨迹目标（JointTrajectory、JointTrajectoryPoint） -->
   <exec_depend>trajectory_msgs</exec_depend>
 
+  <exec_depend>diagnostic_msgs</exec_depend>
   <export>
+    <!-- 诊断只读订阅，无设备访问。 -->
     <!-- 声明构建类型，缺少时 ros2 run 无法定位本包的可执行入口 -->
     <build_type>ament_python</build_type>
   </export>

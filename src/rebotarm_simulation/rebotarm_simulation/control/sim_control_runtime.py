@@ -235,6 +235,23 @@ class SimControlRuntime:
     def set_gripper_width(self, model, data, width: float) -> float:
         return self.command_gripper_width(model, data, width)
 
+    def command_coordinated_gripper(self, model, data, left, torque_cap):
+        """执行已经检查的左指位置；启动限矩折算为指尖力，不独立生成限速斜坡。"""
+        if not math.isfinite(left) or not 0 <= left <= .045:
+            raise ValueError('coordinated finger position outside limits')
+        p = self._motor_parameters.gripper
+        if not math.isfinite(torque_cap) or not 0 < torque_cap <= p.motor_torque_limit_nm:
+            raise ValueError('coordinated torque cap outside configured simulation capability')
+        force = torque_cap*abs(p.motor_radians_per_opening_m)*p.transmission_efficiency
+        return self.command_gripper_width(model,data,2.*left,max_force_n=force)
+
+    def release_gripper_position(self, model, data):
+        """协同位置任务结束后中性释放；保留目标记录而将实际输出归零。"""
+        self._gripper_max_force_n = 0.
+        self._gripper_control_force.fill(0.)
+        for actuator in self._actuator_ids[-2:]:
+            data.ctrl[actuator] = 0.
+
 
     def _apply_motor_control(self, model, data) -> None:
         qpos_addresses = [int(model.jnt_qposadr[joint_id]) for joint_id in self._joint_ids[:6]]

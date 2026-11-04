@@ -38,6 +38,10 @@ def encode_teach_sample(sample: TeachSample) -> str:
             "efforts": list(sample.efforts),
             "motor_status": sample.motor_status,
             "arm_state": sample.arm_state,
+            "format_version": sample.format_version,
+            "gripper_width_m": sample.gripper_width_m,
+            "gripper_source_stamp": sample.gripper_source_stamp,
+            "gripper_valid": sample.gripper_valid,
         },
         separators=(",", ":"),
     )
@@ -60,6 +64,10 @@ def decode_teach_sample(payload: str) -> TeachSample:
         efforts=tuple(float(v) for v in data.get("efforts", [])),
         motor_status={str(k): int(v) for k, v in data.get("motor_status", {}).items()},
         arm_state=str(data.get("arm_state", "")),
+        format_version=int(data.get('format_version',1)),
+        gripper_width_m=data.get('gripper_width_m'),
+        gripper_source_stamp=data.get('gripper_source_stamp'),
+        gripper_valid=data.get('gripper_valid',False),
     )
 
 
@@ -111,6 +119,11 @@ def write_prepared_teach_record(
     下游一眼看出该文件不是手工示教采集的原始记录。
     """
     target = Path(output_path) if output_path is not None else prepared_record_path(raw_path)
+    coordinated = bool(prepared.samples and 'left_finger_joint' in prepared.samples[0].joint_names)
+    if output_path is None and coordinated:
+        target = target.with_name(target.stem+'.v2'+target.suffix)
+    if target.resolve() == Path(raw_path).resolve():
+        raise ValueError('derived teach record must not overwrite raw recording')
     target.parent.mkdir(parents=True, exist_ok=True)
     samples: list[TeachSample]
     if prepared.retimed_points:
@@ -124,6 +137,7 @@ def write_prepared_teach_record(
                 efforts=(),
                 motor_status={},
                 arm_state="PREPARED_REPLAY",
+                format_version=2 if coordinated else 1,
             )
             for point in prepared.retimed_points
         ]

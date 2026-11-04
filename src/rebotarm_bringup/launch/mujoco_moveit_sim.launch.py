@@ -133,6 +133,7 @@ def generate_launch_description():
                     "use_fake_joint_states": "false",
                     "use_sim_time": use_sim_time,
                     'prepare_trajectories': "true",
+                    'trajectory_execution_mode': trajectory_mode,
                 }.items(),
             ),
             Node(package='rebotarm_dashboard', executable='TeleopStatusPanelNode',

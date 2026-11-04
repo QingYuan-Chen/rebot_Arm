@@ -13,6 +13,7 @@ source install/setup.bash
 ```
 
 确认已安装 `ros-jazzy-moveit-simple-controller-manager`。Plan 成功而 Execute 失败时，先检查控制器插件和唯一 Action server。
+使用 prepared_v1 还需要 `ros-jazzy-moveit-py`；准备服务不就绪时明确失败，不回退到旧执行方式。
 
 ## 仿真 RViz 拖动
 
@@ -50,8 +51,12 @@ ros2 action list | grep follow_joint_trajectory
 ```bash
 ros2 launch rebotarm_bringup moveit_hardware.launch.py \
   channel:=/dev/ttyACM0 \
-  use_rviz:=true
+  use_rviz:=true trajectory_execution_mode:=prepared_v1
 ```
+
+这是第三批首次交付的新模式显式选择命令；省略模式参数仍使用 legacy。
+与网页工作台/键盘组合互斥，不应在同一命名空间再启动另一控制器。
+网页工作台实测命令见 [网页命令](rebotarm_common_commands.md#网页工作台)。
 
 操作顺序：
 
@@ -62,6 +67,12 @@ ros2 launch rebotarm_bringup moveit_hardware.launch.py \
 5. 确认当前位置保持；
 6. 点击 `Execute`；
 7. 结束时停止轨迹、确认静止、受控回位、调用 `/rebotarm/disable`。
+
+先从小幅运动开始，再逐步覆盖多轴，观察起停、到达与终点保持，以及原有抖动是否改善。
+MoveIt 取消后应停止并保持；发生异常停止本次测试，保存界面提示和已有日志。
+若准备报告 jerk、速度、加速度超限或碰撞，表示该轨迹被拒绝，不能把 Plan 成功视为 Execute 成功；
+不自动改时间或放宽限制，MoveIt 执行预算仍为 `1.2T + 0.5 s`。
+用户确认功能与运动表现正常后再切换日常默认，实机定量跟踪精度仍未验收。
 
 使能命令：
 
@@ -82,7 +93,26 @@ ros2 topic echo --once /rebotarm/arm_status
 ros2 topic echo --once /rebotarm/joint_states
 ros2 action list | grep follow_joint_trajectory
 ros2 service list | grep -E 'plan_kinematic_path|check_state_validity'
+# 新模式只读检查：后端能力、准备服务、场景版本应存在且模式一致。
+ros2 topic echo --once /rebotarm/trajectory_execution_mode std_msgs/msg/String \
+  --qos-durability transient_local
+ros2 topic echo --once /rebotarm/trajectory_capabilities std_msgs/msg/String \
+  --qos-durability transient_local
+ros2 service type /rebotarm/prepare_arm_trajectory
+ros2 service type /rebotarm/retime_arm_trajectory
+ros2 topic echo --once /rebotarm/trajectory_scene_revision std_msgs/msg/String \
+  --qos-durability transient_local
+ros2 param get /reBotArmController trajectory_execution_mode
 ```
+
+新模式能力应为 `prepared_v1`，服务类型应为 `rebotarm_msgs/srv/PrepareArmTrajectory`。
+网页/键盘组合中的 `trajectory_execution_mode` 也必须相同，准备期间保持当前位置，
+普通夹爪运动会因资源占用拒绝；场景变化停止保持，本批不承担动态避障。
+
+新模式可分别选择 `arm`、`gripper`、`arm_with_gripper` 规划组完成 Plan/Execute。
+复合组使用联合关节目标；位姿协同由运动层先求 arm IK 再规划七轴。
+最终时长由规划阶段统一重定时，Execute 不再改时间。夹爪逐次 effort 覆盖只用于独立接口，
+协同力矩上限查看上述能力快照。完整契约见 [P005 协同接口](../../implemented/features/p005_prepared_trajectory.md#修订协同接口)。
 
 ## 相关文档
 

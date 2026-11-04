@@ -345,6 +345,14 @@ class RebotArmMujoco:
         self._ensure_open()
         return self._control.command_gripper_width(self._model, self._data, width_m, max_force_n)
 
+    def command_coordinated_gripper(self, left, torque_cap):
+        """米制左指参考与启动限矩；不重新生成曲线。"""
+        return self._control.command_coordinated_gripper(self._model,self._data,left,torque_cap)
+
+    def release_gripper_position(self):
+        """只中性释放夹爪，机械臂继续保持其命令终点。"""
+        self._control.release_gripper_position(self._model,self._data)
+
     def set_gripper_width(self, width: float) -> float:
         self._ensure_open()
         return self._control.set_gripper_width(self._model, self._data, width)

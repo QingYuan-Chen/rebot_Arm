@@ -22,7 +22,7 @@ from numpy.polynomial import polynomial as poly
 
 
 from rebotarm_trajectory.polynomial import (
-    CALC_ATOL, JOINT_NAMES, TrajectoryPoint, ordered_points, vector6,
+    CALC_ATOL, JOINT_NAMES, TrajectoryPoint, ordered_points, vector6, canonical_names,
     PolynomialSegment as NumericSegment, PolynomialTrajectory as NumericTrajectory,
 )
 
@@ -71,8 +71,8 @@ class PolynomialTrajectory(NumericTrajectory):
                 pairs = [(a.at(1., k), b.at(0., k))
                          for a, b in zip(self.segments, self.segments[1:])]
                 if k:
-                    pairs += [((0.,) * 6, self.segments[0].at(0., k)),
-                              (self.segments[-1].at(1., k), (0.,) * 6)]
+                    pairs += [((0.,) * len(self.joint_names), self.segments[0].at(0., k)),
+                              (self.segments[-1].at(1., k), (0.,) * len(self.joint_names))]
                 gaps[k] = max((abs(a - b) for left, right in pairs
                                for a, b in zip(left, right)), default=0.)
         return {'guaranteed_order': {1: 0, 3: 1, 5: 2}[self.degree],
@@ -81,18 +81,20 @@ class PolynomialTrajectory(NumericTrajectory):
 
     def collision_times(self, max_joint_step=.02, max_samples=100_000):
         """用段内最大速度给空间步长上界, 同时包含位置极值; 不按端点距离漏掉回转."""
-        if not math.isfinite(max_joint_step) or max_joint_step <= 0:
-            raise ValueError('positive finite collision joint step required')
+        steps = ((float(max_joint_step),) * len(self.joint_names)
+                 if isinstance(max_joint_step, (int, float)) else tuple(max_joint_step))
+        if len(steps) != len(self.joint_names) or any(not math.isfinite(v) or v <= 0 for v in steps):
+            raise ValueError('positive finite per-joint collision steps required')
         times = {0., self.duration}
         for segment in self.segments:
-            speed = max(abs(poly.polyval(u, segment.axis(j, 1))) for j in range(6)
+            speed = max(abs(poly.polyval(u, segment.axis(j, 1)))/steps[j] for j in range(len(steps))
                         for u in segment.candidates(j, 1))
             # 使用段内速度峰值而非首末距离；即使关节先去后回，也不会漏掉中间行程。
-            count = max(1, math.ceil(speed * segment.duration / max_joint_step))
+            count = max(1, math.ceil(speed * segment.duration))
             if count + len(times) > max_samples:
                 raise ValueError('collision coverage exceeds sample budget')
             times.update(segment.start + segment.duration * i / count for i in range(count + 1))
-            times.update(segment.start + segment.duration * u for j in range(6)
+            times.update(segment.start + segment.duration * u for j in range(len(steps))
                          for u in segment.candidates(j))
         if len(times) > max_samples:
             raise ValueError('collision coverage exceeds sample budget')
@@ -102,6 +104,7 @@ class PolynomialTrajectory(NumericTrajectory):
 
 def build_curve(joint_names, points):
     """从全部端点约束构造 1/3/5 次多项式; 不改变时间或中间点."""
+    names = canonical_names(joint_names)
     points = ordered_points(joint_names, points)
     if points[0].time != 0:
         raise ValueError('explicit initial state at time zero required')
@@ -115,7 +118,7 @@ def build_curve(joint_names, points):
         if not math.isfinite(duration) or duration > 1e100:
             raise ValueError('unknown polynomial duration: numerical range')
         coefficients = []
-        for j in range(6):
+        for j in range(len(names)):
             q, delta = first.positions[j], last.positions[j] - first.positions[j]
             if degree == 1:
                 c = (q, delta)
@@ -145,12 +148,12 @@ def build_curve(joint_names, points):
                                    rtol=0, atol=CALC_ATOL):
                     raise ValueError('unknown polynomial endpoints: numerical residual')
         segments.append(segment)
-    return PolynomialTrajectory(points, tuple(segments), degree)
+    return PolynomialTrajectory(points, tuple(segments), degree, names)
 
 
 def curve_from_payload(payload):
     """校验交换数据与端点契约; 系数必须与当前版本的生成规则精确一致."""
-    if payload['version'] != 1:
+    if payload['version'] not in (1, 2):
         raise ValueError('unsupported curve version')
     points = tuple(TrajectoryPoint(p['time_from_start'], p['positions'],
         p.get('velocities', ()), p.get('accelerations', ())) for p in payload['points'])
@@ -160,8 +163,8 @@ def curve_from_payload(payload):
     received = []
     for segment, coefficients in zip(curve.segments, payload['coefficients']):
         c = np.asarray(coefficients, dtype=float)
-        if c.shape != (6, curve.degree + 1) or not np.array_equal(c, segment.coefficients):
+        if c.shape != (len(curve.joint_names), curve.degree + 1) or not np.array_equal(c, segment.coefficients):
             raise ValueError('curve coefficient mismatch')
         received.append(PolynomialSegment(segment.start, segment.duration,
                                           tuple(tuple(float(v) for v in row) for row in c)))
-    return PolynomialTrajectory(curve.points, tuple(received), curve.degree)
+    return PolynomialTrajectory(curve.points, tuple(received), curve.degree, curve.joint_names)

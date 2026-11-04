@@ -8,7 +8,8 @@
     规范化首末约束；point_to_point 生成静止到静止约束；analyze_trajectory
     返回 (PreparedTrajectory 或 None, 报告)。load_reference_limits 读取现有限值。
 安全约束
-    起点只能在新鲜、静止且偏差合格时对齐保持命令；不得修改中间导数或原有时间。
+    新鲜静止时将起点对齐已发送保持命令，不以实际位置与保持值的误差单独拒绝。
+    对齐后的准确曲线仍须完整限值及碰撞检查；不得修改中间导数或原有时间。
     超限、未知或碰撞检查覆盖不足均不能生成候选；不自动拉长时长、裁剪或降级。
     候选不是执行许可：正式服务另外绑定场景/夹爪，后端在所有者事务内复核后接纳。
     observed_at/now 使用同源单调秒；反馈采集与静止证据由执行后端负责。
@@ -30,21 +31,20 @@ from .polynomial_trajectory import (
     curve_from_payload, ordered_points, vector6,
 )
 from .trajectory_runtime_limits import load_joint_runtime_limits
+from rebotarm_trajectory.polynomial import canonical_names, finite_vector, COORDINATED_JOINT_NAMES
 
 
-# 与生产静止证据的位置跨度一致, 仅作为已批准的起点修正额度, 不扩大旧准入门限.
-START_SPAN = 3 * 25. / 65535
 MAX_AGE = .15
 
 
-def load_reference_limits(config_directory):
+def load_reference_limits(config_directory, joint_names=JOINT_NAMES):
     """直接读取规范 URDF 和现有动态 YAML; 不加载物理或电机库."""
     directory = Path(config_directory)
     root = ET.parse(directory / 'rebotarm.urdf').getroot()
     joints = {joint.get('name'): joint.find('limit') for joint in root.findall('joint')}
-    lower = tuple(float(joints[name].get('lower')) for name in JOINT_NAMES)
-    upper = tuple(float(joints[name].get('upper')) for name in JOINT_NAMES)
-    return lower, upper, load_joint_runtime_limits(directory / 'joint_limits.yaml', JOINT_NAMES)
+    lower = tuple(float(joints[name].get('lower')) for name in joint_names)
+    upper = tuple(float(joints[name].get('upper')) for name in joint_names)
+    return lower, upper, load_joint_runtime_limits(directory / 'joint_limits.yaml', joint_names)
 
 
 @dataclass(frozen=True)
@@ -78,25 +78,29 @@ class PreparationContext:
             raise ValueError('fresh feedback required')
         if not self.enabled or not self.stationary or self.busy:
             raise ValueError('enabled stationary idle hold required')
-        if max(abs(a - b) for a, b in zip(self.hold, self.feedback)) > START_SPAN:
-            raise ValueError('feedback outside hold span')
 
 
-def normalize_boundaries(joint_names, points, context, *, now):
+def normalize_boundaries(joint_names, points, context, *, now, start_finger=None):
     """校验前明确调整起止边界; 其后不得再改点或时间."""
     context.require_ready(now)
     points = list(ordered_points(joint_names, points))
+    names = canonical_names(joint_names)
+    hold = context.hold
+    if names == COORDINATED_JOINT_NAMES:
+        if start_finger is None or not math.isfinite(start_finger) or not 0 <= start_finger <= .045:
+            raise ValueError('finite initial finger position required')
+        hold = (*hold, start_finger)
     first = points[0]
-    zeros = (0.,) * 6
+    zeros = (0.,) * len(names)
     if first.time == 0:
-        if len(points) == 1 and first.positions != context.hold:
+        if len(points) == 1 and first.positions != hold:
             raise ValueError('zero-duration position change forbidden')
-        if max(abs(a - b) for a, b in zip(first.positions, context.hold)) > START_SPAN:
-            raise ValueError('first point outside hold span')
-        points[0] = replace(first, positions=context.hold)
+        # 六轴从已发送保持命令连续起步，残差不设单独门限；随后检查整条规范化曲线。
+        # 夹爪起点同样取预约状态，规范化后仍须检查整条曲线和碰撞。
+        points[0] = replace(first, positions=hold)
     else:
         # 首点晚于零时刻时显式补起点；导数字段是否存在仍沿用输入的兼容等级。
-        points.insert(0, TrajectoryPoint(0., context.hold,
+        points.insert(0, TrajectoryPoint(0., hold,
             zeros if first.velocities else (), zeros if first.accelerations else ()))
     # 仅将已提供的首末导数归零以连接保持状态，中间点及末点位置均保留。
     for i in {0, len(points) - 1}:
@@ -110,8 +114,11 @@ def point_to_point(start, target, duration=.4):
     """完整静止到静止五次约束; 不重定时, 不生成密集位置点."""
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError('positive finite point-to-point duration required')
-    return (TrajectoryPoint(0., start, (0.,) * 6, (0.,) * 6),
-            TrajectoryPoint(duration, target, (0.,) * 6, (0.,) * 6))
+    start = finite_vector(start)
+    target = finite_vector(target, len(start))
+    zeros = (0.,)*len(start)
+    return (TrajectoryPoint(0., start, zeros, zeros),
+            TrajectoryPoint(duration, target, zeros, zeros))
 
 
 def minimum_point_to_point_duration(start, target, limits):
@@ -133,16 +140,18 @@ def minimum_point_to_point_duration(start, target, limits):
 
 def check_curve(curve, lower, upper, limits):
     """以解析导数的实根检查全部段内极值; 浮点求解失败由调用方记为未知."""
-    lower, upper = vector6(lower), vector6(upper)
+    names = curve.joint_names
+    lower, upper = finite_vector(lower, len(names)), finite_vector(upper, len(names))
     if any(a > b for a, b in zip(lower, upper)):
         raise ValueError('invalid position bounds')
-    if set(limits) != set(JOINT_NAMES):
-        raise ValueError('all six dynamic limits required')
+    if set(limits) != set(names):
+        raise ValueError('all named dynamic limits required')
     if any(getattr(limits[name], 'max_' + kind) is None
-           for name in JOINT_NAMES for kind in ('velocity', 'acceleration', 'jerk')):
+           for name in names for kind in ('velocity', 'acceleration', 'jerk')
+           if kind != 'jerk' or name in JOINT_NAMES):
         raise ValueError('complete velocity acceleration jerk limits required')
     issues, peaks = [], {}
-    for j, name in enumerate(JOINT_NAMES):
+    for j, name in enumerate(names):
         joint_peaks = {}
         for order, kind in enumerate(('position', 'velocity', 'acceleration', 'jerk')):
             values = [(0., curve.points[0].positions[j] if order == 0 else 0.)]
@@ -230,14 +239,20 @@ class PreparedTrajectory:
 
 
 def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=None,
-                       now=0., collision_check=None):
+                       now=0., collision_check=None, start_finger=None):
     """返回候选与可审计报告; 只有完整覆盖的碰撞 pass 才产生候选.
 
     collision_check(names, positions) 由调用者注入, 应绑定其记录的规划场景与完整
     夹爪状态. 无检查器、异常、超时或样本数不足都不能生成候选.
     """
     source = ordered_points(joint_names, points)
-    points = normalize_boundaries(JOINT_NAMES, source, context, now=now) if context else source
+    names = canonical_names(joint_names)
+    # 去除首点修正幅度门限后，仍明确拒绝越界输入，不能由起点替换掩盖非法位置。
+    if context and any(q < lo-CALC_ATOL or q > hi+CALC_ATOL
+            for q,lo,hi in zip(source[0].positions, lower, upper)):
+        raise ValueError('first input position outside limits')
+    points = normalize_boundaries(names, source, context, now=now,
+        start_finger=start_finger) if context else source
     if points[0].time != 0:
         raise ValueError('explicit initial state at time zero required')
     report = dict(source_points=len(source), normalized_points=len(points),
@@ -245,12 +260,12 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
                   # 保留历史报告格式；正式服务的执行许可来自后端复核，不来自此标签。
                   scope='offline_reference_only')
     try:
-        curve = build_curve(JOINT_NAMES, points)
+        curve = build_curve(names, points)
         report.update(duration=curve.duration, degree=curve.degree,
                       normalized_trajectory=curve.to_payload())
         report['comparison'] = compare_reference(curve, source)
         report['limits'] = check_curve(curve, lower, upper, limits)
-        times = curve.collision_times()
+        times = curve.collision_times(tuple(.00018 if n == 'left_finger_joint' else .02 for n in names))
     except (ValueError, OverflowError, np.linalg.LinAlgError) as exc:
         report.update(state='unknown', reason=str(exc), collision=dict(state='unknown'))
         return None, report
@@ -260,7 +275,7 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
     collision = dict(state='unknown', message='no collision checker provided')
     if collision_check is not None:
         try:
-            collision = dict(collision_check(JOINT_NAMES, [curve.sample(t)[0] for t in times]))
+            collision = dict(collision_check(names, [curve.sample(t)[0] for t in times]))
             # 检查器必须证明整个批次都检查过，不能以一部分样本成功代表整条曲线。
             if (collision.get('state') == 'pass' and
                     (collision.get('checked_samples') != len(times)

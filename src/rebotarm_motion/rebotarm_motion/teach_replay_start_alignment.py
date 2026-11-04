@@ -101,12 +101,16 @@ class MoveItStartAligner:
         hold_point = self._trajectory_point_factory()
         hold_point.positions = [float(v) for v in current_positions]
         hold_point.velocities = [0.0 for _ in current_positions]
+        if 'left_finger_joint' in trajectory.joint_names:
+            # 新生成的七轴准备段是明确 C2 约束；旧六轴输入仍按实际字段等级处理。
+            hold_point.accelerations = [0.0 for _ in current_positions]
         set_duration(hold_point.time_from_start, elapsed)
         trajectory.points.append(hold_point)
         # 逐关节取最大绝对偏差（rad）作为是否需要对齐的判据：只要有一个关节差得多，
         # 就必须规划过渡，否则机械臂会在回放起点发生跳变。
         max_error = max(
-            (abs(float(a) - float(b)) for a, b in zip(current_positions, first_positions)),
+            (abs(float(a) - float(b)) / (.009 if name == 'left_finger_joint' else 1.)
+                for name, a, b in zip(trajectory.joint_names, current_positions, first_positions)),
             default=0.0,
         )
         if max_error >= float(config.skip_threshold):
@@ -144,12 +148,19 @@ class MoveItStartAligner:
         因此结果与前方保持段无缝衔接。若规划点未携带速度，则不写入 ``velocities``
         （保持消息默认值，交由控制器插值）。
         """
+        start = {}
+        if 'left_finger_joint' in trajectory.joint_names:
+            from sensor_msgs.msg import JointState
+            # 与已缓存的起点保持段使用同一快照，避免规划读取较晚反馈制造零时长跳变。
+            start['start_joint_state'] = JointState(name=list(trajectory.joint_names),
+                position=list(trajectory.points[-1].positions))
         plan = self._planner.plan_joint_positions(
             joint_names=tuple(trajectory.joint_names),
             target_positions=first_positions,
             tolerance=float(config.joint_goal_tolerance),
             velocity_scaling=float(config.velocity_scaling),
             acceleration_scaling=float(config.acceleration_scaling),
+            **start,
         )
         if not plan.success or plan.trajectory is None:
             raise ValueError(f"moveit start alignment failed: {plan.message}")

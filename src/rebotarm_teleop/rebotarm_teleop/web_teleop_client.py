@@ -226,6 +226,20 @@ class WebTeleopClient:
             "trajectory": trajectory,
         }
 
+    def send_planned(self, trajectory, decision, *, feedback_callback=None):
+        """提交已预览的准确联合消息；不再插值、改时长或发送独立夹爪 Action。"""
+        self._require_trajectory_capability()
+        if self._trajectory_mode != 'prepared_v1':
+            raise ValueError('coordinated execution requires prepared_v1')
+        if not self._action_client.wait_for_server(timeout_sec=.1):
+            raise ValueError('follow_joint_trajectory action unavailable')
+        goal = self._follow_goal_factory()
+        goal.trajectory = trajectory
+        return dict(accepted=True,decision=decision,response=decision_response(decision),
+            status=dict(state='submitted',message='联合轨迹已提交，等待控制器接纳',duration=decision.duration),
+            trajectory=trajectory,goal_future=self._action_client.send_goal_async(goal,
+                feedback_callback=feedback_callback))
+
     def _append_legacy_points(self, trajectory, current, decision):
         """保留旧模式的位置点序列；不补写导数，避免把兼容输入错误标成 C1/C2。"""
         for elapsed, positions in interpolate_joint_points(

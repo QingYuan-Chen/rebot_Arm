@@ -38,10 +38,14 @@ class ArmGripperPort:
     """读取 positions（两指 m）、raw_position（电机 rad）和 generation。
 
     快照由夹爪所有者在新鲜、连续静止且空闲时提供；不符合条件时抛错。
-    端口不缓存或复制静止证据，也不取得夹爪发送能力。
+    端口不缓存或复制静止证据；协同所有者仅在设备线程通过下列窄接口接管、发送和释放。
     """
 
     snapshot: Callable[[], dict]
+    begin_coordinated: Callable = None
+    coordinated_state: Callable = None
+    send_coordinated: Callable = None
+    end_coordinated: Callable = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +114,7 @@ class ArmCyclePort:
     check_prepared_context: Callable[[], None]
     passthrough_active: Callable[[], bool]
     update_task: Callable[[JointSnapshot], None]
+    coordinated_tick: Callable[[], bool] = lambda: False
 
 
 @dataclass(frozen=True)

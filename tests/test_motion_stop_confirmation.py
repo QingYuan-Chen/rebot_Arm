@@ -41,11 +41,37 @@ def test_invalid_or_moving_feedback_breaks_quiet_window(position, velocity):
     assert not feedback.stationary(10., 10.5, int(10.5e9))
 
 
-def test_position_drift_is_not_stationary_even_if_velocity_reports_zero():
+def test_position_changes_do_not_reject_when_speed_and_continuity_qualify():
     feedback = StopFeedback()
-    for t,p in ((10., 0.), (10.1,.01), (10.2,.02), (10.4,.03)):
+    for t,p in ((10., 0.), (10.1,.01), (10.2,.02), (10.3,.03), (10.4,.04)):
         feedback.update(sample(t,p), t, int(t*1e9))
-    assert not feedback.stationary(10., 10.4, int(10.4e9))
+    assert feedback.stationary(10., 10.4, int(10.4e9))
+
+
+@pytest.mark.parametrize('stale', [False, True])
+def test_coordinated_pose_start_delta_does_not_replace_feedback_freshness_check(stale):
+    from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+    gripper = NS(header=NS(stamp=NS(sec=9 if stale else 10, nanosec=0)), status_code=1, position=.02)
+    trajectory = JointTrajectory(joint_names=[f'joint{i}' for i in range(1, 7)]+['left_finger_joint'],
+        points=[JointTrajectoryPoint(positions=[0.]*6+[.02])])
+    calls = []
+    def retime(request):
+        calls.append(request)
+        return completed(NS(success=True, trajectory=trajectory))
+    node = NS(_trajectory_mode='prepared_v1', _capability=dict(mode='prepared_v1', revision='test'),
+        _capability_at=time.monotonic(), _feedback_receiver=NS(snapshot=lambda:NS(gripper=gripper)),
+        get_clock=lambda:NS(now=lambda:NS(nanoseconds=10_000_000_000)),
+        _retime_client=NS(wait_for_service=lambda **_:True, call_async=retime),
+        _wait_future=lambda *_:None)
+    request = NS(gripper_opening_m=.04, preview_start_joint_state=JointState())
+    if stale:
+        with pytest.raises(ValueError, match='fresh enabled gripper feedback'):
+            PoseExecutionNode._coordinate_pose_plan(node, trajectory, request, 1., 1.)
+        assert calls == []
+    else:
+        # 规划左指 0.02 m 与反馈左指 0.01 m 不再触发量化差值拒绝。
+        assert PoseExecutionNode._coordinate_pose_plan(node, trajectory, request, 1., 1.) is trajectory
+        assert len(calls) == 1
 
 
 def completed(value):

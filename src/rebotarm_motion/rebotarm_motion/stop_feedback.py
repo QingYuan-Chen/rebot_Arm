@@ -1,4 +1,4 @@
-"""运动停止确认的线程安全证据; 保留源时间, 连续性与固定请求锚点.
+"""运动停止确认的线程安全证据；保留源时间、连续性与速度窗口。
 
 职责与位置
     接收线程与停止编排之间共享的证据容器, 不读取设备, 不发出控制命令.
@@ -7,7 +7,7 @@
     update 保存去重样本, ready 供新请求建立起点, stationary 验证固定请求的连续静止.
 
 安全与并发约束
-    每个观察起点只固定一次位置锚点; 重复源时间戳不累计, 断流锁存为该请求失败.
+    重复源时间戳不累计，断流锁存为该请求失败；不按位置变化设置门限。
     内部锁只保护短事务, 禁止持此锁反向调用接收缓存或同步等待 ROS.
 
 文件结构(按定义顺序)
@@ -22,17 +22,16 @@ import threading
 class StopFeedback:
     """用独立短事务锁保存去重六轴反馈, 为固定停止请求提供连续静止证据."""
 
-    def __init__(self, *, window=.3, max_age=.15, velocity_limit=.03, position_span=3*25/65535):
+    def __init__(self, *, window=.3, max_age=.15, velocity_limit=.03):
         """保存窗口与阈值, 初始化样本队列和失效时间; 不执行任何控制动作."""
         self.window = window
         self.max_age = max_age
         self.velocity_limit = velocity_limit
-        self.position_span = position_span
         self.samples = deque(maxlen=600)
         self.lock = threading.Lock()
         self.broken_at = float('-inf')
         self._since = None
-        self._anchor = None
+        self._first_received = None
 
     def invalidate(self, received):
         """接收空档/状态变化使旧请求失效; 调用方不得持有本对象的锁."""
@@ -77,17 +76,17 @@ class StopFeedback:
         """查询 since 之后是否已有连续静止全窗口, 不以恢复帧消除旧请求失败.
 
         since / now 为单调秒, now_ns 与消息时间戳处于同一 ROS 时钟域.
-        首帧固定请求锚点; 至少三帧覆盖窗口, 逐帧速度, 位置极差和锚点位移均需达标.
+        至少三帧覆盖窗口，逐帧速度需达标；不检查位置极差或首帧偏差。
         发现新的过期也锁存 broken_at, 同一请求之后不能因新帧恢复而确认.
         """
         with self.lock:
             samples = [s for s in self.samples if s[0] >= since]
             if since != self._since:
-                self._since, self._anchor = since, None
-            if samples and self._anchor is None:
+                self._since, self._first_received = since, None
+            if samples and self._first_received is None:
                 if samples[0][0]-since > self.max_age:
-                    return False  # 请求起点证据已丢失, 不能把较晚位置重新当作锚点.
-                self._anchor = samples[0][2]
+                    return False  # 请求起点证据已丢失，不能用较晚的新帧跨过空档。
+                self._first_received = samples[0][0]
             if since <= self.broken_at or len(samples) < 3:
                 return False
             latest = samples[-1]
@@ -105,6 +104,4 @@ class StopFeedback:
                 return False
             if any(s[3] > self.velocity_limit for s in selected):
                 return False
-            return all(max(s[2][j] for s in selected)-min(s[2][j] for s in selected) <= self.position_span+1e-12
-                       and max(abs(s[2][j]-self._anchor[j]) for s in selected) <= self.position_span+1e-12
-                       for j in range(6))
+            return True

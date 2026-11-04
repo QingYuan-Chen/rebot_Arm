@@ -9,6 +9,7 @@
 """
 from dataclasses import replace
 import time
+import threading
 from types import SimpleNamespace
 
 import numpy as np
@@ -68,6 +69,48 @@ def test_prepared_curve_uses_actual_writer_cycle_and_final_command_hold(monkeypa
         shutdown(manager)
 
 
+@pytest.mark.parametrize('residual', [.003, .01])
+def test_stationary_hold_residual_allows_two_checked_trajectories_without_reanchoring(monkeypatch,residual):
+    """假电机保留固定跟踪残差，正式静止、准备及接纳不能借旧目标距离间接拒绝。"""
+    from rebotarm_motion.trajectory_preparation import PreparationContext, analyze_trajectory, load_reference_limits
+    from pathlib import Path
+    manager,opened=make_local_manager(monkeypatch)
+    manager.lifecycle.connect()
+    motor=opened[0].motors[0]
+    send=motor.send_pos_vel
+    def offset_position(position,velocity):
+        send(position,velocity)
+        motor.state.pos=position+residual
+    monkeypatch.setattr(motor,'send_pos_vel',offset_position)
+    manager.lifecycle.enable()
+    manager.arm.update_trajectory_scene('scene-a')
+    low,high,limits=load_reference_limits(Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config')
+    try:
+        for _ in range(2):
+            wait_until(lambda:manager.arm.admission_snapshot()['ready'],timeout=2.)
+            hold=tuple(manager.runtime.execution.last_sent_target)
+            token=manager.arm.reserve_arm_preparation(time.monotonic()+2.)
+            assert token.feedback[0]-hold[0] == pytest.approx(residual)
+            target=list(token.feedback);target[0]+=.02
+            prepared,report=analyze_trajectory(JOINT_NAMES,point_to_point(token.feedback,target,1.),
+                lower=low,upper=high,limits=limits,
+                context=PreparationContext(token.session,token.generation,token.hold,token.feedback,
+                    token.observed_at,True,True),now=time.monotonic(),
+                collision_check=lambda _,positions:dict(state='pass',checked_samples=len(positions),requested_samples=len(positions)))
+            assert report['state']=='pass'
+            assert prepared.curve.points[0].positions==hold
+            assert manager.runtime.execution.last_sent_target==hold
+            payload=prepared.to_payload()
+            payload.update(gripper_positions=token.gripper_positions,gripper_generation=token.gripper_generation,
+                scene_revision=token.scene_revision)
+            task=manager.arm.admit_prepared_arm_trajectory(token,manager.arm.decode_prepared_arm_trajectory(payload))
+            assert task.event.wait(3.)
+            assert task.result.state=='succeeded'
+            assert manager.runtime.execution.last_sent_target==tuple(target)
+    finally:
+        shutdown(manager)
+
+
 @pytest.mark.parametrize('change', ['scene', 'gripper', 'hold', 'deadline', 'disable', 'reconnect'])
 def test_stale_handoff_never_starts_after_context_change(monkeypatch, change):
     manager, bus = enabled_manager(monkeypatch)
@@ -113,6 +156,27 @@ def test_preparation_reserves_arm_gripper_and_cancel_waits_for_stop(monkeypatch)
         assert manager.lifecycle.enabled
         with pytest.raises(RuntimeError):
             manager.arm.admit_prepared_arm_trajectory(token, handoff)
+    finally:
+        shutdown(manager)
+
+
+@pytest.mark.parametrize('dimensions', [6, 7])
+def test_finger_position_change_without_new_owner_does_not_reject_checked_trajectory(monkeypatch, dimensions):
+    """夹爪位置变化不再按量化偏差拒绝，原预约和发送确认仍须完整收尾。"""
+    manager, bus = enabled_manager(monkeypatch)
+    try:
+        follow_gripper(bus, monkeypatch)
+        token, _, handoff = reserve(manager) if dimensions == 6 else coordinated_reserve(manager)
+        original = manager.arm.gripper
+        def changed_position():
+            state = original.snapshot()
+            return dict(state, raw_position=state['raw_position']-.01,
+                positions=(state['positions'][0]+.00009, state['positions'][1]-.00009))
+        manager.arm.gripper = replace(original, snapshot=changed_position)
+        task = manager.arm.admit_prepared_arm_trajectory(token, handoff)
+        assert task.event.wait(3.) and task.result.state == 'succeeded'
+        wait_until(lambda: not manager.runtime.arm_resource_reserved)
+        assert manager.lifecycle.enabled
     finally:
         shutdown(manager)
 
@@ -213,7 +277,8 @@ def test_action_wait_cancels_late_service_without_decoding_or_admitting(reason):
     actions._prepare_type = PrepareArmTrajectory
     actions._prepare_client = SimpleNamespace(call_async=lambda request: SimpleNamespace(
         done=lambda: False, cancel=lambda: canceled.append(True)))
-    actions._arm = SimpleNamespace()
+    actions._trajectory_mode = 'prepared_v1'
+    actions._arm = SimpleNamespace(trajectory_capability=lambda mode: {})
     token = SimpleNamespace(session=1, generation=2, hold=(0.,)*6, feedback=(0.,)*6,
         observed_at=time.monotonic(), gripper_positions=(0.,0.), gripper_generation=0,
         scene_revision='a', deadline=time.monotonic()+(-1. if reason=='deadline' else 1.))
@@ -259,6 +324,262 @@ def test_action_cancel_invalidates_owner_before_returning_acceptance():
     canceled=[]
     actions._trajectory_mode='prepared_v1'
     actions._pending_preparations={id(request):(request,token)}
-    actions._arm=SimpleNamespace(cancel_arm_preparation=canceled.append)
+    actions._arm=SimpleNamespace(cancel_arm_preparation=lambda token, *, wait_for_stop:
+        canceled.append((token, wait_for_stop)))
     assert actions.cancel_follow_joint_trajectory(SimpleNamespace(request=request)) == CancelResponse.ACCEPT
-    assert canceled == [token]
+    assert canceled == [(token, False)]
+
+
+def coordinated_reserve(manager, duration=.4, finger=.0005):
+    """构造七轴已检查交接，假总线以 MIT 参考更新位置；不替代真实动力学验收。"""
+    from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
+    token = manager.arm.reserve_arm_preparation(time.monotonic()+2.)
+    start = (*token.hold, token.gripper_positions[0])
+    target = (start[0]+.02, *start[1:6], finger)
+    curve = build_curve(COORDINATED_JOINT_NAMES, point_to_point(start, target, duration))
+    payload = dict(curve=curve.to_payload(), context=dict(session=token.session,
+        generation=token.generation, hold=token.hold), gripper_positions=token.gripper_positions,
+        gripper_generation=token.gripper_generation, scene_revision=token.scene_revision,
+        capability_revision=token.capability)
+    return token, curve, manager.arm.decode_prepared_arm_trajectory(payload)
+
+
+def follow_gripper(bus, monkeypatch):
+    motor = bus.motors[-1]
+    original = motor.send_mit
+    def send(*args):
+        original(*args)
+        if args[2] > 0:
+            motor.state.pos = args[0]
+    monkeypatch.setattr(motor, 'send_mit', send)
+
+
+def test_coordinated_delay_uses_one_reference_time_for_both_actuators():
+    from rebotarmcontroller.runtime.coordinated_trajectory import CoordinatedTrajectory
+    from rebotarmcontroller.arm.arm_execution import ArmExecution
+    from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
+    execution = ArmExecution();execution.running = True
+    times = iter((10.,10.29,10.291))
+    owner = CoordinatedTrajectory(execution,clock=lambda:next(times))
+    curve = build_curve(COORDINATED_JOINT_NAMES,
+        point_to_point((0.,)*7,(.02,0.,0.,0.,0.,0.,.0005),.4))
+    expected = curve.sample(.29)[0]
+    arm_sent, finger_sent = [], []
+    gripper = SimpleNamespace(begin_coordinated=lambda:1,end_coordinated=lambda generation:True,
+        coordinated_state=lambda generation:dict(raw_position=-expected[-1]/.009,observed_at=10.29),
+        send_coordinated=lambda generation,q:finger_sent.append(q))
+    task = owner.submit(curve,execution.generation,gripper)
+    assert owner.tick(SimpleNamespace(send_position_target=arm_sent.append),gripper,
+        SimpleNamespace(positions=expected[:6],observed_at=10.29))
+    assert len(arm_sent) == len(finger_sent) == 1
+    assert arm_sent[0].positions == pytest.approx(expected[:6])
+    assert finger_sent == pytest.approx(expected[-1:])
+    assert not task.event.is_set() and task.sent_at is None
+
+
+def test_coordinated_writer_sends_both_tracks_and_releases_only_after_neutral(monkeypatch):
+    manager, bus = enabled_manager(monkeypatch)
+    try:
+        follow_gripper(bus, monkeypatch)
+        token, curve, handoff = coordinated_reserve(manager)
+        before = len(bus.events)
+        task = manager.arm.admit_prepared_arm_trajectory(token, handoff)
+        assert task.event.wait(2.)
+        assert task.result.state == 'succeeded', task.result
+        events = bus.events[before:]
+        finger = [args for joint,method,args in events if joint == 7 and method == 'mit']
+        assert len(finger) >= 20
+        assert any(args[0] < -.01 and args[2] > 0 for args in finger)
+        assert finger[-1][2:5] == (0., 0., 0.)
+        assert manager.runtime.execution.last_sent_target == curve.points[-1].positions[:6]
+        wait_until(lambda: not manager.runtime.arm_resource_reserved)
+        assert manager.lifecycle.enabled
+    finally:
+        shutdown(manager)
+
+
+@pytest.mark.parametrize('change', ['cancel', 'scene', 'release', 'arm_failure', 'finger_failure'])
+def test_coordinated_stop_or_partial_failure_never_reports_success(monkeypatch, change):
+    manager, bus = enabled_manager(monkeypatch)
+    try:
+        follow_gripper(bus, monkeypatch)
+        token, curve, handoff = coordinated_reserve(manager, 1.)
+        task = manager.arm.admit_prepared_arm_trajectory(token, handoff)
+        time.sleep(.03)
+        if change == 'cancel':
+            manager.arm.stop_active_motion(task)
+        elif change == 'scene':
+            manager.arm.update_trajectory_scene('scene-b')
+        elif change == 'release':
+            manager.gripper.release_grasp_hold('protective release')
+        elif change == 'arm_failure':
+            bus.failure = (3, 'position')
+        else:
+            bus.failure = (7, 'mit')
+        assert task.event.wait(3.)
+        assert task.result.state != 'succeeded'
+        if change in ('finger_failure','arm_failure'):
+            wait_until(lambda: not manager.runtime.control_loop_active)
+            assert manager.lifecycle.state == 'DISABLING'
+            assert bus.disables == 1
+        else:
+            wait_until(lambda: not manager.runtime.arm_resource_reserved)
+            assert manager.lifecycle.enabled
+    finally:
+        bus.failure = None
+        shutdown(manager)
+
+
+def test_diagnostic_hold_residual_no_longer_rejects_or_changes_hold(monkeypatch):
+    manager, bus = enabled_manager(monkeypatch)
+    try:
+        sample = manager.feedback.joint_snapshot()
+        sample = replace(sample, positions=(.003, *sample.positions[1:]))
+        reasons = manager.arm._admission_reasons(sample, (0.,)*6, time.monotonic())
+        assert reasons == []
+        assert manager.runtime.execution.last_sent_target == (0.,)*6
+    finally:
+        shutdown(manager)
+
+
+@pytest.mark.parametrize('dimensions', [6, 7])
+@pytest.mark.parametrize('residual', [.003, .01])
+def test_cancel_with_stationary_residual_releases_resources_and_allows_next_goal(monkeypatch, dimensions, residual):
+    """取消后的静止不依赖目标残差；反复空闲停止保留原保持命令，不逐次追锚。"""
+    manager, bus = enabled_manager(monkeypatch)
+    try:
+        follow_gripper(bus, monkeypatch)
+        motor = bus.motors[0]
+        send = motor.send_pos_vel
+        def offset(position, velocity):
+            send(position, velocity)
+            motor.state.pos = position+residual
+        monkeypatch.setattr(motor, 'send_pos_vel', offset)
+        wait_until(lambda: manager.arm.admission_snapshot()['ready']
+            and abs(manager.feedback.joint_snapshot().positions[0]-manager.runtime.target()[0]-residual) < 1e-9)
+        token, _, handoff = (reserve(manager, 1.) if dimensions == 6 else coordinated_reserve(manager, 1.))
+        task = manager.arm.admit_prepared_arm_trajectory(token, handoff)
+        time.sleep(.04)
+        manager.arm.stop_active_motion(task)
+        assert task.event.is_set() and task.result.state == 'canceled'
+        assert not manager.runtime.arm_resource_reserved
+        assert manager.arm._stop_wait is None
+        hold = tuple(manager.runtime.execution.last_sent_target)
+        manager.arm.stop_active_motion()
+        assert manager.runtime.execution.last_sent_target == hold
+        wait_until(lambda: manager.arm.admission_snapshot()['ready'])
+        token, _, handoff = reserve(manager, 1.)
+        next_task = manager.arm.admit_prepared_arm_trajectory(token, handoff)
+        assert next_task.event.wait(3.) and next_task.result.state == 'succeeded'
+        wait_until(lambda: not manager.runtime.arm_resource_reserved)
+        assert manager.lifecycle.enabled
+    finally:
+        shutdown(manager)
+
+
+@pytest.mark.parametrize('previous_result', ['succeeded', 'canceled', 'aborted'])
+@pytest.mark.parametrize('dimensions', [6, 7])
+def test_old_coordinated_terminal_cannot_finalize_next_task(monkeypatch, previous_result, dimensions):
+    """旧终态不能提前释放新预约，也不能使新成功任务永久占用资源。"""
+    manager, bus = enabled_manager(monkeypatch)
+    try:
+        follow_gripper(bus, monkeypatch)
+        token, _, handoff = coordinated_reserve(manager, .4 if previous_result == 'succeeded' else 1.)
+        old = manager.arm.admit_prepared_arm_trajectory(token, handoff)
+        if previous_result == 'canceled':
+            manager.arm.stop_active_motion(old)
+        elif previous_result == 'aborted':
+            original = manager.arm.gripper
+            def fail_coordinated_state(generation):
+                raise RuntimeError('injected coordinated state failure')
+            manager.arm.gripper = replace(original, coordinated_state=fail_coordinated_state)
+        assert old.event.wait(3.) and old.result.state == previous_result
+        if previous_result == 'aborted':
+            manager.arm.gripper = original
+        wait_until(lambda: manager.arm.admission_snapshot()['ready'])
+        token, _, handoff = (reserve(manager) if dimensions == 6 else coordinated_reserve(manager))
+        current = manager.arm.admit_prepared_arm_trajectory(token, handoff)
+        time.sleep(.04)
+        assert not current.event.is_set()
+        assert manager.lifecycle.execution == 'TRAJ_RUNNING'
+        assert manager.runtime.execution.reservation is token
+        with pytest.raises(RuntimeError, match='reserved'):
+            manager.gripper.set_gripper_target(.01)
+        assert current.event.wait(2.) and current.result.state == 'succeeded'
+        wait_until(lambda: not manager.runtime.arm_resource_reserved)
+        assert manager.lifecycle.execution == 'IDLE'
+    finally:
+        shutdown(manager)
+
+
+@pytest.mark.parametrize('fault', [None, 'gripper_timeout', 'arm_velocity'])
+def test_coordinated_stop_waits_for_both_sides_without_restart_or_late_cleanup(monkeypatch, fault):
+    """机械臂先停稳时仍加入原事务；超时保留预约，旧续体不能清理后继准备。"""
+    manager, bus = enabled_manager(monkeypatch)
+    allow_gripper = threading.Event()
+    workers, errors = [], []
+    try:
+        follow_gripper(bus, monkeypatch)
+        token, _, handoff = coordinated_reserve(manager, 1.)
+        task = manager.arm.admit_prepared_arm_trajectory(token, handoff)
+        original = manager.arm.gripper
+        def stationary_gripper():
+            if not allow_gripper.is_set():
+                raise RuntimeError('injected gripper still moving')
+            return original.snapshot()
+        manager.arm.gripper = replace(original, snapshot=stationary_gripper)
+        def stop():
+            try:
+                manager.arm.stop_active_motion(task)
+            except RuntimeError as exc:
+                errors.append(str(exc))
+        worker = threading.Thread(target=stop)
+        workers.append(worker); worker.start()
+        wait_until(lambda: manager.arm._stop_wait is not None)
+        old_poll, _ = manager.arm._stop_wait
+        generation = manager.runtime.target_generation
+        wait_until(lambda: manager.arm._stop.result.state == 'confirmed')
+        with pytest.raises(RuntimeError, match='pending'):
+            manager.arm.reserve_arm_preparation(time.monotonic()+2.)
+        worker = threading.Thread(target=stop)
+        workers.append(worker); worker.start()
+        time.sleep(.05)
+        assert manager.runtime.target_generation == generation
+        assert not task.event.is_set() and manager.runtime.arm_resource_reserved
+        if fault == 'arm_velocity':
+            for motor in bus.motors[:6]:
+                motor.state.vel = .2
+            wait_until(lambda: manager.arm._stop.evidence.reason == 'velocity')
+        if fault != 'gripper_timeout':
+            allow_gripper.set()
+        for worker in workers:
+            worker.join(3.)
+            assert not worker.is_alive()
+        assert bool(errors) == (fault is not None)
+        if fault is not None:
+            assert task.result.state == 'aborted' and manager.runtime.arm_resource_reserved
+            time.sleep(.1)
+            assert manager.runtime.target_generation == generation
+            allow_gripper.set()
+            for motor in bus.motors[:6]:
+                motor.state.vel = 0.
+            manager.arm.stop_active_motion()
+        else:
+            assert task.result.state == 'canceled'
+        assert manager.arm._stop_wait is None
+        assert not manager.runtime.arm_resource_reserved
+        wait_until(lambda: manager.arm.admission_snapshot()['ready'])
+        newer = manager.arm.reserve_arm_preparation(time.monotonic()+2.)
+        if fault is not None:
+            with pytest.raises(RuntimeError, match='superseded'):
+                manager.runtime.call(old_poll)
+        else:
+            assert manager.runtime.call(old_poll) == (True, None)
+        assert manager.runtime.execution.reservation is newer
+        assert manager.lifecycle.execution == 'TRAJ_PREPARING'
+        manager.arm.cancel_arm_preparation(newer)
+    finally:
+        allow_gripper.set()
+        for worker in workers:
+            worker.join(3.)
+        shutdown(manager)

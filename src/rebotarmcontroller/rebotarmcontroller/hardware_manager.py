@@ -133,6 +133,7 @@ class HardwareManager:
             check_prepared_context=self.arm.check_prepared_context,
             passthrough_active=self.arm.passthrough_active,
             update_task=self.arm.update_task,
+            coordinated_tick=self.arm.coordinated_tick,
         )
         gripper_cycle_port = GripperCyclePort(
             clear_passthrough=self.gripper.clear_passthrough,
@@ -174,7 +175,11 @@ class HardwareManager:
         self.feedback.bind(gripper=gripper_acquisition_port)
         self.gripper.bind(feedback=gripper_feedback_port, protection=protection_port)
         # 准备所需的夹爪快照仍由夹爪组件核验；manager 只绑定方法，不保存第二份状态。
-        arm_gripper_port = ArmGripperPort(snapshot=self.gripper.preparation_snapshot)
+        arm_gripper_port = ArmGripperPort(snapshot=self.gripper.preparation_snapshot,
+            begin_coordinated=self.gripper.begin_coordinated,
+            coordinated_state=self.gripper.coordinated_state,
+            send_coordinated=self.gripper.send_coordinated,
+            end_coordinated=self.gripper.end_coordinated)
         self.arm.bind(cycle=cycle_port, feedback=arm_feedback_port, gravity=gravity_arm_port,
                       protection=protection_port, gripper=arm_gripper_port)
         self.gravity.bind(arm=arm_gravity_port, cycle=cycle_port, feedback=gravity_feedback_port, protection=protection_port)

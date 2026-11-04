@@ -245,6 +245,7 @@ class VisualGraspExecutorNode(Node):
         # ── 执行模式与速度缩放 ─────────────────────────────────────────────
         # plan_only = 只规划干跑（默认）；execute/real = 真正下发轨迹与夹爪命令
         self.declare_parameter("execution_mode", "plan_only")
+        self.declare_parameter("trajectory_execution_mode", "legacy")
         # 仿真停止后的复位由本节点编排；真实硬件仍由操作者确认后单独恢复。
         self.declare_parameter("use_hardware", False)
         # 常规移动的速度缩放，无量纲 (0, 1]；越小越慢越安全

@@ -13,6 +13,10 @@
 """
 
 
+import time
+from rebotarm_trajectory.capability import decode_capability
+
+
 class TrajectoryCapability:
     """由入口节点持有的能力快照；初始 observed=None 表示尚无后端声明。"""
     def __init__(self, expected):
@@ -20,6 +24,27 @@ class TrajectoryCapability:
             raise ValueError('trajectory_execution_mode must be legacy or prepared_v1')
         self.expected = expected
         self.observed = None
+        self.snapshot = None
+        self.observed_at = 0.
+
+    def update_snapshot(self, message):
+        """版本化能力的接收时刻独立于旧模式话题；非法声明清掉旧许可。"""
+        self.snapshot = None
+        self.observed_at = 0.
+        try:
+            self.snapshot = decode_capability(message.data)
+            self.observed_at = time.monotonic()
+        except (ValueError,TypeError,KeyError):
+            pass
+
+    def require_snapshot(self):
+        """返回当前生效能力；过期为未知，不用最后一次快照冒充当前配置。"""
+        self.require()
+        if self.snapshot is None or time.monotonic()-self.observed_at > 1.:
+            raise ValueError('fresh versioned trajectory capability unavailable')
+        if self.snapshot['mode'] != self.expected:
+            raise ValueError('versioned trajectory capability mode mismatch')
+        return dict(self.snapshot)
 
     def update(self, message):
         """保留实际收到的值，未知字符串也留待 require 明确拒绝。"""

@@ -240,6 +240,13 @@ class ControllerRuntime:
         with self.execution.lock:
             # 使用当前单调时刻而非 dt 累加，调度延迟不会形成待补发的轨迹积压。
             target = self.execution.sample(time.monotonic())
+            self.send_position_target(target)
+
+    def send_position_target(self, target):
+        """发送设备周期已经采样的六轴候选；协同执行不在本方法再次读取时钟。"""
+        with self.execution.lock:
+            if target.generation != self.execution.generation:
+                raise RuntimeError('position target superseded before send')
             command = self.position.command(target)
             try:
                 receipt = self.driver.send_positions(command)

@@ -57,6 +57,33 @@ class _LegacySimulation:
         return SimpleNamespace(joint_positions=self.positions)
 
 
+@pytest.mark.parametrize('residual',[.003,.01])
+def test_sim_stationary_snapshot_accepts_hold_residual_but_still_requires_quiet_fresh_window(residual):
+    """不构造 ROS 节点或物理模型，只调用正式方法核对准入条件。"""
+    from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
+    hold=(0.,)*6
+    positions=(residual,0.,0.,0.,0.,0.,.01,-.01)
+    samples=[SimpleNamespace(simulation_time=t,joint_positions=positions,joint_velocities=(0.,)*8,
+        joint_names=tuple(f'joint{i}' for i in range(1,7))+('left_finger_joint','right_finger_joint'))
+        for t in (.8,.9,1.)]
+    owner=SimpleNamespace(_sim=SimpleNamespace(get_state=lambda:samples[-1],
+        get_control_status=lambda:SimpleNamespace(joint_targets=hold)),
+        _sample_history=samples,_last_physics_wall=time.monotonic())
+    snapshot=create_node_class()._stationary_snapshot
+    state,returned_hold=snapshot(owner)
+    assert state is samples[-1] and returned_hold==hold
+    # 六轴与双指位置跨越旧量化门限，只要速度窗口合格仍可继续。
+    samples[1].joint_positions=(.02,)*6+(.012,-.012)
+    assert snapshot(owner)[1]==hold
+    samples[-1].joint_velocities=(.1,)+(0.,)*7
+    with pytest.raises(RuntimeError,match='stationary evidence'):
+        snapshot(owner)
+    samples[-1].joint_velocities=(0.,)*8
+    owner._last_physics_wall=time.monotonic()-1.
+    with pytest.raises(RuntimeError,match='fresh complete stationary window'):
+        snapshot(owner)
+
+
 def test_ros_mode_surface_excludes_raw_torque():
     assert normalize_ros_control_mode(" position ") == "position"
     assert normalize_ros_control_mode("hold") == "hold"
@@ -407,7 +434,10 @@ def test_ros_adapter_trajectory_lifecycle_explicitly_enters_position_and_hold():
         "\n        def _timer_callback", 1
     )[0]
     assert "self._control.command_joint_positions(desired)" in execute_body
-    assert "self._control.command_joint_positions(sampler.sample(sampler.duration))" in execute_body
+    assert "self._finish_prepared(sampler)" in execute_body
+    finish_body = source.split("def _finish_prepared(self, sampler):", 1)[1].split("def _cancel_callback", 1)[0]
+    assert "self._control.command_joint_positions(sampler.sample(sampler.duration)[:6])" in finish_body
+    assert "sim.release_gripper_position()" in finish_body
     assert "if self._trajectory_mode == 'prepared_v1' else self._hold_current_position()" in execute_body
     assert "GOAL_TOLERANCE_VIOLATED" in execute_body
     assert "self._command_gate.stop_and_hold(self._hold_current_position)" in execute_body

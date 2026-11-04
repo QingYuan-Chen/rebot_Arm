@@ -7,8 +7,8 @@
   碰撞预检、示教回放起始对齐与关节轨迹构造工具。本包可以调用规划服务与控制器动作，但不得
   直接访问电机 SDK，硬件访问统一收敛在底层硬件控制包里。
 
-  说明：下面的依赖都是运行期声明（exec_depend）。本清单同时也是测试检查"源码中出现的包名
-  必须已在此声明"的依据，且包依赖图必须保持无环，因此不要随意增删或改动顺序。
+  说明：Python 运动算法由 ament_cmake_python 安装，C++ MoveIt 适配插件由 ament_cmake
+  构建；依赖按编译期和运行期分别声明。本清单也是分层检查的依据，包依赖图必须保持无环。
 -->
 <package format="3">
   <name>rebotarm_motion</name>
@@ -17,8 +17,15 @@
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 构建工具依赖：本包是纯 Python 包，构建类型为 ament_python（见文件末尾 export/build_type）。 -->
-  <buildtool_depend>ament_python</buildtool_depend>
+  <!-- 混合构建：保留 Python 数值算法，C++ 插件通过内部服务复用算法，不复制重定时实现。 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>pluginlib</depend>
+  <depend>moveit_core</depend>
+  <exec_depend>moveit_simple_controller_manager</exec_depend>
+  <build_depend>moveit_msgs</build_depend>
+  <build_depend>rebotarm_msgs</build_depend>
 
   <!-- geometry_msgs：位姿/点/四元数等几何消息类型（目标位姿与规划请求）。 -->
   <exec_depend>geometry_msgs</exec_depend>
@@ -60,6 +67,6 @@
   <exec_depend>rosidl_runtime_py</exec_depend>
 
   <export>
-    <build_type>ament_python</build_type>
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

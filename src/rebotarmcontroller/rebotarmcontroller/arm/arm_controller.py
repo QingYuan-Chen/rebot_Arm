@@ -22,8 +22,9 @@ from __future__ import annotations
 from ..contracts.component_ports import CyclePort, ArmFeedbackPort, GravityArmPort, ProtectionPort, ArmGripperPort
 from .arm_stop import ArmStop, CycleResult
 from .arm_trajectory import ArmTrajectory
+from ..runtime.coordinated_trajectory import CoordinatedTrajectory
 from .arm_execution import ArmExecution
-from ..runtime.stationary_evidence import StationaryEvidence, POSITION_SPAN
+from ..runtime.stationary_evidence import StationaryEvidence
 import logging
 from ..hardware.sdk_driver import CommandTransportError
 from typing import Optional
@@ -48,7 +49,15 @@ class ArmController:
         self._lifecycle = lifecycle
         self.settings = settings
         self._bound = False
+        import secrets
+        from ..gravity.gravity_control import package_file
+        from rebotarm_trajectory.capability import constraint_revision
+        self._limits_revision = constraint_revision(*(package_file('rebotarm_moveit_config', 'config/'+name).read_bytes()
+            for name in ('rebotarm.urdf','joint_limits.yaml')))
+        # 启动随机会话加设备代次，进程重启或重连均不能复用旧计划能力摘要。
+        self._capability_session = secrets.randbits(63)
         self._arm_trajectory = ArmTrajectory(runtime.execution)
+        self._coordinated_trajectory = CoordinatedTrajectory(runtime.execution)
         self._arm_passthrough_until = None
         self._stop = ArmStop()
         self._hold_evidence = StationaryEvidence()
@@ -58,12 +67,21 @@ class ArmController:
         self._scene_revision = ''
         self.gripper = None
 
+    def _task_owner(self):
+        """任务状态仍由各自所有者持有；活动协同优先，终态查询继续使用原句柄。"""
+        coordinated = self._coordinated_trajectory
+        if coordinated.task is not None and not coordinated.task.event.is_set():
+            return coordinated
+        return self._arm_trajectory
+
     def reset_session(self):
         """失能/重连不能复用上一会话的静止证据或停止续体."""
         self._hold_evidence.reset()
         self._hold_generation = None
         self._hold_confirmed_at = None
         self._stop.abort('controller session reset')
+        self._stop_wait = None
+        self.abort_task('controller session reset')
         self._backend.execution.reservation = None
         self._backend.execution.last_sent_target = None
 
@@ -94,9 +112,9 @@ class ArmController:
     def abort_task(self, message):
         """生命周期或保护终止任务, 不再等待旧停止确认."""
         self._stop.abort(message)
-        task = self._arm_trajectory.task
-        if task is not None:
-            self._arm_trajectory.finish(task, 'aborted', message)
+        for owner in (self._arm_trajectory, self._coordinated_trajectory):
+            if owner.task is not None:
+                owner.finish(owner.task, 'aborted', message)
 
     def passthrough_active(self):
         """查询是否存在透传租约, 由周期负责到期交接."""
@@ -104,21 +122,26 @@ class ArmController:
 
     def check_task_generation(self):
         """空闲周期结束过期任务; 停止中的任务交给停止状态机收尾."""
-        task = self._arm_trajectory.task
+        owner = self._task_owner()
+        task = owner.task
         if (task is not None and task.result.state != 'stopping'
                 and task.generation != self._backend.target_generation):
-            self._arm_trajectory.finish(task, 'aborted', 'execution canceled or superseded')
+            owner.finish(task, 'aborted', 'execution canceled or superseded')
 
     def check_prepared_context(self):
-        """固定夹爪变化或保护性释放先停止六轴，不能继续使用已检查的碰撞曲线。"""
+        """夹爪所有权或反馈失效时停止六轴；位置变化不再单独撤销曲线。"""
         token = self._backend.execution.reservation
-        if token is None or self._stop.pending:
+        if (token is None or self._stop_wait is not None
+                or self._lifecycle.execution not in ('TRAJ_PREPARING', 'TRAJ_RUNNING')):
+            # 停止收尾/超时保留预约时，不再把协同运动后的夹爪当作准备前的固定几何。
+            return
+        if self._coordinated_trajectory.active:
+            # 活动协同的夹爪由统一采样路径核验代次和反馈。
             return
         try:
-            # 每个周期重新查询原夹爪所有者；代次变化或原始角漂移都会使固定几何失效。
+            # 每个周期复核夹爪所有权与反馈健康，不再按微小位置变化中止。
             state = self.gripper.snapshot()
-            valid = (state['generation'] == token.gripper_generation
-                and abs(state['raw_position']-token.gripper_raw_position) <= POSITION_SPAN)
+            valid = state['generation'] == token.gripper_generation
         except RuntimeError:
             valid = False
         if valid:
@@ -133,10 +156,17 @@ class ArmController:
 
     def update_task(self, sample):
         """发送后以新鲜快照推进任务, 超差保持目标仍由六轴所有者设置."""
-        hold = self._arm_trajectory.update(sample.positions, sample.observed_at)
+        coordinated = self._coordinated_trajectory
+        owner = self._task_owner()
+        hold = None if owner is coordinated else owner.update(sample.positions, sample.observed_at)
         if hold is not None:
             self._backend.set_target(hold)
-        task = self._arm_trajectory.task
+        task = owner.task
+        if (coordinated.task is not None and coordinated.task.event.is_set()
+                and coordinated.task.generation == self._backend.target_generation
+                and self._lifecycle.execution == 'TRAJ_RUNNING'):
+            # 协同在本拍发送内结束后仍要收尾，但旧协同终态不能覆盖后继六轴任务。
+            task = coordinated.task
         if task is not None and task.event.is_set() and self._lifecycle.execution == 'TRAJ_RUNNING':
             self._lifecycle.set_execution_state('IDLE')
             if task.result.state == 'succeeded':
@@ -154,12 +184,14 @@ class ArmController:
             self._hold_evidence.reset()
         else:
             if self._hold_generation != self._backend.target_generation:
-                self._hold_evidence.reset(self._backend.target())
+                # 静止使用实际反馈的速度窗口；命令保持值不作为到位准入门限。
+                # reset 不写设备目标，不能把反馈残差偷偷变成新的保持命令。
+                self._hold_evidence.reset()
                 self._hold_generation = self._backend.target_generation
                 self._hold_confirmed_at = None
             reason = self._hold_evidence.observe(sample.positions, sample.velocities, sample.observed_at,
                                                  time.monotonic(), sequences=sample.sequences)
-            if reason in ('invalid_or_stale', 'source_regressed', 'source_gap', 'anchor_displacement'):
+            if reason in ('invalid_or_stale', 'source_regressed', 'source_gap'):
                 self._hold_confirmed_at = None
             elif self._hold_evidence.confirmed():
                 self._hold_confirmed_at = sample.observed_at
@@ -183,20 +215,22 @@ class ArmController:
         只有保持命令成功发送且后续新帧持续静止 0.2 s 才返回成功. 超时报告
         未确认, 保留使能和保持目标; 这里绝不把普通取消变成自动失能.
         """
-        owner = self._arm_trajectory
+        owner = self._task_owner()
         active = None if owner is None else owner.task
         if task is not None and (active is not task or task.event.is_set()):
             return
-        if self._stop.pending:
+        if self._stop_wait is not None and self._stop.result.state in ('stopping', 'confirmed'):
             # 加入同一确认, 不递增资源代次, 不重设目标, 也不共享可变的续体.
             poll, _ = self._stop_wait
             return CycleResult(poll)
+        # 已终止事务可由显式停止重新建立；旧续体仍绑定旧 stop，不能清理本次等待。
+        self._stop_wait = None
         with self._lifecycle.lock:
             previous = self._backend.target()
             evidence = self._hold_evidence
             known_hold = self._hold_generation == self._backend.target_generation
             # 孤立速度峰只使新的停止确认延后; 只要上一份已确认保持仍在
-            # 150 ms 内且当前位置仍接近原目标, 不因该峰重新锚定量化位置.
+            # 150 ms 内且保持代次未变，不因残差或该峰重新锚定命令目标。
             recently_confirmed = (self._hold_confirmed_at is not None
                                   and time.monotonic()-self._hold_confirmed_at <= .15)
             if (self._stop.result.state == 'confirmed'
@@ -209,11 +243,15 @@ class ArmController:
                         and self._backend.control_loop_active and not self._backend.trajectory_moving
                         and (active is None or active.event.is_set())
                         and not self.passthrough_active() and not self.gravity.gravity_compensation_active()
-                        and self.feedback.arm_failure() is None
-                        and np.max(np.abs(previous-self.feedback.joint_snapshot().positions)) <= POSITION_SPAN)
+                        and self.feedback.arm_failure() is None)
             self._backend.requests.invalidate('arm')
             if active is not None:
                 owner.stopping(active)
+            coordinated_stop = owner is self._coordinated_trajectory and active is not None
+            reserved_stop = self._backend.execution.reservation is not None
+            if coordinated_stop:
+                if not self.gripper.end_coordinated(owner.gripper_generation):
+                    raise RuntimeError('coordinated gripper neutral not confirmed')
             self._backend.cancel_trajectory()
             self._arm_passthrough_until = None
             if self._lifecycle.enabled:
@@ -234,20 +272,31 @@ class ArmController:
 
                 def cancel(reason):
                     """代次失效或运行时关闭时终结本次停止, 旧续体不能改变后继目标."""
+                    if completed:
+                        return
                     stop.abort(reason)
+                    if self._stop is stop:
+                        self._stop_wait = None
                     if (self._lifecycle.enabled
                             and self._backend.target_generation == stop.result.generation):
                         self._lifecycle.set_execution_state('IDLE')
                     if active is not None:
                         owner.finish(active, 'aborted', f'stop/hold unconfirmed: {reason}')
 
+                completed = False
+
                 def poll():
                     """只读已验证缓存以推进本次停止; 未确认时返回未完成, 不阻塞设备线程."""
+                    nonlocal completed
+                    # 重复停止的等待者共享本续体；完成后的迟到轮询只返回回执，不再改资源。
+                    if completed:
+                        return True, None
                     # 所有读取均来自已验证缓存; 这里不发送, 不睡眠, 不持锁等新帧.
-                    if (not self._lifecycle.enabled
+                    if (self._stop is not stop or not self._lifecycle.enabled
                             or self._backend.target_generation != stop.result.generation):
                         stop.abort('stop superseded by lifecycle or target generation')
-                    if stop.pending:
+                        raise RuntimeError('stop superseded by lifecycle or target generation')
+                    if stop.result.state in ('stopping', 'confirmed'):
                         sample = self.feedback.joint_snapshot()
                         if any(code != 1 for code in sample.statuses):
                             stop.abort('enabled holding status not confirmed')
@@ -264,10 +313,21 @@ class ArmController:
                         return False, None
                     if result.state != 'confirmed':
                         raise RuntimeError(result.message)
+                    if reserved_stop:
+                        try:
+                            self.gripper.snapshot()
+                        except RuntimeError:
+                            if time.monotonic() >= stop.deadline:
+                                raise RuntimeError('coordinated gripper stationary stop unconfirmed')
+                            return False, None
+                    completed = True
+                    self._stop_wait = None
                     self._lifecycle.set_execution_state('IDLE')
                     self._backend.execution.reservation = None
                     if active is not None:
-                        owner.finish(active, 'canceled', result.message)
+                        decision = active.result.decision if coordinated_stop else None
+                        owner.finish(active, 'aborted' if decision else 'canceled',
+                            f'{decision.reason}; {result.message}' if decision else result.message)
                     return True, None
 
                 self._stop_wait = (poll, cancel)
@@ -279,7 +339,7 @@ class ArmController:
 
     def require_available(self):
         """停止确认完成前禁止接替输出; 显式失能仍由独立高优先级入口处理."""
-        if self._stop.pending:
+        if self._stop_wait is not None:
             raise RuntimeError('arm stop/hold confirmation pending')
 
     def _prepared_snapshot(self):
@@ -289,17 +349,62 @@ class ArmController:
         now = time.monotonic()
         sample = self.feedback.joint_snapshot()
         hold = execution.last_sent_target
-        if (hold is None or self._backend.mode != 'pos_vel'
-                or self.passthrough_active() or self.gravity.gravity_compensation_active()
-                or self._hold_generation != execution.generation
-                or not self._hold_evidence.confirmed(now)
-                or any(code != 1 for code in sample.statuses)
-                or not -.005 <= now-sample.observed_at <= .15
-                or np.max(np.abs(np.asarray(hold)-sample.positions)) > POSITION_SPAN):
-            raise RuntimeError('fresh stationary acknowledged hold required')
+        reasons = self._admission_reasons(sample, hold, now)
+        if reasons:
+            raise RuntimeError('fresh stationary acknowledged hold required: '+ '; '.join(reasons))
         if self.gripper is None:
             raise RuntimeError('fixed gripper snapshot port unavailable')
         return sample, tuple(hold), self.gripper.snapshot()
+
+    def _admission_reasons(self, sample, hold, now):
+        """只解释现有门限；诊断和执行准入共用判定，不能据此修改保持锚点。"""
+        execution = self._backend.execution
+        reasons = []
+        if not self._lifecycle.enabled:
+            reasons.append('controller disabled')
+        if hold is None:
+            reasons.append('no acknowledged hold target')
+        if self._backend.mode != 'pos_vel':
+            reasons.append(f'mode={self._backend.mode}, required=pos_vel')
+        if self.passthrough_active() or self.gravity.gravity_compensation_active():
+            reasons.append('arm owned by passthrough or gravity')
+        if self._hold_generation != execution.generation:
+            reasons.append(f'hold_generation={self._hold_generation}, generation={execution.generation}')
+        if not self._hold_evidence.confirmed(now):
+            reasons.append(f'stationary evidence unavailable: {self._hold_evidence.reason}')
+        age = now-sample.observed_at
+        if not -.005 <= age <= .15:
+            reasons.append(f'feedback_age={age:.6f}s, range=[-0.005,0.15]s')
+        for index, status in enumerate(sample.statuses):
+            if status != 1:
+                reasons.append(f'joint{index+1}: status={status}, required=1')
+        return reasons
+
+    def admission_snapshot(self):
+        """ROS 线程只读缓存，快照不是某次 REJECT 的因果证据，不触发设备请求。"""
+        now = time.monotonic()
+        try:
+            sample = self.feedback.joint_snapshot()
+            reasons = self._admission_reasons(sample, self._backend.execution.last_sent_target, now)
+            if self._backend.arm_resource_reserved or self._stop_wait is not None:
+                reasons.append('arm/gripper resources reserved or stopping')
+            try:
+                self.gripper.snapshot()
+            except RuntimeError as exc:
+                reasons.append(f'gripper: {exc}')
+            if not self._scene_revision:
+                reasons.append('scene revision unavailable')
+            return dict(ready=not reasons, reasons=reasons, observed_at=sample.observed_at,
+                generation=self._backend.target_generation, scene_revision=self._scene_revision)
+        except RuntimeError as exc:
+            return dict(ready=False, reasons=[str(exc)], observed_at=0., generation=self._backend.target_generation)
+
+    def trajectory_capability(self, mode):
+        """发布当前配置与设备会话；失能不改配置，重连必须改变能力绑定。"""
+        from rebotarm_trajectory.capability import make_capability
+        return make_capability(mode, self._capability_session+self._backend.requests.generations['device'],
+            self.settings.gripper_position_max_speed_rad_s, self.settings.gripper_position_torque_cap_nm,
+            self._limits_revision)
 
     @device_request
     def reserve_arm_preparation(self, deadline):
@@ -311,7 +416,7 @@ class ArmController:
         from ..contracts.controller_values import ArmPreparation
         self.require_available()
         execution = self._backend.execution
-        task = self._arm_trajectory.task
+        task = self._task_owner().task
         if execution.reservation is not None or (task is not None and not task.event.is_set()):
             raise RuntimeError('arm resource busy')
         if not np.isfinite(deadline) or time.monotonic() >= deadline or not self._scene_revision:
@@ -319,7 +424,8 @@ class ArmController:
         sample, hold, gripper = self._prepared_snapshot()
         token = ArmPreparation(self._backend.requests.generations['device'], execution.generation,
             hold, sample.positions, sample.observed_at, tuple(gripper['positions']),
-            gripper['generation'], gripper['raw_position'], self._scene_revision, deadline)
+            gripper['generation'], gripper['raw_position'], self._scene_revision, deadline,
+            self.trajectory_capability('prepared_v1')['revision'])
         execution.reservation = token
         self._lifecycle.set_execution_state('TRAJ_PREPARING')
         return token
@@ -332,18 +438,20 @@ class ArmController:
         curve = curve_from_payload(payload['curve'])
         # 线性规模检查留在调用线程；这里只验证载荷，不重做 motion 的生成/碰撞算法。
         for point in curve.points:
-            ArmExecution.validate_target(point.positions)
+            ArmExecution.validate_target(point.positions[:6])
+            if len(point.positions) == 7 and not 0 <= point.positions[6] <= .045:
+                raise ValueError('prepared finger outside position limits')
         context = payload['context']
         return PreparedArmHandoff(curve, context['session'], context['generation'],
             tuple(context['hold']), tuple(payload['gripper_positions']),
-            payload['gripper_generation'], payload['scene_revision'])
+            payload['gripper_generation'], payload['scene_revision'], payload.get('capability_revision', ''))
 
     @device_request
     def admit_prepared_arm_trajectory(self, token, handoff):
         """同一设备事务内复核身份与反馈并接纳原系数，不再改点或时间。"""
         execution = self._backend.execution
         # 先核对原预约身份；即使迟到响应的数值与新请求相同，也不能复用旧执行许可。
-        if (execution.reservation is not token or self._stop.pending
+        if (execution.reservation is not token or self._stop_wait is not None
                 or time.monotonic() >= token.deadline
                 or self._backend.requests.generations['device'] != token.session
                 or execution.generation != token.generation
@@ -356,22 +464,33 @@ class ArmController:
                 or handoff.scene_revision != token.scene_revision
                 or handoff.gripper_generation != token.gripper_generation
                 or handoff.gripper_positions != token.gripper_positions
-                or gripper['generation'] != token.gripper_generation
-                or abs(gripper['raw_position']-token.gripper_raw_position) > POSITION_SPAN):
+                or gripper['generation'] != token.gripper_generation):
             raise RuntimeError('prepared trajectory context changed')
         curve = handoff.curve
-        if curve.points[0].positions != token.hold:
+        if len(curve.joint_names) == 7 and (handoff.capability != token.capability
+                or token.capability != self.trajectory_capability('prepared_v1')['revision']):
+            raise RuntimeError('coordinated trajectory capability changed or absent')
+        if curve.points[0].positions[:6] != token.hold:
             raise ValueError('prepared initial hold mismatch')
         # 预约贯穿执行与停止确认，不能在服务成功或 Action 接纳时就解除夹爪排他。
-        task = self._arm_trajectory.submit_prepared(curve, token.generation)
+        if len(curve.joint_names) == 7:
+            if abs(curve.points[0].positions[6]-token.gripper_positions[0]) > 1e-9:
+                raise ValueError('prepared initial finger mismatch')
+            task = self._coordinated_trajectory.submit(curve, token.generation, self.gripper)
+        else:
+            task = self._arm_trajectory.submit_prepared(curve, token.generation)
         self._lifecycle.set_execution_state('TRAJ_RUNNING')
         return task
 
     @device_request
-    def cancel_arm_preparation(self, token):
-        """仅撤销本令牌，停止确认之前继续占用固定夹爪。"""
+    def cancel_arm_preparation(self, token, *, wait_for_stop=True):
+        """仅撤销本令牌；ROS 取消先回接纳，设备周期仍持预约直至停止确认。"""
         if self._backend.execution.reservation is token:
-            return self.stop_active_motion()
+            stopping = self.stop_active_motion()
+            if wait_for_stop or not isinstance(stopping, CycleResult):
+                return stopping
+            # 不在 ROS cancel callback 等待静止，否则任务终态会抢在 CANCELING 状态前发布。
+            self._backend.requests.submit(lambda: stopping, resource='device', priority=0)
 
     @device_request
     def update_trajectory_scene(self, revision):
@@ -427,7 +546,29 @@ class ArmController:
 
     def arm_execution_status(self, task):
         """返回指定任务结果快照, 状态不能与接替任务混用."""
-        return self._arm_trajectory.snapshot(task)
+        owner = self._coordinated_trajectory if task is self._coordinated_trajectory.task else self._arm_trajectory
+        return owner.snapshot(task)
+
+    def coordinated_tick(self):
+        """唯一设备周期推进协同；普通超差受控停止，传输失败交既有保护流程。"""
+        owner = self._coordinated_trajectory
+        if not owner.active:
+            return False
+        try:
+            return owner.tick(self._backend, self.gripper, self.feedback.joint_snapshot())
+        except CommandTransportError:
+            raise
+        except (ValueError, RuntimeError) as exc:
+            logging.getLogger('rebotarm.audit').error('coordinated_failed: %s', exc)
+            from dataclasses import replace
+            from ..runtime.command_guard import failure_decision
+            # 停止确认完成后仍保留原失败原因；不能把跟踪失败显示成一次普通取消。
+            with owner.lock:
+                owner.task.result = replace(owner.task.result, decision=failure_decision(str(exc), 'TRAJECTORY'))
+            stopping = self.stop_active_motion(owner.task)
+            if isinstance(stopping, CycleResult):
+                self._backend.requests.submit(lambda: stopping, resource='device', priority=0)
+            return False
 
     @device_request
     def set_joint_target(self, positions) -> None:

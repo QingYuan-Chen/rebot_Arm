@@ -26,6 +26,7 @@ def generate_launch_description():
         "arm_config": LaunchConfiguration("arm_config"),
         "gripper_config": LaunchConfiguration("gripper_config"),
         "arm_namespace": LaunchConfiguration("arm_namespace"),
+        "trajectory_execution_mode": LaunchConfiguration("trajectory_execution_mode"),
         "channel": LaunchConfiguration("channel"),
         "shutdown_safe_home": LaunchConfiguration("shutdown_safe_home"),
         "joint_state_rate": LaunchConfiguration("joint_state_rate"),
@@ -69,6 +70,9 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
+            # 首次交付保留旧默认；现场实测新路径时由操作者显式选择。
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
+                choices=["legacy", "prepared_v1"]),
             DeclareLaunchArgument("channel", default_value=""),
             DeclareLaunchArgument("shutdown_safe_home", default_value="false"),
             DeclareLaunchArgument("joint_state_rate", default_value="100.0"),

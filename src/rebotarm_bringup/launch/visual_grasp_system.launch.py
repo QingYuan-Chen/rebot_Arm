@@ -74,6 +74,7 @@ def generate_launch_description():
         "arm_namespace": "rebotarm",
         "channel": "auto",
         "use_hardware": "false",
+        "trajectory_execution_mode": "legacy",
         "use_local_rviz": "true",
         "start_vision": "true",
         "start_graspnet_baseline": "true",
@@ -97,6 +98,8 @@ def generate_launch_description():
     declarations = []
     for name, default in names.items():
         kwargs = {"default_value": default}
+        if name == "trajectory_execution_mode":
+            kwargs["choices"] = ["legacy", "prepared_v1"]
         declarations.append(DeclareLaunchArgument(name, **kwargs))
     declarations.append(
         GroupAction(actions=[

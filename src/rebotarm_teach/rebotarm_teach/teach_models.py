@@ -32,6 +32,11 @@ class TeachSample:
     efforts: tuple[float, ...]
     motor_status: dict[str, int]
     arm_state: str
+    # 原始六轴记录保留原向量；第二版另存夹爪源值和有效性，派生准备时才合成七轴。
+    format_version: int = 1
+    gripper_width_m: float | None = None
+    gripper_source_stamp: float | None = None
+    gripper_valid: bool = False
 
 
 @dataclass(frozen=True)

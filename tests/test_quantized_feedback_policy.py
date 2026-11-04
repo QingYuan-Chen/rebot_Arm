@@ -1,11 +1,11 @@
-"""量化反馈的反例：真实漂移、振荡、持续速度、旧缓存和空档不能确认静止。"""
+"""位置变化不设门限；速度、旧缓存、断流和失能回执仍约束确认。"""
 import math
 from types import SimpleNamespace as NS
 
 import numpy as np
 import pytest
 
-from rebotarmcontroller.runtime.stationary_evidence import StationaryEvidence, DisabledTransitionEvidence, POSITION_CODE
+from rebotarmcontroller.runtime.stationary_evidence import StationaryEvidence, DisabledTransitionEvidence
 from rebotarmcontroller.arm.arm_stop import ArmStop
 from rebotarm_motion.stop_feedback import StopFeedback
 from rebotarm_motion.trajectory_runtime_limits import JointRuntimeLimit, TrajectoryRuntimeLimitGuard
@@ -21,7 +21,7 @@ def message(t, q, v):
 @pytest.mark.parametrize('case', ['quiet', 'pulse', 'continuous', 'slow_drift', 'oscillation',
                                   'sustained_speed', 'duplicate', 'gap', 'invalid'])
 def test_stationary_counterexamples(owner, case):
-    # 固定请求锚点；漂移速度低于阈值，单个滑窗也不足三个编码，仍须拒绝累积漂移。
+    # 位置变化不再单独阻断窗口，不能据速度合格宣称已排除真实漂移或振荡。
     motion = StopFeedback()
     device = StationaryEvidence(window=.3)
     device.reset([0.]*6)
@@ -47,7 +47,8 @@ def test_stationary_counterexamples(owner, case):
         dc = not device_broken and device.confirmed()
         if k == 20:
             result_at_pulse = mc if owner == 'motion' else dc
-    assert (mc if owner == 'motion' else dc) == (case in ('quiet', 'pulse'))
+    assert (mc if owner == 'motion' else dc) == (case in (
+        'quiet', 'pulse', 'continuous', 'slow_drift', 'oscillation'))
     if case == 'pulse':
         assert not result_at_pulse  # 不是当场放过单帧峰值，而是等待后续完整正常窗口。
 
@@ -95,7 +96,7 @@ def test_historical_jerk_requires_two_code_pulse_at_logged_intervals():
 
 
 @pytest.mark.parametrize('fault', ['', 'no_receipt', 'unknown_status', 'position', 'gap', 'velocity'])
-def test_disabled_transition_requires_receipt_all_statuses_and_full_position_evidence(fault):
+def test_disabled_transition_requires_receipt_statuses_and_speed_window(fault):
     transition = DisabledTransitionEvidence([0.]*7, [0]*7, 10.)
     if fault != 'no_receipt':
         transition.service_result(True)
@@ -103,7 +104,7 @@ def test_disabled_transition_requires_receipt_all_statuses_and_full_position_evi
         t = 10.+k*.02
         if fault == 'gap' and 10 <= k < 25:
             continue
-        q = 4*POSITION_CODE if fault == 'position' and k == 15 else 0.
+        q = .01 if fault == 'position' and k == 15 else 0.
         # 失能后的孤立速度峰必须记录和延迟确认，但不单独判过渡失败。
         v = .1685 if k == 3 or fault == 'velocity' else 0.
         codes = [0]*7
@@ -112,16 +113,16 @@ def test_disabled_transition_requires_receipt_all_statuses_and_full_position_evi
         transition.observe([q]*7, [v]*7, codes, [k]*7, t, t)
         if k < 54:
             assert not transition.confirmed(t)
-    assert bool(transition.confirmed(t)) == (fault == '')
+    assert bool(transition.confirmed(t)) == (fault in ('', 'position'))
     assert not transition.confirmed(t+1.)
     assert transition.velocity_events >= 1
 
 
-def test_position_extrema_reject_same_endpoints():
+def test_position_extrema_do_not_reject_speed_qualified_window():
     evidence = StationaryEvidence()
-    for k, q in enumerate([0., 2*POSITION_CODE, -2*POSITION_CODE, 0., 0.]):
+    for k, q in enumerate([0., .01, -.01, 0., 0.]):
         evidence.observe([q]*6, [0.]*6, 10.+k*.05, 10.+k*.05)
-    assert not evidence.confirmed()
+    assert evidence.confirmed()
 
 
 def test_sequence_regression_and_missing_first_transition_frames_are_failures():

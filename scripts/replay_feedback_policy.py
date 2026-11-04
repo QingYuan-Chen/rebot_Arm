@@ -13,7 +13,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT/'src/rebotarmcontroller'), str(ROOT/'src/rebotarm_motion')]
-from rebotarmcontroller.runtime.stationary_evidence import StationaryEvidence, POSITION_SPAN
+from rebotarmcontroller.runtime.stationary_evidence import StationaryEvidence
 from rebotarm_motion.trajectory_runtime_limits import JointRuntimeLimit, TrajectoryRuntimeLimitGuard
 
 
@@ -62,7 +62,6 @@ def replay(session):
     return dict(session=path.name, source_sha256=files, snapshots=snapshots,
                 distinct_sequence_tuples=distinct, evidence_reasons=dict(reasons),
                 confirmed_observations=confirmed, max_anchor_displacement_rad=maxima,
-                baseline_span_violating_joints=[j+1 for j, value in enumerate(maxima) if value > POSITION_SPAN],
                 velocity_events=speed_events, derivative_diagnostics=dict(derivatives),
                 limitation='缓存观测回放，不是原守卫采样重建；无逐周期指令/原始字节，不重新评定硬件验收')
 
@@ -72,8 +71,8 @@ def main():
     parser.add_argument('sessions', nargs='+', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
-    report = dict(schema_version=1, policy=dict(arm_window_sec=.2, motion_window_sec=.3,
-                 field_window_sec=1., position_span_rad=POSITION_SPAN, max_age_sec=.15,
+    report = dict(schema_version=2, policy=dict(arm_window_sec=.2, motion_window_sec=.3,
+                 field_window_sec=1., max_age_sec=.15,
                  velocity_limits_rad_s=dict(arm=.05, motion=.03, field=.07)),
                  sessions=[replay(path) for path in args.sessions])
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n')

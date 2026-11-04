@@ -99,6 +99,28 @@ def test_one_read_lock_and_copied_attached_state_cover_every_curve_sample():
     assert all(item['left_finger_joint']==.01 and item['right_finger_joint']==-.01 for item in monitor.checked)
 
 
+def test_coordinated_collision_batch_moves_both_fingers_in_one_snapshot():
+    import json
+    from pathlib import Path
+    from rebotarm_trajectory.capability import make_capability, binding, constraint_revision
+    from rebotarm_trajectory.polynomial import COORDINATED_JOINT_NAMES
+    config = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
+    revision = constraint_revision(*(config.joinpath(n).read_bytes() for n in ('rebotarm.urdf','joint_limits.yaml')))
+    cap = make_capability('prepared_v1',1,.5,1.,revision)
+    monitor = LockedMonitor()
+    req = request(monitor)
+    from rebotarm_motion.coordinated_trajectory import generate_schedule, curve_message
+    req.trajectory = curve_message(generate_schedule((0.,)*6,.02,(.02,0.,0.,0.,0.,0.),.0208,1.),
+        trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
+    req.trajectory.header.frame_id,req.capability_json = binding(cap),json.dumps(cap)
+    SceneCollisionChecker(monitor,config).prepare(req,LOWER,UPPER,LIMITS)
+    assert monitor.entries == 1
+    left = [item['left_finger_joint'] for item in monitor.checked]
+    assert max(left)-min(left) >= .0004-1e-12
+    assert max(abs(a-b) for a,b in zip(left,left[1:])) <= .00018+1e-12
+    assert all(item['right_finger_joint'] == -item['left_finger_joint'] for item in monitor.checked)
+
+
 @pytest.mark.parametrize('damage', ['scene','deadline','mixed','limits'])
 def test_prepare_rejects_invalid_context_or_curve_without_partial_handoff(damage):
     monitor=LockedMonitor();req=request(monitor)

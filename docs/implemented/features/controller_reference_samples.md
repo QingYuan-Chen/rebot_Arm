@@ -10,8 +10,9 @@
 既有 `controller_pose_vectors.json` 的 IK 对照继续保留, 提取方式与显式模型对照见
 [SDK 退出验收](hardware_execution.md#sdk-退出的离线验收)。
 
-量化反馈修复后，停止组件使用 `controller_stop_reference_v2.json`：窗口改为
-0.20 s，增加三个位置编码的全极差和固定锚点约束、150 ms 连续性检查。
+量化反馈修复后，停止组件使用 `controller_stop_reference_v2.json`：窗口为
+0.20 s，并检查 150 ms 连续性。按用户最新要求，三个位置编码的位置极差和锚点
+门限均已删除；当前只以独立新帧、速度和完整窗口确认，不重新改写历史样本。
 v1 的停止片段保留为历史数据，当前停止测试读取 v2，其他 v1 场景继续执行。
 该策略及独立负例见[量化反馈判定与审计](quantized_feedback_safety.md)。
 

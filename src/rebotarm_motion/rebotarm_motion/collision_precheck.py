@@ -274,6 +274,11 @@ class CollisionPrechecker:
         到末尾, 保证每个位置元组的元素顺序与关节名一一对应; 入参不被修改.
         """
         names = tuple(str(name) for name in joint_names)
+        if 'left_finger_joint' in names and 'right_finger_joint' not in names:
+            index = names.index('left_finger_joint')
+            # 协同样本的右指随左指变化，不能用“当前开口默认值”冻结整个预检序列。
+            return (names+('right_finger_joint',),
+                [(*positions,-positions[index]) for positions in positions_list], ['right_finger_joint'])
         # 已经出现在轨迹里的关节不覆盖, 保留记录到的真实位置.
         existing = set(names)
         defaults = [

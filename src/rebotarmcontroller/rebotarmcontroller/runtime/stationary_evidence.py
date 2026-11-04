@@ -4,7 +4,7 @@
     纯数值静止判定, 供生产停止确认及独立现场失能诊断使用.
 
 对外接口
-    StationaryEvidence 用固定锚点和全窗口位置极差确认;
+    StationaryEvidence 用新鲜独立帧的速度与完整时间窗口确认;
     DisabledTransitionEvidence 额外组合七路状态与失能服务回执.
 
 安全与并发约束
@@ -12,30 +12,26 @@
     现场诊断的 0.07 rad/s 与生产停止的 0.05 rad/s 分属不同策略, 不在这里统一或放宽.
 
 文件结构(按定义顺序)
-    StationaryEvidence: 固定锚点和全窗口位置极差的静止证据; 不持有锁, 由调用方串行访问.
+    StationaryEvidence: 速度与时间窗口证据; 不持有锁, 由调用方串行访问.
     DisabledTransitionEvidence: 现场诊断策略; 不改变生产失能事务, 不自行发出任何设备命令.
 """
 
 from collections import deque
 import numpy as np
 
-POSITION_CODE = 25. / 65535
-POSITION_SPAN = 3 * POSITION_CODE
-
-
 class StationaryEvidence:
-    """固定锚点和全窗口位置极差的静止证据; 不持有锁, 由调用方串行访问."""
+    """只按新帧、速度与完整窗口确认；位置锚点仅供诊断记录。"""
 
-    def __init__(self, *, window=.20, velocity_limit=.05, span=POSITION_SPAN, max_age=.15, joints=6):
-        """校验窗口, 速度, 位移和新鲜度参数, 并初始化空证据; 位置跨度以 rad 计."""
-        if not np.isfinite([window, velocity_limit, span, max_age]).all() or min(window, velocity_limit, span, max_age) <= 0:
+    def __init__(self, *, window=.20, velocity_limit=.05, max_age=.15, joints=6):
+        """保留各调用方的窗口、速度和新鲜度策略，不以位置偏差判定静止。"""
+        if not np.isfinite([window, velocity_limit, max_age]).all() or min(window, velocity_limit, max_age) <= 0:
             raise ValueError('stationary policy requires positive finite bounds')
-        self.window, self.velocity_limit, self.span, self.max_age = window, velocity_limit, span, max_age
+        self.window, self.velocity_limit, self.max_age = window, velocity_limit, max_age
         self.joints = joints
         self.reset()
 
     def reset(self, anchor=None):
-        """复制并固定本次位置锚点, 清除样本, 序号与源时间; 不允许在同一失败请求中随意重锚."""
+        """保存可选诊断起点，清除样本、序号与源时间；不设置位置门限。"""
         self.anchor = None if anchor is None else np.array(anchor, dtype=float, copy=True)
         if self.anchor is not None and (self.anchor.shape != (self.joints,) or not np.isfinite(self.anchor).all()):
             raise ValueError('stationary anchor must contain finite positions')
@@ -49,7 +45,7 @@ class StationaryEvidence:
 
         stamp / now 必须同属单调时钟. 重复时间或未全部推进的序号不累计窗口.
         无效值, 断流和回退清空窗口并报告原因; 上层事务须保留连续性失败.
-        速度峰只清静止窗口, 固定锚点不移动; 真实漂移仍由锚点与窗口极差约束.
+        速度峰清空静止窗口；位置仍校验维度和有限性，不检查位置极差或锚点偏差。
         """
         q, v = np.asarray(positions, dtype=float), np.asarray(velocities, dtype=float)
         if (q.shape != (self.joints,) or v.shape != (self.joints,) or not np.isfinite(q).all()
@@ -82,13 +78,10 @@ class StationaryEvidence:
             self.samples.clear()
             self.reason = 'source_gap'
             return self.reason
-        # 锚点只在本请求第一次有效反馈建立; 速度峰后的窗口重建不能悄悄移动基线.
+        # 只保留初始位置用于诊断输出，不用它限制累计位移。
         if self.anchor is None:
             self.anchor = q.copy()
-        if np.max(np.abs(q-self.anchor)) > self.span + 1e-12:
-            self.samples.clear()
-            self.reason = 'anchor_displacement'
-        elif np.max(np.abs(v)) > self.velocity_limit:
+        if np.max(np.abs(v)) > self.velocity_limit:
             self.samples.clear()
             self.reason = 'velocity'
         else:
@@ -105,19 +98,18 @@ class StationaryEvidence:
         return self.samples[0][0] if self.samples else None
 
     def confirmed(self, now=None):
-        """要求至少三份样本覆盖完整窗口且全窗位置极差达标, 可选同时检查最新年龄."""
+        """要求至少三份速度合格的新帧覆盖完整窗口，可选同时检查最新年龄。"""
         return (len(self.samples) >= 3
                 and (now is None or -.005 <= now-self.last_stamp <= self.max_age)
-                and self.samples[-1][0]-self.samples[0][0] >= self.window-1e-9
-                and np.max(np.ptp(np.asarray([q for _, q in self.samples]), axis=0)) <= self.span+1e-12)
+                and self.samples[-1][0]-self.samples[0][0] >= self.window-1e-9)
 
 
 class DisabledTransitionEvidence:
     """现场诊断策略; 不改变生产失能事务, 不自行发出任何设备命令.
 
     七路输入均为原始电机 rad/rad/s. 需显式服务成功, 请求后七路新鲜失能帧,
-    全过渡位置界和之后连续一秒静止; 孤立速度峰保留事件并延迟确认.
-    断流/未知状态/位移超界锁存失败, 之后恢复不能改写该次验收结果.
+    之后连续一秒速度合格; 孤立速度峰保留事件并延迟确认.
+    断流/未知状态锁存失败，位置变化不再单独使诊断失败。
     """
 
     def __init__(self, positions, sequences, requested_at):
@@ -143,7 +135,7 @@ class DisabledTransitionEvidence:
             self.failure = 'disable service failed'
 
     def observe(self, positions, velocities, statuses, sequences, observed_at, now):
-        """以七路新帧检查基线位移, 连续性及失能状态; 速度峰累计诊断并延后静止确认."""
+        """以七路新帧检查连续性及失能状态；速度峰累计诊断并延后确认。"""
         if self.failure:
             return
         if observed_at <= self.requested_at:
@@ -156,9 +148,6 @@ class DisabledTransitionEvidence:
         if (q.shape != (7,) or codes.shape != (7,) or seq.shape != (7,)
                 or not np.isfinite(q).all() or not np.isin(codes, [0, 1]).all()):
             self.failure = 'invalid transition feedback'
-            return
-        if np.max(np.abs(q-self.anchor)) > POSITION_SPAN+1e-12:
-            self.failure = 'transition position displacement'
             return
         reason = self.evidence.observe(q, velocities, observed_at, now, sequences=seq)
         if reason in ('invalid_or_stale', 'source_gap', 'source_regressed'):

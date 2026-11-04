@@ -34,6 +34,7 @@ from __future__ import annotations
 import time
 import math
 import threading
+import json
 
 import rclpy
 from control_msgs.action import FollowJointTrajectory
@@ -42,11 +43,13 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy
+from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import JointState
 from .feedback_receiver import MotionFeedbackReceiver
 
-from rebotarm_msgs.srv import ExecutePose, PublishTrajectoryPreview
+from rebotarm_msgs.srv import ExecutePose, PublishTrajectoryPreview, RetimeArmTrajectory
 
 from .moveit_planner import MoveItMotionPlanner
 
@@ -95,9 +98,18 @@ class PoseExecutionNode(Node):
         # 仅视觉纯规划入口启用; 其他 ExecutePose 调用不会产生预览副作用.
         self.declare_parameter("publish_plan_only_preview", False)
         self.declare_parameter("use_hardware", False)
+        self.declare_parameter("trajectory_execution_mode", "legacy")
         self.declare_parameter("stop_confirmation_timeout_sec", 8.0)
 
         self._arm_namespace = str(self.get_parameter("arm_namespace").value).strip("/")
+        self._trajectory_mode = self.get_parameter('trajectory_execution_mode').value
+        self._capability = None
+        self._capability_at = 0.
+        self.create_subscription(String, f'/{self._arm_namespace}/trajectory_capabilities',
+            self._receive_capability, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+            callback_group=self._callback_group)
+        self._retime_client = self.create_client(RetimeArmTrajectory,
+            f'/{self._arm_namespace}/retime_arm_trajectory', callback_group=self._callback_group)
         # 当前请求的动作句柄保留到下一次请求准入时重置, 供停止流程补发取消并核对终态.
         self._active_goal_handle = None
         # 可重入回调会并行修改运动状态; 运动锁保护共享字段, 停止锁只允许一轮停止确认.
@@ -159,7 +171,7 @@ class PoseExecutionNode(Node):
             self._stop,
             callback_group=self._callback_group,
         )
-        self._feedback_receiver = MotionFeedbackReceiver(self, self._arm_namespace)
+        self._feedback_receiver = MotionFeedbackReceiver(self, self._arm_namespace, gripper=True)
         self._stop_feedback = self._feedback_receiver.stop_feedback
         self.get_logger().info(
             f"pose motion execution ready: /{self._arm_namespace}/motion_execution/execute_pose"
@@ -216,9 +228,10 @@ class PoseExecutionNode(Node):
                 response.message = "explicit preview start is forbidden for execution"
                 return response
             if (
-                len(preview_start.name) != 6
-                or set(preview_start.name) != {f"joint{i}" for i in range(1, 7)}
-                or len(preview_start.position) != 6
+                len(preview_start.name) != (7 if request.coordinated_gripper else 6)
+                or set(preview_start.name) != ({f"joint{i}" for i in range(1, 7)} |
+                    ({'left_finger_joint'} if request.coordinated_gripper else set()))
+                or len(preview_start.position) != len(preview_start.name)
                 or not all(math.isfinite(value) for value in preview_start.position)
             ):
                 response.success = False
@@ -229,16 +242,23 @@ class PoseExecutionNode(Node):
         acceleration = float(request.acceleration_scaling) or float(
             self.get_parameter("default_acceleration_scaling").value
         )
-        plan = self._planner.plan_pose(
+        planner = self._planner.plan_coordinated_pose if request.coordinated_gripper else self._planner.plan_pose
+        plan = planner(
             request.target_pose,
             velocity_scaling=velocity,
             acceleration_scaling=acceleration,
             **({"start_joint_state": preview_start} if preview_start.name else {}),
+            **({'gripper_opening_m':request.gripper_opening_m} if request.coordinated_gripper else {}),
         )
         if not plan.success or plan.trajectory is None:
             response.success = False
             response.message = plan.message
             return response
+
+        if request.coordinated_gripper:
+            from dataclasses import replace
+            plan = replace(plan, trajectory=self._coordinate_pose_plan(
+                plan.trajectory, request, velocity, acceleration))
 
         # 即使随后不执行, 也把规划结果回填, 便于调用方审查轨迹.
         response.planned_trajectory = plan.trajectory
@@ -335,6 +355,52 @@ class PoseExecutionNode(Node):
         response.message = "trajectory executed"
         return response
 
+    def _receive_capability(self, message):
+        """只缓存版本化声明；配置或会话改变后旧规划绑定会由后端拒绝。"""
+        from rebotarm_trajectory.capability import decode_capability
+        try:
+            capability = decode_capability(message.data)
+        except (KeyError, TypeError, ValueError):
+            self._capability, self._capability_at = None, 0.
+            return
+        self._capability, self._capability_at = capability, time.monotonic()
+
+    def _coordinate_pose_plan(self, trajectory, request, velocity, acceleration):
+        """复核七轴关节规划与反馈可用性，再在规划阶段统一重定时。
+
+        虚拟起点只用于纯预览；真实执行使用独立接收器的新鲜开口。最终接近段给相同
+        开口即可生成恒定夹爪参考。下发的仍是唯一 FJT，执行准备负责联合碰撞检查。
+        """
+        from .feedback_receiver import stamp_ns
+        capability = self._capability
+        if (self._trajectory_mode != 'prepared_v1' or capability is None
+                or capability['mode'] != 'prepared_v1' or time.monotonic()-self._capability_at > 1.):
+            raise ValueError('fresh matching prepared_v1 capability required for visual coordination')
+        target = float(request.gripper_opening_m)
+        if not math.isfinite(target) or not 0 <= target <= .09:
+            raise ValueError('gripper total opening must be in [0,0.09] m')
+        if not request.preview_start_joint_state.name:
+            sample = self._feedback_receiver.snapshot().gripper
+            if (sample is None or sample.status_code != 1
+                    or not -.05 <= (self.get_clock().now().nanoseconds-stamp_ns(sample))/1e9 <= .15):
+                raise ValueError('fresh enabled gripper feedback required for coordinated planning')
+        if 'left_finger_joint' not in trajectory.joint_names or not trajectory.points:
+            raise ValueError('coordinated joint planning returned no finger track')
+        started = time.monotonic()
+        if not self._retime_client.wait_for_service(timeout_sec=.1):
+            raise RuntimeError('coordinated retiming service unavailable')
+        query = RetimeArmTrajectory.Request(trajectory=trajectory, velocity_scaling=velocity,
+            acceleration_scaling=acceleration, capability_revision=capability['revision'])
+        future = self._retime_client.call_async(query)
+        self._wait_future(future, max(0., 2.-(time.monotonic()-started)))
+        if not future.done() or time.monotonic()-started > 2.:
+            future.cancel()
+            raise TimeoutError('coordinated planning retiming exceeded 2 s')
+        response = future.result()
+        if response is None or not response.success:
+            raise ValueError(getattr(response, 'message', 'coordinated retiming returned no response'))
+        return response.trajectory
+
     def _publish_trajectory_preview(
         self,
         request: PublishTrajectoryPreview.Request,
@@ -399,9 +465,13 @@ class PoseExecutionNode(Node):
         from .gripper_preview import with_gripper_preview
         try:
             # 按阶段加入夹爪显示动画; 事件无效时整组拒绝, 不发布部分预览.
-            trajectories = with_gripper_preview(
-                trajectories, request.gripper_before_trajectory, request.gripper_openings_m
-            )
+            if 'left_finger_joint' in expected_names:
+                if request.gripper_before_trajectory or request.gripper_openings_m:
+                    raise ValueError('joint coordinated previews cannot contain independent gripper animations')
+            else:
+                trajectories = with_gripper_preview(
+                    trajectories, request.gripper_before_trajectory, request.gripper_openings_m
+                )
         except ValueError as exc:
             response.success = False
             response.message = str(exc)

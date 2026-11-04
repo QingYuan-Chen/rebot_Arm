@@ -1,4 +1,4 @@
-"""六轴分段多项式的数据契约和数值求值内核。
+"""具名分段多项式的数据契约和数值求值内核。
 
 文件职责
     保存不可变轨迹点和系数，校验数值结构，并按外部提供的经过时间求 q/v/a/jerk。
@@ -7,8 +7,8 @@
 对外接口
     TrajectoryPoint、PolynomialSegment、PolynomialTrajectory 表示点、段和整条轨迹；
     ordered_points 统一关节顺序；curve_from_payload 解码已准备的曲线，不重新拟合。
-    系数按归一化时间 u=(t-start)/duration 的升幂排列，六行依次对应 joint1..joint6。
-    位置单位 rad，时间单位 s，返回的导数分别为 rad/s、rad/s²、rad/s³。
+    系数按归一化时间 u=(t-start)/duration 的升幂排列，行顺序由 joint_names 明确声明。
+    六轴位置为 rad、左指位置为 m；导数沿用对应位置单位，时间单位 s。
 
 安全约束
     本库不读取时钟，不持有执行状态，不访问 ROS、设备或物理引擎。
@@ -24,7 +24,26 @@ from dataclasses import dataclass, field
 import math
 
 JOINT_NAMES = tuple(f'joint{i}' for i in range(1, 7))
+COORDINATED_JOINT_NAMES = (*JOINT_NAMES, 'left_finger_joint')
 CALC_ATOL = 1e-9
+
+
+def finite_vector(values, size=None):
+    """复制具名曲线的一行数值；维度由轨迹契约核对，不按单位混合做范数。"""
+    result = tuple(float(v) for v in values)
+    if (not result or (size is None and len(result) not in (1, 2, 6, 7, 8))
+            or (size is not None and len(result) != size) or not all(math.isfinite(v) for v in result)):
+        raise ValueError('matching finite joint values required')
+    return result
+
+
+def canonical_names(names):
+    """只接受已支持的完整机构集合；右指从动关系由消息边界另行校验。"""
+    names = tuple(names)
+    for supported in (JOINT_NAMES, COORDINATED_JOINT_NAMES, ('left_finger_joint',)):
+        if len(names) == len(supported) and set(names) == set(supported):
+            return supported
+    raise ValueError('exactly joint1..joint6, coordinated joints or left_finger_joint required')
 
 
 def vector6(values):
@@ -37,7 +56,7 @@ def vector6(values):
 
 @dataclass(frozen=True)
 class TrajectoryPoint:
-    """一个带相对时刻的六轴约束点；输入序列复制为元组，避免调用者事后修改。"""
+    """带相对时刻的等维关节约束点；复制为元组，维度和关节顺序由整轨契约核对。"""
 
     time: float
     positions: tuple
@@ -49,21 +68,22 @@ class TrajectoryPoint:
         if not math.isfinite(stamp) or stamp < 0:
             raise ValueError('finite nonnegative trajectory time required')
         object.__setattr__(self, 'time', stamp)
-        object.__setattr__(self, 'positions', vector6(self.positions))
+        object.__setattr__(self, 'positions', finite_vector(self.positions))
         for name in ('velocities', 'accelerations'):
             values = tuple(getattr(self, name))
-            object.__setattr__(self, name, vector6(values) if values else ())
+            object.__setattr__(self, name, finite_vector(values, len(self.positions)) if values else ())
 
 
 def ordered_points(joint_names, points):
     """按规范顺序复制所有位置及导数; 混合缺失不能默默降级."""
     names = tuple(joint_names)
-    if len(names) != 6 or set(names) != set(JOINT_NAMES):
-        raise ValueError('exactly joint1..joint6 required')
+    canonical = canonical_names(names)
     source = tuple(points)
     if not source:
         raise ValueError('trajectory points required')
-    order = tuple(names.index(n) for n in JOINT_NAMES)
+    if any(len(p.positions) != len(names) for p in source):
+        raise ValueError('trajectory point dimension differs from joint names')
+    order = tuple(names.index(n) for n in canonical)
     result = tuple(TrajectoryPoint(p.time, tuple(p.positions[i] for i in order),
         tuple(p.velocities[i] for i in order) if p.velocities else (),
         tuple(p.accelerations[i] for i in order) if p.accelerations else ()) for p in source)
@@ -81,7 +101,7 @@ def ordered_points(joint_names, points):
 
 @dataclass(frozen=True)
 class PolynomialSegment:
-    """六轴共用一个时间区间；每行 2/4/6 个升幂系数分别表示线性/三次/五次。"""
+    """全部具名关节共用一个时间区间；每行 2/4/6 个升幂系数表示线性/三次/五次。"""
 
     start: float
     duration: float
@@ -91,7 +111,7 @@ class PolynomialSegment:
         start, duration = float(self.start), float(self.duration)
         coefficients = tuple(tuple(float(v) for v in row) for row in self.coefficients)
         if (not math.isfinite(start) or start < 0 or not math.isfinite(duration) or duration <= 0
-                or len(coefficients) != 6 or any(len(row) not in (2, 4, 6) for row in coefficients)
+                or not coefficients or any(len(row) not in (2, 4, 6) for row in coefficients)
                 or len({len(row) for row in coefficients}) != 1
                 or not all(math.isfinite(v) for row in coefficients for v in row)):
             raise ValueError('invalid finite polynomial segment')
@@ -114,14 +134,14 @@ class PolynomialSegment:
         return values
 
     def at(self, u, order=0):
-        """在归一化时刻 u 用 Horner 法求六轴值；区间选择和钳位由整轨采样负责。"""
+        """在归一化时刻 u 用 Horner 法求各关节值；区间选择和钳位由整轨采样负责。"""
         values = []
-        for joint in range(6):
+        for joint in range(len(self.coefficients)):
             value = 0.
             for coefficient in reversed(self.axis(joint, order)):
                 value = coefficient + u * value
             values.append(value)
-        return vector6(values)
+        return finite_vector(values)
 
 
 @dataclass(frozen=True)
@@ -131,11 +151,13 @@ class PolynomialTrajectory:
     points: tuple
     segments: tuple
     degree: int
+    joint_names: tuple = JOINT_NAMES
     times: tuple = field(init=False, repr=False)
     positions: tuple = field(init=False, repr=False)
 
     def __post_init__(self):
-        points = ordered_points(JOINT_NAMES, self.points)
+        names = canonical_names(self.joint_names)
+        points = ordered_points(names, self.points)
         segments = tuple(self.segments)
         if any(not isinstance(segment, PolynomialSegment) for segment in segments):
             raise ValueError('immutable polynomial segments required')
@@ -144,10 +166,12 @@ class PolynomialTrajectory:
             raise ValueError('invalid polynomial trajectory structure')
         for first, last, segment in zip(points, points[1:], segments):
             if (segment.start != first.time or segment.duration != last.time-first.time
-                    or len(segment.coefficients[0]) != degree+1):
+                    or len(segment.coefficients[0]) != degree+1
+                    or len(segment.coefficients) != len(names)):
                 raise ValueError('invalid polynomial segment boundaries')
         object.__setattr__(self, 'points', points)
         object.__setattr__(self, 'segments', segments)
+        object.__setattr__(self, 'joint_names', names)
         object.__setattr__(self, 'times', tuple(p.time for p in points))
         object.__setattr__(self, 'positions', tuple(p.positions for p in points))
 
@@ -162,7 +186,8 @@ class PolynomialTrajectory:
             raise ValueError('finite sample time required')
         if elapsed < 0 or elapsed > self.duration or not self.segments:
             point = self.points[0] if elapsed <= 0 else self.points[-1]
-            return (point.positions, (0.,) * 6, (0.,) * 6, (0.,) * 6)
+            zeros = (0.,) * len(self.joint_names)
+            return (point.positions, zeros, zeros, zeros)
         # 内部节点取右段，终点取最后一段；C0/C1 的高阶导数跳变不会被平滑隐藏。
         index = min(len(self.segments) - 1,
                     bisect_right(self.times, elapsed) - 1)
@@ -172,7 +197,8 @@ class PolynomialTrajectory:
 
     def to_payload(self):
         """编码版本化数值载荷；执行端采样携带的系数，避免重新拟合造成检查与执行不一致。"""
-        return {'version': 1, 'joint_names': list(JOINT_NAMES), 'degree': self.degree,
+        return {'version': 1 if self.joint_names == JOINT_NAMES else 2,
+                'joint_names': list(self.joint_names), 'degree': self.degree,
                 'points': [dict(time_from_start=p.time, positions=p.positions,
                     velocities=p.velocities, accelerations=p.accelerations) for p in self.points],
                 'coefficients': [s.coefficients for s in self.segments]}
@@ -180,9 +206,12 @@ class PolynomialTrajectory:
 
 def curve_from_payload(payload):
     """校验版本、形状、有限性及端点约束并载入系数；不替代上层限位和碰撞检查。"""
-    if payload['version'] != 1 or tuple(payload['joint_names']) != JOINT_NAMES:
+    names = canonical_names(payload['joint_names'])
+    if tuple(payload['joint_names']) != names:
+        raise ValueError('curve payload must declare canonical joint order')
+    if payload['version'] not in (1, 2) or (payload['version'] == 1 and names != JOINT_NAMES):
         raise ValueError('unsupported curve version or joint order')
-    points = ordered_points(JOINT_NAMES, tuple(TrajectoryPoint(
+    points = ordered_points(names, tuple(TrajectoryPoint(
         p['time_from_start'], p['positions'], p.get('velocities', ()),
         p.get('accelerations', ())) for p in payload['points']))
     degree = 5 if points[0].accelerations else 3 if points[0].velocities else 1
@@ -196,7 +225,7 @@ def curve_from_payload(payload):
     segments = []
     for first, last, coefficients in zip(points, points[1:], rows):
         c = tuple(tuple(float(value) for value in row) for row in coefficients)
-        if (len(c) != 6 or any(len(row) != degree + 1 for row in c)
+        if (len(c) != len(names) or any(len(row) != degree + 1 for row in c)
                 or not all(math.isfinite(value) for row in c for value in row)):
             raise ValueError('curve coefficient shape or finite values invalid')
         duration = last.time - first.time
@@ -215,4 +244,4 @@ def curve_from_payload(payload):
                                                   getattr(point, field))) > CALC_ATOL:
                     raise ValueError('curve coefficient endpoints mismatch')
         segments.append(segment)
-    return PolynomialTrajectory(points, tuple(segments), degree)
+    return PolynomialTrajectory(points, tuple(segments), degree, names)

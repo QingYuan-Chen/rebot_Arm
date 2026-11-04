@@ -185,6 +185,8 @@ class VisualGraspWorkflow:
                 retreat_distance_m=float(_parameter(self, "safe_retreat_distance_m").value),
             ),
             include_safe_home=bool(_parameter(self, "safe_home_after_grasp").value),
+            coordinated_position_only=(getattr(self, '_config', None) is not None
+                and self._config.get('trajectory_execution_mode', 'legacy') == 'prepared_v1'),
         )
         return build_visual_grasp_sequence(pregrasp, grasp, config)
 
@@ -479,7 +481,9 @@ class VisualGraspWorkflow:
             if step.reached:
                 return True, f"target reached: error={step.error_m:.4f}"
             ok, message = self._run_stage(
-                VisualGraspStage(name="visual_servo_approach", kind="move", pose=step.target)
+                VisualGraspStage(name="visual_servo_approach", kind="move", pose=step.target,
+                    gripper_position_m=(state.retry_retreat_stage.gripper_position_m
+                        if state.retry_retreat_stage is not None else None))
             )
             if not ok:
                 return False, message
@@ -521,6 +525,9 @@ class VisualGraspWorkflow:
     def _append_place_stages(self, stages: list[VisualGraspStage]) -> list[VisualGraspStage]:
         """在抓取序列末尾追加放置阶段（移动到位 → 松爪 → 抬升撤开）；未启用时追加空列表。"""
 
+        if (getattr(self, '_config', None) is not None
+                and self._config.get('trajectory_execution_mode', 'legacy') == 'prepared_v1'):
+            return stages
         return stages + build_place_stages(
             PlaceTaskConfig(
                 enabled=bool(_parameter(self, "place_after_grasp_enabled").value),
