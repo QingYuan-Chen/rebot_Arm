@@ -1,86 +1,125 @@
 """网页六轴轨迹与独立夹爪的组合任务所有者。
 
-文件职责：保存组合任务身份并汇总原六轴、夹爪执行器的结果，不生成夹爪参考。
-对外接口：submit 在设备事务中登记两个目标；tick 查询两侧结果；cancel_gripper
-    只取消本任务的夹爪代次；snapshot 沿用六轴结果契约供 ROS 查询。
-安全约束：仅设备线程推进，无自主线程。准备通过前不接纳夹爪；失败由六轴所有者
-    执行整体停止，停止确认前不释放预约。两侧输出仍由原周期各自发送并确认。
-文件结构：整体任务创建 → 两侧状态汇总 → 指定代次取消。
+文件职责：保存组合身份并汇总原六轴、夹爪执行器的结果；六轴期限、容差及发送游标
+    继续由 ArmTrajectory 拥有，夹爪继续采用独立开合逻辑。
+对外接口：submit/tick 登记及推进；snapshot/status 查询；fail/stopping/finish
+    登记失败和停止收尾；cancel_gripper 只取消本任务代次。
+安全约束：设备线程推进，查询以可重入锁串行化。跨线程保留句柄身份，旧句柄收尾
+    仅作用于旧子任务；停止确认前保留预约，两侧发送仍由各自周期确认。
+文件结构：组合句柄 → 登记 → 状态汇总 → 失败与停止收尾。
 """
 
-from dataclasses import replace
-from ..arm.arm_trajectory import ArmTrajectory, ArmTask
+from dataclasses import dataclass, field, replace
+import threading
+from ..arm.arm_trajectory import ArmResult, ArmTask
 
 
-class CoordinatedTrajectory(ArmTrajectory):
-    """保留原模块入口，职责改为六轴与独立开合的整体终态管理。"""
+@dataclass
+class CoordinatedTask:
+    """组合任务身份及整体结果；六轴执行参数只存在于原子任务中。"""
+
+    arm_task: ArmTask
+    gripper_generation: int | None
+    gripper_state: str
+    result: ArmResult = field(default_factory=ArmResult)
+    event: threading.Event = field(default_factory=threading.Event)
+
+    @property
+    def generation(self):
+        return self.arm_task.generation
+
+    def __deepcopy__(self, memo):
+        """请求队列传递同一身份和完成事件。"""
+        return self
+
+
+class CoordinatedTrajectory:
+    """委托两个执行器并拥有整体终态，不继承六轴执行行为。"""
 
     def __init__(self, execution, arm_trajectory):
-        super().__init__(execution, arm_trajectory.clock)
-        self.arm = arm_trajectory
-        self.arm_task = None
-        self.gripper_generation = None
-        self.gripper_state = 'not_requested'
+        self.execution, self._arm = execution, arm_trajectory
+        self.task = None
+        self._lock = threading.RLock()
 
     @property
     def active(self):
-        return self.task is not None and not self.task.event.is_set() and self.task.result.state != 'stopping'
+        with self._lock:
+            return self.task is not None and not self.task.event.is_set() and self.task.result.state != 'stopping'
 
     def submit(self, curve, token, gripper):
-        """同一设备事务登记两侧；登记本身不发总线命令，随后同一周期各自推进。"""
-        with self.lock:
+        """同一设备事务登记两侧；登记不发总线命令，随后同一周期各自推进。"""
+        with self._lock:
             if self.active or len(curve.joint_names) != 6:
                 raise ValueError('idle combination and six-joint curve required')
             generation = None
             if token.gripper_command:
                 generation = gripper.start_position(token, *token.gripper_command)
             try:
-                arm_task = self.arm.submit_prepared(curve, token.generation)
+                arm_task = self._arm.submit_prepared(curve, token.generation)
             except Exception:
                 if generation is not None:
                     gripper.cancel_position('combination admission failed', expected_generation=generation)
                 raise
-            self.arm_task = arm_task
-            self.gripper_generation = generation
-            self.gripper_state = 'running' if generation is not None else 'not_requested'
-            self.task = ArmTask(arm_task.generation, arm_task.target, arm_task.deadline, arm_task.tolerance)
+            self.task = CoordinatedTask(arm_task, generation,
+                'running' if generation is not None else 'not_requested')
             return self.task
 
+    def snapshot(self, task):
+        """旧句柄继续查询自身不可变结果快照。"""
+        with self._lock:
+            return replace(task.result)
+
+    def status(self, task, gripper):
+        """停止期间也刷新本代夹爪的中性释放状态。"""
+        with self._lock:
+            if task is self.task and task.gripper_generation is not None:
+                task.gripper_state, _ = gripper.position_state(task.gripper_generation)
+            return self._arm.snapshot(task.arm_task).state, task.gripper_state
+
+    def fail(self, task, decision):
+        """失败原因先于停止事务保存，迟到失败只更新自身未完成句柄。"""
+        with self._lock:
+            if task is self.task and not task.event.is_set():
+                task.result = replace(task.result, decision=decision)
+
     def tick(self, gripper, sample):
-        """只观察原执行器；夹爪使用自身限速、到位、超时和中性释放，不随 FJT 采样。"""
-        with self.lock:
+        """只观察原执行器；夹爪不随 FJT 采样。"""
+        with self._lock:
             if not self.active:
                 return
-            if self.task.generation != self.execution.generation:
+            task = self.task
+            if task.generation != self.execution.generation:
                 raise RuntimeError('combination execution generation changed')
-            self.arm.update(sample.positions, sample.observed_at)
-            arm = self.arm.snapshot(self.arm_task)
-            self.task.result = replace(self.task.result, progress=arm.progress, desired=arm.desired)
+            self._arm.update(sample.positions, sample.observed_at)
+            arm = self._arm.snapshot(task.arm_task)
+            task.result = replace(task.result, progress=arm.progress, desired=arm.desired)
             if arm.state not in ('running', 'succeeded'):
                 raise RuntimeError(arm.message or 'arm execution failed')
-            if self.gripper_generation is not None:
-                state, reason = gripper.position_state(self.gripper_generation)
-                self.gripper_state = state
-                if state not in ('active', 'releasing', 'succeeded'):
+            if task.gripper_generation is not None:
+                task.gripper_state, reason = gripper.position_state(task.gripper_generation)
+                if task.gripper_state not in ('active', 'releasing', 'succeeded'):
                     raise RuntimeError(reason or 'independent gripper execution failed')
-            if arm.state == 'succeeded' and self.gripper_state in ('succeeded', 'not_requested'):
-                self.finish(self.task, 'succeeded', 'arm and independent gripper completed')
+            if arm.state == 'succeeded' and task.gripper_state in ('succeeded', 'not_requested'):
+                self.finish(task, 'succeeded', 'arm and independent gripper completed')
 
     def cancel_gripper(self, gripper):
-        """取消只作用于本组合的夹爪代次；实际中性发送和静止仍由原周期确认。"""
-        if self.gripper_generation is not None:
-            gripper.cancel_position('combination stopped', expected_generation=self.gripper_generation)
+        """设备线程取消当前组合代次，中性发送及静止继续由夹爪周期确认。"""
+        with self._lock:
+            task = self.task
+            if task is not None and task.gripper_generation is not None:
+                gripper.cancel_position('combination stopped', expected_generation=task.gripper_generation)
 
     def stopping(self, task):
-        """停止期间同时冻结本组合的六轴子任务，避免旧到位事件提前完成。"""
-        with self.lock:
-            if task is self.task and self.arm_task is not None:
-                self.arm.stopping(self.arm_task)
-            super().stopping(task)
+        """冻结本句柄子任务，完成事件等待原停止事务确认。"""
+        with self._lock:
+            if not task.event.is_set():
+                self._arm.stopping(task.arm_task)
+                task.result = replace(task.result, state='stopping')
 
     def finish(self, task, state, message):
-        """原预约停止确认后终结子任务；迟到收尾不能覆盖后继任务。"""
-        with self.lock:
-            if task is self.task and self.arm_task is not None:
-                self.arm.finish(self.arm_task, state, message)
-            super().finish(task, state, message)
+        """先收尾原子任务，再一次性发布整体终态；旧句柄不会触及后继任务。"""
+        with self._lock:
+            if not task.event.is_set():
+                self._arm.finish(task.arm_task, state, message)
+                task.result = replace(task.result, state=state, message=message)
+                task.event.set()

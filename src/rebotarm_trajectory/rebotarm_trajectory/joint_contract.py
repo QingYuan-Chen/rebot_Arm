@@ -9,8 +9,8 @@
 from .polynomial import JOINT_NAMES, ordered_points
 
 
-def canonical_input(names, points, hold=None):
-    """hold 保留原调用签名；不能用保持值补齐非法的缺轴请求。"""
+def canonical_input(names, points):
+    """严格校验六轴输入；不使用保持值补齐缺轴请求。"""
     names, points = tuple(names), tuple(points)
     if len(names) != 6 or set(names) != set(JOINT_NAMES):
         raise ValueError('FJT requires exactly joint1..joint6; use the independent gripper interface')

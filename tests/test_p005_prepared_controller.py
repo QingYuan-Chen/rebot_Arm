@@ -408,7 +408,8 @@ def test_combination_observes_independent_children_without_reference_resampling(
     task = owner.submit(curve,token,gripper)
     owner.tick(gripper,SimpleNamespace(positions=(0.,)*6,observed_at=10.1))
     assert registered == [(token,.02,1.)]
-    assert owner.gripper_generation == 3 and not task.event.is_set()
+    assert not isinstance(owner, ArmTrajectory)
+    assert task.gripper_generation == 3 and not task.event.is_set()
     owner.stopping(task)
     owner.finish(task,'canceled','stopped')
     assert arm.task.event.is_set() and arm.task.result.state == 'canceled'

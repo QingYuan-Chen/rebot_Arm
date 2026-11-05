@@ -62,7 +62,7 @@ class CoordinatedWebPlans:
         if plan is None:
             raise ValueError('final planning binding missing')
         token = uuid.uuid4().hex
-        decision = replace(decision,duration=final.duration, positions=final.points[-1].positions[:6])
+        decision = replace(decision,duration=final.duration, positions=final.points[-1].positions)
         with self._lock:
             if len(self._plans) >= 32:
                 self._plans.pop(next(iter(self._plans)))
@@ -78,7 +78,7 @@ class CoordinatedWebPlans:
             message=('仅预览：使能后须重新预览。' if plan['purpose']=='preview' else '')+
                 '按闭合夹爪模型检查；夹爪独立开合，不保证与机械臂同时到达')
 
-    def take(self, token, current):
+    def take(self, token):
         """单次交接原计划；准备只复核，不能修改已绑定的节点与时间。"""
         capability = self.capability()
         with self._lock:

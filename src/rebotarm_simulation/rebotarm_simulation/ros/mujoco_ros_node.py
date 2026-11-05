@@ -5,7 +5,7 @@
 对外接口
     create_node_class 延迟加载 ROS 并返回节点类；main 创建执行器。
     trajectory_execution_mode 选择 legacy 或 prepared_v1；准备服务只返回检查结果，
-    仿真节点自己拥有目标令牌、资源占用、物理时钟和原子接纳。
+    execution 组件拥有目标令牌、资源占用及原子接纳；节点驱动物理时钟。
 安全约束
     不导入真实硬件后端或运动层实现；参考求值来自共享数值包。
     锁序固定为活动目标锁 → 仿真锁；准备服务等待、停止等待均不能占住物理步进锁。
@@ -13,40 +13,33 @@
     固定夹爪或场景变化后停止保持；停止未确认继续占用资源，不能因 Action 退出而放行。
     正常成功保持曲线终点；Action 成功条件与独立物理验收指标分开。
 文件结构
-    延迟创建节点 → 参数/仿真/ROS 装配 → Goal 预约与准备 → 停止及控制服务
-    → Action 终态协调 → 物理周期与状态发布 → 关闭和进程入口。
+    延迟创建节点 → 参数/执行组件/ROS 装配 → 协议转换与服务等待
+    → Action 反馈和终态映射 → 物理调度及状态发布 → 关闭和进程入口。
 """
 
 from __future__ import annotations
 
 import math
 import json
-from collections import deque
 import threading
 import time
-from typing import Any, Sequence
 
 from rebotarm_simulation.ros.message_codec import DEFAULT_MAX_TRAJECTORY_DURATION_SEC
 from rebotarm_simulation.ros.message_codec import DEFAULT_MAX_TRAJECTORY_POINTS
-from rebotarm_simulation.execution.trajectory_state import ActiveTrajectory
-from rebotarm_simulation.execution.trajectory_state import ExecutionLifecycle
 from rebotarm_simulation.execution.feedback_timing import FeedbackRateLimiter
 from rebotarm_simulation.execution.trajectory_state import GateOutcome
 from rebotarm_simulation.execution.goal_policy import GoalSettlingPolicy
 from rebotarm_simulation.ros.message_codec import MonotonicStamp
 from rebotarm_simulation.execution.simulation_access import SerializedSimulationAccess
-from rebotarm_simulation.execution.trajectory_state import TrajectoryCommandGate
 from rebotarm_simulation.ros.message_codec import duration_to_seconds
-from rebotarm_simulation.ros.message_codec import seconds_to_stamp_parts
 from rebotarm_simulation.execution.trajectory_state import terminal_disposition
 from rebotarm_simulation.ros.message_codec import trajectory_to_sampler
 from rebotarm_simulation.ros.message_codec import validate_gripper_width
-from rebotarm_simulation.execution.trajectory_sampler import ARM_JOINT_NAMES, NamedTrajectoryPoint, TrajectorySampler
-from rebotarm_simulation.execution.trajectory_sampler import PreparedTrajectorySampler
-from rebotarm_trajectory.polynomial import curve_from_payload, TrajectoryPoint, ordered_points
+from rebotarm_simulation.execution.trajectory_sampler import ARM_JOINT_NAMES
+from rebotarm_trajectory.polynomial import TrajectoryPoint
 from rebotarm_trajectory.joint_contract import canonical_input
 from rebotarm_trajectory.capability import make_capability, constraint_revision
-from rebotarm_trajectory.planning import planning_state, decode_plan, require_plan_context
+from rebotarm_simulation.execution.trajectory_execution import TrajectoryExecution
 from pathlib import Path
 
 
@@ -126,7 +119,7 @@ def create_node_class():
             # Per-goal JointTolerance arrays are intentionally not interpreted:
             # this simulation backend uses these bounded node-wide defaults so
             # clients cannot weaken settling guarantees on individual goals.
-            self._settling_policy = GoalSettlingPolicy(
+            settling_policy = GoalSettlingPolicy(
                 float(self.get_parameter("goal_position_tolerance").value),
                 float(self.get_parameter("goal_velocity_tolerance").value),
                 float(self.get_parameter("goal_time_tolerance_sec").value),
@@ -164,24 +157,7 @@ def create_node_class():
                     self._control.command_joint_positions(initial)
 
             self._sim_access.run(initialize)
-            # Gate/active lock is intentionally distinct. Lock order is always
-            # gate first, then simulation; the timer only takes simulation.
-            self._active = ActiveTrajectory()
-            # 跨任务代次属于后端；对象 id 只能辨认当前 Goal，不能绑定规划时的起点。
-            self._planning_generation = 0
-            self._command_gate = TrajectoryCommandGate(self._active)
-            self._lifecycle = ExecutionLifecycle(self._active, self._command_gate)
-            self._pending_sampler: TrajectorySampler | None = None
             self._callback_group = ReentrantCallbackGroup()
-            self._scene_revision = ''
-            # 待准备请求与已接纳曲线分开保存，服务返回之前物理周期仍保持当前位置。
-            self._preparation = None
-            self._gripper_task = None
-            self._gripper_reservation = None
-            self._sample_history = deque(maxlen=512)
-            self._last_physics_wall = time.monotonic()
-            self._stop_unconfirmed = False
-            self._retained_stop_token = None
             qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
             self._capability_publisher = self.create_publisher(String,
                 f'/{namespace}/trajectory_execution_mode', qos)
@@ -193,9 +169,13 @@ def create_node_class():
             directory = Path(get_package_share_directory('rebotarm_moveit_config'))/'config'
             revision = constraint_revision(*(directory.joinpath(name).read_bytes()
                 for name in ('rebotarm.urdf','joint_limits.yaml')))
-            self._execution_capability = make_capability(self._trajectory_mode, secrets.randbits(63),
+            capability = make_capability(self._trajectory_mode, secrets.randbits(63),
                 float(self.get_parameter('gripper_position_max_speed_rad_s').value),
                 float(self.get_parameter('gripper_position_torque_cap_nm').value), revision)
+            self._execution = TrajectoryExecution(self._sim_access, self._control,
+                capability, self._trajectory_mode, settling_policy)
+            # 仅保存 ROS Goal UUID 与执行令牌的传输关联；任务状态仍全部归 execution。
+            self._goal_tokens = {}
             self._versioned_capabilities = self.create_publisher(String,
                 f'/{namespace}/trajectory_capabilities', qos)
             self.create_service(GetArmPlanningState, f'/{namespace}/get_arm_planning_state',
@@ -230,6 +210,7 @@ def create_node_class():
                 FollowJointTrajectory,
                 f"/{self._arm_namespace}/follow_joint_trajectory",
                 goal_callback=self._goal_callback,
+                handle_accepted_callback=self._handle_accepted,
                 cancel_callback=self._cancel_callback,
                 execute_callback=self._execute_goal,
                 callback_group=self._callback_group,
@@ -246,6 +227,7 @@ def create_node_class():
                 self._teleop_server = ActionServer(self,ExecuteTeleopMotion,
                     f'/{namespace}/execute_teleop_motion',
                     goal_callback=lambda goal:self._goal_callback(goal,web=True),
+                    handle_accepted_callback=self._handle_accepted,
                     cancel_callback=self._cancel_callback,
                     execute_callback=lambda goal:self._execute_goal(goal,web=True),
                     callback_group=self._callback_group)
@@ -299,279 +281,122 @@ def create_node_class():
         def sync_viewer(self, viewer) -> None:
             self._sim_access.run(lambda _sim: viewer.sync())
 
-        def _hold_current_position(self) -> None:
-            self._sim_access.run(lambda _sim: self._hold_current_position_unlocked())
 
-        def _hold_current_position_unlocked(self) -> None:
-            self._planning_generation += 1
-            self._control.hold_current_position()
-            if self._gripper_task is not None and self._gripper_task['state'] == 'active':
-                self._cancel_gripper(self._gripper_task,'combination stopped')
-
-        def _apply_target_threadsafe(self, operation) -> None:
-            self._sim_access.run(lambda _sim: operation())
 
         def _goal_callback(self, goal_request, *, web=False):
-            token = goal_request
+            received = time.monotonic()
+            token = object()
             try:
-                if len(goal_request.trajectory.joint_names) != 6 or set(goal_request.trajectory.joint_names) != set(ARM_JOINT_NAMES):
+                names = tuple(goal_request.trajectory.joint_names)
+                if len(names) != 6 or set(names) != set(ARM_JOINT_NAMES):
                     raise ValueError('FJT requires exactly six arm joints; use independent gripper command')
-                if self._gripper_busy():
-                    raise RuntimeError('independent gripper busy')
                 if self._trajectory_mode == 'prepared_v1':
-                    return self._reserve_prepared_goal(goal_request,web=web)
-                sampler = trajectory_to_sampler(
-                    goal_request.trajectory,
-                    initial_positions=self._current_arm_positions(),
-                    max_points=self._max_points,
-                    max_duration_sec=self._max_duration,
-                )
+                    if not self._prepare_client.service_is_ready():
+                        raise RuntimeError('preparation service unavailable')
+                    command = None
+                    if web and goal_request.move_gripper:
+                        command = (validate_gripper_width(goal_request.gripper_position),
+                            float(goal_request.gripper_max_effort))
+                        validate_gripper_force(command[1])
+                    points = tuple(TrajectoryPoint(duration_to_seconds(p.time_from_start),
+                        p.positions, p.velocities, p.accelerations) for p in goal_request.trajectory.points)
+                    canonical_input(names, points)
+                    if not 0 < len(points) <= self._max_points or points[-1].time > self._max_duration:
+                        raise ValueError('trajectory point or duration budget exceeded')
+                    self._execution.reserve(token, names, points, goal_request.trajectory.header.frame_id,
+                        web=web, gripper_command=command, received=received)
+                else:
+                    sampler = trajectory_to_sampler(goal_request.trajectory,
+                        initial_positions=self._current_arm_positions(),
+                        max_points=self._max_points, max_duration_sec=self._max_duration)
+                    self._execution.admit_legacy(token, sampler)
+                return GoalResponse.ACCEPT
             except (TypeError, ValueError, RuntimeError) as exc:
                 self.get_logger().warning(f"FJT goal rejected: {exc}")
                 return GoalResponse.REJECT
-            if not self._active.try_start(token):
-                self.get_logger().warning("rejected trajectory goal while controller is busy")
-                return GoalResponse.REJECT
-            self._pending_sampler = sampler
-            self._planning_generation += 1
-            return GoalResponse.ACCEPT
 
         def _planning_state_service(self, _request, response):
-            """固定锁序只读命令保持值；不预约、不推进物理、不发送目标。"""
             try:
-                with self._active._lock:
-                    if self._active.busy or self._gripper_busy() or self._stop_unconfirmed:
-                        raise RuntimeError('arm/gripper resources reserved or stop unconfirmed')
-                    with self._lock:
-                        _state, hold = self._admission_snapshot()
-                        if self._sim.control_mode not in ('position', 'hold'):
-                            raise RuntimeError('planning requires position/hold mode')
-                        snapshot = planning_state(self._execution_capability['revision'],
-                            self._execution_capability['session'], self._planning_generation,
-                            hold, executable=True)
-                response.success, response.state_json = True, json.dumps(snapshot, allow_nan=False)
-                response.message = 'ready'
+                response.state_json = json.dumps(self._execution.planning_snapshot(), allow_nan=False)
+                response.success, response.message = True, 'ready'
             except (ValueError, RuntimeError) as exc:
                 response.success, response.message = False, str(exc)
             return response
 
-        def _stationary_snapshot(self, *, after=None):
-            """调用方持仿真锁，核验六轴及两指的完整静止窗口并返回实际状态和保持命令。
-
-            物理窗口按仿真时间覆盖 0.2 s，墙上单调时钟另查物理循环是否停滞；
-            after 用于要求停止发起之后的全新窗口，重复发布旧状态不能满足条件。
-            """
-            state = self._sim.get_state()
-            cutoff = state.simulation_time-.2
-            samples = [item for item in self._sample_history if item.simulation_time >= cutoff-.0021]
-            if (time.monotonic()-self._last_physics_wall > .15 or len(samples) < 3
-                    or samples[-1].simulation_time-samples[0].simulation_time < .2-1e-9
-                    or (after is not None and samples[0].simulation_time <= after)):
-                raise RuntimeError('fresh complete stationary window required')
-            speeds = (.05,)*6+(.00045,)*2
-            for index, speed in enumerate(speeds):
-                if any(abs(item.joint_velocities[index]) > speed for item in samples):
-                    raise RuntimeError(f'{state.joint_names[index]} stationary evidence:'
-                        f' speed={max(abs(item.joint_velocities[index]) for item in samples):.9f}'
-                        f' > {speed:.9f}')
-            hold = tuple(self._sim.get_control_status().joint_targets)
-            # 静止窗口比较实际反馈；实际位置与命令保持值的残差不单独阻断下一次请求。
-            return state, hold
-
-        def _admission_snapshot(self):
-            """准入只要求新鲜物理反馈及夹爪静止，不要求机械臂积累静止窗口。"""
-            state = self._sim.get_state()
-            cutoff = state.simulation_time-.2
-            samples = [item for item in self._sample_history if item.simulation_time >= cutoff-.0021]
-            if (time.monotonic()-self._last_physics_wall > .15 or len(samples) < 3
-                    or samples[-1].simulation_time-samples[0].simulation_time < .2-1e-9):
-                raise RuntimeError('fresh complete gripper stationary window required')
-            if any(abs(item.joint_velocities[index]) > .00045
-                   for item in samples for index in (6, 7)):
-                raise RuntimeError('gripper stationary evidence unavailable')
-            return state, tuple(self._sim.get_control_status().joint_targets)
-
         def _publish_admission(self):
-            """发布只读准入证据；物理状态和能力不代表任何一次 REJECT 的准确原因。"""
-            self._versioned_capabilities.publish(String(data=json.dumps(self._execution_capability, allow_nan=False)))
-            reasons = []
-            with self._active._lock:
-                if self._active.busy or self._stop_unconfirmed:
-                    reasons.append('arm/gripper resources reserved or stop unconfirmed')
-                with self._lock:
-                    try:
-                        self._admission_snapshot()
-                    except RuntimeError as exc:
-                        reasons.append(str(exc))
-                    if self._sim.control_mode not in ('position','hold'):
-                        reasons.append(f'mode={self._sim.control_mode}, required=position/hold')
-                if self._trajectory_mode == 'prepared_v1':
-                    if not self._scene_revision:
-                        reasons.append('scene revision unavailable')
-                    if not self._prepare_client.service_is_ready():
-                        reasons.append('preparation service unavailable')
+            self._versioned_capabilities.publish(String(data=json.dumps(self._execution.capability, allow_nan=False)))
+            reasons = self._execution.admission_reasons()
+            status = self._execution.status_snapshot()
+            if self._trajectory_mode == 'prepared_v1':
+                if not status.scene_revision:
+                    reasons.append('scene revision unavailable')
+                if not self._prepare_client.service_is_ready():
+                    reasons.append('preparation service unavailable')
             message = DiagnosticArray()
             message.header.stamp = self.get_clock().now().to_msg()
             message.status = [DiagnosticStatus(name=f'{self._arm_namespace}/trajectory_admission',hardware_id='simulation',
                 level=DiagnosticStatus.WARN if reasons else DiagnosticStatus.OK,
                 message='; '.join(reasons) if reasons else 'ready',
-                values=[KeyValue(key='scene_revision',value=self._scene_revision)])]
+                values=[KeyValue(key='scene_revision',value=status.scene_revision)])]
             self._diagnostic_pub.publish(message)
 
-        def _reserve_prepared_goal(self, goal, *, web=False):
-            """先校验输入，再按固定锁序预约空闲资源；忙时拒绝，不累积键盘或网页目标。"""
-            received = time.monotonic()
-            if web and goal.move_gripper:
-                validate_gripper_width(goal.gripper_position)
-                validate_gripper_force(goal.gripper_max_effort)
-            if not self._prepare_client.service_is_ready():
-                raise RuntimeError('preparation service unavailable')
-            if not self._scene_revision:
-                raise RuntimeError('scene revision unavailable')
-            points = tuple(TrajectoryPoint(duration_to_seconds(p.time_from_start), p.positions,
-                p.velocities, p.accelerations) for p in goal.trajectory.points)
-            canonical_input(goal.trajectory.joint_names, points, self._current_arm_positions())
-            if not 0 < len(points) <= self._max_points or points[-1].time > self._max_duration:
-                raise ValueError('trajectory point or duration budget exceeded')
-            with self._active._lock:
-                if self._active.busy or self._gripper_busy():
-                    raise RuntimeError('arm/gripper resources reserved')
-                with self._lock:
-                    state, hold = self._admission_snapshot()
-                    if self._sim.control_mode not in ('position', 'hold'):
-                        raise RuntimeError(f'mode={self._sim.control_mode}, required=position/hold')
-                    plan = decode_plan(goal.trajectory.header.frame_id, goal.trajectory.joint_names,
-                        points, capability_revision=self._execution_capability['revision'], require_execution=True)
-                    require_plan_context(plan, capability_revision=self._execution_capability['revision'],
-                        session=self._execution_capability['session'], generation=self._planning_generation, hold=hold)
-                    if not self._active.try_start(goal):
-                        return GoalResponse.REJECT
-                    request = self._prepare_type.Request()
-                    request.trajectory = goal.trajectory
-                    request.session = self._execution_capability['session']
-                    request.generation = self._planning_generation
-                    request.hold_positions, request.feedback_positions = list(hold), list(state.joint_positions[:6])
-                    request.feedback_observed_at = self._last_physics_wall
-                    request.stationary = False  # 兼容字段，不再声明机械臂静止窗口。
-                    request.enabled = True
-                    request.gripper_positions = list(state.joint_positions[-2:])
-                    request.gripper_generation = 0
-                    request.gripper_collision_policy = 1 if web else 0
-                    request.scene_revision = self._scene_revision
-                    request.capability_json = json.dumps(self._execution_capability, allow_nan=False)
-                    request.deadline_monotonic = received+min(2., .2*points[-1].time+.25)
-                    self._preparation = (goal, request)
-                    self._pending_sampler = None
-                    self._stop_unconfirmed = False
-            return GoalResponse.ACCEPT
-
         def _scene_changed(self, message):
-            """收到不同碰撞版本时使准备/执行失效；由命令闸门接管保持，不重算活动曲线。"""
-            with self._active._lock:
-                self._scene_revision = message.data
-                expected = (self._preparation[1].scene_revision if self._preparation is not None
-                            else self._active.prepared['revision'] if self._active.prepared else None)
-                if expected is not None and expected != message.data:
-                    self._command_gate.stop_and_hold(self._hold_current_position)
+            self._execution.scene_changed(message.data)
 
         def _prepare_sampler(self, goal_handle, token):
-            """Action 工作线程等待服务并解码，最终由命令闸门原子核验身份和仿真快照。"""
-            pending = self._preparation
-            if pending is None or pending[0] is not token:
-                raise RuntimeError('preparation ownership lost')
-            request = pending[1]
-            self.get_logger().info(f'trajectory preparation dispatch age={time.monotonic()-request.feedback_observed_at:.4f}s')
+            """ROS 工作线程仅编码请求及等待 Future；执行组件完成上下文复核与原子接纳。"""
+            pending = self._execution.preparation_for(token)
+            request = self._prepare_type.Request()
+            request.trajectory = goal_handle.request.trajectory
+            for field in ('session', 'generation', 'feedback_observed_at', 'gripper_generation',
+                          'gripper_collision_policy', 'scene_revision', 'deadline_monotonic'):
+                setattr(request, field, getattr(pending, field))
+            for field in ('hold_positions', 'feedback_positions', 'gripper_positions'):
+                setattr(request, field, list(getattr(pending, field)))
+            request.stationary, request.enabled = False, True
+            request.capability_json = json.dumps(self._execution.capability, allow_nan=False)
+            self.get_logger().info(f'trajectory preparation dispatch age={time.monotonic()-pending.feedback_observed_at:.4f}s')
             future = self._prepare_client.call_async(request)
             while not future.done():
-                if (goal_handle.is_cancel_requested or self._active.cancel_requested
-                        or time.monotonic() >= request.deadline_monotonic):
+                if (goal_handle.is_cancel_requested or self._execution.active.cancel_requested
+                        or time.monotonic() >= pending.deadline_monotonic):
                     future.cancel()
                     raise RuntimeError('trajectory preparation canceled or timed out')
                 time.sleep(.002)
             response = future.result()
             if not response.success:
                 raise ValueError(response.message)
-            payload = json.loads(response.prepared_json)
-            curve = curve_from_payload(payload['curve'])
-            decode_plan(request.trajectory.header.frame_id, curve.joint_names, curve.points,
-                capability_revision=self._execution_capability['revision'], require_execution=True)
-            def admit():
-                """在目标锁内再取得仿真锁，复核期间不能插入物理状态或控制模式修改。"""
-                with self._lock:
-                    state, hold = self._admission_snapshot()
-                    context = payload['context']
-                    if (self._sim.control_mode not in ('position', 'hold')
-                            or time.monotonic() >= request.deadline_monotonic
-                            or self._scene_revision != response.scene_revision
-                            or payload['scene_revision'] != request.scene_revision
-                            or context['session'] != request.session or context['generation'] != request.generation
-                            or self._planning_generation != request.generation
-                            or tuple(context['hold']) != tuple(request.hold_positions)
-                            or hold != tuple(request.hold_positions) or curve.points[0].positions[:6] != hold
-                            or payload['gripper_generation'] != request.gripper_generation
-                            or tuple(payload['gripper_positions']) != tuple(request.gripper_positions)
-                            or payload.get('gripper_collision_policy',0) != request.gripper_collision_policy
-                            or payload.get('capability_revision') != self._execution_capability['revision']
-                            or tuple(curve.joint_names) != tuple(ARM_JOINT_NAMES)):
-                        raise RuntimeError('prepared simulation context changed')
-                    # 执行起时在接纳时捕获；不能用准备开始时间让曲线跳过起始运动。
-                    self._active.prepared = dict(curve=curve, start=state.simulation_time,
-                        revision=response.scene_revision, fingers=tuple(request.gripper_positions))
-                    self._planning_generation += 1
-                    self._active.prepared['web'] = request.gripper_collision_policy == 1
-                    if request.gripper_collision_policy == 1 and goal_handle.request.move_gripper:
-                        self._start_gripper(token,goal_handle.request.gripper_position,
-                            goal_handle.request.gripper_max_effort)
-                        self._active.prepared['gripper'] = self._gripper_task
-                    self._preparation = None
-            outcome = self._command_gate.apply_with_reason(token,
-                lambda: goal_handle.is_cancel_requested, admit, self._hold_current_position)
-            if outcome is not GateOutcome.APPLIED:
-                raise RuntimeError('prepared trajectory canceled before atomic admission')
-            # 记录原子接纳后实际解码的阶数，供仿真验收核对；不在周期线程内增加检查。
-            self.get_logger().info(f'prepared curve accepted degree={curve.degree} points={len(curve.points)}')
-            return PreparedTrajectorySampler(curve)
+            sampler = self._execution.admit(token, json.loads(response.prepared_json),
+                response.scene_revision, lambda: goal_handle.is_cancel_requested)
+            self.get_logger().info(f'prepared curve accepted degree={sampler.curve.degree} points={len(sampler.curve.points)}')
+            return sampler
 
-        def _wait_prepared_stop(self):
-            """取消不是连续轨迹保证；资源仍占用至新物理帧确认静止。"""
-            after = self._sim_access.run(lambda sim: sim.get_state().simulation_time)
-            deadline = time.monotonic()+5.
-            # 每轮只短暂读取物理状态，等待在锁外进行，物理定时器才能产生新的静止证据。
-            while time.monotonic() < deadline:
-                try:
-                    self._sim_access.run(lambda _sim: self._stationary_snapshot(after=after))
-                    self._stop_unconfirmed = False
-                    return
-                except RuntimeError:
-                    time.sleep(.01)
-            self._stop_unconfirmed = True
-            raise RuntimeError('simulation stop/hold unconfirmed')
+        def _wait_prepared_stop(self, token):
+            wait = self._execution.begin_stop_wait(token)
+            while not self._execution.poll_stop(wait):
+                time.sleep(.01)
 
-        def _finish_prepared(self, sampler):
-            """末点已由物理周期送出；原命令终点保持，协同夹爪中性释放后才完成。"""
-            def finish(sim):
-                self._control.command_joint_positions(sampler.sample(sampler.duration)[:6])
-            self._sim_access.run(finish)
+        def _handle_accepted(self, goal_handle):
+            """协议句柄绑定本次令牌；取消与执行回调都使用同一关联。"""
+            with self._execution.lock:
+                self._goal_tokens[bytes(goal_handle.goal_id.uuid)] = self._execution.active.token
+            goal_handle.execute()
 
-        def _cancel_callback(self, _goal_handle):
-            stopped = self._command_gate.stop_and_hold(self._hold_current_position)
+        def _cancel_callback(self, goal_handle):
+            with self._execution.lock:
+                token = self._goal_tokens.get(bytes(goal_handle.goal_id.uuid))
+                if token is None or not goal_handle.is_active:
+                    return CancelResponse.REJECT
+                stopped = self._execution.stop(token)
             return CancelResponse.ACCEPT if stopped else CancelResponse.REJECT
 
         def _stop_service(self, _request, response):
-            # 空闲 Stop 也作废已有规划；目标锁覆盖代次更新，不能插入新预约后再保持。
-            with self._active._lock:
-                token = self._active.token
-                stopped = self._command_gate.stop_and_hold(self._hold_current_position)
-                if not stopped:
-                    self._hold_current_position()
+            with self._execution.lock:
+                token = self._execution.active.token
+                stopped = self._execution.stop()
             if self._trajectory_mode == 'prepared_v1' and stopped:
                 try:
-                    self._wait_prepared_stop()
-                    with self._active._lock:
-                        if self._retained_stop_token is token:
-                            self._preparation = None
-                            self._active.finish(token)
-                            self._retained_stop_token = None
+                    self._wait_prepared_stop(token)
                 except RuntimeError as exc:
                     response.success, response.message = False, str(exc)
                     return response
@@ -610,79 +435,35 @@ def create_node_class():
             msg.status = [item]
             self._diagnostic_pub.publish(msg)
 
-        def _gripper_busy(self):
-            return (self._gripper_reservation is not None or
-                self._gripper_task is not None and self._gripper_task['state'] in ('active','releasing'))
-
-        def _start_gripper(self, owner, width, effort):
-            """调用方持目标锁及仿真锁；内部预约身份不能越过另一任务的资源。"""
-            width = validate_gripper_width(width)
-            validate_gripper_force(effort)
-            if self._active.busy and self._active.token is not owner:
-                raise RuntimeError('gripper reserved by arm task')
-            if self._gripper_task is not None and self._gripper_task['state'] in ('active','releasing'):
-                raise RuntimeError('gripper busy')
-            state = self._sim.get_state()
-            speed = self._execution_capability['gripper_motor_speed_rad_s']*.018
-            self._gripper_task = dict(owner=owner,start=state.simulation_time,initial=state.gripper_width,
-                target=width,speed=speed,deadline=state.simulation_time+abs(width-state.gripper_width)/speed+1.5,
-                effort=min(effort if effort > 0 else 1.,self._execution_capability['gripper_torque_cap_nm']),
-                state='active',reason='')
-            return self._gripper_task
-
-        def _cancel_gripper(self, task, reason):
-            """只取消本任务；中性释放后等待新物理帧确认静止才释放资源。"""
-            if task is not self._gripper_task or task['state'] != 'active':
-                return
-            self._sim.release_gripper_position()
-            task.update(state='releasing',reason=reason,released=self._sim.get_state().simulation_time)
-
-        def _advance_gripper(self, sim):
-            task = self._gripper_task
-            if task is None or task['state'] not in ('active','releasing'):
-                return
-            state = sim.get_state()
-            if task['state'] == 'releasing':
-                if state.simulation_time-task['released'] >= .2 and max(abs(v) for v in state.joint_velocities[-2:]) <= .00045:
-                    task['state'] = 'failed'
-                return
-            elapsed = state.simulation_time-task['start']
-            distance = min(abs(task['target']-task['initial']),task['speed']*elapsed)
-            target = task['initial']+math.copysign(distance,task['target']-task['initial'])
-            sim.command_gripper_position(target,task['effort'])
-            if distance >= abs(task['target']-task['initial']):
-                task.setdefault('sent_at',state.simulation_time)
-                # 与六轴末点相同：必须先送出最终目标，再用后续物理帧确认，不能用发送前反馈提前成功。
-                if state.simulation_time > task['sent_at'] and abs(state.gripper_width-task['target']) <= .12*.018:
-                    sim.release_gripper_position()
-                    task['state'] = 'succeeded'
-            if task['state'] == 'active' and state.simulation_time >= task['deadline']:
-                self._cancel_gripper(task,'gripper goal timeout')
 
         def _gripper_goal_callback(self, request):
-            with self._active._lock:
-                if self._active.busy or self._gripper_busy():
-                    return GoalResponse.REJECT
-                self._gripper_reservation = request
+            try:
+                with self._execution.lock:
+                    self._execution.gripper.reserve(object())
                 return GoalResponse.ACCEPT
+            except RuntimeError:
+                return GoalResponse.REJECT
 
         def _execute_gripper(self, goal, *, moveit=False):
             result = GripperCommand.Result()
-            owner = self._gripper_reservation
+            owner = self._execution.gripper.reservation
+            task = None
             try:
-                with self._active._lock:
-                    task = self._sim_access.run(lambda sim:self._start_gripper(owner,
-                        goal.request.command.position*(2. if moveit else 1.),goal.request.command.max_effort))
+                width = validate_gripper_width(goal.request.command.position*(2. if moveit else 1.))
+                effort = float(goal.request.command.max_effort)
+                validate_gripper_force(effort)
+                with self._execution.lock:
+                    task = self._sim_access.run(lambda sim: self._execution.gripper.start(owner, width, effort))
                 while rclpy.ok():
-                    with self._active._lock:
+                    with self._execution.lock:
                         if goal.is_cancel_requested:
-                            self._sim_access.run(lambda sim:self._cancel_gripper(task,'gripper action canceled'))
-                        state = self._sim_access.run(lambda sim:sim.get_state())
+                            self._sim_access.run(lambda sim: self._execution.gripper.cancel(task, 'gripper action canceled'))
+                        state = self._sim_access.run(lambda sim: sim.get_state())
                         result.position = state.gripper_width/(2. if moveit else 1.)
-                        result.reached_goal = task['state'] == 'succeeded'
-                        feedback = GripperCommand.Feedback(position=result.position,reached_goal=result.reached_goal)
-                        goal.publish_feedback(feedback)
-                        if task['state'] in ('succeeded','failed'):
+                        result.reached_goal = task.state == 'succeeded'
+                        goal.publish_feedback(GripperCommand.Feedback(
+                            position=result.position, reached_goal=result.reached_goal))
+                        if task.state in ('succeeded', 'failed'):
                             if result.reached_goal: goal.succeed()
                             elif goal.is_cancel_requested: goal.canceled()
                             else: goal.abort()
@@ -691,51 +472,45 @@ def create_node_class():
                 raise RuntimeError('simulation shutting down')
             except Exception as exc:
                 self.get_logger().error(f'gripper execution failed: {exc}')
-                if self._gripper_task is not None and self._gripper_task['owner'] is owner:
-                    self._sim_access.run(lambda sim:self._cancel_gripper(self._gripper_task,str(exc)))
+                with self._execution.lock:
+                    if task is not None:
+                        self._sim_access.run(lambda sim: self._execution.gripper.cancel(task, str(exc)))
                 goal.abort()
                 return result
             finally:
-                if self._gripper_reservation is owner:
-                    self._gripper_reservation = None
+                with self._execution.lock:
+                    self._execution.gripper.release_reservation(owner)
 
         def _gripper_service(self, request, response):
-            task = None
             try:
-                with self._active._lock:
-                    if self._active.busy or self._gripper_busy():
+                width = validate_gripper_width(request.position)
+                effort = float(request.max_effort)
+                validate_gripper_force(effort)
+                with self._execution.lock:
+                    if self._execution.active.busy or self._execution.gripper.busy:
                         raise RuntimeError('gripper resources reserved')
-                    task = self._sim_access.run(lambda sim:self._start_gripper(object(),request.position,request.max_effort))
-                while rclpy.ok() and task['state'] in ('active','releasing'):
+                    task = self._sim_access.run(lambda sim: self._execution.gripper.start(object(), width, effort))
+                while rclpy.ok():
+                    with self._execution.lock:
+                        if task.state not in ('active', 'releasing'):
+                            response.success = task.state == 'succeeded'
+                            break
                     time.sleep(.01)
-                response.success = task['state'] == 'succeeded'
-            except (TypeError,ValueError,RuntimeError):
+                else:
+                    response.success = False
+            except (TypeError, ValueError, RuntimeError):
                 response.success = False
-            response.reached_position = self._sim_access.run(lambda sim:sim.get_state().gripper_width)
+            response.reached_position = self._sim_access.run(lambda sim: sim.get_state().gripper_width)
             return response
+
 
         def _mode_service(self, request, response):
             try:
-                mode = normalize_ros_control_mode(request.mode)
-            except ValueError as exc:
-                response.success = False
-                response.message = str(exc)
+                reached = self._execution.change_mode(normalize_ros_control_mode(request.mode))
+            except (TypeError, ValueError, RuntimeError) as exc:
+                response.success, response.message = False, f"mode rejected: {exc}"
                 return response
-            try:
-                # 与准备占用使用同一锁，避免检查空闲后被新 Goal 抢入再切换模式。
-                with self._active._lock:
-                    if self._active.busy or self._gripper_busy():
-                        response.success = False
-                        response.message = "trajectory active; stop or cancel it before changing mode"
-                        return response
-                    reached = self._sim_access.run(lambda _sim: self._control.set_mode(mode))
-                    self._planning_generation += 1
-            except (TypeError, ValueError) as exc:
-                response.success = False
-                response.message = f"mode rejected: {exc}"
-                return response
-            response.success = True
-            response.message = f"simulation mode: {reached}"
+            response.success, response.message = True, f"simulation mode: {reached}"
             return response
 
         @staticmethod
@@ -754,201 +529,122 @@ def create_node_class():
                 result.error_string = "simulation trajectory is no longer active"
             return result
 
+
         def _execute_goal(self, goal_handle, *, web=False):
-            """协调反馈和终态；prepared_v1 的实际目标采样由物理定时器唯一推进。"""
-            # rclpy does not promise that the goal-request wrapper passed to
-            # admission and the one exposed by the goal handle are identical.
-            # Preserve the admission token so cleanup cannot leave the server
-            # permanently busy after an otherwise valid goal.
-            token = self._active.token
+            """协调传输与等待；曲线采样、到位、组合终态和清理由执行组件拥有。"""
+            execution = self._execution
+            goal_key = bytes(goal_handle.goal_id.uuid)
+            with execution.lock:
+                token = self._goal_tokens[goal_key]
             result = ExecuteTeleopMotion.Result() if web else FollowJointTrajectory.Result()
             grip = None
             completed = False
-            sampler, self._pending_sampler = self._pending_sampler, None
+            sampler = execution.take_sampler()
             if sampler is None and self._trajectory_mode == 'legacy':
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
                 result.error_string = "trajectory was not admitted"
                 goal_handle.abort()
-                self._active.finish(token)
+                execution.cleanup(token)
+                with execution.lock:
+                    del self._goal_tokens[goal_key]
                 return result
             try:
                 if self._trajectory_mode == 'prepared_v1':
                     if web:
                         goal_handle.publish_feedback(ExecuteTeleopMotion.Feedback(stage='preparing',
-                            gripper_state='not_started',gripper_position=self._sim_access.run(
-                                lambda sim:sim.get_state().gripper_width)))
+                            gripper_state='not_started', gripper_position=self._sim_access.run(
+                                lambda sim: sim.get_state().gripper_width)))
                     sampler = self._prepare_sampler(goal_handle, token)
-                    start_time = self._active.prepared['start']
-                    grip = self._active.prepared.get('gripper')
+                    start_time, grip = execution.accepted_context(token)
                 else:
                     start_time = self._sim_access.run(lambda sim: sim.get_state().simulation_time)
                 feedback_limiter = FeedbackRateLimiter(self._feedback_rate_hz)
                 while rclpy.ok():
-                    command: dict[str, Any] = {}
-
-                    def apply_target() -> None:
-                        state = self._sim.get_state()
-                        elapsed = max(0.0, state.simulation_time - start_time)
-                        desired = sampler.sample(min(elapsed, sampler.duration))
-                        # prepared 路径这里只构造反馈，避免 Action 线程另行写目标造成双重推进。
-                        if self._trajectory_mode == 'legacy':
-                            self._control.command_joint_positions(desired)
-                        command.update(state=state, elapsed=elapsed, desired=desired)
-
-                    outcome = self._command_gate.apply_with_reason(
-                        token,
-                        lambda: goal_handle.is_cancel_requested,
-                        lambda: self._apply_target_threadsafe(apply_target),
-                        self._hold_current_position,
-                    )
+                    outcome, observation = execution.observe(token, sampler, start_time,
+                        lambda: goal_handle.is_cancel_requested)
                     if outcome is not GateOutcome.APPLIED:
                         if self._trajectory_mode == 'prepared_v1':
-                            self._wait_prepared_stop()
+                            self._wait_prepared_stop(token)
                         return self._terminate_goal(goal_handle, result, outcome)
-                    state = command["state"]
-                    elapsed = command["elapsed"]
-                    desired = command["desired"]
+                    state, elapsed, desired = observation.state, observation.elapsed, observation.desired
+                    settling = observation.settling
                     feedback = ExecuteTeleopMotion.Feedback() if web else FollowJointTrajectory.Feedback()
                     if web:
                         feedback.stage = 'executing'
-                        feedback.arm_progress = min(1.,elapsed/sampler.duration) if sampler.duration else 1.
-                        grip = self._active.prepared.get('gripper')
-                        feedback.gripper_state = grip['state'] if grip else 'not_requested'
+                        feedback.arm_progress = min(1., elapsed/sampler.duration) if sampler.duration else 1.
+                        feedback.gripper_state = observation.gripper_state
                         feedback.gripper_position = state.gripper_width
+                        result.arm_state, result.gripper_state = observation.arm_state, observation.gripper_state
                     else:
                         feedback.joint_names = list(ARM_JOINT_NAMES)
                     feedback.desired.positions = list(desired)
-                    elapsed_ns = round(min(sampler.duration,max(0.,elapsed))*1e9)
-                    feedback.desired.time_from_start.sec, feedback.desired.time_from_start.nanosec = divmod(elapsed_ns,1_000_000_000)
+                    elapsed_ns = round(min(sampler.duration, max(0., elapsed))*1e9)
+                    feedback.desired.time_from_start.sec, feedback.desired.time_from_start.nanosec = divmod(elapsed_ns, 1_000_000_000)
                     actual = tuple(state.joint_positions[:6])
                     feedback.actual.positions = list(actual)
                     feedback.actual.velocities = list(state.joint_velocities[:6])
                     if not web:
                         feedback.error.positions = [d-a for d,a in zip(desired,actual)]
-                    settling = self._settling_policy.evaluate(
-                        sampler.sample(sampler.duration)[:6],
-                        actual[:6],
-                        tuple(state.joint_velocities[:6]),
-                        max(0.0, elapsed - sampler.duration),
-                    ) if elapsed >= sampler.duration else "tracking"
-                    if web:
-                        grip = self._active.prepared.get('gripper')
-                        result.arm_state = 'succeeded' if settling == 'succeeded' else 'running'
-                        result.gripper_state = grip['state'] if grip else 'not_requested'
-                        if grip and grip['state'] in ('failed','releasing'):
-                            raise RuntimeError(grip['reason'] or 'independent gripper failed')
-                        if settling == 'succeeded' and grip and grip['state'] != 'succeeded':
-                            settling = 'settling'
-                    if self._trajectory_mode == 'prepared_v1' and settling == 'succeeded':
-                        active = self._active.prepared
-                        if active is None or active.get('sent_at') is None or state.simulation_time <= active['sent_at']:
-                            settling = 'settling'
-                    if feedback_limiter.should_publish(
-                        time.monotonic(), final=settling in ("succeeded", "timed_out")
-                    ):
+                    if feedback_limiter.should_publish(time.monotonic(), final=settling in ('succeeded', 'timed_out')):
                         goal_handle.publish_feedback(feedback)
-                    if settling == "succeeded":
-                        # prepared 正常结束再明确写入最终命令；不能捕获瞬时实际位置代替它。
-                        completion = self._command_gate.complete_with_reason(
-                            token,
-                            lambda: goal_handle.is_cancel_requested,
-                            self._hold_current_position,
-                            lambda: (self._finish_prepared(sampler)
-                                if self._trajectory_mode == 'prepared_v1' else self._hold_current_position(),
-                                goal_handle.succeed()),
-                        )
+                    if settling == 'succeeded':
+                        completion = execution.complete(token, sampler,
+                            lambda: goal_handle.is_cancel_requested, goal_handle.succeed)
                         if completion is not GateOutcome.SUCCEEDED:
                             if self._trajectory_mode == 'prepared_v1':
-                                self._wait_prepared_stop()
+                                self._wait_prepared_stop(token)
                             return self._terminate_goal(goal_handle, result, completion)
                         result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
                         result.error_string = "simulation trajectory finished"
                         completed = True
                         return result
-                    if settling == "timed_out":
-                        self._command_gate.stop_and_hold(self._hold_current_position)
+                    if settling == 'timed_out':
+                        execution.stop(token)
                         if self._trajectory_mode == 'prepared_v1':
-                            self._wait_prepared_stop()
+                            self._wait_prepared_stop(token)
                         goal_handle.abort()
                         result.error_code = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
                         result.error_string = "simulation goal did not settle within configured tolerance"
                         return result
                     time.sleep(self._execute_wait_sec)
+                execution.stop(token)
                 goal_handle.abort()
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
                 result.error_string = "simulation shutting down"
-                self._hold_current_position()
                 return result
             except Exception as exc:
-                self.get_logger().error(
-                    f"trajectory execution exception: {type(exc).__name__}: {exc}"
-                )
+                self.get_logger().error(f"trajectory execution exception: {type(exc).__name__}: {exc}")
                 if self._trajectory_mode == 'prepared_v1':
-                    self._command_gate.stop_and_hold(self._hold_current_position)
+                    execution.stop(token)
                     try:
-                        self._wait_prepared_stop()
+                        self._wait_prepared_stop(token)
                     except RuntimeError as stop_error:
                         exc = RuntimeError(f'{exc}; {stop_error}')
-                    if goal_handle.is_cancel_requested and not self._stop_unconfirmed:
+                    if goal_handle.is_cancel_requested and not execution.status_snapshot().stop_unconfirmed:
                         goal_handle.canceled()
                     else:
                         goal_handle.abort()
                 else:
-                    self._lifecycle.fail(token, self._hold_current_position,
+                    execution.fail_legacy(token,
                         lambda: goal_handle.abort() if getattr(goal_handle, "is_active", True) else None)
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
                 result.error_string = f"simulation trajectory execution failed: {exc}"
                 return result
             finally:
                 if web:
-                    # 闸门正常完成时会清空活动槽；保留本任务句柄，避免丢失夹爪真实结果。
                     if completed:
                         result.arm_state = 'succeeded'
                     elif result.arm_state != 'succeeded':
                         result.arm_state = 'canceled' if goal_handle.is_cancel_requested else 'failed'
-                    result.gripper_state = (grip['state'] if grip else
+                    result.gripper_state = (grip.state if grip else
                         'not_started' if goal_handle.request.move_gripper else 'not_requested')
-                # 停止证据不足时保留 token；只有后续显式停止确认才能恢复资源可用。
-                if self._stop_unconfirmed:
-                    self._retained_stop_token = token
-                if not self._stop_unconfirmed:
-                    with self._active._lock:
-                        if self._preparation is not None and self._preparation[0] is token:
-                            self._preparation = None
-                        self._active.finish(token)
+                execution.cleanup(token)
+                with execution.lock:
+                    del self._goal_tokens[goal_key]
 
         def _timer_callback(self) -> None:
             """物理定时器串行推进仿真；一个定时回调含多步时也在每个物理步重采参考。"""
-            if self._trajectory_mode == 'legacy':
-                def legacy_step(sim):
-                    for _ in range(self._steps_per_tick):
-                        self._advance_gripper(sim)
-                        state = sim.step()
-                    return state
-                with self._active._lock:
-                    state = self._sim_access.run(legacy_step)
-            else:
-                # 锁序固定为目标闸门 -> 仿真；每个物理步按当前仿真时间采样，不积压旧目标。
-                with self._active._lock:
-                    def step(sim):
-                        for _ in range(self._steps_per_tick):
-                            active = self._active.prepared
-                            if active is not None and not self._active.cancel_requested:
-                                current = sim.get_state()
-                                curve = active['curve']
-                                elapsed = current.simulation_time-active['start']
-                                target = curve.sample(elapsed)[0]
-                                self._control.command_joint_positions(target)
-                                if elapsed >= curve.duration:
-                                    active.setdefault('sent_at',current.simulation_time)
-                            self._advance_gripper(sim)
-                            state = sim.step()
-                            # 记录与静止窗口都使用真正推进后的物理帧，而不是 ROS 重复发布频率。
-                            self._trace.record(state, sim.get_control_status(), active)
-                            self._sample_history.append(state)
-                        self._last_physics_wall = time.monotonic()
-                        return state
-                    state = self._sim_access.run(step)
+            state = self._execution.step(self._steps_per_tick, self._trace.record)
             stamp = Clock()
             seconds, nanoseconds = self._stamp.update(state.simulation_time)
             stamp.clock.sec = seconds
@@ -974,11 +670,11 @@ def create_node_class():
             status = ArmStatus()
             status.header.stamp = stamp.clock
             status.mode, status.enabled, status.control_loop_active = 'pos_vel', True, True
-            status.state_machine = ('TRAJ_PREPARING' if self._preparation else
-                'TRAJ_RUNNING' if self._active.busy else 'IDLE')
+            execution_status = self._execution.status_snapshot()
+            status.state_machine = execution_status.phase
             status.joint_names = list(ARM_JOINT_NAMES)
             status.per_joint_status_code = [1]*6
-            status.error_codes = ['SIM_STOP_UNCONFIRMED'] if self._stop_unconfirmed else []
+            status.error_codes = ['SIM_STOP_UNCONFIRMED'] if execution_status.stop_unconfirmed else []
             self._status_pub.publish(status)
 
 

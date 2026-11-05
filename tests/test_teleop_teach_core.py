@@ -245,6 +245,19 @@ class StatusPanelApiRouterTests(unittest.TestCase):
         self.assertIn("/api/keyboard_key", paths)
 
 
+def _six_axis_samples(samples, *, with_velocity=False):
+    """将单轴示例扩成完整六轴测试夹具，其余轴固定零位。"""
+    from dataclasses import replace
+    names = tuple(f'joint{i}' for i in range(1,7))
+    result = []
+    for sample in samples:
+        q = dict(zip(sample.joint_names,sample.positions))
+        v = dict(zip(sample.joint_names,sample.velocities))
+        result.append(replace(sample,joint_names=names,positions=tuple(q.get(n,0.) for n in names),
+            velocities=tuple(v.get(n,0.) for n in names) if with_velocity or v else ()))
+    return result
+
+
 class TeachRecordingCoreTests(unittest.TestCase):
     def test_is_quit_key_matches_configured_key_case_insensitively(self) -> None:
         self.assertTrue(is_quit_key("q", quit_key="q"))
@@ -680,6 +693,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.05, ("joint1",), (0.04,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.10, ("joint1",), (0.08,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
         retimed = retime_teach_samples(
             samples,
@@ -716,6 +730,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.05, ("joint1",), (0.2,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.10, ("joint1",), (0.21,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples, with_velocity=True)
 
         retimed = retime_teach_samples(
             samples,
@@ -726,13 +741,13 @@ class TeachRecordingCoreTests(unittest.TestCase):
             boundary_zero_velocity=True,
         )
 
-        self.assertEqual(retimed[0].velocities, (0.0,))
-        self.assertEqual(retimed[-1].velocities, (0.0,))
-        for previous, current in zip(retimed, retimed[1:]):
-            dt = current.time_from_start - previous.time_from_start
-            for last_velocity, velocity in zip(previous.velocities, current.velocities):
-                acceleration = abs(float(velocity) - float(last_velocity)) / dt
-                self.assertLessEqual(acceleration, 0.500001)
+        self.assertEqual(retimed[0].velocities, (0.0,)*6)
+        self.assertEqual(retimed[-1].velocities, (0.0,)*6)
+        from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
+        from rebotarm_motion.trajectory_time_parameterization import teach_curve_analysis
+        curve = build_curve(samples[0].joint_names, tuple(TrajectoryPoint(
+            p.time_from_start-retimed[0].time_from_start,p.positions,p.velocities,p.accelerations) for p in retimed))
+        self.assertLessEqual(teach_curve_analysis(curve)['segment_peaks']['acceleration'], .500001)
 
     def test_retime_teach_samples_caps_jerk(self) -> None:
         samples = [
@@ -741,6 +756,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.10, ("joint1",), (0.21,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.15, ("joint1",), (0.4,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples, with_velocity=True)
 
         retimed = retime_teach_samples(
             samples,
@@ -752,28 +768,25 @@ class TeachRecordingCoreTests(unittest.TestCase):
             boundary_zero_velocity=True,
         )
 
-        last_velocity = retimed[0].velocities[0]
-        last_acceleration = 0.0
-        for previous, current in zip(retimed, retimed[1:]):
-            dt = current.time_from_start - previous.time_from_start
-            velocity = current.velocities[0]
-            acceleration = (velocity - last_velocity) / dt
-            jerk = abs(acceleration - last_acceleration) / dt
-            self.assertLessEqual(abs(acceleration), 0.800001)
-            self.assertLessEqual(jerk, 1.200001)
-            last_velocity = velocity
-            last_acceleration = acceleration
+        from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
+        from rebotarm_motion.trajectory_time_parameterization import teach_curve_analysis
+        curve = build_curve(samples[0].joint_names, tuple(TrajectoryPoint(
+            p.time_from_start-retimed[0].time_from_start,p.positions,p.velocities,p.accelerations) for p in retimed))
+        peaks = teach_curve_analysis(curve)['segment_peaks']
+        self.assertLessEqual(peaks['acceleration'], .800001)
+        self.assertLessEqual(peaks['jerk'], 1.200001)
 
     def test_retime_teach_samples_uses_per_joint_velocity_limits(self) -> None:
         samples = [
             TeachSample(0.0, ("joint1", "joint4"), (0.0, 0.0), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.1, ("joint1", "joint4"), (0.3, 0.3), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples, with_velocity=True)
 
         retimed = retime_teach_samples(
             samples,
             replay_speed=1.0,
-            max_velocity_rad_s=(3.0, 1.8),
+            max_velocity_rad_s=(3.0,3.0,3.0,1.8,3.0,3.0),
             max_acceleration_rad_s2=999.0,
             max_jerk_rad_s3=999.0,
             initial_delay_sec=0.0,
@@ -783,7 +796,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
         dt = retimed[1].time_from_start - retimed[0].time_from_start
         self.assertGreaterEqual(dt, 0.3 / 1.8)
         self.assertLessEqual(abs(retimed[1].velocities[0]), 3.000001)
-        self.assertLessEqual(abs(retimed[1].velocities[1]), 1.800001)
+        self.assertLessEqual(abs(retimed[1].velocities[3]), 1.800001)
 
     def test_analyze_teach_trajectory_uses_per_joint_velocity_limits(self) -> None:
         samples = [
@@ -904,6 +917,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.10, ("joint1",), (0.13,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.15, ("joint1",), (0.14,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
         prepared = prepare_teach_replay_samples(
             samples,
@@ -930,6 +944,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.1, ("joint1",), (0.1,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.2, ("joint1",), (0.2,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
         prepared = prepare_teach_replay_samples(
             samples,
@@ -943,7 +958,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
         payload = prepared_teach_replay_to_dict(prepared)
 
         self.assertEqual(payload["time_parameterization"]["requested_method"], "ruckig")
-        self.assertIn(payload["time_parameterization"]["used_method"], ("ruckig", "current_jerk_retime"))
+        self.assertEqual(payload["time_parameterization"]["used_method"], "c0_waypoint_retime")
         self.assertTrue(payload["time_parameterization"]["message"])
         self.assertTrue(prepared.retime_applied)
 
@@ -953,21 +968,21 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.1, ("joint1",), (0.1,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.2, ("joint1",), (0.2,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
-        with patch("rebotarm_motion.trajectory_time_parameterization.ruckig_python_available", return_value=True):
-            prepared = prepare_teach_replay_samples(
-                samples,
-                retime_enabled=True,
-                time_parameterization_method="ruckig",
-                replay_speed=0.2,
-                max_velocity_rad_s=1.0,
-                max_acceleration_rad_s2=0.5,
-                max_jerk_rad_s3=1.2,
-            )
+        prepared = prepare_teach_replay_samples(
+            samples,
+            retime_enabled=True,
+            time_parameterization_method="ruckig",
+            replay_speed=0.2,
+            max_velocity_rad_s=1.0,
+            max_acceleration_rad_s2=0.5,
+            max_jerk_rad_s3=1.2,
+        )
         payload = prepared_teach_replay_to_dict(prepared)
 
         self.assertEqual(payload["time_parameterization"]["requested_method"], "ruckig")
-        self.assertEqual(payload["time_parameterization"]["used_method"], "current_jerk_retime")
+        self.assertEqual(payload["time_parameterization"]["used_method"], "c0_waypoint_retime")
         self.assertIn("python ruckig waypoint adapter not implemented", payload["time_parameterization"]["message"])
 
     def test_prepare_teach_replay_samples_keeps_requested_speed_for_large_motion(self) -> None:
@@ -976,6 +991,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.5, ("joint1", "joint2"), (0.6, 0.4), (), (), {}, "GRAVITY_COMP"),
             TeachSample(1.0, ("joint1", "joint2"), (1.2, 0.8), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
         prepared = prepare_teach_replay_samples(
             samples,
@@ -1004,6 +1020,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
                 TeachSample(0.10, ("joint1",), (0.13,), (), (), {}, "GRAVITY_COMP"),
                 TeachSample(0.15, ("joint1",), (0.14,), (), (), {}, "GRAVITY_COMP"),
             ]
+            samples = _six_axis_samples(samples)
             raw_path.write_text(
                 "\n".join(encode_teach_sample(sample) for sample in samples) + "\n",
                 encoding="utf-8",
@@ -1028,7 +1045,9 @@ class TeachRecordingCoreTests(unittest.TestCase):
             self.assertEqual(output_path.name, "teach1.prepared.v5.jsonl")
             self.assertEqual([s.accelerations for s in exported],
                              [p.accelerations for p in prepared.retimed_points])
-            self.assertGreater(len(exported), len(samples))
+            self.assertEqual(len(exported), len(samples))
+            self.assertEqual([p.positions for p in exported],
+                             [p.positions for p in prepared.retimed_points])
             self.assertTrue(all(sample.arm_state == "PREPARED_REPLAY" for sample in exported))
             self.assertEqual(exported[0].stamp, 0.0)
             self.assertTrue(all(a.stamp <= b.stamp for a, b in zip(exported, exported[1:])))

@@ -119,7 +119,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
     latest = {}
     samples = []
     node.create_subscription(JointState, '/rebotarm/joint_states',
-        lambda m: (latest.update(joint=m), samples.append(m)), 10)
+        lambda m: (latest.update(joint=m, joint_received_at=time.monotonic()), samples.append(m)), 10)
     qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
     for name in ('trajectory_execution_mode','trajectory_scene_revision','trajectory_capabilities'):
         node.create_subscription(String, '/rebotarm/'+name,
@@ -225,13 +225,20 @@ def ros_acceptance(output, dashboard, teach_record=None):
         assert final.success and final.executable,final.message
         binding=decode_plan(final.trajectory.header.frame_id,names,numeric(final.trajectory),require_execution=True)
         frozen=binding['state']
+        # 服务发现可能耗时，先建立连接再取得本次准备请求的反馈时间戳。
+        prepare_client=node.create_client(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory')
+        assert prepare_client.wait_for_service(timeout_sec=3)
+        pause(.05)
         check=PrepareArmTrajectory.Request(trajectory=final.trajectory, session=frozen['session'],
             generation=frozen['generation'],hold_positions=frozen['hold'],
-            feedback_positions=list(latest['joint'].position[:6]),feedback_observed_at=time.monotonic(),
+            feedback_positions=list(latest['joint'].position[:6]),feedback_observed_at=latest['joint_received_at'],
             enabled=True,gripper_positions=list(latest['joint'].position[-2:]),
             scene_revision=latest['trajectory_scene_revision'],deadline_monotonic=time.monotonic()+2.,
             capability_json=latest['trajectory_capabilities'])
-        checked=call(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory',check)
+        future=prepare_client.call_async(check)
+        wait(future.done)
+        checked=future.result()
+        node.destroy_client(prepare_client)
         assert checked.success,checked.message
         prepared=json.loads(checked.prepared_json)
         curve=curve_from_payload(prepared['curve'])

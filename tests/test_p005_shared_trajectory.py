@@ -131,16 +131,18 @@ def test_web_coordinated_plan_is_single_use():
     current = dict.fromkeys(JOINT_NAMES,0.);current['gripper'] = .02
     payload = dict(joint_positions=dict.fromkeys(JOINT_NAMES,.02),duration=2.,gripper_position=.021)
     preview = plans.preview(payload,current,max_delta=.2,min_duration=.1,max_duration=10.,max_speed=1.)
-    message, _, gripper = plans.take(preview['plan_id'],current)
+    message, _, gripper = plans.take(preview['plan_id'])
     assert len(message.joint_names) == 6
     assert [p.time for p in build_curve(message.joint_names,tuple(TrajectoryPoint(
         p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
         for p in message.points)).points] == [0.,2.]
     with pytest.raises(ValueError,match='missing'):
-        plans.take(preview['plan_id'],current)
+        plans.take(preview['plan_id'])
     preview = plans.preview(payload,current,max_delta=.2,min_duration=.1,max_duration=10.,max_speed=1.)
-    message, _, gripper = plans.take(preview['plan_id'],dict(current,joint1=.01))
+    # 交接不读取新的位置、不重锚起点；绑定失效由后端按原计划身份拒绝。
+    message, _, gripper = plans.take(preview['plan_id'])
     assert len(message.joint_names) == 6
+    assert list(message.points[0].positions) == [0.]*6
 
 
 @pytest.mark.parametrize('level_name,ready', [('OK',True),('WARN',False),('ERROR',False),('STALE',False)])
@@ -212,14 +214,21 @@ def test_fixed_stationary_plan_does_not_check_artificial_start_displacement(name
     assert scale == 1. and curve.points == points
 
 
-def test_capability_binding_changes_on_reconnect_and_rejects_tampering():
-    from rebotarm_trajectory.capability import make_capability, decode_capability, binding
+def test_capability_revision_changes_on_reconnect_and_rejects_tampering():
+    from rebotarm_trajectory.capability import make_capability, decode_capability
     first = make_capability('prepared_v1',1,.5,1.)
     assert decode_capability(first) == first
-    assert binding(first) != binding(make_capability('prepared_v1',2,.5,1.))
+    assert first['revision'] != make_capability('prepared_v1',2,.5,1.)['revision']
     first['gripper_torque_cap_nm'] = 2.
     with pytest.raises(ValueError, match='revision'):
         decode_capability(first)
+
+
+@pytest.mark.parametrize('header', ['rebotarm-capability:'+'0'*64, 'rebotarm-plan:v0:{}'])
+def test_retired_binding_is_rejected_instead_of_becoming_unbound_fjt(header):
+    from rebotarm_trajectory.planning import decode_plan
+    with pytest.raises(ValueError, match='update client and re-plan'):
+        decode_plan(header, JOINT_NAMES, point_to_point((0.,)*6, (.02,)*6))
 
 
 def test_joint_state_bridge_never_restamps_cached_gripper_or_fabricates_zero():

@@ -10,6 +10,20 @@ from rebotarm_teach.teach_replay_workflow import TeachReplayWorkflow
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_partial_joint_record_remains_readable_but_retiming_requires_six_axes():
+    import pytest
+    from rebotarm_teach.teach_models import TeachSample
+    from rebotarm_teach.teach_preparation import prepare_teach_replay_samples, retime_teach_samples
+    samples = [TeachSample(i*.1, ('joint1',), (i*.001,), (), (), {}, 'record') for i in range(3)]
+    analyzed = prepare_teach_replay_samples(samples, retime_enabled=False)
+    assert analyzed.samples[0].joint_names == ('joint1',)
+    assert analyzed.samples[-1].positions == samples[-1].positions
+    with pytest.raises(ValueError, match='joint1..joint6'):
+        prepare_teach_replay_samples(samples, retime_enabled=True)
+    with pytest.raises(ValueError, match='joint1..joint6'):
+        retime_teach_samples(samples, replay_speed=1., max_velocity_rad_s=1.)
+
+
 def workflow_fixture(tmp_path):
     # Exercise the actual dashboard parameter contract without a ROS or HTTP server.
     source = ROOT / "src/rebotarm_dashboard/rebotarm_dashboard/teleop_status_panel_node.py"

@@ -109,10 +109,11 @@ ros2 param get /reBotArmController trajectory_execution_mode
 网页/键盘组合中的 `trajectory_execution_mode` 也必须相同，准备期间保持当前位置，
 普通夹爪运动会因资源占用拒绝；场景变化停止保持，本批不承担动态避障。
 
-新模式可分别选择 `arm`、`gripper`、`arm_with_gripper` 规划组完成 Plan/Execute。
-复合组使用联合关节目标；位姿协同由运动层先求 arm IK 再规划七轴。
-最终时长由规划阶段统一重定时，Execute 不再改时间。夹爪逐次 effort 覆盖只用于独立接口，
-协同力矩上限查看上述能力快照。完整契约见 [P005 协同接口](../../implemented/features/p005_prepared_trajectory.md#修订协同接口)。
+新模式分别选择 `arm` 和 `gripper` 两个独立规划组完成 Plan/Execute，不提供 `arm_with_gripper`。
+`arm` 下发六轴 FJT；`gripper` 通过独立 GripperCommand 执行，适配器将左指位置转换为双指总开口。
+夹爪完成后再规划机械臂，起始状态使用新鲜实际开度。六轴最终计划在规划阶段绑定保持起点并
+统一重定时，Execute 不再改节点或时间；旧绑定失效须重新规划。生效夹爪速度、力矩上限查看
+上述能力快照。完整契约见 [P005 接口](../../implemented/features/p005_prepared_trajectory.md#修订协同接口)。
 
 ## 相关文档
 

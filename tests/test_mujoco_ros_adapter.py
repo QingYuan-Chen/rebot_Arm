@@ -8,20 +8,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from rebotarm_simulation.ros.mujoco_ros_node import (
-    ActiveTrajectory,
-    SerializedSimulationAccess,
-    ExecutionLifecycle,
-    FeedbackRateLimiter,
-    GateOutcome,
-    GoalSettlingPolicy,
+from rebotarm_simulation.execution.trajectory_state import (
+    ActiveTrajectory, ExecutionLifecycle, GateOutcome, TrajectoryCommandGate, terminal_disposition,
+)
+from rebotarm_simulation.execution.trajectory_execution import TrajectoryExecution
+from rebotarm_simulation.execution.gripper_execution import GripperExecution, GripperTask
+from rebotarm_simulation.execution.simulation_access import SerializedSimulationAccess
+from rebotarm_simulation.execution.feedback_timing import FeedbackRateLimiter
+from rebotarm_simulation.execution.goal_policy import GoalSettlingPolicy
+from rebotarm_simulation.execution.control_api import SimulationControlApi, normalize_ros_control_mode
+from rebotarm_simulation.ros.message_codec import (
     MonotonicStamp,
-    TrajectoryCommandGate,
-    SimulationControlApi,
-    normalize_ros_control_mode,
     seconds_to_stamp_parts,
     trajectory_to_sampler,
-    terminal_disposition,
     validate_gripper_width,
     validate_gripper_force,
 )
@@ -60,28 +59,27 @@ class _LegacySimulation:
 @pytest.mark.parametrize('residual',[.003,.01])
 def test_sim_stationary_snapshot_accepts_hold_residual_but_still_requires_quiet_fresh_window(residual):
     """不构造 ROS 节点或物理模型，只调用正式方法核对准入条件。"""
-    from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
-    snapshot=create_node_class()._stationary_snapshot
+    snapshot=TrajectoryExecution._stationary_snapshot
     hold=(0.,)*6
     positions=(residual,0.,0.,0.,0.,0.,.01,-.01)
     samples=[SimpleNamespace(simulation_time=t,joint_positions=positions,joint_velocities=(0.,)*8,
         joint_names=tuple(f'joint{i}' for i in range(1,7))+('left_finger_joint','right_finger_joint'))
         for t in (.8,.9,1.)]
-    owner=SimpleNamespace(_sim=SimpleNamespace(get_state=lambda:samples[-1],
-        get_control_status=lambda:SimpleNamespace(joint_targets=hold)),
-        _sample_history=samples,_last_physics_wall=time.monotonic())
-    state,returned_hold=snapshot(owner)
+    sim=SimpleNamespace(get_state=lambda:samples[-1],
+        get_control_status=lambda:SimpleNamespace(joint_targets=hold))
+    owner=SimpleNamespace(_sample_history=samples,_last_physics_wall=time.monotonic(),clock=time.monotonic)
+    state,returned_hold=snapshot(owner,sim)
     assert state is samples[-1] and returned_hold==hold
     # 六轴与双指位置跨越旧量化门限，只要速度窗口合格仍可继续。
     samples[1].joint_positions=(.02,)*6+(.012,-.012)
-    assert snapshot(owner)[1]==hold
+    assert snapshot(owner,sim)[1]==hold
     samples[-1].joint_velocities=(.1,)+(0.,)*7
     with pytest.raises(RuntimeError,match='stationary evidence'):
-        snapshot(owner)
+        snapshot(owner,sim)
     samples[-1].joint_velocities=(0.,)*8
     owner._last_physics_wall=time.monotonic()-1.
     with pytest.raises(RuntimeError,match='fresh complete stationary window'):
-        snapshot(owner)
+        snapshot(owner,sim)
 
 
 def test_ros_mode_surface_excludes_raw_torque():
@@ -94,22 +92,21 @@ def test_ros_mode_surface_excludes_raw_torque():
 
 def test_independent_gripper_requires_a_new_physics_frame_after_final_target():
     """即使小开口已在到位容差内，也不能用最终目标发送前的反馈报告成功。"""
-    from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
     state = SimpleNamespace(simulation_time=1.,gripper_width=0.)
     events = []
     sim = SimpleNamespace(get_state=lambda:state,
         command_gripper_position=lambda *args:events.append(('target',*args)),
         release_gripper_position=lambda:events.append(('neutral',)))
-    task = dict(state='active',start=0.,initial=0.,target=.0001,speed=.01,effort=1.,deadline=2.)
-    owner = SimpleNamespace(_gripper_task=task)
-    advance = create_node_class()._advance_gripper
-    advance(owner,sim)
-    advance(owner,sim)  # 重读同一物理帧不算新反馈。
-    assert task['state'] == 'active' and all(e[0]=='target' for e in events)
+    task = GripperTask(object(),0.,0.,.0001,.01,2.,1.)
+    owner = GripperExecution(sim,ActiveTrajectory(),{})
+    owner.task = task
+    owner.advance()
+    owner.advance()  # 重读同一物理帧不算新反馈。
+    assert task.state == 'active' and all(e[0]=='target' for e in events)
     state.simulation_time=1.002
     state.gripper_width=.0001
-    advance(owner,sim)
-    assert task['state']=='succeeded' and events[-1]==('neutral',)
+    owner.advance()
+    assert task.state=='succeeded' and events[-1]==('neutral',)
 
 
 def test_ros_control_api_starts_home_hold_and_tracks_positions_with_legacy_core():
@@ -417,13 +414,8 @@ def test_ros_adapter_source_has_required_safe_interfaces_and_no_hardware_imports
     assert "MutuallyExclusiveCallbackGroup" in source
     assert "self._timer_callback_group" in source
     assert "callback_group=self._callback_group" in source
-    assert "def _hold_current_position" in source
-    assert "def _hold_current_position_unlocked" in source
-    assert source.count("self._hold_current_position") >= 3
     assert "ActiveTrajectory(self._lock)" not in source
     assert "GOAL_TOLERANCE_VIOLATED" in source
-    assert "complete_with_reason" in source
-    assert "apply_with_reason" in source
     execution_source = Path(
         "src/rebotarm_simulation/rebotarm_simulation/execution/trajectory_state.py"
     ).read_text()
@@ -448,16 +440,218 @@ def test_ros_adapter_configures_home_hold_and_bounded_diagnostics():
     assert "<exec_depend>diagnostic_msgs</exec_depend>" in manifest
 
 
-def test_ros_adapter_trajectory_lifecycle_explicitly_enters_position_and_hold():
-    source = Path("src/rebotarm_simulation/rebotarm_simulation/ros/mujoco_ros_node.py").read_text()
-    execute_body = source.split("def _execute_goal(self, goal_handle, *, web=False):", 1)[1].split(
-        "\n        def _timer_callback", 1
-    )[0]
-    assert "self._control.command_joint_positions(desired)" in execute_body
-    assert "self._finish_prepared(sampler)" in execute_body
-    finish_body = source.split("def _finish_prepared(self, sampler):", 1)[1].split("def _cancel_callback", 1)[0]
-    assert "self._control.command_joint_positions(sampler.sample(sampler.duration)[:6])" in finish_body
-    assert "sim.release_gripper_position()" in source
-    assert "if self._trajectory_mode == 'prepared_v1' else self._hold_current_position()" in execute_body
-    assert "GOAL_TOLERANCE_VIOLATED" in execute_body
-    assert "self._command_gate.stop_and_hold(self._hold_current_position)" in execute_body
+def test_execution_components_own_state_and_have_no_ros_dependencies():
+    import ast
+    root = Path("src/rebotarm_simulation/rebotarm_simulation")
+    forbidden = {'rclpy', 'control_msgs', 'trajectory_msgs', 'rebotarm_msgs',
+                 'rebotarm_motion', 'rebotarmcontroller', 'serial'}
+    for name in ('trajectory_execution', 'gripper_execution'):
+        tree = ast.parse((root/'execution'/f'{name}.py').read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert not forbidden.intersection(a.name.split('.')[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                assert (node.module or '').split('.')[0] not in forbidden
+    tree = ast.parse((root/'ros/mujoco_ros_node.py').read_text())
+    retired = {'_active', '_command_gate', '_pending_sampler', '_planning_generation',
+               '_preparation', '_gripper_task', '_gripper_reservation',
+               '_sample_history', '_last_physics_wall', '_stop_unconfirmed', '_retained_stop_token'}
+    assert not retired.intersection(n.attr for n in ast.walk(tree) if isinstance(n,ast.Attribute))
+
+
+def _execution_fixture():
+    """确定性仿真替身：复用正式执行组件，记录命令和物理时间。"""
+    from rebotarm_trajectory.capability import make_capability
+    from rebotarm_motion.polynomial_trajectory import JOINT_NAMES, build_curve
+    from rebotarm_motion.trajectory_preparation import point_to_point
+
+    class Sim:
+        control_mode = 'hold'
+        timestep = .002
+        time = 0.
+        width = 0.
+        q = (0.,)*6
+        target = (0.,)*6
+        events = None
+
+        def __init__(self):
+            self.events = []
+
+        def get_state(self):
+            return SimpleNamespace(simulation_time=self.time, gripper_width=self.width,
+                joint_positions=self.q+(self.width/2.,-self.width/2.), joint_velocities=(0.,)*8,
+                joint_names=JOINT_NAMES+('left_finger_joint','right_finger_joint'))
+
+        def get_control_status(self):
+            return SimpleNamespace(joint_targets=self.target)
+
+        def command(self, q):
+            self.events.append(('arm',self.time,tuple(q)))
+            self.target = self.q = tuple(q)
+
+        def command_gripper_position(self, width, effort):
+            self.events.append(('finger',self.time,width,effort))
+            self.width = width
+
+        def release_gripper_position(self):
+            self.events.append(('neutral',self.time))
+
+        def step(self):
+            self.time += self.timestep
+            return self.get_state()
+
+    sim = Sim()
+    control = SimpleNamespace(command_joint_positions=sim.command,
+        hold_current_position=lambda:sim.events.append(('hold',sim.time)),
+        set_mode=lambda mode:setattr(sim,'control_mode',mode) or mode)
+    execution = TrajectoryExecution(SerializedSimulationAccess(sim),control,
+        make_capability('prepared_v1',11,.5,1.),'prepared_v1',GoalSettlingPolicy(),clock=lambda:10.)
+    execution.scene_changed('scene-a')
+    execution.step(120,lambda *args:None)
+    curve = build_curve(JOINT_NAMES,point_to_point((0.,)*6,(.02,)*6,.4))
+    return execution, sim, curve
+
+
+def _reserve_simulation(execution, curve, *, width=None):
+    token = object()
+    pending = execution.reserve(token,curve.joint_names,curve.points,'',web=width is not None,
+        gripper_command=None if width is None else (width,1.),received=10.)
+    payload = dict(curve=curve.to_payload(),context=dict(session=pending.session,
+        generation=pending.generation,hold=pending.hold_positions),
+        scene_revision=pending.scene_revision,gripper_generation=pending.gripper_generation,
+        gripper_positions=pending.gripper_positions,
+        gripper_collision_policy=pending.gripper_collision_policy,
+        capability_revision=execution.capability['revision'])
+    return token,payload
+
+
+@pytest.mark.parametrize('width',[None,.0009,.009])
+def test_component_samples_exact_curve_and_waits_for_both_children(width):
+    execution,sim,curve = _execution_fixture()
+    token,payload = _reserve_simulation(execution,curve,width=width)
+    before = len(sim.events)
+    assert execution.active.busy
+    assert execution.status_snapshot().phase == 'TRAJ_PREPARING'
+    sampler = execution.admit(token,payload,'scene-a',lambda:False)
+    start,grip = execution.accepted_context(token)
+    assert len(sim.events) == before  # 两侧只登记，尚未发送。
+    trace = []
+    execution.step(1,lambda *args:trace.append(args))
+    sends = sim.events[before:]
+    assert sends[0][:2] == ('arm',start)
+    if grip:
+        assert sends[1][:2] == ('finger',start)
+    # 周期延迟直接采样当前时刻，没有补发积压点。
+    sim.time += .1
+    before = len(sim.events)
+    execution.step(1,lambda *args:trace.append(args))
+    assert sim.events[before][2] == pytest.approx(curve.sample(.102)[0])
+    for _ in range(700):
+        execution.step(1,lambda *args:None)
+        outcome,observation = execution.observe(token,sampler,start,lambda:False)
+        assert outcome is GateOutcome.APPLIED
+        if observation.settling == 'succeeded':
+            break
+    assert observation.settling == 'succeeded'
+    assert sim.time-start >= max(curve.duration,0. if width is None else width/.009)
+    notifications = []
+    def notify():
+        assert execution.active.token is token  # 先通知，再释放预约。
+        notifications.append(True)
+    assert execution.complete(token,sampler,lambda:False,notify) is GateOutcome.SUCCEEDED
+    assert notifications == [True] and not execution.active.busy
+    assert sim.target == pytest.approx(curve.points[-1].positions)
+    if grip:
+        assert grip.state == 'succeeded' and any(e[0]=='neutral' for e in sim.events)
+    assert trace[0][2]['curve'].to_payload() == payload['curve']
+
+
+@pytest.mark.parametrize('change',['scene','cancel','context','failure'])
+def test_preparation_failure_and_late_reply_never_start_children(change):
+    execution,sim,curve = _execution_fixture()
+    token,payload = _reserve_simulation(execution,curve,width=.001)
+    before = len(sim.events)
+    if change == 'scene':
+        execution.scene_changed('scene-b')
+    elif change == 'cancel':
+        execution.stop(token)
+    elif change == 'context':
+        payload['context']['generation'] += 1
+    else:
+        # 准备失败直接进入停止清理，未调用接纳。
+        execution.stop(token)
+    with pytest.raises(RuntimeError):
+        execution.admit(token,payload,'scene-a',lambda:False)
+    assert not any(e[0] in ('arm','finger') for e in sim.events[before:])
+    assert execution.gripper.task is None
+    execution.cleanup(token)
+    other,_ = _reserve_simulation(execution,curve)
+    before = len(sim.events)
+    with pytest.raises(RuntimeError,match='ownership'):
+        execution.admit(token,payload,'scene-a',lambda:False)
+    execution.cleanup(token)
+    assert not execution.stop(token)
+    assert execution.active.token is other and len(sim.events) == before
+
+
+def test_unconfirmed_stop_retains_resources_and_old_wait_cannot_release_new_goal():
+    execution,sim,curve = _execution_fixture()
+    token,payload = _reserve_simulation(execution,curve,width=.001)
+    execution.admit(token,payload,'scene-a',lambda:False)
+    execution.step(5,lambda *args:None)
+    assert execution.stop(token)
+    wait = execution.begin_stop_wait(token)
+    assert not execution.poll_stop(wait)
+    execution.clock = lambda:16.
+    with pytest.raises(RuntimeError,match='unconfirmed'):
+        execution.poll_stop(wait)
+    execution.cleanup(token)
+    assert execution.active.token is token and execution.status_snapshot().stop_unconfirmed
+    with pytest.raises(RuntimeError,match='trajectory active'):
+        execution.change_mode('gravity_comp')
+    # 新物理帧确认之后，由显式 Stop 收尾保留的原身份。
+    execution.step(120,lambda *args:None)
+    assert execution.poll_stop(wait)
+    assert not execution.active.busy and execution.gripper.task.state == 'failed'
+    other,_ = _reserve_simulation(execution,curve)
+    assert execution.poll_stop(wait)
+    execution.cleanup(token)
+    assert execution.active.token is other
+
+
+def test_component_legacy_target_and_mode_contracts_are_preserved():
+    execution,sim,curve = _execution_fixture()
+    execution.mode = 'legacy'
+    token = object()
+    sampler = trajectory_to_sampler(_trajectory(tuple(f'joint{i}' for i in range(1,7)),
+        ((0.,(0.,)*6),(.4,(.02,)*6))),initial_positions=(0.,)*6)
+    execution.admit_legacy(token,sampler)
+    assert execution.take_sampler() is sampler
+    assert execution.take_sampler() is None
+    start = sim.time
+    execution.step(10,lambda *args:None)
+    _,observation = execution.observe(token,sampler,start,lambda:False)
+    assert sim.target == pytest.approx((.001,)*6)
+    events = []
+    execution.fail_legacy(token,lambda:events.append('abort'))
+    assert events == ['abort'] and not execution.active.busy
+    assert execution.change_mode('gravity_comp') == 'gravity_comp'
+
+
+def test_ros_goal_transport_binding_prevents_late_cancel_from_stopping_next_goal():
+    from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
+    from rclpy.action import CancelResponse
+    node_class = create_node_class()
+    execution,sim,curve = _execution_fixture()
+    old,_ = _reserve_simulation(execution,curve)
+    owner = SimpleNamespace(_execution=execution,_goal_tokens={})
+    key = bytes(range(16))
+    goal = SimpleNamespace(goal_id=SimpleNamespace(uuid=key),is_active=True,execute=lambda:None)
+    node_class._handle_accepted(owner,goal)
+    assert owner._goal_tokens[key] is old
+    execution.cleanup(old)
+    current,_ = _reserve_simulation(execution,curve)
+    before = len(sim.events)
+    assert node_class._cancel_callback(owner,goal) is CancelResponse.REJECT
+    assert execution.active.token is current and not execution.active.cancel_requested
+    assert len(sim.events) == before

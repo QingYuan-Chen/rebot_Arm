@@ -38,6 +38,8 @@ C++ MoveIt 响应插件调用独立 Python 纯计算服务；执行准备不改�
 和 `gripper` 两个独立组；后者通过薄 GripperCommand 适配将左指 m 转换为双指总开口 m。
 控制器 `runtime/coordinated_trajectory.py` 持有网页组合任务，在同一设备周期登记原六轴
 轨迹与独立夹爪目标；夹爪复用原限速、到位、超时及中性释放，不参与 FJT 采样或重定时。
+`CoordinatedTrajectory` 采用组合关系，句柄只保存六轴子任务、夹爪代次、整体结果和事件；
+六轴期限、容差及游标继续归原执行器。`ArmController` 通过所有者接口查询、登记失败和收尾。
 整体成功等待两侧完成和清理，不承诺同时到达或总线原子同步。MuJoCo 用物理时间执行六轴
 曲线，并按实际反馈确认独立夹爪到位。网页碰撞计算副本固定闭合双指，其他 FJT/示教/视觉
 冻结新鲜真实开度；策略和真实快照分别绑定，不修改公共场景或实际反馈。关节状态桥按机械臂
@@ -267,6 +269,14 @@ ROS 与离线轨迹执行共用 `TrajectorySampler`；模型和配置统一通�
 旧 `MuJoCoArmAdapter` 及其无人调用的辅助函数已删除。
 位置阶跃通过正式控制器执行；抓取试验必须指定目标、双指和执行过程，
 以目标双指接触和抬升共同判定。ROS 协议适配仍由 `ros/mujoco_ros_node.py` 持有；目标收敛、轨迹准入、反馈限流、单目标状态、命令闸门、异常清理和仿真访问串行化分别归入 `execution/trajectory_state.py`、`goal_policy.py`、`feedback_timing.py`、`simulation_access.py`；ROS消息转换与时间戳归 `ros/message_codec.py`。
+
+P005 准备预约、规划代次、上下文复核、六轴采样、组合终态及停止确认归
+`execution/trajectory_execution.py`；独立夹爪的任务、限速、到位、超时和中性释放归
+`execution/gripper_execution.py`。准备与活动曲线采用具名数据对象，节点只做消息转换、
+服务 Future 等待、Action 反馈/终态映射和物理调度。执行组件复用活动目标及命令闸门，
+锁序保持目标锁→仿真锁，准备期限用单调时间，参考采样用仿真时间。
+执行状态只有一个写入所有者，诊断与记录读取快照。维护整理的验证结果见
+[P005 代码和文档审查](features/p005_prepared_trajectory.md#代码和文档审查2026-11-04)。
 
 ### 轻量预演职责
 

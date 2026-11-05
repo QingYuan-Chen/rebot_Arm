@@ -1219,7 +1219,7 @@ class TeleopStatusPanelNode(Node):
             try:
                 if str(payload.get('confirm','')).upper() != 'EXECUTE':
                     raise ValueError('missing EXECUTE confirmation')
-                trajectory,decision,gripper = self._coordinated_plans.take(payload['plan_id'],current_positions)
+                trajectory,decision,gripper = self._coordinated_plans.take(payload['plan_id'])
                 execution = self._web_teleop_client.send_planned(trajectory,decision,gripper=gripper,
                     feedback_callback=lambda message:self._on_coordinated_feedback(message,decision))
                 execution['goal_future'].add_done_callback(lambda fut:self._on_execute_goal_response(fut,decision))

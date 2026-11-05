@@ -581,13 +581,7 @@ class ArmController:
     def teleop_execution_status(self, task):
         """ROS 只读本任务的两侧结果；旧句柄不能读取后继组合的状态。"""
         owner = self._coordinated_trajectory
-        with owner.lock:
-            if task is not owner.task:
-                return 'superseded', 'superseded'
-            # 停止时组合 tick 已冻结；仍须读取本代次夹爪的中性释放终态，不能回显旧 active。
-            if owner.gripper_generation is not None:
-                owner.gripper_state, _ = self.gripper.position_state(owner.gripper_generation)
-            return owner.arm.snapshot(owner.arm_task).state, owner.gripper_state
+        return owner.status(task, self.gripper)
 
     def coordinated_tick(self):
         """唯一设备周期推进协同；普通超差受控停止，传输失败交既有保护流程。"""
@@ -602,11 +596,9 @@ class ArmController:
             raise
         except (ValueError, RuntimeError) as exc:
             logging.getLogger('rebotarm.audit').error('coordinated_failed: %s', exc)
-            from dataclasses import replace
             from ..runtime.command_guard import failure_decision
             # 停止确认完成后仍保留原失败原因；不能把跟踪失败显示成一次普通取消。
-            with owner.lock:
-                owner.task.result = replace(owner.task.result, decision=failure_decision(str(exc), 'TRAJECTORY'))
+            owner.fail(owner.task, failure_decision(str(exc), 'TRAJECTORY'))
             stopping = self.stop_active_motion(owner.task)
             if isinstance(stopping, CycleResult):
                 self._backend.requests.submit(lambda: stopping, resource='device', priority=0)

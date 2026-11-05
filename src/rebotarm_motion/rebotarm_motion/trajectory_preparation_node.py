@@ -80,7 +80,7 @@ class SceneCollisionChecker:
             p.positions, p.velocities, p.accelerations) for p in trajectory.points)
         if any(p.effort for p in trajectory.points):
             raise ValueError('FJT effort is not a supported per-request torque limit')
-        names, points = canonical_input(trajectory.joint_names, points, context.hold)
+        names, points = canonical_input(trajectory.joint_names, points)
         capability = None
         capability_json = getattr(request, 'capability_json', '')
         if capability_json:
