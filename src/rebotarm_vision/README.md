@@ -2,7 +2,7 @@
 
 Ubuntu 原生视觉包提供 D405 RGB-D 与 YOLO 检测、本地 GraspNet 候选、基于 TF/IK/碰撞和工作空间的筛选，以及 RViz 和 Open3D 显示。操作与参数见[视觉候选命令](../../docs/reference/commands/visual_grasp_commands.md)。
 
-D405 驱动使用 `pyrealsense2`，请求彩色 BGR8 与深度 Z16 `640x480@30`，按设备比例尺输出毫米深度并对齐彩色。图像、CameraInfo 和候选话题沿用现有接口。默认 `handeye_config` 为空；完成新手眼标定后显式加载，旧 `config/handeye.yaml` 仅保留作 Gemini2 历史记录。安装与现场核查见[视觉环境](../../docs/setup/ubuntu_vision_setup_zh.md)。
+D405 驱动使用 `pyrealsense2`，请求彩色 BGR8 与深度 Z16 `640x480@30`，按设备比例尺输出毫米深度并对齐彩色。图像、CameraInfo 和候选话题沿用现有接口。默认 `handeye_config` 为空；完成新手眼标定后显式加载，旧 `config/handeye.yaml` 仅保留作 Gemini2 历史记录。2026-11-06 的上游方法 D405 候选外参保存在 `config/d405_handeye.yaml`，仍需显式传入。安装与现场核查见[视觉环境](../../docs/setup/ubuntu_vision_setup_zh.md)。
 
 - `camera/`、`detector/`、`converters/`：图像、深度与检测消息。
 - `backends/`、`graspnet_baseline_adapter.py`：本机 GraspNet 推理。

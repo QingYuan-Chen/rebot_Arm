@@ -95,8 +95,11 @@ handeye:
   rotation: {x: <qx>, y: <qy>, z: <qz>, w: <qw>}
 ```
 
-独立相机入口通过 `handeye_config:=/absolute/path/to/d405_handeye.yaml` 加载；
-总入口使用 `vision_handeye_config:=/absolute/path/to/d405_handeye.yaml`。
+独立相机入口通过 `handeye_config:=<路径>/d405_handeye.yaml` 加载；
+总入口使用 `vision_handeye_config:=<路径>/d405_handeye.yaml`。
+本次上游方法结果已写入包配置 `src/rebotarm_vision/config/d405_handeye.yaml`，
+安装后位于 `install/rebotarm_vision/share/rebotarm_vision/config/d405_handeye.yaml`；
+默认仍为空，需显式加载，避免未完成现场精度验收的外参自动生效。
 对齐后的 `camera_color_frame` 与 `camera_depth_frame` 表示同一光学系，
 launch 将两者连接为同位姿；手眼文件也可使用 `camera_depth_frame`。
 URDF 的 `d405_link` 为 CAD 装配帧，光学外参使用实测标定。
@@ -237,7 +240,7 @@ export REBOTARM_VISION_PYTHON="$PWD/.venv-vision/bin/python"
 export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
   robot_context:=offline \
-  vision_handeye_config:=/absolute/path/to/d405_handeye.yaml \
+  vision_handeye_config:="$PWD/install/rebotarm_vision/share/rebotarm_vision/config/d405_handeye.yaml" \
   vision_yolo_model_path:="$PWD/src/rebotarm_vision/models/yolo26s-seg.pt"
 ```
 

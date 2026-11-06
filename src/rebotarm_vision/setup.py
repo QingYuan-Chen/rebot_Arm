@@ -44,6 +44,7 @@ setup(
             f"share/{package_name}/config",
             [
                 "config/camera_ubuntu.yaml",
+                "config/d405_handeye.yaml",
                 "config/grasp_pose_policy.yaml",
                 "config/graspnet_ubuntu.yaml",
                 "config/handeye.yaml",
