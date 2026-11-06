@@ -45,11 +45,10 @@ MJLab 训练任务和策略配对评估位于独立工程 `/home/a/project/rebot
 
 `rebotarm_sim_trajectory_controller` 由独立的 `rebotarm_preview` 包提供，只是在内存中对目标轨迹做插值并发布关节状态。
 它不加载 MJCF，不推进 MuJoCo 物理，不计算动力学、执行器力、物体接触或碰撞结果。
-因此以下入口中的“执行成功”只能证明 ROS/MoveIt/视觉流程和 RViz 姿态链路可运行：
+因此以下入口中的“执行成功”只能证明 ROS/MoveIt 流程和 RViz 姿态链路可运行：
 
 - `teleop_keyboard.launch.py` 的无硬件模式；
-- `rviz_ee_drag_sim.launch.py`；
-- `visual_grasp_system.launch.py` 的 `use_hardware:=false` 模式。
+- `rviz_ee_drag_sim.launch.py`。
 
 需要验证物理、动力学或接触时，使用 `mujoco_moveit_sim.launch.py` 或单独的
 `mujoco_sim.launch.py`。完整入口通过 `use_rviz` 和 `use_mujoco_viewer` 控制窗口。
@@ -59,10 +58,9 @@ MJLab 训练任务和策略配对评估位于独立工程 `/home/a/project/rebot
 | 后端 | 使用入口 | 执行方式 |
 |---|---|---|
 | `rebotarm_mujoco_node` | `mujoco_sim`、`mujoco_moveit_sim` | 加载 MJCF，推进物理并反馈实际仿真状态 |
-| `rebotarm_sim_trajectory_controller`（`rebotarm_preview`） | 无硬件键盘、`rviz_ee_drag_sim`、无硬件视觉抓取组合 | 在内存中插值轨迹，用于 ROS 接口和 RViz 流程预演 |
+| `rebotarm_sim_trajectory_controller`（`rebotarm_preview`） | 无硬件键盘、`rviz_ee_drag_sim` | 在内存中插值轨迹，用于 ROS 接口和 RViz 流程预演 |
 
-RViz 预演不计算动力学、力矩或物体接触，也不自行检查碰撞。视觉组合的
-`use_hardware:=false` 当前选择 RViz 预演后端；物理验证使用 MuJoCo 组合入口。
+RViz 预演使用轻量关节插值；物理验证使用 MuJoCo 组合入口。视觉筛选可通过 `robot_context:=external use_sim_time:=true` 接入 MuJoCo 环境。
 两种后端提供相同的控制器话题、服务和 Action，同一命名空间只运行一个。
 该入口名称保持兼容；它只用于轻量 RViz 轨迹预演，不代表 MuJoCo 物理仿真。
 

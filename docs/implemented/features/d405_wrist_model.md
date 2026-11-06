@@ -2,7 +2,10 @@
 
 2026-10-25 按用户确认，将腕部装配改为 D405，沿用原 Gemini 2 的腕部安装位置和朝向。
 统一模型归属 `rebotarm_moveit_config`；RViz、Dashboard 和 MuJoCo 读取同一套装配。
-实际 RGB-D 驱动、CameraInfo、手眼标定与视觉抓取仍需后续接入和现场验收。
+2026-11-05 已将实际 RGB-D 驱动、CameraInfo 和视觉入口切换为 D405；环境及启动见
+[D405 视觉配置](../../setup/ubuntu_vision_setup_zh.md)。真实设备已完成 RGB-D 出图检查，
+深度精度及手眼重标定待现场验收，结果见[项目状态](../../reference/project_status.md)；
+默认撤下旧 Gemini2 外参；本次保留原装配、碰撞与载荷参数。
 
 ## 来源与转换
 

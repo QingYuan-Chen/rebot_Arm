@@ -4,7 +4,7 @@
 
 本文是 `implemented/` 的功能总索引。每项都区分“软件能力”和“现场边界”，避免把代码存在、仿真通过误写成真机验收。
 
-专题说明：硬件见 [真机硬件控制与执行](hardware_execution.md)，运动见 [MoveIt 规划与轨迹执行](moveit_planning.md)，操作见 [Dashboard、键盘与 RViz 操作](operator_control.md)，示教见 [示教录制、检查与回放](teach_replay.md)，视觉抓取见 [视觉抓取规划与执行编排](visual_grasp.md)。
+专题说明：硬件见 [真机硬件控制与执行](hardware_execution.md)，运动见 [MoveIt 规划与轨迹执行](moveit_planning.md)，操作见 [Dashboard、键盘与 RViz 操作](operator_control.md)，示教见 [示教录制、检查与回放](teach_replay.md)，视觉抓取见 [视觉候选生成与筛选](visual_grasp.md)。
 
 ## 功能概述与清单
 
@@ -19,8 +19,8 @@
 | 示教录制 | 重力补偿录制、原子反馈批次、JSONL 文件、文件列表和记录状态 | `rebotarm_teach` | 录制不自动代表轨迹可执行；真机重力补偿需现场授权 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 示教检查与回放 | 滤波、重采样、重定时、速度/加速度/jerk 检查、MoveIt 起点对齐、碰撞预检、dry-run/execute、运行时跟踪门 | `rebotarm_teach` + `rebotarm_motion` | 原始记录不能直接下发；回放通过不等于真实运动安全 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 网页手眼/TCP 标定 | 会话保存恢复、同步采样、五方法求解、独立验证、质量门、导出和审计 | `rebotarm_calibration` + `rebotarm_dashboard` | 当前是软件/合成数据闭环；真实相机和物理精度需独立验收 | [网页标定命令](../../reference/commands/calibration_web.md) |
-| Ubuntu 原生视觉 | Gemini 2 RGB-D、CameraInfo、YOLO 检测、深度融合、本机 GraspNet 候选、Marker/Open3D 可视化 | `rebotarm_vision` + `rebotarm_bringup` | 相机入口只读；完整抓取入口等待显式 execute，不自动使能或抓取 | [视觉只读命令](../../reference/commands/ubuntu_vision_readonly_test_zh.md) |
-| 视觉抓取规划 | 候选过滤、IK、工作空间/姿态/夹爪约束、MoveIt 碰撞门、预抓取/抓取/撤退阶段编排 | `rebotarm_vision` + `rebotarm_motion` | 候选和规划通过不等于抓取成功；真机执行需分级授权 | [视觉抓取命令](../../reference/commands/visual_grasp_commands.md) |
+| Ubuntu 原生视觉 | D405 RGB-D、CameraInfo、YOLO 检测、深度融合、本机 GraspNet 候选、Marker/Open3D 可视化 | `rebotarm_vision` + `rebotarm_bringup` | 候选筛选与显示由视觉总入口组合；需 D405 手眼标定 | [视觉只读命令](../../reference/commands/ubuntu_vision_readonly_test_zh.md) |
+| 视觉抓取规划 | 候选过滤、IK、工作空间/姿态/夹爪约束、MoveIt 碰撞门 | `rebotarm_vision` + MoveIt 查询 | 输出筛选结果及 Marker | [视觉抓取命令](../../reference/commands/visual_grasp_commands.md) |
 | MuJoCo 仿真 | URDF→MJCF、headless/viewer、仿真关节状态、仿真轨迹控制器、MoveIt Plan/Execute 仿真后端、物理指标 | `rebotarm_simulation` | 不访问真实电机；仿真接触不替代现场碰撞/抓取验收 | [仿真命令](../../reference/commands/system_runtime.md) |
 | MuJoCo 示教预演 | 读取示教 JSONL，复用准备/重定时，在独立仿真中报告跟踪、接触和位移 | `rebotarm_teach` + `rebotarm_simulation` | 只覆盖仿真预演，不授权真机回放 | [示教预演命令](../../reference/commands/mujoco_teach_preview.md) |
 | 轻量 RViz 预演 | 无物理引擎的轨迹插值、关节/夹爪状态和停止接口 | `rebotarm_preview` | 不验证动力学、碰撞、接触或真实硬件 | [架构说明](../architecture.md) |
@@ -29,7 +29,6 @@
 
 ## 本地保留的扩展
 
-- [单瓶抓取](../../single_bottle_grasp_zh.md)：感知与确认执行分开启动，含候选稳定性/高度检查和失败后受控回基线保护。
 - [Real2Sim](../../real2sim_bridge_zh.md)：只读反馈镜像、physics/mirror 模式与 Viewer。
 - [Sim2Real 仿真工具](../../sim2real_workflow_zh.md)：随机化、记录、确定性回放、对比和批量安全检查，不部署真实策略。
 - [Pick 环境](../../mujoco_pick_zh.md)：方块接触、阶段和失败分类；小批次安全通过不代表抓取成功。
@@ -37,7 +36,7 @@
 ## 尚未列为已实现功能的内容
 
 - 稳定收敛的 Reach-and-Hold 策略和 sim-to-real 部署；独立训练与评测结果见[项目状态](../../reference/project_status.md)，软件链路通过不代表任务收敛。
-- 自动真机视觉抓取、lift/retreat、放置和抓取结果分类；当前执行器存在，但不能据此宣称现场成功。
+- 自动真机视觉抓取、lift/retreat、放置和抓取结果分类。
 - 真实相机/机械臂联合精度、真实接触力和物理抓取成功率；这些属于单独的现场验收。
 - 已退役的 Windows、HTTP、MJPEG、远程 JSON、独立 GraspNet 服务和旧 interactive-control 路线。
 

@@ -11,7 +11,7 @@
 | 文档 | 用途 | 环境/入口 |
 | --- | --- | --- |
 | [runtime.md](runtime.md) | MotorBridge 控制器基础依赖 | 系统 Python，安装后仍需反馈序号补丁 |
-| [vision.md](vision.md) | Gemini 2、YOLO、OpenCV | `.venv-vision`；`scripts/setup_ubuntu_vision.sh` |
+| [vision.md](vision.md) | D405、YOLO、OpenCV | `.venv-vision`；`scripts/setup_ubuntu_vision.sh` |
 | [graspnet.md](graspnet.md) | GraspNet、点云及 CUDA PyTorch | `.venv-graspnet`；`scripts/setup_ubuntu_graspnet.sh` |
 | [mujoco.md](mujoco.md) | MuJoCo 仿真与模型工具 | 系统 Python 3.12，用户级安装 |
 | [rl.md](rl.md) | CPU Reach 和可选 CUDA SB3/PPO | `third_party/rebotarm_rl_venv` |

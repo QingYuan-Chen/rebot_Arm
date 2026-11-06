@@ -5,7 +5,7 @@
 Supported deployment is Ubuntu 24.04 / ROS 2 Jazzy:
 
 ```text
-Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/detections -> local GraspNet
+D405 -> YOLO -> ROS RGB-D/CameraInfo/detections -> local GraspNet
 ```
 
 Retired Windows, HTTP, MJPEG, remote-JSON, and standalone GraspNet service
@@ -54,9 +54,8 @@ not own motion planning, teach replay algorithms, or motor SDK calls.
 The maintained vision path is native Ubuntu only:
 
 ```text
-Gemini 2 SDK -> YOLO -> ROS Image/CameraInfo/detections
--> local GraspNet -> candidate IK/collision gates -> MoveIt
--> lightweight RViz preview or explicitly enabled hardware
+D405 / RealSense SDK -> YOLO -> ROS Image/CameraInfo/detections
+-> local GraspNet -> candidate IK/collision queries -> filtered results / RViz markers
 ```
 
 Windows/HTTP/MJPEG/remote JSON and standalone GraspNet service paths are retired.
@@ -76,14 +75,12 @@ full-scene collision checks; backends own reservations and the overall result, w
 for both independent executors. Web checks use closed fingers only in a calculation
 copy; other arm requests freeze fresh actual opening. Feedback and the public scene
 always remain real, with separate arm/gripper source timestamps. MoveIt arm and gripper
-execute independently; teach replay is six-axis and vision opens the gripper before planning. Real
+execute independently; teach replay is six-axis. Real
 hardware stays disabled by default and uses legacy until user field validation.
 See [P005 coordination](../implemented/features/p005_prepared_trajectory.md#修订协同接口).
 
-The general visual-grasp entrypoint waits for an explicit execute request.
-Stopping drains old requests and requires fresh stationary feedback before new
-execution is allowed. A healthy real arm keeps enabled hold after a recoverable
-failure, or returns under guard to the captured baseline and verifies it before
-disable. Stop confirmation alone does not authorize disable or a new motion.
-The local single-bottle workflow retains its guarded motion interface and baseline
-recovery; vision never accesses motor SDKs directly.
+The visual entrypoint owns perception, candidate filtering and display. Offline mode
+uses passive robot state and MoveIt queries; external mode reuses an existing robot
+environment. D405 hand-eye calibration is supplied explicitly; the default camera-only
+launch leaves the arm-to-camera TF unpublished. The old Gemini2 calibration is retained
+for provenance. Vision never submits motion targets or accesses motor SDKs directly.

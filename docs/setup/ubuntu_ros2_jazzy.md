@@ -247,11 +247,11 @@ python3 scripts/install_python_dependencies.py mujoco --user --break-system-pack
 
 ## 4. 视觉配置
 
-Ubuntu 物理机直连 Gemini2 并在本机运行 CUDA YOLO 时，使用：
+Ubuntu 物理机直连 D405 并在本机运行 CUDA YOLO 时，使用：
 
 ```bash
 ./scripts/setup_ubuntu_vision.sh
-./scripts/install_orbbec_udev_rules.sh
+rs-enumerate-devices -s
 ./scripts/run_ubuntu_vision.sh yolo_model_path:="$PWD/src/rebotarm_vision/models/yolo26s-seg.pt" yolo_device:=0
 ```
 
@@ -261,13 +261,13 @@ GraspNet独立环境、模型输入和完整视觉launch见 `docs/setup/ubuntu_v
 逐进程解释器设置见 `docs/setup/launch_python_configuration.md`。
 
 视觉相机配置使用 `src/rebotarm_vision/config/camera_ubuntu.yaml`，通过本机
-Gemini 2 SDK 获取 RGB-D；不再配置远端 HTTP/MJPEG/JSON 服务。
+RealSense SDK 获取 RGB-D。USB 规则与 SDK 安装见[视觉环境](ubuntu_vision_setup_zh.md)。
 
-手眼标定文件也可以独立覆盖：
+默认手眼参数为空；D405 重标定后显式加载：
 
 ```bash
 ros2 launch rebotarm_vision vision.launch.py \
-  handeye_config:=/absolute/path/to/my_handeye.yaml
+  handeye_config:=/absolute/path/to/d405_handeye.yaml
 ```
 
 旧的 `ordinary_grasp` 节点及其 launch 参数已退役；当前候选由本地 GraspNet 链路生成。
@@ -279,18 +279,9 @@ ros2 launch rebotarm_vision vision.launch.py \
 3. 检查串口或 CAN、关节方向、零位、软限位和 enable 失败回滚。
 4. 在失能状态验证 `joint_states`，再显式 enable 并保持当前位置。
 5. 使用低速度验证停止服务、单关节小角度和单个安全姿态。
-6. 依次核验网页执行、示教回放、视觉候选/规划预检和明确授权的视觉低速执行；通用视觉 launch 不再提供 plan-only 模式参数。
+6. 依次核验网页执行、示教回放及视觉候选筛选。视觉入口默认采用离线被动状态，接入真机环境使用 `robot_context:=external`。
 
-完整视觉抓取的目标安全默认值是：
-
-```text
-use_hardware:=false
-shutdown_safe_home:=false
-auto_enable:=false
-```
-
-这些默认值已经落地；实机执行仍必须显式选择硬件后端并调用 `/rebotarm/enable`，
-且针对当前机器完成分级预检。旧阶段的验收结果不自动适用于新设备。
+真机启动默认失能；现场动作需显式使能并针对当前机器完成分级预检。
 
 ## 6. 历史 P0 验收工具
 

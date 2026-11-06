@@ -56,7 +56,7 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests -q
 运行时按节点设置 [解释器参数](docs/setup/launch_python_configuration.md)，不要全局注入视觉依赖。
 完整回归还需要已构建的 ROS 消息及固定厂商 SDK；纯源码构建通过不代表真机验收。
 
-视觉只支持 Ubuntu 原生 Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/检测结果 -> 本机
+视觉只支持 Ubuntu 原生 D405 -> YOLO -> ROS RGB-D/CameraInfo/检测结果 -> 本机
 GraspNet。Windows、HTTP、MJPEG、远端 JSON 和独立 GraspNet 服务已删除。
 MoveIt 执行还需要 `ros-jazzy-moveit-simple-controller-manager`；规划成功不等于
 执行成功。真机启动默认失能，必须在新鲜反馈和现场安全检查后显式使能。

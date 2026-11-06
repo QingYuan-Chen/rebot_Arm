@@ -45,7 +45,7 @@
 
 ## 当前路线与安全边界
 
-视觉只维护 Ubuntu 原生 Gemini 2、YOLO、ROS RGB-D/CameraInfo/detections、本机
+视觉只维护 Ubuntu 原生 D405、YOLO、ROS RGB-D/CameraInfo/detections、本机
 GraspNet、MoveIt 和 MuJoCo/真机后端。Windows、HTTP、MJPEG、远端 JSON 和独立
 GraspNet service 已删除。Dashboard HTTP 仅用于本机网页界面。
 语音控制包 `rebotarm_voice_control` 已从当前工作空间移除，不属于现行启动链。
@@ -480,7 +480,7 @@ ros2 topic pub --once /rebotarm/joints/joint1/cmd rebotarm_msgs/msg/JointMotorCm
 | 入口 | 当前用途 | 预留方向 | 使用说明 |
 |---|---|---|---|
 | `/rebotarm/follow_joint_trajectory` | 关节轨迹 action | MoveIt2、任务规划器、离线轨迹回放 | 发送完整 `joint_names` 和 `points`，首点需接近当前关节角 |
-| `/rebotarm/move_to_pose` | 末端位姿 action | 视觉抓取、点击到达、任务级 API | 输入 `Pose + duration`，返回 `final_pose` 和执行结果 |
+| `/rebotarm/move_to_pose` | 末端位姿 action | 点击到达、任务级 API | 输入 `Pose + duration`，返回 `final_pose` 和执行结果 |
 | `/rebotarm/move_to_pose_ik` | IK 执行兼容服务 | 旧应用接入 | 会触发运动；返回 `q_solution`，success 仅表示接纳，不可作为只读预览 |
 | `/rebotarm/joints/<joint>/cmd` | 单电机直通 topic | 调参、重力补偿、低层控制实验 | 轨迹运行时默认 `reject`，可用参数 `cmd_arbitration:=preempt` 改为抢占 |
 | `/rebotarm/gripper/command` | 标准夹爪 action | 行为树、抓取 pipeline | 使用 `control_msgs/action/GripperCommand`，位置单位为米 |

@@ -51,11 +51,12 @@
 ### 当前操作
 
 - [`implemented/features/hardware_execution.md`](implemented/features/hardware_execution.md)：真机控制器、反馈、夹爪和执行边界。
+- [`implemented/features/p005_prepared_trajectory.md`](implemented/features/p005_prepared_trajectory.md)：共享轨迹、prepared_v1 执行和验证范围。
 - [`implemented/features/moveit_planning.md`](implemented/features/moveit_planning.md)：MoveIt 规划、碰撞和轨迹执行。
 - [`implemented/features/operator_control.md`](implemented/features/operator_control.md)：网页、键盘和 RViz 操作。
 - [`implemented/features/teach_replay.md`](implemented/features/teach_replay.md)：示教录制、准备和回放。
-- [`implemented/features/visual_grasp.md`](implemented/features/visual_grasp.md)：视觉候选、规划和阶段编排。
-- [`setup/ubuntu_vision_setup_zh.md`](setup/ubuntu_vision_setup_zh.md)：Gemini 2、YOLO、GraspNet 环境和启动。
+- [`implemented/features/visual_grasp.md`](implemented/features/visual_grasp.md)：视觉候选生成、筛选和显示。
+- [`setup/ubuntu_vision_setup_zh.md`](setup/ubuntu_vision_setup_zh.md)：D405、YOLO、GraspNet 环境和启动。
 - [`implemented/features/vision_readonly.md`](implemented/features/vision_readonly.md)：Ubuntu 原生视觉只读链路的功能和边界。
 - [`reference/commands/mujoco_rl.md`](reference/commands/mujoco_rl.md)：保留的 CPU Gymnasium Reach 与 SB3 工具。
 - [`reference/commands/mjlab_rl.md`](reference/commands/mjlab_rl.md)：现有独立 MJLab 工程入口和验证边界。
@@ -70,7 +71,8 @@
 
 ## 设计文档和历史说明
 
-- [`design/controller_refactor_plan.md`](design/controller_refactor_plan.md)：硬件控制器按功能拆分与 C++ 迁移初步规划；已确认六轴与末端执行器分开控制，接口及选型待细化，尚未实施。
+- [`design/visual_grasp_cleanup_scope.md`](design/visual_grasp_cleanup_scope.md)：视觉执行及通用夹爪力夹取/握持的结构剔除清单；保留候选筛选、显示及共享运动功能。
+- [`design/controller_refactor_plan.md`](design/controller_refactor_plan.md)：Python 控制器结构整理记录；原 C++ 迁移计划已废弃，后续迁移由另一个仓库承担。
 - [`design/calibration_web_plan.md`](design/calibration_web_plan.md)：网页手眼标定完整技术路线；软件链路已实现，真实设备和物理精度仍在后续开发/验收范围。
 - 历史迁移快照和已删除文档当前不在工作树；需要追溯时从 Git 历史恢复，不作为当前源码清单。
 

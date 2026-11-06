@@ -4,11 +4,11 @@
 
 ## 功能概述
 
-当前支持：`Gemini 2 → YOLO → ROS RGB-D/CameraInfo/detections → 本机 GraspNet candidates`。
+当前支持：`D405 → YOLO → ROS RGB-D/CameraInfo/detections → 本机 GraspNet candidates`。
 
 ## 当前实现
 
-- Gemini 2 RGB-D 和 CameraInfo 发布；
+- D405 RGB-D 和 CameraInfo 发布；
 - YOLO 本地检测与标注图像；
 - 深度融合和候选生成；
 - GraspNet 候选话题、Marker 和可选 Open3D 查看；

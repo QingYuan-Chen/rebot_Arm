@@ -279,9 +279,7 @@ position→hold 最大漂移 **0.00002664 rad**，切换支撑力矩跳变 **0.0
 `full_release.log` 为最终完整回归。复核首轮单独启动运动节点时漏启既有预览发布参数，
 因此停在视觉预览；补齐 `publish_plan_only_preview:=true` 后全链通过，失败日志仍保留。
 
-视觉验收覆盖接触前服务/序列链，未覆盖相机、检测、候选生成的完整感知工作流，也没有
-实机抓取。`visual_grasp_system use_hardware:=false` 仍选择 legacy 轻量预演；本轮
-prepared_v1 视觉验证使用 MuJoCo 日常链加现有运动执行节点。连续执行的现场残差根因仍待
+历史视觉验收覆盖当时的接触前服务/序列链，相关执行入口现已剔除；相机、检测和实机抓取未在该次验收中覆盖。连续执行的现场残差根因仍待
 用户日志；交付后按用户追加要求取消六轴保持残差准入门限，设备保持命令不重锚。
 没有操作实机、提交或推送。
 
@@ -484,9 +482,7 @@ Dashboard 的 `simulation_backend=mujoco` 消费物理后端的反馈，独立�
 真机新模式显式启动方式及人工操作步骤分别见
 [网页与键盘](../../reference/commands/rebotarm_common_commands.md#p005-用户实机功能验证) 和
 [MoveIt](../../reference/commands/rebotarm_feature_commands.md#真机-rviz-拖动)。
-视觉入口可显式设置 `use_hardware:=true trajectory_execution_mode:=prepared_v1`，
-首次交付仅贯通配置。后续本页修订协同验收已验证接触前序列/服务链；完整感知工作流
-和实机抓取仍未验收。
+历史第三批曾贯通视觉接触前序列；该视觉执行入口现已剔除，通用 prepared 运动继续保留。
 
 软件侧复用现有测试、假设备链和 MuJoCo 验收工具，不新增专用实机测试文件、启动器或界面。
 现场检查、当次基线记录、显式使能及网页/键盘/MoveIt 操作全部由用户完成，

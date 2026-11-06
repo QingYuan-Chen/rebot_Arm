@@ -69,7 +69,7 @@ MuJoCo 模型资源的选择方式保持原有契约；本次只解除解释器�
 覆盖入口：
 
 - MuJoCo：`rebotarm_simulation/mujoco_sim.launch.py`、`rebotarm_bringup/mujoco_moveit_sim.launch.py`
-- 视觉和 GraspNet：`rebotarm_bringup/visual_grasp_system.launch.py`、`rebotarm_vision/vision.launch.py`、`rebotarm_vision/vision_ubuntu.launch.py`。视觉总入口的无硬件模式使用 RViz 轻量预演，不启动 MuJoCo。
+- 视觉和 GraspNet：`rebotarm_bringup/visual_grasp_system.launch.py`、`rebotarm_vision/vision.launch.py`、`rebotarm_vision/vision_ubuntu.launch.py`。视觉总入口的离线模式使用被动关节状态与 MoveIt 查询，外部模式复用已有环境。
 
 旧 `mujoco_ros_adapter_node.py` 和快照进程转发器 `upstream_backend.py` 已退出
 活动源码包，`rebotarm_simulation` 不再依赖 `rebotarm_motion`。正式 ROS 入口仍是
