@@ -5,6 +5,142 @@ import subprocess
 import sys
 
 
+def test_capture_visual_stability_evidence_and_duplicate_admission(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, ROS_DOMAIN_ID='179')
+    env['PYTHONPATH'] = str(root/'src/rebotarm_calibration')+os.pathsep+env.get('PYTHONPATH','')
+    result = subprocess.run([sys.executable,str(root/'tests/fixtures/handeye_capture_quality_probe.py'),str(tmp_path)],
+                            env=env,capture_output=True,text=True,timeout=20)
+    assert result.returncode==0,result.stdout+result.stderr
+
+
+def test_tf_chain_matches_canonical_fk_and_keeps_historical_direction(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ,ROS_DOMAIN_ID='180')
+    env['PYTHONPATH'] = os.pathsep.join([str(root/'src/rebotarm_calibration'),str(root/'src/rebotarm_teleop'),env.get('PYTHONPATH','')])
+    result = subprocess.run([sys.executable,str(root/'tests/fixtures/handeye_tf_probe.py'),str(tmp_path)],
+                            env=env,capture_output=True,text=True,timeout=25)
+    assert result.returncode==0,result.stdout+result.stderr
+
+
+def test_live_distance_is_read_only_and_available_while_capture_waits(tmp_path):
+    script = r'''
+import json, threading, time
+import cv2
+import numpy as np
+import rclpy
+from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.qos import qos_profile_sensor_data
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image, CameraInfo
+from rebotarm_msgs.srv import CalibrationCommand
+from rebotarm_calibration.handeye_capture_node import HandeyeCaptureNode
+from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+rclpy.init(args=['--ros-args','-p','port:=0','-p','capture_timeout_sec:=1.2',
+                 '-p','session_directory:='+__import__('sys').argv[1]])
+node=HandeyeCaptureNode(); source=Node('distance_source'); panel=TeleopStatusPanelNode()
+images=source.create_publisher(Image,'/camera/color/image_raw',10)
+infos=source.create_publisher(CameraInfo,'/camera/color/camera_info',10)
+bridge=CvBridge(); image=np.full((480,640,3),255,np.uint8)
+dictionary=cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+marker=(cv2.aruco.generateImageMarker(dictionary,0,180) if hasattr(cv2.aruco,'generateImageMarker')
+        else cv2.aruco.drawMarker(dictionary,0,180))
+image[150:330,230:410]=cv2.cvtColor(marker,cv2.COLOR_GRAY2BGR)
+publishing=True
+def publish():
+    if not publishing:return
+    info=CameraInfo();info.header.stamp=source.get_clock().now().to_msg();info.header.frame_id='optical'
+    info.width=640;info.height=480;info.k=[520.,0.,320.,0.,520.,240.,0.,0.,1.]
+    info.d=[0.]*5;info.distortion_model='plumb_bob'
+    msg=bridge.cv2_to_imgmsg(image,'bgr8');msg.header=info.header
+    infos.publish(info);images.publish(msg)
+source.create_timer(.03,publish)
+executor=MultiThreadedExecutor(num_threads=4)
+for n in (node,source,panel):executor.add_node(n)
+thread=threading.Thread(target=executor.spin);thread.start()
+def call(command,sid='a'*32,payload=None):
+    body=dict(command=command,session_id=sid,payload=payload or {})
+    req=Request(f'http://127.0.0.1:{panel._server.server_port}/api/calibration/command',
+                data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
+    try:
+        with urlopen(req,timeout=4) as response:return json.load(response)
+    except HTTPError as exc:return json.load(exc)
+def until(test):
+    end=time.monotonic()+3
+    while not test():
+        assert time.monotonic()<end
+        time.sleep(.02)
+try:
+    until(panel._calibration_client.client.service_is_ready)
+    until(panel._calibration_observation_client.client.service_is_ready)
+    metadata=dict(base_frame='base',end_link_frame='end',camera_frame='optical',
+                  marker_frame='board',marker_length_m=.075)
+    assert call('create',payload={'metadata':metadata})['success']
+    until(lambda:node._inputs.snapshot().image is not None and node._inputs.snapshot().infos)
+    progress=panel._store.snapshot_dict()['teleop']['calibration']
+    observed=call('observe');assert observed['success'],observed
+    assert panel._store.snapshot_dict()['teleop']['calibration']==progress
+    value=observed['session']['observation']
+    assert abs(value['distance_m']-.218)<.01,value
+    assert np.isclose(value['distance_m'],np.linalg.norm(value['translation_m']))
+    assert value['marker_length_m']==.075 and value['frame_id']=='optical'
+    assert node.store.read('a'*32)['revision']==0
+    # 无机器人 TF 时采集持续等待，独立观测仍可经真实 HTTP/ROS 返回距离。
+    client=source.create_client(CalibrationCommand,'/rebotarm_handeye_capture/command')
+    pending=client.call_async(CalibrationCommand.Request(command='capture',session_id='a'*32,
+        request_id='distance-wait',payload_json='{"split":"training"}'))
+    time.sleep(.15);started=time.monotonic()
+    assert call('observe')['success']
+    assert time.monotonic()-started<.8 and not pending.done()
+    until(pending.done)
+    assert not pending.result().success and pending.result().reason_code=='CAPTURE_TIMEOUT'
+    saved=node.store.read('a'*32)
+    assert saved['revision']==0 and not saved['training_samples']
+    readonly=source.create_client(CalibrationCommand,'/rebotarm_handeye_capture/observation')
+    rejected=readonly.call_async(CalibrationCommand.Request(command='capture',session_id='a'*32))
+    until(rejected.done);assert not rejected.result().success
+    assert node.store.read('a'*32)==saved
+    # 估测尺度跟随会话边长；观测服务不切换订阅或写会话。
+    assert call('create',sid='b'*32,payload={'metadata':dict(metadata,marker_length_m=.1)})['success']
+    scaled=call('observe',sid='b'*32)['session']['observation']['distance_m']
+    assert np.isclose(value['distance_m']/scaled,.75)
+    assert call('create',sid='c'*32,payload={'metadata':dict(metadata,image_topic='/other/image',camera_info_topic='/other/info')})['success']
+    assert not call('observe')['success']
+    assert node._inputs.topics==('/other/image','/other/info')
+    call('preview',sid='a'*32)
+    until(lambda:node._inputs.snapshot().image is not None and node._inputs.snapshot().infos)
+    node.settings['minimum_area_px2']=1e9
+    rejected=call('observe');assert not rejected['success'] and 'too small' in rejected['message']
+    node.settings['minimum_area_px2']=400.
+    import rebotarm_calibration.handeye_capture_node as capture_module
+    original_detect=capture_module.detect_aruco_pose
+    def bad_reprojection(*args,**kwargs):
+        return dict(original_detect(*args,**kwargs),reprojection_rmse_px=2.)
+    capture_module.detect_aruco_pose=bad_reprojection
+    rejected=call('observe');assert not rejected['success'] and 'reprojection' in rejected['message']
+    assert 'observation' not in rejected['session']
+    capture_module.detect_aruco_pose=original_detect
+    image=np.full_like(image,255);time.sleep(.1)
+    rejected=call('observe');assert not rejected['success'] and 'not detected' in rejected['message']
+    publishing=False;time.sleep(.6)
+    rejected=call('observe');assert not rejected['success'] and 'fresh' in rejected['message']
+    assert 'observation' not in rejected['session']
+finally:
+    panel.destroy_node();executor.shutdown();thread.join()
+    node.destroy_node();source.destroy_node();rclpy.shutdown()
+'''
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, ROS_DOMAIN_ID='178')
+    env['PYTHONPATH'] = str(root / 'src/rebotarm_calibration') + os.pathsep + env.get('PYTHONPATH', '')
+    result = subprocess.run([sys.executable, '-c', script, str(tmp_path)], env=env,
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '标定请求失败' in result.stdout + result.stderr
+
+
 def test_real_node_service_without_camera_fails_closed(tmp_path):
     script = '''
 import json
@@ -64,10 +200,10 @@ rclpy.init(args=['--ros-args','-p','port:=0','-p','session_directory:='+__import
 node=HandeyeCaptureNode(); source=Node('synthetic_calibration_source')
 from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
 panel=TeleopStatusPanelNode()
-images=source.create_publisher(Image,'/camera/color/image_raw',qos_profile_sensor_data)
-infos=source.create_publisher(CameraInfo,'/camera/color/camera_info',qos_profile_sensor_data)
-alternate_images=source.create_publisher(Image,'/alternate/color',qos_profile_sensor_data)
-alternate_infos=source.create_publisher(CameraInfo,'/alternate/info',qos_profile_sensor_data)
+images=source.create_publisher(Image,'/camera/color/image_raw',10)
+infos=source.create_publisher(CameraInfo,'/camera/color/camera_info',10)
+alternate_images=source.create_publisher(Image,'/alternate/color',10)
+alternate_infos=source.create_publisher(CameraInfo,'/alternate/info',10)
 tf=TransformBroadcaster(source)
 bridge=CvBridge(); image=np.full((480,640,3),255,np.uint8)
 d=cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
@@ -124,6 +260,17 @@ try:
     assert len(sample['provenance']['source_sha256']['handeye_capture_node.py'])==64
     assert sample['image_stamp_ns']==sample['tf_stamp_ns']
     assert sample['quality']['reprojection_rmse_px']<1.
+    assert len(sample['corners_px'])==4
+    window=sample['capture_window']; selected=window['observations'][window['selected_index']]
+    assert selected['image_stamp_ns']==sample['image_stamp_ns']
+    assert selected['base_to_end']==sample['base_to_end']
+    assert selected['camera_to_marker']==sample['camera_to_marker']
+    assert len(window['observations'])==sample['stability_sample_count']
+    assert sample['tf_frames']==dict(target='base',source='end')
+    import base64,hashlib
+    png=base64.b64decode(sample['image']['data_base64'])
+    assert hashlib.sha256(png).hexdigest()==sample['image']['sha256']
+    assert np.array_equal(cv2.imdecode(np.frombuffer(png,np.uint8),cv2.IMREAD_COLOR),image)
     assert abs(sample['camera_to_marker']['translation'][2]-.217)<.01
     assert call('capture',{'split':'training'},'capture-one')['revision']==1
     tf_check=call('tf_check',{})['tf_check']

@@ -41,6 +41,11 @@ import numpy as np
 SCHEMA_VERSION = 1
 
 
+def robot_pose_key(transform):
+    """采集与求解共用已有八位小数精度的机器人姿态重复判定。"""
+    return tuple(round(float(value), 8) for value in transform_matrix(transform).ravel())
+
+
 def transform_matrix(transform: Mapping[str, object]) -> np.ndarray:
     """把 ``{"translation", "rotation_xyzw"}`` 表示的变换转成 4x4 齐次矩阵。
 

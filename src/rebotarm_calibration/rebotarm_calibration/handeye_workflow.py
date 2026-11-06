@@ -9,7 +9,7 @@ import tempfile
 
 import cv2
 
-from .handeye_residual import analyze_handeye_residual, matrix_transform, transform_matrix
+from .handeye_residual import analyze_handeye_residual, matrix_transform, transform_matrix, robot_pose_key
 from .handeye_solver import HAND_EYE_METHODS, evaluate_eye_in_hand, solve_eye_in_hand
 
 
@@ -77,7 +77,7 @@ def solve_dataset(dataset):
             normalized_sample = {'sample_id': identity, 'label': identity}
             for field in ('base_to_end', 'camera_to_marker'):
                 normalized_sample[field] = matrix_transform(transform_matrix(sample[field]))
-            pose = tuple(round(float(v), 8) for v in transform_matrix(sample['base_to_end']).ravel())
+            pose = robot_pose_key(sample['base_to_end'])
             if pose in poses:
                 raise ValueError('duplicate robot pose; use independent diverse samples')
             poses.add(pose)

@@ -12,7 +12,7 @@ import re
 import threading
 from uuid import uuid4
 
-from .handeye_residual import matrix_transform, transform_matrix
+from .handeye_residual import matrix_transform, transform_matrix, robot_pose_key
 from .handeye_workflow import atomic_write_json, solve_dataset
 
 
@@ -96,6 +96,11 @@ class SessionStore:
                     reference = {key: existing[0].get(key) for key in conditions}
                     if conditions != reference:
                         raise ValueError('acquisition conditions changed; create a new session')
+                if data['metadata'].get('mode') != 'tcp':
+                    key = robot_pose_key(sample['base_to_end'])
+                    duplicate = next((item for item in existing if robot_pose_key(item['base_to_end']) == key), None)
+                    if duplicate is not None:
+                        raise ValueError(f"duplicate robot pose matches sample {duplicate['sample_id']}; change robot pose")
                 sample['sample_id'] = request_id
                 sample['sample_index'] = len(existing)
                 sample['recorded_at'] = datetime.now(timezone.utc).isoformat()

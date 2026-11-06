@@ -50,6 +50,17 @@ def test_eye_in_hand_solver_recovers_exact_transform() -> None:
     assert np.allclose(solved, expected, atol=1e-8)
 
 
+@pytest.mark.parametrize('method', ['TSAI','PARK','HORAUD','ANDREFF','DANIILIDIS'])
+def test_fixed_base_frame_change_keeps_same_camera_mount(method):
+    from rebotarm_calibration.handeye_residual import matrix_transform,transform_matrix
+    from rebotarm_calibration.handeye_solver import solve_eye_in_hand
+    samples,expected,_ = _perfect_samples()
+    world_to_base,_ = _transform([.3,-.2,.4],[.25,-.1,.3])
+    rebased = [dict(sample,base_to_end=matrix_transform(world_to_base@transform_matrix(sample['base_to_end'])))
+               for sample in samples]
+    assert np.allclose(solve_eye_in_hand(rebased,method=method),expected,atol=1e-8)
+
+
 def test_eye_in_hand_evaluation_can_use_training_reference() -> None:
     from rebotarm_calibration.handeye_solver import evaluate_eye_in_hand
 

@@ -541,6 +541,11 @@ class TeleopStatusPanelNode(Node):
             CalibrationCommand.Request,
             lambda value: self._store.update_teleop_status('calibration', value),
         )
+        # 单帧只读估测独立等待，避免高频刷新占用采集锁或覆盖其进度状态。
+        self._calibration_observation_client = CalibrationClient(
+            self.create_client(CalibrationCommand, '/rebotarm_handeye_capture/observation'),
+            CalibrationCommand.Request, lambda value: None, timeout=2.,
+        )
         self._calibration_gravity_owned = False
         self._calibration_gravity_tracker = GravityRequestTracker()
         self._arm_status_received_at = None
@@ -689,6 +694,8 @@ class TeleopStatusPanelNode(Node):
         return result
 
     def _handle_calibration_command(self, payload: dict) -> dict:
+        if payload.get('command') == 'observe':
+            return self._calibration_observation_client.command(payload)
         return self._calibration_client.command(payload)
 
     def _panel_config(self) -> dict:
@@ -1617,9 +1624,8 @@ class TeleopStatusPanelNode(Node):
     def _update_gravity_comp_status(self) -> None:
         """汇总重力补偿可用性并写入 ``gravity_comp`` 状态（1 Hz 定时 + 整臂状态回调触发）。
 
-        没有专门的重力补偿话题，因此状态由两部分推断：
-        - 整臂状态机是否为 "GRAVITY_COMP"，决定 ``active``；
-        - start/stop 服务是否可见，决定 ``state``：active > ready（start 可用）> unavailable。
+        active 要求新鲜、已使能且无错误的 GRAVITY_COMP 反馈。
+        故障优先显示 fault_hold/fault；其余状态按 active、服务可用性和反馈时效汇总。
         探测用 ``service_is_ready()`` 为主、0 超时的 ``wait_for_service`` 为辅，两者都在
         try 里保护——探测异常只应体现为"不可用"，不能让定时器抛错。
         ``ready_for_teach_recording`` 是界面"能否开始录制"的判据：录制流程要求重力补偿
@@ -1628,9 +1634,11 @@ class TeleopStatusPanelNode(Node):
         snapshot = self._store.snapshot()
         arm_state = str(snapshot.arm.get("state_machine", ""))
         received = getattr(self, '_arm_status_received_at', None)
+        age = time.monotonic() - received if received is not None else None
+        fresh = age is not None and 0 <= age <= .5
         self._store.update_teleop_status('arm_feedback', {
-            'fresh': received is not None and time.monotonic() - received <= .5,
-            'age_sec': time.monotonic() - received if received is not None else None,
+            'fresh': fresh,
+            'age_sec': age,
         })
         try:
             start_available = bool(self._gravity_start_client.service_is_ready())
@@ -1644,8 +1652,17 @@ class TeleopStatusPanelNode(Node):
                 stop_available = bool(self._gravity_stop_client.wait_for_service(timeout_sec=0.0))
         except Exception:
             stop_available = False
-        active = arm_state == "GRAVITY_COMP"
-        if active:
+        errors = snapshot.arm.get('error_codes', [])
+        active = (arm_state == "GRAVITY_COMP" and bool(snapshot.arm.get('enabled'))
+                  and fresh and not errors)
+        if errors:
+            state = ("fault_hold" if arm_state == "GRAVITY_COMP" and snapshot.arm.get('enabled')
+                     and all(code.startswith('GRAVITY_HOLD:') for code in errors) else "fault")
+            message = '; '.join(errors)
+        elif not fresh:
+            state = "unavailable"
+            message = "controller feedback is stale or unavailable"
+        elif active:
             state = "active"
             message = "gravity compensation is active"
         elif start_available:

@@ -18,13 +18,13 @@ from rebotarm_msgs.msg import ArmStatus
 from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
 rclpy.init(args=['--ros-args','-p','port:=0','-p','use_hardware:=true','-p','web_execute_enabled:=true','-p','execution_mode:=execute','-p','arm_namespace:=calibration_test'])
 panel=TeleopStatusPanelNode(); controller=Node('fake_calibration_controller')
-state={'enabled':False,'mode':'IDLE','stale':True};calls=[]
+state={'enabled':False,'mode':'IDLE','stale':True,'errors':[]};calls=[]
 def handler(name):
     def call(request,response):
         calls.append(name)
         if name=='enable':state['enabled']=True
         if name=='start':state['mode']='GRAVITY_COMP'
-        if name=='stop':state['mode']='IDLE'
+        if name=='stop':state['mode']='IDLE';state['errors']=[]
         response.success=True;response.message='fake '+name;return response
     return call
 for name,path in [('enable','enable'),('start','gravity_compensation/start'),('stop','gravity_compensation/stop')]:
@@ -35,6 +35,7 @@ def publish():
     message=ArmStatus();message.header.stamp=controller.get_clock().now().to_msg()
     if state['stale']:message.header.stamp.sec-=10
     message.enabled=state['enabled'];message.state_machine=state['mode'];message.mode='pos_vel'
+    message.error_codes=state['errors']
     publisher.publish(message)
 controller.create_timer(.03,publish)
 executor=MultiThreadedExecutor(num_threads=3);executor.add_node(panel);executor.add_node(controller)
@@ -63,6 +64,14 @@ try:
     assert post('/api/calibration/gravity',{'command':'start','confirmed':True})['accepted']
     wait(lambda:panel._store.snapshot().arm['state_machine']=='GRAVITY_COMP')
     assert not post('/api/keyboard_enable',{})['accepted']
+    assert calls==['enable','start']
+    wait(lambda:panel._store.snapshot().teleop['gravity_comp']['active'])
+    state['errors']=['GRAVITY_HOLD: three consecutive control deadline misses']
+    wait(lambda:panel._store.snapshot().teleop['gravity_comp']['state']=='fault_hold')
+    gravity=panel._store.snapshot().teleop['gravity_comp']
+    assert not gravity['active'] and not gravity['ready_for_teach_recording']
+    assert 'GRAVITY_HOLD' in gravity['message']
+    assert not post('/api/calibration/gravity',{'command':'start','confirmed':True})['accepted']
     assert calls==['enable','start']
     assert post('/api/calibration/gravity',{'command':'stop','confirmed':True})['accepted']
     wait(lambda:panel._store.snapshot().arm['state_machine']=='IDLE' and panel._arm_status_received_at>panel._calibration_gravity_tracker.completed_at)

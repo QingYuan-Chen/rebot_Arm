@@ -15,8 +15,8 @@ import threading
 from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo, Image
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from sensor_msgs.msg import CameraInfo, Image, JointState
 from tf2_ros import Buffer, TransformListener
 
 
@@ -25,6 +25,7 @@ class CaptureSnapshot:
     image: object
     infos: tuple
     generation: int
+    topics: tuple
 
 
 class CaptureInputReceiver(Node):
@@ -40,6 +41,11 @@ class CaptureInputReceiver(Node):
         self.lock = threading.Lock()
         self.frames = deque(maxlen=40)
         self.infos = deque(maxlen=40)
+        self.joints = deque(maxlen=200)
+        namespace = owner.get_parameter('arm_namespace').value.strip('/')
+        self.joint_topic = owner.resolve_topic_name(f'/{namespace}/joint_states')
+        self._joint_subscription = self.create_subscription(
+            JointState, self.joint_topic, self._receive_joint, qos_profile_sensor_data)
         self.generation = 0
         self.topics = None
         self.error = ''
@@ -95,8 +101,10 @@ class CaptureInputReceiver(Node):
         new_subscriptions = []
         try:
             for message, topic, kind in zip((Image, CameraInfo), topics, ('image', 'info')):
+                # 本机大彩色图需可靠重传；与 D405 正式发布端保持一致。
                 new_subscriptions.append(self.create_subscription(message, topic,
-                    self._callback(generation, kind), qos_profile_sensor_data))
+                    self._callback(generation, kind),
+                    QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)))
         except Exception:
             for subscription in new_subscriptions:
                 self.destroy_subscription(subscription)
@@ -105,8 +113,9 @@ class CaptureInputReceiver(Node):
             self.generation = generation
             self.frames.clear()
             self.infos.clear()
+            self.topics = topics
         old = self._camera_subscriptions
-        self._camera_subscriptions, self.topics = new_subscriptions, topics
+        self._camera_subscriptions = new_subscriptions
         for subscription in old:
             self.destroy_subscription(subscription)
 
@@ -115,8 +124,26 @@ class CaptureInputReceiver(Node):
             if self.error:
                 raise RuntimeError('calibration input receiver failed: ' + self.error)
             snapshot = CaptureSnapshot(self.frames[-1] if self.frames else None,
-                                       tuple(self.infos), self.generation)
+                                       tuple(self.infos), self.generation, self.topics)
         return deepcopy(snapshot)
+
+    def _receive_joint(self, message):
+        with self.lock:
+            self.joints.append(message)
+
+    def joint_evidence(self, stamp):
+        """保留图像时刻两侧最近的原始关节消息；缺失明确留空，TF 仍由 TF2 查询。"""
+        def timestamp(message):
+            return message.header.stamp.sec * 10**9 + message.header.stamp.nanosec
+        with self.lock:
+            values = list(self.joints)
+        before = [m for m in values if 0 < timestamp(m) <= stamp]
+        after = [m for m in values if timestamp(m) > stamp]
+        selected = ([max(before, key=timestamp)] if before else []) + ([min(after, key=timestamp)] if after else [])
+        return {'topic': self.joint_topic, 'samples': [
+            {'stamp_ns': timestamp(m), 'offset_sec': (timestamp(m)-stamp)/1e9,
+             'frame_id': m.header.frame_id, 'name': list(m.name), 'position': list(m.position),
+             'velocity': list(m.velocity), 'effort': list(m.effort)} for m in selected]}
 
     def _spin(self):
         try:

@@ -99,6 +99,28 @@ def test_returned_session_is_detached(tmp_path):
     assert store.read(sid)['training_samples'][0]['base_to_end']['translation'][0]!=999
 
 
+@pytest.mark.parametrize('split', ['training', 'validation'])
+def test_duplicate_pose_rejected_before_persistence_and_retry_stays_idempotent(tmp_path, split):
+    from copy import deepcopy
+    store = SessionStore(tmp_path)
+    source = dataset()
+    data = store.create(source['metadata'])
+    sid = data['session_id']
+    payload = {'split': 'training', 'sample': source['training_samples'][0]}
+    saved = store.mutate(sid, request_id='first', revision=0, operation='capture', payload=payload)
+    raw = (tmp_path / (sid+'.json')).read_bytes()
+    duplicate = deepcopy(payload['sample'])
+    duplicate['camera_to_marker']['translation'][0] += .02
+    with pytest.raises(ValueError, match='duplicate robot pose matches sample first'):
+        SessionStore(tmp_path).mutate(sid, request_id='duplicate', revision=1,
+            operation='capture', payload={'split': split, 'sample': duplicate})
+    assert (tmp_path / (sid+'.json')).read_bytes() == raw
+    assert store.mutate(sid, request_id='first', revision=0, operation='capture', payload=payload) == saved
+    duplicate['base_to_end'] = source['training_samples'][1]['base_to_end']
+    assert store.mutate(sid, request_id='different', revision=1, operation='capture',
+                        payload={'split':split, 'sample':duplicate})['revision'] == 2
+
+
 def test_audit_indices_and_retries_are_stable(tmp_path):
     from datetime import datetime
     store=SessionStore(tmp_path);source=dataset()

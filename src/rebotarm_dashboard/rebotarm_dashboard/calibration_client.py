@@ -18,7 +18,7 @@ class CalibrationClient:
                     state=session.get('state', 'unavailable'), revision=session.get('revision'))
 
     def _command(self, payload):
-        allowed = {'tf_check', 'preview', 'create', 'status', 'preflight', 'capture', 'solve', 'reopen', 'exclude_samples', 'accept', 'abort'}
+        allowed = {'observe', 'tf_check', 'preview', 'create', 'status', 'preflight', 'capture', 'solve', 'reopen', 'exclude_samples', 'accept', 'abort'}
         if not isinstance(payload, dict) or payload.get('command') not in allowed:
             raise ValueError('invalid calibration command')
         if not self.lock.acquire(blocking=False):

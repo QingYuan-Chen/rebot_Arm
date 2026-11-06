@@ -10,7 +10,10 @@ def gravity_rejection(command, confirmed, *, hardware, web_enabled, execution_mo
         return '当前工作台未允许真实硬件操作'
     if not math.isfinite(status_age) or not 0 <= status_age <= .5:
         return '控制器反馈过期，请检查连接'
-    if not arm.get('enabled') or arm.get('error_codes'):
+    errors = arm.get('error_codes', [])
+    # 仅重力故障保持允许显式交接回位置保持；设备与反馈错误继续阻断切换。
+    hold_exit = command == 'stop' and all(code.startswith('GRAVITY_HOLD:') for code in errors)
+    if not arm.get('enabled') or (errors and not hold_exit):
         return '需要已显式使能且无错误的控制器'
     if command == 'start' and (arm.get('state_machine') != 'IDLE' or busy):
         return '请先结束其他运动、键盘控制或示教任务'
