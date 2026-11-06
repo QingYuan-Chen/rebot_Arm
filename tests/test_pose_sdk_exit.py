@@ -10,7 +10,6 @@ import numpy as np
 import pinocchio as pin
 import pytest
 from rebotarm_motion.pose_kinematics import JOINT_NAMES, PoseKinematics
-from rebotarm_motion.pose_preview_solver import PosePreviewSolver
 from rebotarm_motion.cartesian_trajectory import plan_cartesian, retime_path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,11 +21,6 @@ def test_fk_ik_roundtrip_and_canonical_upper_limits(q):
     assert result.success and result.error <= 1e-4
     assert result.q == pytest.approx(q)
     assert solver.upper[1:3] == pytest.approx((.02,.02))
-    preview = PosePreviewSolver(ROOT)
-    target = preview.compute_pose_target(q)
-    assert preview.solve_pose(target, q, JOINT_NAMES).success
-    with pytest.raises(ValueError, match='order'):
-        preview.solve_pose(target, q, tuple(reversed(JOINT_NAMES)))
 
 
 def test_unreachable_ik_and_fixed_retry_source():

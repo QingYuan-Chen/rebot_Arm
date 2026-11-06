@@ -400,6 +400,9 @@ def test_legacy_custom_interactive_preview_entrypoints_are_removed() -> None:
 
     assert not (ROOT / "src/rebotarm_motion/rebotarm_motion/preview_node.py").exists()
     assert not (ROOT / "src/rebotarm_motion/rebotarm_motion/execution_node.py").exists()
+    for name in ('command_models', 'preview_manager', 'execution_coordinator', 'mode_manager',
+                 'message_codec', 'pose_preview_solver'):
+        assert not (ROOT / 'src/rebotarm_motion/rebotarm_motion' / f'{name}.py').exists()
 
 
 def test_shared_trajectory_is_flat_pure_numeric_and_dependencies_are_one_way():

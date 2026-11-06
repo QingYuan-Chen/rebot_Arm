@@ -21,18 +21,17 @@ import rebotarmcontroller.hardware_manager as hardware
 import rebotarm_motion.pose_kinematics as motion
 from rebotarmcontroller.configuration import default_config
 from rebotarmcontroller.gravity.gravity_control import package_file
-from rebotarm_motion.pose_preview_solver import PosePreviewSolver
 from rebotarm_motion.cartesian_trajectory import plan_cartesian
 from rebotarm_motion.pose_compat_node import PoseCompatNode
 
 manager = hardware.HardwareManager()
 assert not manager.lifecycle.connected
 assert manager.runtime.control_thread is None
-solver = PosePreviewSolver()
+solver = motion.PoseKinematics()
 q = (0., -1., -1., 0., .3, 0.)
-target = solver.kinematics.pose(q)
-assert solver.kinematics.solve(target, q).success
-assert plan_cartesian(solver.kinematics, q, target, .1)[0]
+target = solver.pose(q)
+assert solver.solve(target, q).success
+assert plan_cartesian(solver, q, target, .1)[0]
 paths = {
     'controller_module': Path(hardware.__file__).resolve(),
     'motion_module': Path(motion.__file__).resolve(),
