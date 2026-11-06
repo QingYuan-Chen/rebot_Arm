@@ -224,9 +224,8 @@ def curve_from_payload(payload):
     segments = []
     for first, last, coefficients in zip(points, points[1:], rows):
         c = tuple(tuple(float(value) for value in row) for row in coefficients)
-        if (len(c) != len(names) or any(len(row) != degree + 1 for row in c)
-                or not all(math.isfinite(value) for row in c for value in row)):
-            raise ValueError('curve coefficient shape or finite values invalid')
+        if len(c) != len(names) or any(len(row) != degree + 1 for row in c):
+            raise ValueError('curve coefficient shape invalid')
         duration = last.time - first.time
         if not math.isfinite(duration) or duration > 1e100:
             raise ValueError('unknown polynomial duration: numerical range')

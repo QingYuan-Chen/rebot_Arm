@@ -146,7 +146,7 @@ def test_bound_preparation_checks_exact_curve_without_normalizing_or_retiming():
     from rebotarm_trajectory.polynomial import TrajectoryPoint,curve_from_payload
     import json
     monitor=LockedMonitor();req=request(monitor)
-    cap=make_capability('prepared_v1',1,.5,1.)
+    cap=make_capability('prepared_v1',1,.5,1.,'1'*64)
     req.capability_json=json.dumps(cap)
     points=tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
         p.positions,p.velocities,p.accelerations) for p in req.trajectory.points)

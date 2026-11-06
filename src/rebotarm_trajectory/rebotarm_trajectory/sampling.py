@@ -45,7 +45,5 @@ def linear_sample(times, positions, initial, elapsed):
     lower = positions[upper - 1] if upper else initial
     if lower_time == elapsed and upper:
         return lower
-    if times[upper] == lower_time:
-        return positions[upper]
     ratio = (elapsed - lower_time) / (times[upper] - lower_time)
     return tuple(a + ratio * (b - a) for a, b in zip(lower, positions[upper]))

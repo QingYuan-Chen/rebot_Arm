@@ -505,7 +505,7 @@ def _execution_fixture():
         hold_current_position=lambda:sim.events.append(('hold',sim.time)),
         set_mode=lambda mode:setattr(sim,'control_mode',mode) or mode)
     execution = TrajectoryExecution(SerializedSimulationAccess(sim),control,
-        make_capability('prepared_v1',11,.5,1.),'prepared_v1',GoalSettlingPolicy(),clock=lambda:10.)
+        make_capability('prepared_v1',11,.5,1.,'1'*64),'prepared_v1',GoalSettlingPolicy(),clock=lambda:10.)
     execution.scene_changed('scene-a')
     execution.step(120,lambda *args:None)
     curve = build_curve(JOINT_NAMES,point_to_point((0.,)*6,(.02,)*6,.4))

@@ -21,7 +21,7 @@ def constraint_revision(*documents):
     return digest.hexdigest()
 
 
-def make_capability(mode, session, speed, torque, limits_revision='0'*64):
+def make_capability(mode, session, speed, torque, limits_revision):
     """速度为夹爪电机 rad/s，力矩为 N·m；与开口单位的转换必须显式。"""
     if mode not in ('legacy', 'prepared_v1') or type(session) is not int or session < 0:
         raise ValueError('invalid capability identity')

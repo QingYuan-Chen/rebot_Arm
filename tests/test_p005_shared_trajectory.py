@@ -117,7 +117,7 @@ def test_web_coordinated_plan_is_single_use():
     from rebotarm_teleop.web_coordinated import CoordinatedWebPlans
     from rebotarm_trajectory.capability import make_capability
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-    cap = make_capability('prepared_v1',1,.5,1.)
+    cap = make_capability('prepared_v1',1,.5,1.,'1'*64)
     from rebotarm_trajectory.planning import plan_binding, planning_state
     def retime(message,*args):
         points = tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
@@ -216,9 +216,9 @@ def test_fixed_stationary_plan_does_not_check_artificial_start_displacement(name
 
 def test_capability_revision_changes_on_reconnect_and_rejects_tampering():
     from rebotarm_trajectory.capability import make_capability, decode_capability
-    first = make_capability('prepared_v1',1,.5,1.)
+    first = make_capability('prepared_v1',1,.5,1.,'1'*64)
     assert decode_capability(first) == first
-    assert first['revision'] != make_capability('prepared_v1',2,.5,1.)['revision']
+    assert first['revision'] != make_capability('prepared_v1',2,.5,1.,'1'*64)['revision']
     first['gripper_torque_cap_nm'] = 2.
     with pytest.raises(ValueError, match='revision'):
         decode_capability(first)
@@ -299,7 +299,7 @@ def test_planning_rejects_geometry_capability_and_nanosecond_damage():
     from rebotarm_trajectory.capability import make_capability
     config = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
     with pytest.raises(ValueError,match='revision mismatch'):
-        effective_limits(config,JOINT_NAMES,make_capability('prepared_v1',1,.5,1.))
+        effective_limits(config,JOINT_NAMES,make_capability('prepared_v1',1,.5,1.,'1'*64))
     low,high,limits = load_reference_limits(config)
     with pytest.raises(ValueError,match='position extremum'):
         retime_curve(JOINT_NAMES,point_to_point((0.,)*6,(99.,)*6),low,high,limits)
