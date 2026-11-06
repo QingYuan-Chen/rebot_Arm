@@ -198,17 +198,19 @@ def load_joint_runtime_limits(
     # 延迟导入 yaml: 本模块的纯逻辑(守卫本身)不依赖 YAML 解析, 避免导入期强耦合.
     import yaml
 
-    # 空文件时 safe_load 返回 None, 这里按空映射处理, 让后面按键缺失正常报错.
-    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    entries = payload.get("joint_limits", {})
+    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("joint_limits"), Mapping):
+        raise ValueError("MoveIt YAML requires a joint_limits mapping")
+    entries = payload["joint_limits"]
     result: dict[str, JointRuntimeLimit] = {}
     for raw_name in joint_names:
         name = str(raw_name)
         if name not in entries:
             # 缺限位的关节不允许静默跳过, 否则该关节将完全不受执行守卫保护.
             raise ValueError(f"joint limit missing from MoveIt YAML: {name}")
-        # 关节节点为空(YAML 里只写了关节名)时按"无限位"处理, 由 _enabled_limit 决定各项开关.
-        entry = entries[name] or {}
+        entry = entries[name]
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"joint limit entry must be a mapping: {name}")
         result[name] = JointRuntimeLimit(
             max_velocity=_enabled_limit(entry, "velocity"),
             max_acceleration=_enabled_limit(entry, "acceleration"),

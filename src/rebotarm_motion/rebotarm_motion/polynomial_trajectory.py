@@ -132,8 +132,6 @@ def build_curve(joint_names, points):
                 d, v, a = delta - v0 - a0 / 2, v1 - v0 - a0, a1 - a0
                 c = (q, v0, a0 / 2, 10 * d - 4 * v + a / 2,
                      -15 * d + 7 * v - a, 6 * d - 3 * v + a / 2)
-            if not all(math.isfinite(value) for value in c):
-                raise ValueError('unknown polynomial coefficients: numerical overflow')
             coefficients.append(c)
         segment = PolynomialSegment(first.time, duration, tuple(coefficients))
         for order in range(4):

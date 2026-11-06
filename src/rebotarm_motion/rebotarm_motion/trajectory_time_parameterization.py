@@ -165,15 +165,14 @@ class TimeParameterizationResult:
 def normalize_time_parameterization_method(method: str | None) -> str:
     """把外部传入的方法名归一化为三种合法取值之一.
 
-    规则: ``None``/空串/``"default"`` 以及任何无法识别的取值都回落为 ``"auto"``,
-    不抛异常; 参数来自 YAML 或 launch, 非法值不应让节点启动失败. 比较前会去掉首尾
-    空白并转小写, 因此 ``"Auto"``, ``" RUCKIG "`` 均能正确识别.
+    ``None``/空串/``"default"`` 使用 ``"auto"``；未知方法名显式报错。
+    比较前去掉首尾空白并转小写。
     """
-    value = str(method or "auto").strip().lower()
+    value = ("auto" if method is None else method).strip().lower()
     if value in ("", "default"):
         return "auto"
     if value not in ("auto", "current_jerk_retime", "ruckig"):
-        return "auto"
+        raise ValueError(f"unknown time parameterization method: {method}")
     return value
 
 
