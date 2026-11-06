@@ -243,10 +243,6 @@ class GripperCommandPort(GripperStatePort, Protocol):
         """约定同步等待位置任务, 返回是否成功与当前开口 m."""
         ...
 
-    def grasp_gripper(self, **kwargs):
-        """约定等待堵转抓取结果, 保持有期限且不声称测得接触力."""
-        ...
-
     def cancel_gripper_position_command(self, *args, **kwargs):
         """约定只取消匹配代次的位置命令, 释放由周期推进."""
         ...

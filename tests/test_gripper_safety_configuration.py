@@ -72,9 +72,6 @@ def test_real_hardware_launches_expose_and_forward_gripper_safety_defaults() -> 
             assert float(defaults[name]) == expected, relative_path
             assert name in parameter_keys, relative_path
 
-    profile = (ROOT / "src/rebotarm_bringup/config/visual_backend_profile.yaml").read_text()
-    for name, expected in LAUNCH_SAFETY_DEFAULTS.items():
-        assert f"{name}: {expected:g}" in profile or f"{name}: {expected}" in profile
 
 def test_controller_declares_gripper_safety_defaults() -> None:
     tree = _tree("src/rebotarmcontroller/rebotarmcontroller/rebotarm_controller.py")

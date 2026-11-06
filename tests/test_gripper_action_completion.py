@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
-import types
 
 import rebotarmcontroller.ros.ros_actions as ros_actions_module
 from rebotarmcontroller.ros.ros_actions import ArmActions
@@ -40,13 +38,6 @@ class _LongMoveHardware:
 
     def gripper_reached_target(self) -> bool:
         return self._clock[0] >= 8.0
-
-    def wait_gripper_target(self, timeout: float | None = None) -> bool:
-        del timeout
-        if not self.gripper_reached_target():
-            return False
-        self.active = False
-        return True
 
     def cancel_gripper_position_command(self, _reason: str, *, expected_generation=None) -> bool:
         return False

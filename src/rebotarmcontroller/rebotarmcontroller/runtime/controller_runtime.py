@@ -363,7 +363,11 @@ class ControllerRuntime:
                                 self.on_error(exc)
                             except Exception as protection_error:
                                 self.last_error += f'; protection failed: {protection_error}'
-                    deadline = time.monotonic() + self._period
+                    # 回调耗时计入本周期；错过下一拍时重新排期，避免追赶积压输出。
+                    deadline += self._period
+                    finished = time.monotonic()
+                    if deadline <= finished:
+                        deadline = finished + self._period
                 # 停止证据以续体逐拍推进, 避免在唯一设备线程内睡眠等静止而阻塞显式失能.
                 self._advance_deferred()
                 self._wake.wait(max(0., deadline-time.monotonic()))

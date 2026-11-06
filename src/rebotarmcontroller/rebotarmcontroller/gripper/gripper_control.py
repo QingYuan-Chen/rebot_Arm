@@ -57,25 +57,6 @@ _G_LARGE_MOVE_MAX_TAU_CAP_NM = 1.5
 _G_KP_MOVE = 5.0
 _G_KD_MOVE = 1.0
 _G_DEFAULT_FORCE = 0.40
-_G_GRASP_CLOSE_KP = 0.0
-_G_GRASP_CLOSE_KD = 0.5
-_G_GRASP_HOLD_KP = 5.0
-_G_GRASP_HOLD_KD = 1.0
-# 抓取保持的估算力矩:
-#   kp * (hold_angle - pos) + kd * (-vel) + hold_force
-# hold_angle 固定在堵转角, PD 与前馈共同决定输出, 各项贡献随反馈误差变化.
-# close_force/hold_force 表示电机力矩(N·m), 不等同于实测指尖力.
-_G_GRASP_CLOSE_FORCE_DEFAULT = 0.40
-_G_GRASP_CLOSE_FORCE_MAX = 1.0
-_G_GRASP_HOLD_FORCE_DEFAULT = 0.40
-# 抓取保持会持续向电机施加输出, 因此必须有时限.
-# 超时后请求中性释放; 发送失败和设备故障由执行组件及保护路径处理.
-_G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC = 30.0
-_G_GRASP_HOLD_TIMEOUT_MAX_SEC = 120.0
-_G_GRASP_VEL_THRESHOLD = 0.04
-_G_GRASP_MIN_CLOSE_TIME = 0.08
-_G_GRASP_MIN_CLOSURE_M = 0.006
-_G_GRASP_TIMEOUT = 2.0
 _G_CTRL_RATE = 500.0
 
 

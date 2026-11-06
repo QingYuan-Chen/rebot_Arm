@@ -82,11 +82,9 @@ REQUEST_POLICIES = MappingProxyType({
     'ArmController.ensure_pos_vel_control': RequestPolicy('arm', 5),
     'ArmController.send_joint_motor_cmd': RequestPolicy('arm', ttl=.25),
     'GripperController.set_gripper_target': RequestPolicy('gripper'),
-    'GripperController.submit_grasp': RequestPolicy('gripper'),
     'GripperController.send_gripper_motor_cmd': RequestPolicy('gripper', ttl=.25),
     'GripperController.cancel_gripper_position_command': RequestPolicy('gripper', 0),
     'GripperController._release_gripper_position_target': RequestPolicy('gripper', 0),
-    'GripperController.release_grasp_hold': RequestPolicy('gripper', 0, invalidate=('gripper',)),
     'GravityController.start_gravity_compensation': RequestPolicy('arm', 5, invalidate=('arm',)),
     'GravityController.stop_gravity_compensation': RequestPolicy('arm', 5, invalidate=('arm',)),
 })

@@ -42,7 +42,7 @@ from .runtime.controller_protection import ControllerProtection
 from .controller_parameters import (
     _HARDWARE_FEEDBACK_RATE_HZ, _G_LARGE_MOVE_MAX_TAU_NM,
     _G_POSITION_MAX_SPEED_RAD_S, _G_POSITION_TIMEOUT_MARGIN_SEC,
-    _G_FEEDBACK_STALE_TIMEOUT_SEC, _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC,
+    _G_FEEDBACK_STALE_TIMEOUT_SEC,
 )
 
 
@@ -59,7 +59,6 @@ class HardwareManager:
         gripper_position_max_speed_rad_s: float = _G_POSITION_MAX_SPEED_RAD_S,
         gripper_position_timeout_margin_sec: float = _G_POSITION_TIMEOUT_MARGIN_SEC,
         gripper_feedback_stale_timeout_sec: float = _G_FEEDBACK_STALE_TIMEOUT_SEC,
-        grasp_hold_timeout_sec: float = _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC,
         gravity_config: Optional[str] = None,
         *,
         runtime_factory=ControllerRuntime,
@@ -73,7 +72,7 @@ class HardwareManager:
         """
         settings = HardwareSettings(hardware_feedback_rate_hz, gripper_position_torque_cap_nm,
             gripper_position_max_speed_rad_s, gripper_position_timeout_margin_sec,
-            gripper_feedback_stale_timeout_sec, grasp_hold_timeout_sec)
+            gripper_feedback_stale_timeout_sec)
         configuration = load_configuration(arm_cfg, gripper_cfg, channel)
         gravity_path = (Path(gravity_config).expanduser() if gravity_config else
                         package_file('rebotarmcontroller', 'config/gravity_compensation.yaml'))
@@ -153,6 +152,7 @@ class HardwareManager:
         )
         gravity_protection_port = GravityProtectionPort(
             clear_execution=self.gravity.clear_execution,
+            clear_hold_fault=self.gravity.clear_hold_fault,
         )
         gravity_arm_port = GravityArmPort(
             stop_gravity_compensation=self.gravity.stop_gravity_compensation,

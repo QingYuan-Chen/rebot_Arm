@@ -13,7 +13,6 @@
         set_zero: 请求六轴, 指定关节或夹爪置零.
         set_mode: 请求模式切换.
         gripper/set: 请求夹爪位置目标并等待结果.
-        gripper/grasp: 请求闭合堵转检测及有界保持.
 
 安全与并发约束
     连接成功后默认失能; 显式使能所需的反馈与生命周期准入由组件验证.
@@ -32,7 +31,7 @@ from __future__ import annotations
 
 import math
 
-from rebotarm_msgs.srv import GraspGripper, SetGripper, SetMode, SetZero
+from rebotarm_msgs.srv import SetGripper, SetMode, SetZero
 from std_srvs.srv import Trigger
 
 from ..contracts.ros_ports import LifecycleCommandPort, ArmCommandPort, GripperCommandPort, GravityCommandPort
@@ -111,12 +110,6 @@ class ArmServices:
             SetGripper,
             self._service("gripper/set"),
             self.set_gripper,
-            callback_group=node.reentrant_group,
-        )
-        node.create_service(
-            GraspGripper,
-            self._service("gripper/grasp"),
-            self.grasp_gripper,
             callback_group=node.reentrant_group,
         )
 
@@ -309,64 +302,5 @@ class ArmServices:
                 f"max_effort={float(request.max_effort):.3f}Nm "
                 f"reached={response.reached_position:.3f}m reason={exc}"
             )
-        self._node.publish_arm_status()
-        return response
-
-    def grasp_gripper(self, request, response):
-        """夹爪力闭合抓取: 闭合到堵转后保持夹持力, 并给出接触(堵转)判定.
-
-        请求字段(字段名沿用历史命名, 力学量实际是夹爪电机力矩, 单位 N·m):
-            close_force            闭合阶段力矩, 硬件层夹到 [0.05, 1.0] N·m;
-            hold_force             保持阶段前馈力矩, 硬件层夹到 [0.05, 1.5] N·m;
-            close_timeout_sec      闭合超时(秒), 超时仍未检测到堵转即判失败;
-            min_close_time_sec     最短闭合时间(秒), 防止刚起步就被误判为接触;
-            velocity_threshold     判定"已停住"的速度阈值(rad/s);
-            min_closure_distance_m 判定接触所需的最小闭合行程(米).
-        响应字段:
-            success / contact_detected  是否完成闭合, 是否检测到接触;
-            contact_position / reached_position 接触位置与实际位置(米);
-            hold_force                  实际保持力矩(N·m);
-            message                     硬件层说明文本(含保持时长上限).
-        该夹爪没有力传感器, "接触"是由闭合行程加速度堵转推断出来的, 不是实测接触力.
-        """
-        try:
-            (
-                success,
-                contact_detected,
-                contact_position,
-                reached_position,
-                hold_force,
-                message,
-            ) = self._gripper.grasp_gripper(
-                close_force=request.close_force,
-                hold_force=request.hold_force,
-                close_timeout_sec=request.close_timeout_sec,
-                min_close_time_sec=request.min_close_time_sec,
-                velocity_threshold=request.velocity_threshold,
-                min_closure_distance_m=request.min_closure_distance_m,
-            )
-            response.success = bool(success)
-            response.contact_detected = bool(contact_detected)
-            response.contact_position = float(contact_position)
-            response.reached_position = float(reached_position)
-            response.hold_force = float(hold_force)
-            response.message = str(message)
-            self._node.get_logger().info(
-                "gripper grasp "
-                f"success={response.success} "
-                f"contact={response.contact_detected} "
-                f"contact_position={response.contact_position:.3f}m "
-                f"reached={response.reached_position:.3f}m "
-                f"hold_force={response.hold_force:.3f}"
-            )
-        except Exception as exc:
-            # 失败时把各字段清零, 避免调用方把上一次的数值误当成本次结果.
-            response.success = False
-            response.contact_detected = False
-            response.contact_position = 0.0
-            response.reached_position = 0.0
-            response.hold_force = 0.0
-            response.message = str(exc)
-            self._node.get_logger().error(f"gripper grasp failed: {exc}")
         self._node.publish_arm_status()
         return response

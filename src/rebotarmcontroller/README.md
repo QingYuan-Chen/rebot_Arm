@@ -157,7 +157,7 @@ FK 检查的位置及旋转误差均须严格小于 `1e-12`; 超差退出 1, 输
 | --- | --- |
 | 状态话题 | `joint_states`, `joints/<joint>/state`, `gripper/state`, `arm_status` |
 | 生命周期服务 | `enable`, `disable`, `set_mode`, `set_zero` |
-| 执行服务 | `trajectory_stop`, `safe_home`, `gripper/set`, `gripper/grasp` |
+| 执行服务 | `trajectory_stop`, `safe_home`, `gripper/set` |
 | 重力补偿服务 | `gravity_compensation/start`, `gravity_compensation/stop` |
 | Action | `follow_joint_trajectory` (`FollowJointTrajectory`), `gripper/command` (`GripperCommand`) |
 | 低层命令话题 | `joints/<joint>/cmd`, `gripper/cmd`, 仍受模式、范围、仲裁和断流租约约束 |

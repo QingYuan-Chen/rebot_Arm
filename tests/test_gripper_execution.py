@@ -7,6 +7,7 @@ import pytest
 
 from rebotarmcontroller.gripper.gripper_control import GripperControl
 from rebotarmcontroller.gripper.gripper_execution import GripperExecution
+from rebotarmcontroller.contracts.controller_values import GripperTarget
 
 
 VECTORS = json.loads((Path(__file__).parent / 'fixtures/controller_gripper_vectors.json').read_text())
@@ -44,67 +45,15 @@ def fixture():
 
 
 def start(execution, now):
-    return execution.start_grasp(close_force=.4, hold_force=.3, timeout=2., min_time=.1,
-        velocity_limit=.04, min_closure=.006, hold_timeout=.5, start_position=.054, now=now)
+    return execution.accept_position(GripperTarget(-3., -2., .4, 2.), now)
 
 
-def test_stall_is_decided_by_tick_and_hold_expires_to_neutral():
-    execution, state, now, commands, _ = fixture()
-    request = start(execution, now[0])
-    state.pos = -2.5
-    state.vel = 0.
-    assert not request['event'].is_set()
-    now[0] = .05
+def test_cancel_position_emits_neutral():
+    execution, _, _, commands, _ = fixture()
+    generation = start(execution, 0.)
+    assert execution.cancel_gripper_position_command('cancelled', expected_generation=generation)
     execution._gripper_tick()
-    assert not request['event'].is_set()
-    now[0] = .2
-    execution._gripper_tick()
-    assert request['result'][:2] == (True, True)
-    assert execution._gripper_mode == 'grasp_holding'
-    assert commands[-1][0][2:4] == (5., 1.)
-    now[0] = .7
-    execution._gripper_tick()
-    assert execution._gripper_mode == 'idle'
-    assert commands[-1][0][2:4] == (0., 0.)
-    count = len(commands)
-    execution._gripper_tick()
-    assert len(commands) == count
-
-
-def test_hold_write_failure_does_not_report_success():
-    execution, state, now, _, fail = fixture()
-    request = start(execution, 0.)
-    state.pos, state.vel = -2.5, 0.
-    now[0], fail[0] = .2, True
-    execution._gripper_tick()
-    assert request['event'].is_set()
-    assert request['result'][:2] == (False, False)
-    assert 'write failed' in request['result'][-1]
-    assert execution._gripper_mode == 'idle'
-
-
-def test_cancel_or_supersede_never_emits_old_closing_command():
-    execution, state, now, commands, _ = fixture()
-    old = start(execution, 0.)
-    assert execution.release_grasp_hold('cancelled')
-    assert old['result'][-1] == 'cancelled'
-    execution._gripper_tick()
-    assert commands[-1][0][2:4] == (0., 0.)
-    current = start(execution, 0.)
-    newer = start(execution, 0.)
-    assert current['result'][-1] == 'grasp superseded'
-    execution.expire_grasp(current)
-    assert execution._gripper_mode == 'grasp_closing'
-    assert newer['result'] is None
-
-
-def test_timeout_queues_neutral_without_reporting_contact():
-    execution, state, now, commands, _ = fixture()
-    request = start(execution, 0.)
-    now[0] = 2.
-    execution._gripper_tick()
-    assert request['result'][:2] == (False, False)
-    assert 'timeout' in request['result'][-1]
+    assert execution.snapshot(generation).state == 'failed'
     assert commands[-1][0][2:4] == (0., 0.)
 
 
@@ -137,15 +86,16 @@ def test_old_neutral_confirmation_cannot_complete_new_position_command():
     assert execution._gripper_position_result == 'active'
 
 
-def test_neutral_failure_blocks_superseding_grasp():
+def test_neutral_failure_blocks_superseding_position():
     execution, _, _, _, fail = fixture()
     with execution._gripper_lock:
         execution._queue_gripper_neutral_locked('old target', marks_success=True)
-    request = start(execution, 0.)
+    generation = start(execution, 0.)
     fail[0] = True
     execution._gripper_tick()
-    assert request['result'][:2] == (False, False)
-    assert 'neutral command failed' in request['result'][-1]
+    result = execution.snapshot(generation)
+    assert result.state == 'failed'
+    assert 'neutral command failed' in result.message
     assert not execution._gripper_active
 
 
@@ -157,7 +107,7 @@ def test_feedback_from_old_generation_does_not_advance_new_target():
         return state
     execution._verified = replace_while_reading
     execution._gripper_tick()
-    assert execution._gripper_mode == 'grasp_closing'
+    assert execution._gripper_mode == 'position'
     assert commands == []
 
 

@@ -20,7 +20,7 @@
     GripperCyclePort: 周期对夹爪租约, 执行和会话的推进.
     ArmProtectionPort: 保护只能清透传和终止任务, 不接纳运动.
     GripperProtectionPort: 保护清理及设备绑定, 不提供目标或执行状态的可写引用.
-    GravityProtectionPort: 保护清除补偿执行, 不做恢复或模式切换.
+    GravityProtectionPort: 保护清除补偿执行，失能验证后确认故障；不切换模式。
     GravityArmPort: 六轴交接需要的补偿状态, 停止与只读力矩限位.
     ArmGravityPort: 重力交接需要的六轴保持能力, 停止待确认时拒绝启动补偿.
     CyclePort: 统一周期分发入口, 调用方不掌握其他执行器状态.
@@ -146,9 +146,10 @@ class GripperProtectionPort:
 
 @dataclass(frozen=True)
 class GravityProtectionPort:
-    """保护清除补偿执行, 不做恢复或模式切换."""
+    """保护清除执行，验证失能后清除重力故障；端口自身不发送设备命令。"""
 
     clear_execution: Callable[[], None]
+    clear_hold_fault: Callable[[], None]
 
 
 @dataclass(frozen=True)

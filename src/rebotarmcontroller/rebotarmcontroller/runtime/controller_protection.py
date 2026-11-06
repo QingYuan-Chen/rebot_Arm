@@ -44,6 +44,7 @@ class ControllerProtection:
 
     def confirm_disabled(self):
         """显式失能以新帧确认后解除故障锁存; 反馈恢复本身不得调用."""
+        self.gravity.clear_hold_fault()
         self._command_guard.confirm_disabled()
 
     @property

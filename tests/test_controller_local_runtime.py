@@ -438,6 +438,43 @@ def test_runtime_self_stop_and_bounded_queue_never_start_second_writer():
         runtime.close_worker()
 
 
+@pytest.mark.parametrize('durations,intervals,faulted', [
+    ([.006] * 5, [.01] * 4, False),
+    ([.012] * 5, [.022] * 4, True),
+    ([.006, .035, .006, .006, .006], [.01, .045, .01, .01], False),
+])
+def test_runtime_cycle_budget_includes_callback_without_catchup(
+        monkeypatch, durations, intervals, faulted):
+    """真实调度器按 100 Hz 排期，超时后跳过旧拍且保留重力超时判据。"""
+    from rebotarmcontroller.runtime import controller_runtime
+    from rebotarmcontroller.gravity.gravity_control import LoopTiming
+
+    clock = SimpleNamespace(now=0.)
+    monkeypatch.setattr(controller_runtime, 'time',
+                        SimpleNamespace(monotonic=lambda: clock.now))
+    config = replace(load_configuration(), rate=100.)
+    runtime = ControllerRuntime(config, None, driver=SimpleNamespace(connected=False))
+    runtime._wake = SimpleNamespace(
+        clear=lambda: None,
+        wait=lambda duration: setattr(clock, 'now', clock.now + duration))
+    timing, starts = LoopTiming(config.rate), []
+
+    def tick(_runtime, dt):
+        assert dt == pytest.approx(.01)
+        starts.append(clock.now)
+        timing.begin(clock.now)
+        clock.now += durations[len(starts) - 1]
+        timing.finish(clock.now)
+        if len(starts) == len(durations):
+            runtime._closing = True
+
+    runtime._callback = tick
+    runtime._run()
+    assert runtime.last_error is None
+    assert np.diff(starts) == pytest.approx(intervals)
+    assert timing.faulted is faulted
+
+
 def test_real_manager_local_path_default_disabled_enable_recover_reconnect(monkeypatch):
     manager,opened=make_local_manager(monkeypatch)
     assert not opened and not manager.lifecycle.enabled and not manager.lifecycle.connected

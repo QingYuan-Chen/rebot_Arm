@@ -5,10 +5,12 @@
 
 对外接口
     start/stop_gravity_compensation 显式交接; target 和 diagnostics 提供副本与诊断.
+    clear_hold_fault 供成功保持交接或已验证失能后的故障确认使用。
 
 安全与并发约束
     交接前后重新检查新反馈; 模型/计算失败优先有界保持, 无法确认设备输出时进入保护.
     重力模型有可变 Data 缓存, 只由统一设备周期串行调用.
+    故障保持需显式退出或确认失能后解除；交接失败继续保留锁存。
 
 文件结构(按定义顺序)
     GravityController: 重力补偿模式交接与周期计算所有者, 持有补偿状态, 模型缓存和诊断.
@@ -69,6 +71,17 @@ class GravityController:
         self._gravity_execution.target = None
         self._gravity_execution.integral = None
 
+    def clear_hold_fault(self):
+        """设备线程在成功交接保持或验证失能后清除本组件故障，保留其他错误。"""
+        self._backend.assert_writer()
+        if self._gravity_execution.active:
+            raise RuntimeError('stop gravity compensation before clearing its fault')
+        self._gravity_execution.fault = None
+        self._gravity_execution.hold_feedforward = None
+        self._hold_decision = None
+        self._lifecycle.errors[:] = [code for code in self._lifecycle.errors
+                                    if not code.startswith('GRAVITY_HOLD:')]
+
     def effort_limit(self, name):
         """只返回指定关节的 N·m 标量, 调用方不能修改模型限位数组."""
         return float(self._gc_torque_limits[self._backend.joint_names.index(name)])
@@ -88,6 +101,8 @@ class GravityController:
         ``_gravity_hardware_tick``. 补偿期间操作员可以推动机械臂(目标会跟随),
         停止时再回到位置-速度保持.
         """
+        if self._gravity_execution.fault is not None:
+            raise RuntimeError('gravity fault latched; explicitly stop gravity compensation or verify disable first')
         self._lifecycle.require_enabled()
         # 准备期间也在保持输出，但不能据此切入拖拽；模式变化会破坏已绑定的曲线起点。
         if self._backend.arm_resource_reserved:
@@ -182,6 +197,9 @@ class GravityController:
                 self.protection.protect(str(exc))
                 raise
         self._lifecycle.set_execution_state("IDLE")
+        if self._lifecycle.enabled:
+            # 失能事务在新反馈确认后另行清错；保持交接成功才可在此解除故障。
+            self.clear_hold_fault()
 
     def gravity_compensation_active(self) -> bool:
         """查询补偿执行状态, 不以模式名推断补偿是否活动."""

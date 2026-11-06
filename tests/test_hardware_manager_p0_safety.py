@@ -18,7 +18,6 @@ from rebotarmcontroller.hardware_manager import HardwareManager
 from rebotarmcontroller.controller_parameters import (
     _LOG,
     _G_ANGLE_OPEN,
-    _G_GRASP_HOLD_TIMEOUT_MAX_SEC,
     _G_LARGE_MOVE_MAX_TAU_CAP_NM,
     _G_LARGE_MOVE_MAX_TAU_NM,
     _G_MAX_DIST_M,
@@ -378,6 +377,64 @@ def test_gravity_deadline_fault_keeps_healthy_arm_enabled(monkeypatch):
         manager.gravity._gravity_hardware_tick(manager.test_arm, .01)
     assert manager.gravity._gravity_execution.fault == 'three consecutive control deadline misses'
     assert manager.lifecycle.enabled and manager.test_arm.disable_calls == 0
+
+
+def test_gravity_hold_requires_explicit_successful_stop_before_restart():
+    manager = make_manager()
+    q = np.array([.2, -.3, -.4, .1, .2, -.1])
+    configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
+    manager.gravity.start_gravity_compensation()
+    manager.gravity._gravity_fault_hold('three consecutive control deadline misses')
+    with pytest.raises(RuntimeError, match='stop'):
+        manager.gravity.start_gravity_compensation()
+    assert manager.gravity._gravity_execution.fault is not None
+    manager.gravity.stop_gravity_compensation()
+    assert manager.lifecycle.enabled and manager.test_arm.disable_calls == 0
+    assert manager.lifecycle.execution == 'IDLE' and manager.test_arm.mode == 'pos_vel'
+    assert manager.test_arm.control_loop_active
+    np.testing.assert_allclose(manager.arm.joint_target(), q)
+    assert not any(code.startswith('GRAVITY_HOLD:') for code in manager.lifecycle.errors)
+    assert manager.gravity._gravity_execution.fault is None
+    manager.gravity.start_gravity_compensation()
+    assert manager.gravity.gravity_compensation_active()
+
+
+def test_gravity_hold_failed_stop_preserves_fault_until_verified_disable():
+    manager = make_manager()
+    configure_gravity_compensation_test(manager, positions=np.zeros(6), velocities=np.zeros(6))
+    manager.gravity.start_gravity_compensation()
+    manager.gravity._gravity_fault_hold('test deadline miss')
+    manager.test_arm.mode_pos_vel = lambda: False
+    with pytest.raises(Exception, match='restore failed'):
+        manager.gravity.stop_gravity_compensation()
+    assert manager.gravity._gravity_execution.fault == 'test deadline miss'
+    assert 'GRAVITY_HOLD: test deadline miss' in manager.lifecycle.errors
+    manager.lifecycle.disable()
+    assert manager.gravity._gravity_execution.fault is None
+    assert 'GRAVITY_HOLD: test deadline miss' not in manager.lifecycle.errors
+    assert 'FEEDBACK_PROTECTIVE_DISABLE' in manager.lifecycle.errors
+
+
+def test_gravity_hold_disable_verification_failure_preserves_fault(monkeypatch):
+    manager = make_manager()
+    configure_gravity_compensation_test(manager, positions=np.zeros(6), velocities=np.zeros(6))
+    manager.gravity.start_gravity_compensation()
+    manager.gravity._gravity_fault_hold('test deadline miss')
+    manager.lifecycle.errors.append('UNRELATED_CONTROLLER_ERROR')
+    original_verify = manager.lifecycle._verify_disabled
+    monkeypatch.setattr(manager.lifecycle, '_verify_disabled',
+                        lambda: (_ for _ in ()).throw(RuntimeError('feedback unconfirmed')))
+    with pytest.raises(RuntimeError, match='feedback unconfirmed'):
+        manager.lifecycle.disable()
+    assert manager.gravity._gravity_execution.fault == 'test deadline miss'
+    assert 'GRAVITY_HOLD: test deadline miss' in manager.lifecycle.errors
+    monkeypatch.setattr(manager.lifecycle, '_verify_disabled', original_verify)
+    manager.lifecycle.disable()
+    assert manager.gravity._gravity_execution.fault is None
+    assert not any(code.startswith('GRAVITY_HOLD:') for code in manager.lifecycle.errors)
+    assert 'UNRELATED_CONTROLLER_ERROR' in manager.lifecycle.errors
+    assert 'DISABLE_VERIFICATION_FAILED' in manager.lifecycle.errors
+    assert not manager.lifecycle.enabled
 
 
 def test_gravity_send_failure_requests_protective_disable(monkeypatch):
@@ -1764,10 +1821,6 @@ def _configure_gripper_position_move(
     manager.gripper._gripper_execution._gripper_goal_angle = goal
     manager.gripper._gripper_execution._gripper_target_effort = float(effort)
     manager.gripper._gripper_execution._gripper_close_force = 0.4
-    manager.gripper._gripper_execution._gripper_hold_force = 0.4
-    manager.gripper._gripper_execution._gripper_hold_angle = state.pos
-    manager.gripper._gripper_execution._gripper_hold_deadline = None
-    manager.gripper._gripper_execution._gripper_hold_release_reason = None
     manager.gripper._gripper_execution._gripper_mode = mode
     manager.gripper._gripper_execution._gripper_active = True
     observed_at = time.monotonic()
@@ -2036,50 +2089,8 @@ def test_stale_gripper_feedback_stops_ramp_before_next_target(monkeypatch) -> No
     assert commands == [(-0.5, 0.0, 0.0, 0.0, 0.0)]
 
 
-def test_grasp_rejects_stale_feedback_before_sending_close_command() -> None:
-    manager = make_manager()
-    manager.lifecycle.connected = True
-    manager.lifecycle.enabled = True
-    manager.test_arm.control_loop_active = True
-    commands = _configure_gripper_position_move(
-        manager,
-        position=-1.0,
-        goal=-1.0,
-        mode="idle",
-    )
-    manager.gripper._gripper_execution._gripper_active = False
-    manager.gripper._gripper_feedback_updated_monotonic = time.monotonic() - 1.0
-
-    with pytest.raises(RuntimeError, match="feedback stale"):
-        manager.gripper.grasp_gripper(close_timeout_sec=0.1)
-
-    assert commands == []
 
 
-@pytest.mark.parametrize('parameter', [
-    'close_force', 'hold_force', 'close_timeout_sec', 'min_close_time_sec',
-    'velocity_threshold', 'min_closure_distance_m', 'hold_timeout_sec',
-])
-@pytest.mark.parametrize('value', [float('nan'), float('inf'), float('-inf')])
-def test_grasp_nonfinite_parameters_cannot_replace_or_extend_active_request(parameter, value):
-    manager = make_manager()
-    manager.lifecycle.connected = manager.lifecycle.enabled = True
-    manager.test_arm.control_loop_active = True
-    commands = _configure_gripper_position_move(manager, position=-3., mode='idle')
-    execution = manager.gripper._gripper_execution
-    execution._gripper_active = False
-    request = manager.gripper.submit_grasp(close_timeout_sec=.1)
-    generation = execution._generation
-    with pytest.raises(ValueError, match='finite'):
-        manager.gripper.submit_grasp(**{parameter: value})
-    assert execution._grasp_request is request and execution._generation == generation
-    assert not request['event'].is_set() and commands == []
-    # 拒绝异常参数不影响原任务的有限期限及中性释放.
-    execution._clock = lambda: request['deadline']
-    execution._gripper_tick()
-    assert request['event'].is_set() and request['result'][:2] == (False, False)
-    assert manager.gripper.gripper_mode == 'idle'
-    assert commands[-1][2:] == (0., 0., 0.)
 
 
 def test_get_gripper_state_reports_unknown_status_without_verified_sample() -> None:
@@ -2486,88 +2497,16 @@ def test_gripper_tick_emits_no_command_once_arrival_is_detected() -> None:
     assert manager.gripper.gripper_mode == "idle"
 
 
-def test_grasp_hold_is_released_after_timeout() -> None:
-    manager = make_manager()
-    commands = _configure_gripper_position_move(manager, mode="grasp_holding")
-    manager.gripper._gripper_execution._gripper_hold_deadline = time.monotonic() + 60.0
-
-    manager.gripper._gripper_tick()
-    assert manager.gripper.gripper_mode == "grasp_holding"
-    assert commands[-1][:4] == (-4.72, 0.0, 5.0, 1.0)
-
-    # Deadline reached: neutralize and stop loading the motor.
-    manager.gripper._gripper_execution._gripper_hold_deadline = time.monotonic() - 0.01
-    manager.gripper._gripper_tick()
-
-    assert manager.gripper.gripper_active is False
-    assert manager.gripper.gripper_mode == "idle"
-    assert commands[-1] == (-4.72, 0.0, 0.0, 0.0, 0.0)
-    assert manager.gripper._gripper_execution.grasp_hold_release_reason == "hold timeout"
-
-    before = len(commands)
-    manager.gripper._gripper_tick()
-    assert len(commands) == before
 
 
-def test_grasp_hold_without_deadline_is_not_released() -> None:
-    manager = make_manager()
-    _configure_gripper_position_move(manager, mode="grasp_holding")
-    manager.gripper._gripper_execution._gripper_hold_deadline = None
-
-    manager.gripper._gripper_tick()
-
-    assert manager.gripper.gripper_mode == "grasp_holding"
 
 
-def test_release_grasp_hold_neutralizes_on_request() -> None:
-    manager = make_manager()
-    commands = _configure_gripper_position_move(manager, mode="grasp_holding")
-    manager.gripper._gripper_execution._gripper_hold_deadline = time.monotonic() + 60.0
-
-    assert manager.gripper.release_grasp_hold("external release") is True
-
-    assert commands == []
-    assert manager.gripper.gripper_active is False
-    assert manager.gripper.gripper_mode == "idle"
-    assert manager.gripper._gripper_execution.grasp_hold_release_reason == "external release"
-
-    manager.gripper._gripper_tick()
-    assert commands == [(-4.72, 0.0, 0.0, 0.0, 0.0)]
-
-    # Idempotent: nothing active to release.
-    assert manager.gripper.release_grasp_hold() is False
 
 
-def test_release_grasp_hold_ignores_normal_position_move() -> None:
-    manager = make_manager()
-    _configure_gripper_position_move(manager, mode="position")
-
-    assert manager.gripper.release_grasp_hold() is False
-    assert manager.gripper.gripper_mode == "position"
 
 
-def test_grasp_hold_timeout_rejects_out_of_range() -> None:
-    for bad in (0.05, _G_GRASP_HOLD_TIMEOUT_MAX_SEC + 1.0):
-        with pytest.raises(ValueError, match="grasp_hold_timeout_sec"):
-            HardwareManager(grasp_hold_timeout_sec=bad)
 
 
-def test_grasp_modes_are_not_released_by_position_neutralization() -> None:
-    for mode, expected in (
-        ("grasp_closing", (0.0, 0.0, 0.0, 0.5)),
-        ("grasp_holding", (-4.72, 0.0, 5.0, 1.0)),
-    ):
-        manager = make_manager()
-        commands = _configure_gripper_position_move(manager, mode=mode)
-
-        manager.gripper._gripper_tick()
-        manager.gripper._gripper_tick()
-
-        assert manager.gripper.gripper_active is True
-        assert manager.gripper.gripper_mode == mode
-        assert len(commands) == 2
-        for command in commands:
-            assert command[:4] == expected
 
 
 @pytest.mark.parametrize(("requested_m", "expected_angle"), [
@@ -2752,12 +2691,11 @@ def test_closed_tolerance_keeps_feedback_valid_without_rezeroing(equivalent_widt
     assert manager.test_arm.enable_calls == manager.test_arm.disable_calls == 0
 
 
-@pytest.mark.parametrize("mode", ["position", "grasp_closing", "grasp_holding"])
-def test_coordinate_jump_stops_gripper_without_disabling_healthy_arm(mode) -> None:
+def test_coordinate_jump_stops_gripper_without_disabling_healthy_arm() -> None:
     manager = make_manager()
     manager.lifecycle.connect()
     manager.lifecycle.enable()
-    commands = _configure_gripper_position_move(manager, position=-1.0, goal=-2.0, mode=mode)
+    commands = _configure_gripper_position_move(manager, position=-1.0, goal=-2.0, mode="position")
     state = SimpleNamespace(pos=2 * np.pi, vel=0.0, torq=0.0, status_code=1)
     seed_verified_feedback(manager, arm_status=1, gripper_state=state)
     manager.feedback._feedback_component._feedback_next_refresh_monotonic = time.monotonic() + 1.0
@@ -2776,7 +2714,6 @@ def test_coordinate_jump_stops_gripper_without_disabling_healthy_arm(mode) -> No
     assert commands == [(0.0, 0.0, 0.0, 0.0, 0.0)]
     for command in [
         lambda: manager.gripper.set_gripper_target(0.01),
-        manager.gripper.grasp_gripper,
         lambda: manager.gripper.send_gripper_motor_cmd(SimpleNamespace()),
     ]:
         with pytest.raises(RuntimeError, match="coordinate invalid"):

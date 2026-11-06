@@ -65,7 +65,6 @@ class HardwareSettings:
     gripper_position_max_speed_rad_s: float = .5
     gripper_position_timeout_margin_sec: float = 1.5
     gripper_feedback_stale_timeout_sec: float = .15
-    grasp_hold_timeout_sec: float = 30.
 
     def __post_init__(self):
         """将运行参数规范为有限浮点值, 并拒绝超出已评审频率, 速度, 力矩和超时范围的值."""
@@ -74,8 +73,7 @@ class HardwareSettings:
             ('gripper_position_torque_cap_nm',.05,1.5,'N.m'),
             ('gripper_position_max_speed_rad_s',.05,3.,'rad/s'),
             ('gripper_position_timeout_margin_sec',.1,10.,'s'),
-            ('gripper_feedback_stale_timeout_sec',.05,2.,'s'),
-            ('grasp_hold_timeout_sec',.1,120.,'s')):
+            ('gripper_feedback_stale_timeout_sec',.05,2.,'s')):
             value=float(getattr(self,name))
             if not math.isfinite(value) or not lo <= value <= hi:
                 raise ValueError(f"{name} must be within [{lo:g}, {hi:g}] {unit}")

@@ -110,9 +110,6 @@ class reBotArmController(Node):
         # gripper_feedback_stale_timeout_sec: 夹爪反馈新鲜度阈值(秒), 超时即判反馈过期并拒绝
         # 新的夹爪命令; 硬件层限制在 [0.05, 2.0].
         self.declare_parameter("gripper_feedback_stale_timeout_sec", 0.15)
-        # grasp_hold_timeout_sec: 抓取保持的最长时间(秒), 到期自动松开, 避免电机在 500 Hz 下
-        # 持续堵转发热; 硬件层限制在 [0.1, 120.0].
-        self.declare_parameter("grasp_hold_timeout_sec", 10.0)
         # arm_namespace: 话题/服务/动作的命名空间前缀, 首尾斜杠会被去掉.
         self.declare_parameter("arm_namespace", "rebotarm")
         # cmd_arbitration: 轨迹运行期间收到单关节透传指令时的仲裁策略:
@@ -152,9 +149,6 @@ class reBotArmController(Node):
         gripper_feedback_stale_timeout_sec = float(
             self.get_parameter("gripper_feedback_stale_timeout_sec").value
         )
-        grasp_hold_timeout_sec = float(
-            self.get_parameter("grasp_hold_timeout_sec").value
-        )
         cmd_arbitration = str(self.get_parameter("cmd_arbitration").value or "reject")
         # 非法仲裁值回退到 "reject": 拒绝透传指令始终是安全的一侧.
         if cmd_arbitration not in ("reject", "preempt"):
@@ -179,7 +173,6 @@ class reBotArmController(Node):
             gripper_position_max_speed_rad_s=gripper_position_max_speed_rad_s,
             gripper_position_timeout_margin_sec=gripper_position_timeout_margin_sec,
             gripper_feedback_stale_timeout_sec=gripper_feedback_stale_timeout_sec,
-            grasp_hold_timeout_sec=grasp_hold_timeout_sec,
         )
         # 连接失败时硬件层会尽力失能和清理, 但不能仅凭异常断言失能已验证; 这里上抛,
         # 不允许在"半连接"状态下继续对外提供服务.

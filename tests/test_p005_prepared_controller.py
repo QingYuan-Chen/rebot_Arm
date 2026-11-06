@@ -218,13 +218,15 @@ def test_finger_position_change_without_new_owner_does_not_reject_checked_trajec
         shutdown(manager)
 
 
-def test_protective_gripper_release_invalidates_active_curve(monkeypatch):
+def test_changed_gripper_generation_invalidates_active_curve(monkeypatch):
     manager, bus = enabled_manager(monkeypatch)
     try:
         token, curve, handoff = reserve(manager, 1.)
         task = manager.arm.admit_prepared_arm_trajectory(token, handoff)
         time.sleep(.04)
-        manager.gripper.release_grasp_hold('protective release')
+        original = manager.arm.gripper
+        manager.arm.gripper = replace(original, snapshot=lambda: dict(
+            original.snapshot(), generation=token.gripper_generation + 1))
         wait_until(lambda: task.event.is_set(), 2.)
         assert task.result.state != 'succeeded'
         assert manager.lifecycle.enabled
@@ -457,7 +459,7 @@ def test_coordinated_writer_sends_both_tracks_and_releases_only_after_neutral(mo
         shutdown(manager)
 
 
-@pytest.mark.parametrize('change', ['cancel', 'scene', 'release', 'arm_failure', 'finger_failure'])
+@pytest.mark.parametrize('change', ['cancel', 'scene', 'gripper_cancel', 'arm_failure', 'finger_failure'])
 def test_coordinated_stop_or_partial_failure_never_reports_success(monkeypatch, change):
     manager, bus = enabled_manager(monkeypatch)
     try:
@@ -469,8 +471,8 @@ def test_coordinated_stop_or_partial_failure_never_reports_success(monkeypatch, 
             manager.arm.stop_active_motion(task)
         elif change == 'scene':
             manager.arm.update_trajectory_scene('scene-b')
-        elif change == 'release':
-            manager.gripper.release_grasp_hold('protective release')
+        elif change == 'gripper_cancel':
+            assert manager.gripper.cancel_gripper_position_command('injected cancellation')
         elif change == 'arm_failure':
             bus.failure = (3, 'position')
         else:
