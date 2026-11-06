@@ -299,9 +299,9 @@ class MoveItMotionPlanner:
             )
 
         trajectory = response.motion_plan_response.trajectory
-        joint_trajectory = getattr(trajectory, "joint_trajectory", None)
+        joint_trajectory = trajectory.joint_trajectory
         # 有成功码但没有轨迹点, 等于没有可执行内容: 绝不能当成成功下发.
-        if joint_trajectory is None or not joint_trajectory.points:
+        if not joint_trajectory.points:
             return MotionPlanResult(
                 success=False,
                 message="moveit planning returned empty joint trajectory",

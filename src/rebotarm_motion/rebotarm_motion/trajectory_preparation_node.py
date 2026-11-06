@@ -25,7 +25,8 @@ import threading
 import time
 
 from .polynomial_trajectory import JOINT_NAMES, TrajectoryPoint
-from .trajectory_preparation import PreparationContext, analyze_trajectory, load_reference_limits
+from .trajectory_preparation import PreparationContext, analyze_trajectory
+from .coordinated_trajectory import effective_limits
 from rebotarm_trajectory.joint_contract import canonical_input
 from rebotarm_trajectory.capability import decode_capability
 
@@ -54,11 +55,11 @@ def scene_revision(message):
 class SceneCollisionChecker:
     """一个 read_only 临界区覆盖全部采样；RobotState 是局部副本。"""
 
-    def __init__(self, monitor, config_directory=None):
+    def __init__(self, monitor, config_directory):
         self.monitor = monitor
         self.config_directory = config_directory
 
-    def prepare(self, request, lower, upper, limits):
+    def prepare(self, request):
         """在请求期限内返回完整检查结果；任何异常交由服务回调转成明确失败响应。"""
         now = time.monotonic()
         if not math.isfinite(request.deadline_monotonic) or now >= request.deadline_monotonic:
@@ -69,7 +70,7 @@ class SceneCollisionChecker:
         fingers = tuple(float(value) for value in request.gripper_positions)
         if len(fingers) != 2 or not all(math.isfinite(value) for value in fingers):
             raise ValueError('complete finite fixed gripper state required')
-        policy = getattr(request, 'gripper_collision_policy', 0)
+        policy = request.gripper_collision_policy
         if policy not in (0, 1):
             raise ValueError('unknown gripper collision policy')
         collision_fingers = (0., 0.) if policy == 1 else fingers
@@ -81,20 +82,13 @@ class SceneCollisionChecker:
         if any(p.effort for p in trajectory.points):
             raise ValueError('FJT effort is not a supported per-request torque limit')
         names, points = canonical_input(trajectory.joint_names, points)
-        capability = None
-        capability_json = getattr(request, 'capability_json', '')
-        if capability_json:
-            capability = decode_capability(capability_json)
+        capability = decode_capability(request.capability_json)
         from rebotarm_trajectory.planning import decode_plan, require_plan_context
         planning = decode_plan(trajectory.header.frame_id, names, points,
-            capability_revision=capability['revision'] if capability else None, require_execution=True)
-        require_plan_context(planning, capability_revision=capability['revision'] if capability else '',
+            capability_revision=capability['revision'], require_execution=True)
+        require_plan_context(planning, capability_revision=capability['revision'],
             session=request.session, generation=request.generation, hold=context.hold)
-        if self.config_directory is not None and capability is not None:
-            from .coordinated_trajectory import effective_limits
-            lower, upper, limits = effective_limits(self.config_directory, names, capability)
-        elif set(limits) != set(names):
-            raise ValueError('matching joint limits required for preparation')
+        lower, upper, limits = effective_limits(self.config_directory, names, capability)
         # 整批共用一个场景快照，不能逐点释放锁后把不同环境的检查结果拼成一次通过。
         with self.monitor.read_only() as scene:
             revision = scene_revision(scene.planning_scene_message)
@@ -128,8 +122,7 @@ class SceneCollisionChecker:
             payload.update(scene_revision=revision, gripper_positions=fingers,
                            gripper_generation=request.gripper_generation,
                            gripper_collision_policy=policy)
-            if capability is not None:
-                payload['capability_revision'] = capability['revision']
+            payload['capability_revision'] = capability['revision']
             return payload, revision
 
 
@@ -176,7 +169,6 @@ def main(args=None):
     monitor = robot.get_planning_scene_monitor()
     config_directory = Path(get_package_share_directory('rebotarm_moveit_config'))/'config'
     checker = SceneCollisionChecker(monitor, config_directory)
-    limits = load_reference_limits(config_directory)
     qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
     publisher = node.create_publisher(String, f'/{namespace}/trajectory_scene_revision', qos)
     lock = threading.RLock()
@@ -209,7 +201,7 @@ def main(args=None):
             with lock:
                 if not initialized:
                     raise RuntimeError('planning scene snapshot is not initialized')
-                payload, revision = checker.prepare(request, *limits)
+                payload, revision = checker.prepare(request)
                 response.prepared_json = json.dumps(payload, allow_nan=False)
                 response.scene_revision, response.success = revision, True
                 response.message = 'prepared_v1'

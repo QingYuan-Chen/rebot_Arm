@@ -327,6 +327,26 @@ def test_select_collision_samples_evenly_keeps_first_and_last() -> None:
     assert selected == [(0, 0), (3, 3), (6, 6), (9, 9)]
 
 
+def test_collision_transport_errors_remain_unknown_with_original_cause():
+    def fail():
+        raise RuntimeError('transport disconnected')
+    for boundary in ('discovery','send','result'):
+        client = _StateValidityClient([_StateValidityResponse(valid=True)])
+        if boundary == 'discovery':
+            client.service_is_ready = fail
+        elif boundary == 'send':
+            client.call_async = lambda request: fail()
+        else:
+            client.call_async = lambda request: type('Future',(),{
+                'done': staticmethod(lambda: True), 'result': staticmethod(fail)})()
+        prechecker = CollisionPrechecker(client=client,request_factory=_StateValidityRequest)
+        result = prechecker.check_positions(joint_names=('joint1',),positions_list=[(0.,)],
+            config=CollisionPrecheckConfig(True,'/check_state_validity','arm',10,1.))
+        assert result['state'] == 'unknown'
+        assert 'transport disconnected' in result['message']
+        assert result['checked_samples'] == 0
+
+
 def test_collision_prechecker_returns_pass_after_sampling_state_validity() -> None:
     client = _StateValidityClient(
         [
@@ -518,6 +538,37 @@ def test_replay_runtime_monitor_clears_pending_violation_after_recovery() -> Non
     assert recovered.should_stop is False
     assert monitor.violation_since is None
     assert monitor.stop_requested is False
+
+
+def test_missing_or_nonfinite_feedback_stops_after_grace_and_latches():
+    trajectory = dict(joint_names=['joint1'],points=[dict(time_from_start=0.,positions=[0.])])
+    config = ReplayRuntimeMonitorConfig(True,0.,.2,.1,5.)
+    for joints, reason in [({'joint1': {'position': 0.}}, 'missing_joint_state'),
+            ({'joint1': {'velocity': 0.}}, 'missing_joint_state'),
+            ({}, 'missing_joint_state'),
+            ({'joint1': {'position': float('nan'), 'velocity': 0.}}, 'invalid_joint_state'),
+            ({'joint1': {'position': 0., 'velocity': float('inf')}}, 'invalid_joint_state')]:
+        monitor = ReplayRuntimeMonitor()
+        assert not monitor.check(trajectory=trajectory,started_at=0.,joints=joints,now=1.,config=config).should_stop
+        decision = monitor.check(trajectory=trajectory,started_at=0.,joints=joints,now=1.21,config=config)
+        assert decision.should_stop and decision.status['runtime_monitor']['reason'] == reason
+        assert not monitor.check(trajectory=trajectory,started_at=0.,joints=joints,now=1.5,config=config).should_stop
+        monitor.reset()
+        assert not monitor.check(trajectory=trajectory,started_at=0.,joints=joints,now=2.,config=config).should_stop
+        good = {'joint1': {'position': 0., 'velocity': 0.}}
+        assert not monitor.check(trajectory=trajectory,started_at=0.,joints=good,now=2.1,config=config).should_stop
+        assert monitor.violation_since is None
+
+
+def test_tracking_rejects_partial_velocity_and_nonfinite_feedback_but_accepts_optional_empty_velocity():
+    from rebotarm_motion.trajectory_safety_monitor import evaluate_replay_tracking
+    trajectory = dict(joint_names=['joint1','joint2'],points=[dict(time_from_start=0.,positions=[0.,0.])])
+    kwargs = dict(joint_names=['joint1','joint2'], positions=[0.,0.],elapsed_sec=0.,
+        max_tracking_error_rad=.1,max_live_velocity_rad_s=5.)
+    assert evaluate_replay_tracking(trajectory,**kwargs).ok
+    assert evaluate_replay_tracking(trajectory,**kwargs,velocities=[0.]).reason == 'missing_joint_state'
+    for values in ([0.,float('nan')], [0.,float('inf')], [0.,'bad']):
+        assert evaluate_replay_tracking(trajectory,**kwargs,velocities=values).reason == 'invalid_joint_state'
 
 
 def test_teach_record_client_sets_path_then_starts_gravity_and_recording() -> None:

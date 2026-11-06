@@ -6,7 +6,9 @@
 文件结构：场景版本测试 → 状态/锁替身 → 完整请求工厂 → 覆盖与拒绝用例。
 """
 import copy
+import json
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 import time
 
@@ -17,7 +19,11 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from rebotarm_motion.trajectory_messages import point_to_point_message
 from rebotarm_motion.trajectory_preparation_node import scene_revision, SceneCollisionChecker
-from test_polynomial_trajectory import LIMITS, LOWER, UPPER
+from rebotarm_trajectory.capability import make_capability, constraint_revision
+
+CONFIG = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
+CAPABILITY = make_capability('prepared_v1',1,.5,1.,constraint_revision(
+    *(CONFIG.joinpath(name).read_bytes() for name in ('rebotarm.urdf','joint_limits.yaml'))))
 
 
 def test_scene_version_tracks_environment_attached_objects_and_rules_only():
@@ -84,6 +90,7 @@ def request(monitor):
     req.feedback_observed_at=time.monotonic()
     req.stationary=req.enabled=True
     req.gripper_positions=[.01,-.01]
+    req.capability_json=json.dumps(CAPABILITY)
     req.scene_revision=scene_revision(monitor.scene.planning_scene_message)
     req.deadline_monotonic=time.monotonic()+.33
     return req
@@ -91,7 +98,7 @@ def request(monitor):
 
 def test_one_read_lock_and_copied_attached_state_cover_every_curve_sample():
     monitor=LockedMonitor()
-    payload,revision=SceneCollisionChecker(monitor).prepare(request(monitor), LOWER, UPPER, LIMITS)
+    payload,revision=SceneCollisionChecker(monitor,CONFIG).prepare(request(monitor))
     assert monitor.entries==1 and len(monitor.checked)>=2
     assert payload['scene_revision']==revision
     assert payload['gripper_positions']==(.01,-.01)
@@ -103,7 +110,7 @@ def test_web_closed_collision_policy_preserves_actual_snapshot_and_public_scene(
     monitor = LockedMonitor()
     req = request(monitor)
     req.gripper_collision_policy = req.WEB_CLOSED
-    payload,_ = SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+    payload,_ = SceneCollisionChecker(monitor,CONFIG).prepare(req)
     assert payload['gripper_positions'] == (.01,-.01)
     assert payload['gripper_collision_policy'] == req.WEB_CLOSED
     assert all(item['left_finger_joint'] == item['right_finger_joint'] == 0. for item in monitor.checked)
@@ -115,7 +122,7 @@ def test_prepare_rejects_gripper_fjt_before_collision(names):
     monitor=LockedMonitor();req=request(monitor)
     req.trajectory.joint_names=list(names)
     with pytest.raises(ValueError,match='exactly'):
-        SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+        SceneCollisionChecker(monitor,CONFIG).prepare(req)
     assert not monitor.checked
 
 
@@ -125,9 +132,9 @@ def test_prepare_rejects_invalid_context_or_curve_without_partial_handoff(damage
     if damage=='scene':req.scene_revision='old'
     elif damage=='deadline':req.deadline_monotonic=time.monotonic()-.1
     elif damage=='mixed':req.trajectory.points[-1].velocities=[]
-    else:req.trajectory.points[-1].positions[0]=2.
+    else:req.trajectory.points[-1].positions[0]=99.
     with pytest.raises((ValueError,TimeoutError)):
-        SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+        SceneCollisionChecker(monitor,CONFIG).prepare(req)
 
 
 def test_formal_preparation_skips_only_offline_comparison(monkeypatch):
@@ -136,26 +143,34 @@ def test_formal_preparation_skips_only_offline_comparison(monkeypatch):
         raise AssertionError('formal preparation must not run offline comparison grid')
     monkeypatch.setattr(preparation,'compare_reference',forbidden)
     monitor=LockedMonitor()
-    payload,_=SceneCollisionChecker(monitor).prepare(request(monitor),LOWER,UPPER,LIMITS)
+    payload,_=SceneCollisionChecker(monitor,CONFIG).prepare(request(monitor))
     assert payload['curve'] and len(monitor.checked)>2
 
 
 def test_bound_preparation_checks_exact_curve_without_normalizing_or_retiming():
-    from rebotarm_trajectory.capability import make_capability
     from rebotarm_trajectory.planning import plan_binding,planning_state
     from rebotarm_trajectory.polynomial import TrajectoryPoint,curve_from_payload
     import json
     monitor=LockedMonitor();req=request(monitor)
-    cap=make_capability('prepared_v1',1,.5,1.,'1'*64)
+    cap=CAPABILITY
     req.capability_json=json.dumps(cap)
     points=tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
         p.positions,p.velocities,p.accelerations) for p in req.trajectory.points)
     state=planning_state(cap['revision'],req.session,req.generation,req.hold_positions,executable=True)
     req.trajectory.header.frame_id=plan_binding(cap['revision'],req.trajectory.joint_names,points,state=state)
-    payload,_=SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+    payload,_=SceneCollisionChecker(monitor,CONFIG).prepare(req)
     assert curve_from_payload(payload['curve']).points==points
     req.hold_positions[0]=.01
     monitor.checked.clear()
     with pytest.raises(ValueError,match='re-plan'):
-        SceneCollisionChecker(monitor).prepare(req,LOWER,UPPER,LIMITS)
+        SceneCollisionChecker(monitor,CONFIG).prepare(req)
+    assert not monitor.checked
+
+
+@pytest.mark.parametrize('capability', ['', '{}', '{', json.dumps(dict(CAPABILITY,revision='1'*64))])
+def test_missing_or_damaged_capability_rejected_before_collision(capability):
+    monitor=LockedMonitor();req=request(monitor)
+    req.capability_json=capability
+    with pytest.raises((ValueError,KeyError)):
+        SceneCollisionChecker(monitor,CONFIG).prepare(req)
     assert not monitor.checked

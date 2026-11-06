@@ -88,6 +88,29 @@ def test_workflow_stop_uses_controller_fallback_without_active_goal(tmp_path):
     assert events["replay"] == result
 
 
+def test_missing_tracking_feedback_requests_stop_before_cancel_once(tmp_path, monkeypatch):
+    import rebotarm_teach.teach_replay_workflow as module
+    workflow, events, calls = workflow_fixture(tmp_path)
+    order = []
+    workflow._request_controller_trajectory_stop = lambda **kwargs: order.append('stop')
+    workflow._teach_replay_goal_handle = SimpleNamespace(cancel_goal_async=lambda: order.append('cancel'))
+    workflow._active_teach_replay_trajectory = dict(joint_names=['joint1'],
+        points=[dict(time_from_start=0.,positions=[0.])])
+    workflow._active_teach_replay_started_at = 0.
+    workflow._snapshot = lambda: SimpleNamespace(joints={'joint1': {'position': 0.}},teleop=events)
+    now = [10.]
+    monkeypatch.setattr(module.time,'monotonic',lambda: now[0])
+    workflow.check_tracking()
+    assert order == []
+    now[0] = 100.
+    workflow.check_tracking()
+    assert order == ['stop','cancel']
+    assert events['replay']['state'] == 'safety_stop'
+    assert events['replay']['runtime_monitor']['reason'] == 'missing_joint_state'
+    workflow.check_tracking()
+    assert order == ['stop','cancel']
+
+
 def test_workflow_prepares_dry_run_then_executes_through_injected_action(tmp_path):
     workflow, events, calls = workflow_fixture(tmp_path)
     names = tuple(f"joint{i}" for i in range(1, 7))

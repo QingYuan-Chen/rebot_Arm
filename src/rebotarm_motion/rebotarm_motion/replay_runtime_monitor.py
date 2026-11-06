@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .trajectory_safety_monitor import evaluate_replay_tracking
+from .trajectory_safety_monitor import ReplayTrackingResult, evaluate_replay_tracking
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,7 @@ class ReplayRuntimeMonitor:
         - ``started_at``: 轨迹下发的起始时刻(秒, 与 ``now`` 同一时钟); ``None`` 表示
           尚未开始计时;
         - ``joints``: 最新关节状态, 形如 ``{关节名: {"position": rad, "velocity": rad/s}}``,
-          缺字段时按 0 处理;
+          位置和速度均必填，缺字段按持续违规处理;
         - ``now``: 本次检查时刻(秒, 需单调时钟);
         - ``config``: 阈值配置, 见 :class:`ReplayRuntimeMonitorConfig`.
 
@@ -106,15 +106,21 @@ class ReplayRuntimeMonitor:
         elapsed = float(now) - float(started_at)
         if elapsed < float(config.start_grace_sec):
             return ReplayRuntimeMonitorDecision(False)
-        result = evaluate_replay_tracking(
-            trajectory,
-            joint_names=tuple(joints.keys()),
-            positions=tuple(float(item.get("position", 0.0)) for item in joints.values()),
-            velocities=tuple(float(item.get("velocity", 0.0)) for item in joints.values()),
-            elapsed_sec=elapsed,
-            max_tracking_error_rad=float(config.max_tracking_error_rad),
-            max_live_velocity_rad_s=float(config.max_live_velocity_rad_s),
-        )
+        try:
+            positions = tuple(item["position"] for item in joints.values())
+            velocities = tuple(item["velocity"] for item in joints.values())
+        except KeyError as exc:
+            result = ReplayTrackingResult(False, "missing_joint_state", f"joint_states missing field: {exc}")
+        else:
+            result = evaluate_replay_tracking(
+                trajectory,
+                joint_names=tuple(joints.keys()),
+                positions=positions,
+                velocities=velocities,
+                elapsed_sec=elapsed,
+                max_tracking_error_rad=float(config.max_tracking_error_rad),
+                max_live_velocity_rad_s=float(config.max_live_velocity_rad_s),
+            )
         if result.ok:
             self.violation_since = None
             return ReplayRuntimeMonitorDecision(False)

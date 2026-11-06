@@ -38,7 +38,7 @@ def test_final_plan_normalizes_before_retiming_and_survives_nanoseconds(grade,de
         p.accelerations if grade>=2 else ()) for p in point_to_point((0.,)*6,(.02,)*6,.4))
     msg=curve_message(build_curve(JOINT_NAMES,source),trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
     req=SimpleNamespace(trajectory=msg,capability_revision=cap['revision'],velocity_scaling=1.,
-        acceleration_scaling=1.,fixed_duration=False,planning_purpose=0)
+        acceleration_scaling=1.,fixed_duration=False,planning_purpose=0,max_arm_speed_rad_s=0.)
     state=planning_state(cap['revision'],10,7,(-.01,)*6,executable=True)
     result,scale=retime_message(req,cap,config,state)
     final=tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,

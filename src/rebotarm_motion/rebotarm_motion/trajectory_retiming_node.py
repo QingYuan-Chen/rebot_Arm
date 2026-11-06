@@ -42,8 +42,8 @@ def retime_message(request, capability, config_directory, planning_state=None):
     # 必须在起点替换前拒绝原始越界节点，不能以保持值覆盖来修复非法输入。
     if any(q < lo-1e-9 or q > hi+1e-9 for p in points for q,lo,hi in zip(p.positions,low,high)):
         raise ValueError('original planning position outside limits')
-    purpose = 'reference' if getattr(request, 'planning_purpose', 0) == 1 else 'execution'
-    if getattr(request, 'planning_purpose', 0) not in (0, 1):
+    purpose = 'reference' if request.planning_purpose == 1 else 'execution'
+    if request.planning_purpose not in (0, 1):
         raise ValueError('unknown planning purpose')
     if names == ('left_finger_joint',):
         purpose = 'gripper'
@@ -58,7 +58,7 @@ def retime_message(request, capability, config_directory, planning_state=None):
             points = (replace(points[0], positions=tuple(planning_state['hold'])),)+points[1:]
         else:
             purpose = 'preview'
-    speed = float(getattr(request,'max_arm_speed_rad_s',0.))
+    speed = float(request.max_arm_speed_rad_s)
     if not math.isfinite(speed) or speed < 0:
         raise ValueError('nonnegative finite arm speed cap required')
     if speed:
