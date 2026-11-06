@@ -79,6 +79,79 @@ def test_relocated_launches_select_independent_interpreters(tmp_path, mode):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("calibrated_frame", [
+    "", "camera_color_frame", "camera_depth_frame", "d405_link", "partial_config",
+])
+def test_d405_launch_requires_explicit_handeye_and_connects_only_aligned_frames(tmp_path, calibrated_frame):
+    result = subprocess.run([sys.executable, "-", str(ROOT), str(tmp_path), calibrated_frame],
+        input=r'''
+import importlib.util
+from pathlib import Path
+import sys
+from unittest.mock import patch
+import yaml
+try:
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+    from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
+    from launch_ros.actions import Node
+except ImportError:
+    sys.exit(77)
+root, temp, calibrated_frame = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+spec = importlib.util.spec_from_file_location("vision_launch", root / "src/rebotarm_vision/launch/vision.launch.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+context = LaunchContext()
+def text(value):
+    return perform_substitutions(context, normalize_to_list_of_substitutions(value))
+with patch.object(module, "get_package_share_directory", return_value=str(root / "src/rebotarm_vision")):
+    description = module.generate_launch_description()
+    for action in description.entities:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
+assert context.launch_configurations["handeye_config"] == ""
+if calibrated_frame == "partial_config":
+    path = temp / "partial_camera.yaml"
+    path.write_text(yaml.safe_dump({"rebotarm_vision_node": {"ros__parameters": {
+        "ros.enable_detection": False,
+    }}}))
+    context.launch_configurations["camera_config"] = str(path)
+    calibrated_frame = ""
+if calibrated_frame:
+    path = temp / "d405_handeye.yaml"
+    path.write_text(yaml.safe_dump({"handeye": {
+        "parent_frame": "end_link", "child_frame": calibrated_frame,
+        "translation": {"x": 0.1, "y": 0.2, "z": 0.3},
+        "rotation": {"x": 0, "y": 0, "z": 0, "w": 1},
+    }}))
+    context.launch_configurations["handeye_config"] = str(path)
+if calibrated_frame == "d405_link":
+    try:
+        module._launch_setup(context)
+    except ValueError as exc:
+        assert "child_frame" in str(exc)
+        sys.exit(0)
+    raise AssertionError("CAD frame must not be accepted as aligned optical frame")
+nodes = [item for item in module._launch_setup(context) if isinstance(item, Node)]
+context.extend_locals({"ros_specific_arguments": {"name": "__node:=inspect_only"}})
+transforms = [list(map(text, node.process_description.cmd[1:])) for node in nodes
+              if text(node.node_executable) == "static_transform_publisher"]
+# ROS launch may append name/remap arguments; extract only the TF values.
+edges = {args[args.index("--child-frame-id") + 1]: args[args.index("--frame-id") + 1]
+         for args in transforms}
+assert len(edges) == (2 if calibrated_frame else 1)
+if calibrated_frame:
+    assert edges[calibrated_frame] == "end_link"
+    other = "camera_depth_frame" if calibrated_frame == "camera_color_frame" else "camera_color_frame"
+    assert edges[other] == calibrated_frame
+else:
+    assert edges == {"camera_depth_frame": "camera_color_frame"}
+''', text=True, capture_output=True, timeout=30)
+    if result.returncode == 77:
+        pytest.skip("ROS 2 launch is not installed in this Python environment")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 LAUNCH_CHECK = r'''
 import importlib.util
 from pathlib import Path
@@ -153,6 +226,10 @@ for package, names in files.items():
             for entity in description.entities:
                 if isinstance(entity, DeclareLaunchArgument):
                     entity.execute(context)
+            if package == "rebotarm_vision":
+                assert context.launch_configurations["handeye_config"] == ""
+            if name == "visual_grasp_system.launch.py":
+                assert context.launch_configurations["vision_handeye_config"] == ""
             entities = list(walk(description.entities))
             if name == "vision.launch.py":
                 entities += module._launch_setup(context)

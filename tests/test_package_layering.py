@@ -36,11 +36,20 @@ def test_simulation_has_no_motion_implementation_or_manifest_dependency() -> Non
     assert not any(child.text == "rebotarm_motion" for child in manifest)
 
 
-def test_vision_declares_motion_execution_interface_without_owning_calibration() -> None:
+def test_vision_owns_perception_filtering_and_display_only() -> None:
     vision = ET.parse(ROOT / "src/rebotarm_vision/package.xml").getroot()
     bringup = ET.parse(ROOT / "src/rebotarm_bringup/package.xml").getroot()
     assert not any(child.text == "rebotarm_calibration" for child in vision)
-    assert any(child.text == "rebotarm_motion" for child in vision)
+    assert not any(child.text == "rebotarm_motion" for child in vision)
+    for path in (ROOT / "src/rebotarm_vision/rebotarm_vision").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                imports = [alias.name.split(".")[0] for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                imports = [(node.module or "").split(".")[0]]
+            else:
+                continue
+            assert "rebotarm_motion" not in imports, path
     for package in ("rebotarm_calibration", "rebotarm_motion"):
         assert any(child.text == package for child in bringup)
 
@@ -149,8 +158,7 @@ def test_preview_is_independent_of_physics_and_hardware() -> None:
     assert not forbidden.intersection(child.text for child in manifest)
     bringup = ET.parse(ROOT / "src/rebotarm_bringup/package.xml").getroot()
     assert any(child.text == "rebotarm_preview" for child in bringup)
-    for name in ("teleop_keyboard.launch.py", "rviz_ee_drag_sim.launch.py",
-                 "includes/visual_backend.launch.py"):
+    for name in ("teleop_keyboard.launch.py", "rviz_ee_drag_sim.launch.py"):
         source = (ROOT / "src/rebotarm_bringup/launch" / name).read_text()
         assert 'package="rebotarm_preview"' in source
         assert 'package="rebotarm_simulation"' not in source

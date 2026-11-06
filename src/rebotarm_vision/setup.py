@@ -39,21 +39,14 @@ setup(
             f"share/{package_name}/launch",
             ["launch/vision.launch.py", "launch/vision_ubuntu.launch.py"],
         ),
-        # 参数配置：相机 profile、抓取候选姿态策略、GraspNet 策略、夹爪/重试/退避/视觉伺服/
-        # 桌面安全等独立 YAML，供启动文件按 profile 选择加载
+        # 参数配置：D405、候选姿态、GraspNet 和筛选策略；旧手眼文件仅保留历史数值。
         (
             f"share/{package_name}/config",
             [
                 "config/camera_ubuntu.yaml",
                 "config/grasp_pose_policy.yaml",
                 "config/graspnet_ubuntu.yaml",
-                "config/gripper_policy.yaml",
                 "config/handeye.yaml",
-                "config/retry_policy.yaml",
-                "config/retreat_policy.yaml",
-                "config/single_bottle_grasp.yaml",
-                "config/table_safety.yaml",
-                "config/visual_servo.yaml",
                 "config/visual_strategy_profile.yaml",
             ],
         ),
@@ -67,22 +60,18 @@ setup(
     zip_safe=True,
     maintainer="reBotArm Maintainers",
     maintainer_email="support@example.com",
-    description="ROS 2 Gemini2 vision node for reBotArm grasping.",
+    description="ROS 2 D405 vision node for reBotArm grasp candidates.",
     license="Apache-2.0",
     # 控制台入口点。名称（字符串）是对外接口，脚本名与 launch 里的 executable= 必须一致，禁止改动。
     # 采集/检测：视觉主节点、GraspNet 候选节点、离线 YOLO 节点
-    # 预览/可视化：抓取预览发送器、RViz 标记发布器
-    # 执行/筛选：视觉抓取执行器、抓取候选 IK 过滤器
+    # 可视化/筛选：RViz 标记发布器、抓取候选 IK 过滤器
     # 工具/标定：抓取 TCP 坐标系广播、相机调试预览、深度探针、Open3D 查看器
     entry_points={
         "console_scripts": [
             "rebotarm_vision_node = rebotarm_vision.nodes.vision_node:main",
             "rebotarm_graspnet_baseline_node = rebotarm_vision.nodes.graspnet_baseline_node:main",
-            "rebotarm_send_grasp_preview = rebotarm_vision.nodes.grasp_preview_sender_node:main",
             "rebotarm_visual_grasp_markers = rebotarm_vision.nodes.visual_grasp_marker_node:main",
             "rebotarm_grasp_candidate_markers = rebotarm_vision.nodes.grasp_candidate_marker_node:main",
-            "rebotarm_single_bottle_grasp = rebotarm_vision.single_bottle_grasp:main",
-            "rebotarm_visual_grasp_executor = rebotarm_vision.nodes.visual_grasp_executor_node:main",
             "rebotarm_grasp_candidate_ik_filter = rebotarm_vision.nodes.candidate_ik_filter_node:main",
             "rebotarm_grasp_tcp_frame = rebotarm_vision.nodes.grasp_tcp_frame_node:main",
             "rebotarm_debug_camera_preview = rebotarm_vision.diagnostics.debug_camera_preview:main",

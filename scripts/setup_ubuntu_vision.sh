@@ -21,7 +21,7 @@ set -u
 "${python_bin}" - <<'PY'
 import cv2
 import numpy
-import pyorbbecsdk
+import pyrealsense2
 import tensorrt
 import torch
 from cv_bridge import CvBridge
@@ -34,14 +34,15 @@ print(f"TensorRT: {tensorrt.__version__}")
 print(f"CUDA available: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
     print(f"CUDA device: {torch.cuda.get_device_name(0)}")
-print("ROS cv_bridge, Orbbec SDK and Ultralytics imports: OK")
+print("ROS cv_bridge, RealSense SDK and Ultralytics imports: OK")
 PY
 
 echo
 echo "Environment ready."
 echo "Build the ROS workspace separately with system Python; see docs/setup/ubuntu_ros2_jazzy.md."
 echo "No models are downloaded or exported. Select a model using yolo_model_path."
-echo "Install the Orbbec udev rule once after connecting the camera:"
-echo "  ${repo_root}/scripts/install_orbbec_udev_rules.sh"
+echo "Install RealSense USB rules using the SDK apt repository:"
+echo "  sudo apt install librealsense2-udev-rules librealsense2-utils"
+echo "Then reconnect D405 and check: rs-enumerate-devices -s"
 echo "Start Ubuntu-native vision with:"
 echo "  ${repo_root}/scripts/run_ubuntu_vision.sh"

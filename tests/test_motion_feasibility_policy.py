@@ -12,7 +12,7 @@ if str(VISION_SRC) not in sys.path:
 
 def test_motion_feasibility_policy_requires_pregrasp_before_grasp():
     from rebotarm_vision.policies.motion_feasibility_policy import evaluate_motion_feasibility
-    from rebotarm_vision.visual_grasp_sequence import PoseTarget
+    from rebotarm_vision.candidate_pose import PoseTarget
 
     calls: list[str] = []
 
@@ -37,7 +37,7 @@ def test_motion_feasibility_policy_requires_pregrasp_before_grasp():
 
 def test_motion_feasibility_policy_returns_motion_penalty_after_grasp_solution():
     from rebotarm_vision.policies.motion_feasibility_policy import evaluate_motion_feasibility
-    from rebotarm_vision.visual_grasp_sequence import PoseTarget
+    from rebotarm_vision.candidate_pose import PoseTarget
 
     solutions = {"candidate0/pregrasp": object(), "candidate0/grasp": object()}
 

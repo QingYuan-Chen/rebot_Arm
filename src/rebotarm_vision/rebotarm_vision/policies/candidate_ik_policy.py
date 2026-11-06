@@ -21,7 +21,7 @@ from .candidate_motion_policy import (
 from .candidate_precheck_policy import CandidatePrecheckConfig, evaluate_candidate_precheck
 from .candidate_target_policy import CandidateTargetPolicyConfig, build_candidate_target_variants
 from .pose_variant_policy import PoseVariantConfig
-from ..visual_grasp_sequence import PoseTarget
+from ..candidate_pose import PoseTarget
 
 
 def _parameter(context, name):

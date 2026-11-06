@@ -68,7 +68,6 @@ def generate_launch_description():
     gripper_position_max_speed_rad_s = LaunchConfiguration("gripper_position_max_speed_rad_s")
     gripper_position_timeout_margin_sec = LaunchConfiguration("gripper_position_timeout_margin_sec")
     gripper_feedback_stale_timeout_sec = LaunchConfiguration("gripper_feedback_stale_timeout_sec")
-    grasp_hold_timeout_sec = LaunchConfiguration("grasp_hold_timeout_sec")
     cmd_arbitration = LaunchConfiguration("cmd_arbitration")
     frame_id = LaunchConfiguration("frame_id")
     ee_frame_id = LaunchConfiguration("ee_frame_id")
@@ -132,8 +131,6 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_position_timeout_margin_sec", default_value="1.5"),
             # 抓爪反馈过期阈值（s）：超过该时长没有新反馈即判定为不新鲜
             DeclareLaunchArgument("gripper_feedback_stale_timeout_sec", default_value="0.15"),
-            # 保持夹持的最长时间（s）：超时后松开，避免长时间堵转发热
-            DeclareLaunchArgument("grasp_hold_timeout_sec", default_value="10.0"),
             # 多路命令仲裁策略：reject 表示发现冲突命令直接拒绝（不做静默覆盖）
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             # 是否在本文件内启动 RViz
@@ -198,7 +195,6 @@ def generate_launch_description():
                     "gripper_position_max_speed_rad_s": gripper_position_max_speed_rad_s,
                     "gripper_position_timeout_margin_sec": gripper_position_timeout_margin_sec,
                     "gripper_feedback_stale_timeout_sec": gripper_feedback_stale_timeout_sec,
-                    "grasp_hold_timeout_sec": grasp_hold_timeout_sec,
                     "cmd_arbitration": cmd_arbitration,
                     "arm_namespace": arm_namespace,
                     "trajectory_execution_mode": trajectory_mode,

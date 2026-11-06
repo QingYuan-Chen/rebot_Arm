@@ -31,11 +31,15 @@ def test_tf_message_adapter_transforms_pose_without_mutating_input():
     assert pose.orientation.z == 0.0
 
 
-def test_tf_message_adapter_uses_canonical_public_module():
-    from rebotarm_vision.utils.tf_message_adapter import (
-        transform_from_msg as canonical_transform_from_msg,
-        transform_pose_message as canonical_transform_pose_message,
-    )
+def test_apply_tcp_offset_converts_grasp_tcp_target_to_end_link_target():
+    pose = Pose()
+    pose.position.x = 0.50
+    pose.position.y = 0.00
+    pose.position.z = 0.20
+    pose.orientation.w = 1.0
 
-    assert canonical_transform_from_msg is transform_from_msg
-    assert canonical_transform_pose_message is transform_pose_message
+    target = apply_tcp_offset_to_pose(pose, (0.10, 0.0, 0.0))
+
+    assert target.position.x == pytest.approx(0.40)
+    assert target.position.y == pytest.approx(0.00)
+    assert target.position.z == pytest.approx(0.20)

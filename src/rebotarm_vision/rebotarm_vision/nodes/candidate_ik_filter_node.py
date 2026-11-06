@@ -51,7 +51,7 @@ from ..policies.candidate_ik_policy import CandidateIkPolicy
 from ..candidate_ik_runtime import CandidateIkRuntime
 from ..candidate_tf_adapter import transform_candidate_pose_to_target_frame
 from ..utils.latest_only_work_queue import LatestOnlyWorkQueue
-from ..visual_grasp_sequence import PoseTarget
+from ..candidate_pose import PoseTarget
 
 
 def _parameter(node, name: str):

@@ -77,6 +77,7 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     arm_namespace = LaunchConfiguration("arm_namespace")
     use_fake_joint_states = LaunchConfiguration("use_fake_joint_states")
+    allow_trajectory_execution = LaunchConfiguration("allow_trajectory_execution")
     use_sim_time = LaunchConfiguration("use_sim_time")
     trajectory_mode = LaunchConfiguration('trajectory_execution_mode')
     prepared_mode = PythonExpression(["'", trajectory_mode, "' == 'prepared_v1'"])
@@ -191,6 +192,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             DeclareLaunchArgument("use_fake_joint_states", default_value="true"),
+            DeclareLaunchArgument("allow_trajectory_execution", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             # 准备节点读取同一规范模型和场景；服务存在不等于任何后端获得执行许可。
             DeclareLaunchArgument('prepare_trajectories', default_value='false'),
@@ -273,6 +275,7 @@ def generate_launch_description():
                     trajectory_execution,
                     sensors_3d,
                     execution_adapters,
+                    {"allow_trajectory_execution": ParameterValue(allow_trajectory_execution, value_type=bool)},
                     {"use_sim_time": use_sim_time},
                 ],
             ),

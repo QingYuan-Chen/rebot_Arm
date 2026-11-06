@@ -26,7 +26,7 @@ def test_visual_grasp_bringup_exposes_explicit_ubuntu_native_profile() -> None:
 def test_ubuntu_native_camera_profile_has_no_network_inputs() -> None:
     config = _read("src/rebotarm_vision/config/camera_ubuntu.yaml")
 
-    assert "camera.type: gemini2" in config
+    assert "camera.type: d405" in config
     assert "ros.enable_network_detection" not in config
     assert "camera.network_" not in config
     assert "http://" not in config
@@ -92,3 +92,24 @@ def test_ubuntu_native_uses_reliable_qos_for_large_image_payloads() -> None:
     assert 'self.declare_parameter("ros.image_reliability", "best_effort")' in source
     assert "ReliabilityPolicy.RELIABLE" in source
     assert "self._image_qos_profile()" in source
+
+
+def test_vision_launch_does_not_wrap_static_tf_in_ros2_run():
+    text = _read("src/rebotarm_vision/launch/vision.launch.py")
+    assert "exec ros2 run tf2_ros static_transform_publisher" not in text
+    assert 'package="tf2_ros"' in text
+    assert 'executable="static_transform_publisher"' in text
+
+
+def test_vision_launch_configures_opencv_qt_font_environment():
+    text = _read("src/rebotarm_vision/launch/vision.launch.py")
+    assert '"QT_QPA_PLATFORM": "xcb"' in text
+    assert '"QT_QPA_FONTDIR": "/usr/share/fonts/truetype/dejavu"' in text
+
+
+def test_vision_launch_has_no_machine_specific_home_paths():
+    text = _read("src/rebotarm_vision/launch/vision.launch.py")
+    assert "/home/u24" not in text
+    assert "camera_config" in text
+    assert "handeye_config" in text
+    assert "start_ordinary_grasp" not in text

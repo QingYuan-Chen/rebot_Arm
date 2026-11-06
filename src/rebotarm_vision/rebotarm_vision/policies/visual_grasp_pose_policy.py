@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .approach_policy import ApproachPolicyConfig, build_pregrasp_tcp, normalize_vector
-from ..visual_grasp_sequence import PoseTarget
+from ..candidate_pose import PoseTarget
 from .pose_variant_policy import (
     build_parallel_jaw_symmetric_orientation,
     quaternion_to_rotation_matrix,

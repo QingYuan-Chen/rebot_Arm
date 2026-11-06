@@ -1,9 +1,12 @@
+"""候选配置快照、参数拒绝和独立筛选运行时。"""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from rebotarm_vision.candidate_ik_config import CandidateIkConfig
-from rebotarm_vision.visual_grasp_config import VisualGraspConfig
 from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
 
 
@@ -22,7 +25,7 @@ def _candidate_values():
         "candidate_min_jaw_width_m": 0.006, "candidate_max_jaw_width_m": 0.085,
         "candidate_workspace_gate_enabled": False, "candidate_workspace_min_xyz": [0, 0, 0],
         "candidate_workspace_max_xyz": [1, 1, 1], "candidate_max_grasp_to_object_center_m": 0.15,
-        "candidate_min_grasp_z_m": 0.0, "pose_policy": "base_axis",
+        "candidate_min_grasp_z_m": 0.0, "pose_policy": "preserve_candidate_pose",
         "fixed_grasp_orientation_xyzw": [0, 0, 0, 1], "base_approach_axis_xyz": [1, 0, 0],
         "base_pregrasp_distance_m": 0.08, "tcp_offset_xyz": [0, 0, 0],
         "target_base_offset_xyz": [0, 0, 0], "candidate_pregrasp_min_z_m": 0.04,
@@ -41,28 +44,19 @@ def test_candidate_config_is_a_validated_snapshot():
     assert config.tcp_offset_xyz == (0.0, 0.0, 0.0)
 
 
-def test_candidate_config_rejects_wrong_vector_length():
+@pytest.mark.parametrize(("overrides", "error"), [
+    ({"tcp_offset_xyz": [0.0, 0.0]}, "tcp_offset_xyz"),
+    ({"candidate_workspace_min_xyz": [1, 0, 0],
+      "candidate_workspace_max_xyz": [0, 1, 1]}, "candidate_workspace_min_xyz"),
+    ({"max_candidates_per_frame": 0}, "max_candidates_per_frame"),
+    ({"candidate_min_jaw_width_m": 0.1,
+      "candidate_max_jaw_width_m": 0.08}, "candidate_min_jaw_width_m"),
+])
+def test_candidate_config_rejects_invalid_parameters(overrides, error):
     values = _candidate_values()
-    values["tcp_offset_xyz"] = [0.0, 0.0]
-    try:
+    values.update(overrides)
+    with pytest.raises(ValueError, match=error):
         CandidateIkConfig.from_node(_Node(values))
-    except ValueError as exc:
-        assert "tcp_offset_xyz" in str(exc)
-    else:
-        raise AssertionError("invalid vector length was accepted")
-
-
-def test_visual_config_copies_ros_parameters_once():
-    config = VisualGraspConfig.from_node(
-        _Node({
-            "input_topic": "/grasp/filtered_plan",
-            "max_plan_age_sec": 1.0,
-            "auto_retry_enabled": True,
-            "safe_retreat_before_retry": False,
-        })
-    )
-    assert config.input_topic == "/grasp/filtered_plan"
-    assert config.auto_retry_enabled is True
 
 
 def test_candidate_runtime_runs_without_a_ros_node():
@@ -101,3 +95,42 @@ def test_candidate_runtime_runs_without_a_ros_node():
     ).filter_frame(message)
     assert counts["ranked"] == 1
     assert len(published[0]) == 1
+
+
+def test_candidate_filter_tf_failure_publishes_no_ranked_candidates():
+    from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
+    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
+
+    msg = GraspCandidateArray()
+    msg.header.frame_id = "camera_depth_frame"
+    candidate = GraspCandidate()
+    candidate.confidence = 0.8
+    candidate.jaw_width = 0.04
+    msg.candidates.append(candidate)
+    published = []
+    warnings = []
+    node = object.__new__(CandidateIkPolicy)
+    parameters = {
+        "max_candidates_per_frame": 10,
+        "candidate_min_confidence": 0.4,
+        "candidate_min_jaw_width_m": 0.006,
+        "candidate_max_jaw_width_m": 0.085,
+    }
+    node.get_parameter = lambda name: type(
+        "Parameter", (), {"value": parameters[name]}
+    )()
+    node._candidate_target_variants = lambda _msg, _pose: (_ for _ in ()).throw(
+        RuntimeError("TF lookup unavailable")
+    )
+    node._publish_ranked = lambda original, ranked: published.append((original, ranked))
+    node.get_logger = lambda: type("Logger", (), {"warn": warnings.append})()
+
+    CandidateIkRuntime(
+        policy=node, gateway=SimpleNamespace(
+            check_target=getattr(node, "_check_ik_and_collision", None),
+            publish_ranked=node._publish_ranked, publish_empty=lambda message: None,
+        ), max_candidates=10, logger=node.get_logger(),
+    ).filter_frame(msg)
+
+    assert published == [(msg, [])]
+    assert warnings == ["candidate IK filter rejected candidate: TF lookup unavailable"]

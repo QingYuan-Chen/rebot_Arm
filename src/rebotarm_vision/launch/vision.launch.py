@@ -1,13 +1,12 @@
 """视觉包的主启动文件：真实相机路径下启动感知链路所需的节点组合。
 
-启动内容共 3 个节点：
+启动内容：
 
-1. 手眼静态 TF：按 ``handeye.yaml`` 把相机坐标系挂到机械臂坐标系上（静态变换，不随
-   关节运动改变）；
+1. 可选手眼静态 TF：显式传入 D405 标定文件后，把相机光学坐标系挂到末端；
 2. 视觉主节点 ``rebotarm_vision_node``：彩色/深度采集、检测与深度融合，参数来自
    ``camera_config`` 中同名段；
 3. 夹爪 TCP 静态帧节点 ``rebotarm_grasp_tcp_frame``：发布末端到抓取 TCP 的固定偏移，
-   供抓取位姿换算使用。
+   供抓取位姿换算使用；对齐 RGB-D 的两个光学帧发布同位姿关系。
 
 参数来源：节点参数统一从 ``camera_config`` 指向的 YAML 读取，再按启动参数覆盖。两个
 节点都用 ``vision_python_executable`` 作为解释器前缀（默认取环境变量
@@ -23,7 +22,7 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 import yaml
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -57,7 +56,8 @@ def _launch_setup(context):
     handeye_config = LaunchConfiguration("handeye_config").perform(context)
     yolo_model_path = LaunchConfiguration("yolo_model_path").perform(context)
     yolo_device = LaunchConfiguration("yolo_device").perform(context)
-    handeye = load_handeye_config(Path(handeye_config).expanduser())
+    # 更换相机后旧外参失效；默认只采图，完成 D405 标定后显式加载结果。
+    handeye = load_handeye_config(Path(handeye_config).expanduser()) if handeye_config else None
 
     # OpenCV highgui 的 Qt 后端需要指定平台插件与字体目录，否则在无 Wayland/缺字体的
     # 主机上创建预览窗口会失败；这两个键有测试锁定，不要改动字面量。
@@ -75,16 +75,41 @@ def _launch_setup(context):
     vision_parameters.update(vision_overrides)
     tcp_parameters = _node_parameters(camera_config, "rebotarm_grasp_tcp_frame")
 
-    return [
-        # 手眼静态 TF：参数顺序沿用 static_transform_publisher 的位置参数约定
-        # （x y z qx qy qz qw 父坐标系 子坐标系），数值全部来自 handeye.yaml。
-        Node(
+    transforms = []
+    if handeye is not None:
+        transforms.append(Node(
             package="tf2_ros",
             executable="static_transform_publisher",
             name="rebotarm_handeye_static_tf",
             output="screen",
             arguments=handeye.as_static_transform_arguments(),
-        ),
+        ))
+    else:
+        transforms.append(LogInfo(msg=(
+            "D405 handeye_config is empty: camera-to-arm TF is unpublished; "
+            "pass a calibrated D405 handeye_config to enable robot-frame candidate filtering."
+        )))
+    # 自定义 YAML 可只覆盖部分参数；缺省值与视觉节点声明保持一致。
+    if vision_parameters.get("camera.enable_depth", True) and vision_parameters.get("camera.enable_align", True):
+        color_frame = vision_parameters.get("ros.frame_id_color", "camera_color_frame")
+        depth_frame = vision_parameters.get("ros.frame_id_depth", "camera_depth_frame")
+        optical_parent = handeye.child_frame if handeye else color_frame
+        if optical_parent not in (color_frame, depth_frame):
+            raise ValueError("D405 handeye child_frame must match a configured RGB-D optical frame")
+        if color_frame != depth_frame:
+            optical_child = depth_frame if optical_parent == color_frame else color_frame
+            # 深度已重投影到彩色光学系；此处只连接两个消息名，不再叠加出厂外参。
+            transforms.append(Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="rebotarm_d405_aligned_optical_tf",
+                output="screen",
+                arguments=["--frame-id", optical_parent, "--child-frame-id", optical_child,
+                           "--x", "0", "--y", "0", "--z", "0",
+                           "--qx", "0", "--qy", "0", "--qz", "0", "--qw", "1"],
+            ))
+
+    return transforms + [
         # 视觉主节点：负责取图、检测与深度融合，不下发任何运动指令。
         Node(
             package="rebotarm_vision",
@@ -113,8 +138,8 @@ def generate_launch_description():
 
     默认值的含义与安全考虑：
 
-    - ``camera_config`` / ``handeye_config``：默认取安装后的包内配置，避免机器相关绝对
-      路径；整体替换即可切换到别的相机或标定结果；
+    - ``camera_config`` 默认取包内 D405 配置；``handeye_config`` 默认为空，
+      完成新相机标定后显式传入文件；
     - ``vision_python_executable``：解释器前缀，优先取环境变量
       ``REBOTARM_VISION_PYTHON``，未设置时用 ``python3``；
     - ``yolo_model_path`` / ``yolo_device`` 默认空串：表示不覆盖 YAML 里的模型路径与
@@ -133,7 +158,8 @@ def generate_launch_description():
             # 手眼标定结果（父/子坐标系与平移、四元数），决定相机在机械臂下的位姿。
             DeclareLaunchArgument(
                 "handeye_config",
-                default_value=str(vision_share / "config" / "handeye.yaml"),
+                default_value="",
+                description="Calibrated D405 handeye YAML; empty starts camera without arm TF",
             ),
             # 视觉节点解释器：环境变量优先，缺省 python3。
             DeclareLaunchArgument(

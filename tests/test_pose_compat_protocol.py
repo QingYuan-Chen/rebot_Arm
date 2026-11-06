@@ -118,6 +118,8 @@ def test_monitor_uses_source_time_and_audits_actual_quantized_samples(monkeypatc
     import numpy as np
     from rebotarm_motion.trajectory_runtime_limits import JointRuntimeLimit, TrajectoryRuntimeLimitGuard
     from rebotarm_motion.paired_trajectory_protocol import sample_command
+    # launch 的日志类默认关闭传播；审计断言显式接入 caplog，避免依赖收集顺序。
+    monkeypatch.setattr(logging.getLogger('rebotarm.audit'), 'propagate', True)
     node, run = monitor_node()
     run.dispatched, run.dispatched_ns = 100., int(10e9)
     run.guard = TrajectoryRuntimeLimitGuard({f'joint{i}': JointRuntimeLimit(

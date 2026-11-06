@@ -12,6 +12,17 @@ if str(VISION_SRC) not in sys.path:
     sys.path.insert(0, str(VISION_SRC))
 
 
+def test_candidate_pose_value_contract():
+    from rebotarm_vision.candidate_pose import PoseTarget
+
+    target = PoseTarget((0.1, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
+    assert target == PoseTarget((0.1, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
+    assert PoseTarget.__annotations__ == {
+        "position": "tuple[float, float, float]",
+        "orientation": "tuple[float, float, float, float]",
+    }
+
+
 def test_candidate_target_policy_preserve_pose_adds_parallel_jaw_symmetric_variant():
     from rebotarm_vision.policies.candidate_target_policy import CandidateTargetPolicyConfig, build_candidate_target_variants
 

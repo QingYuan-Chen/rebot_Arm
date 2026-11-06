@@ -1,16 +1,15 @@
-"""抓取候选深度探针：判断近距离深度是否还够准，用于决定能否做预抓取位重定位。
+"""D405 候选深度探针：按配置区间统计深度及重复测量离散度。
 
 用途与位置
 ----------
 这是一个诊断/验收辅助节点，不参与正式抓取链路：它订阅抓取候选话题，连续采集若干帧
 目标候选的深度值，输出均值/极值/标准差与逐样本的深度状态，最后给出
-``gemini2_close_depth_usable`` 结论——近距离深度能否支撑"接近后按新深度重新定位
-预抓取位"的做法。结论为不可用时，应改用一次性抓取（不重定位）或把粗预抓取位放远
-一些，而不是硬用带噪声的深度继续接近。
+``d405_close_depth_usable`` 统计结论。默认区间取产品标称的 7–50 cm，
+实际精度需通过已知距离样本复核；诊断结果只供操作员查看。
 
 接口与行为
 ----------
-- 订阅：``input_topic``（默认 ``/grasp/candidates``，类型为抓取候选数组）。
+- 订阅：``input_topic``（默认 ``/grasp/graspnet_candidates``，类型为抓取候选数组）。
 - 发布：无。写服务/动作：无。本节点不发布任何运动请求，也不使能硬件。
 - 采满 ``sample_count`` 个样本后打印汇总并主动关闭运行时退出，因此适合脚本化调用：
   ``ros2 run <本包> rebotarm_grasp_depth_probe``（可带 ``-p`` 覆盖参数）。
@@ -45,7 +44,7 @@ class GraspDepthProbeNode(Node):
     清，跨帧累积，因此要求候选在采集期间保持静止。
 
     参数（全部可在启动时覆盖）：
-    - ``input_topic``：候选来源话题，默认 ``/grasp/candidates``。
+    - ``input_topic``：候选来源话题，默认 ``/grasp/graspnet_candidates``。
     - ``sample_count``：汇总所需的样本数，构造时钳到至少 1。
     - ``absolute_min_depth_m``：绝对最近可信距离；更近直接判 ``too_close_unreliable``。
     - ``min_reliable_depth_m``：可靠区下限；介于绝对下限与它之间判 ``near_limit``。
@@ -57,11 +56,12 @@ class GraspDepthProbeNode(Node):
 
     def __init__(self) -> None:
         super().__init__("rebotarm_grasp_depth_probe")
-        self.declare_parameter("input_topic", "/grasp/candidates")
+        self.declare_parameter("input_topic", "/grasp/graspnet_candidates")
         self.declare_parameter("sample_count", 20)
-        self.declare_parameter("min_reliable_depth_m", 0.20)
-        self.declare_parameter("absolute_min_depth_m", 0.15)
-        self.declare_parameter("max_reliable_depth_m", 5.0)
+        # D405 标称工作区间；仅用于诊断，不修改正式候选筛选阈值。
+        self.declare_parameter("min_reliable_depth_m", 0.07)
+        self.declare_parameter("absolute_min_depth_m", 0.07)
+        self.declare_parameter("max_reliable_depth_m", 0.50)
         self.declare_parameter("max_depth_std_m", 0.02)
         self.declare_parameter("target_class", "")
         self._samples: list[float] = []
@@ -169,7 +169,7 @@ class GraspDepthProbeNode(Node):
             f"samples={len(depths)}, depth_min={min_depth:.3f}, depth_max={max_depth:.3f}, "
             f"depth_mean={avg:.3f}, depth_std={std:.3f}, "
             f"jaw_mean={mean(self._last_widths):.3f}, object_length_mean={mean(self._last_lengths):.3f}, "
-            f"gemini2_close_depth_usable={usable}"
+            f"d405_close_depth_usable={usable}"
         )
         if usable:
             self.get_logger().info("result: depth appears usable for close-range re-localization")

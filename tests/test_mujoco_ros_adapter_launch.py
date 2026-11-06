@@ -73,7 +73,7 @@ def test_physics_and_rviz_preview_launches_select_distinct_execution_backends():
         ROOT / "src/rebotarm_bringup/launch/mujoco_moveit_sim.launch.py"
     ).read_text(encoding="utf-8")
     preview_launch = (
-        ROOT / "src/rebotarm_bringup/launch/includes/visual_backend.launch.py"
+        ROOT / "src/rebotarm_bringup/launch/rviz_ee_drag_sim.launch.py"
     ).read_text(encoding="utf-8")
 
     assert 'executable="rebotarm_mujoco_node"' in physics_launch

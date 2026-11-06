@@ -1,4 +1,4 @@
-"""Gemini 2 相机的本地调试预览脚本（不是 ROS 节点）。
+"""D405 相机的本地调试预览脚本。
 
 直接用深度相机 SDK 打开设备，把彩色图与深度伪彩图显示在两个 OpenCV 窗口里，并在画面上
 叠加 min/max/mean 等像素统计，用于快速判断「相机是否出图、彩色是否过曝/全黑、深度是否有
@@ -15,7 +15,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from ..camera.gemini2_driver import Gemini2Config, Gemini2Driver
+from ..camera.d405_driver import D405Config, D405Driver
 
 
 def _depth_to_u8(depth_mm: np.ndarray | None) -> np.ndarray | None:
@@ -49,31 +49,29 @@ def _depth_to_u8(depth_mm: np.ndarray | None) -> np.ndarray | None:
 def main() -> None:
     """打开相机、循环预览，直到按键退出；退出时保证释放设备与窗口。"""
 
-    # 彩色固定 640x480@30；深度宽高传 0 表示不指定，由驱动选相机默认深度 profile。
+    # 彩深均请求 640x480@30，与生产相机配置一致。
     # enable_align=False：预览不需要深度对齐到彩色，省掉对齐带来的开销与视野裁剪；
     # frame_timeout_ms=1000 是单帧等待上限，超时返回空帧后循环继续，不会卡死。
-    driver = Gemini2Driver(
-        Gemini2Config(
+    driver = D405Driver(
+        D405Config(
             color_width=640,
             color_height=480,
             color_fps=30,
             enable_depth=True,
-            depth_width=0,
-            depth_height=0,
+            depth_width=640,
+            depth_height=480,
             depth_fps=30,
             frame_timeout_ms=1000,
             enable_align=False,
         )
     )
 
-    driver.open()
-    # 丢掉前 15 帧：自动曝光/白平衡收敛前的画面偏暗，统计值没有参考意义。
-    driver.warmup(15)
-
-    cv2.namedWindow("Gemini2 Color", cv2.WINDOW_AUTOSIZE)
-    cv2.namedWindow("Gemini2 Depth", cv2.WINDOW_AUTOSIZE)
-
     try:
+        driver.open()
+        # 预热和建窗也归入会话清理，异常时释放已打开的设备。
+        driver.warmup(15)
+        cv2.namedWindow("D405 Color", cv2.WINDOW_AUTOSIZE)
+        cv2.namedWindow("D405 Depth", cv2.WINDOW_AUTOSIZE)
         while True:
             # allow_partial=True：彩色或深度只到一路时也返回，便于定位是哪一路缺数据。
             color_bgr, depth_mm = driver.get_frame(allow_partial=True)
@@ -96,7 +94,7 @@ def main() -> None:
                     2,
                     cv2.LINE_AA,
                 )
-                cv2.imshow("Gemini2 Color", overlay)
+                cv2.imshow("D405 Color", overlay)
 
             depth_vis = _depth_to_u8(depth_mm)
             if depth_vis is not None:
@@ -115,7 +113,7 @@ def main() -> None:
                     2,
                     cv2.LINE_AA,
                 )
-                cv2.imshow("Gemini2 Depth", depth_vis)
+                cv2.imshow("D405 Depth", depth_vis)
 
             # waitKey 只有在高亮窗口时才能收到按键；返回值高位可能带修饰键，取低 8 位比较。
             # 27 是 ESC 的 ASCII 码。
@@ -123,8 +121,10 @@ def main() -> None:
             if key in (ord("q"), ord("Q"), 27):
                 break
     finally:
-        driver.close()
-        cv2.destroyAllWindows()
+        try:
+            driver.close()
+        finally:
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

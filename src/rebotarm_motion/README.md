@@ -15,7 +15,6 @@ rebotarm_motion/
 │   ├── pose_preview_solver.py             # SDK 运动学的无硬件预览
 │   ├── moveit_planner.py                  # MoveIt 规划客户端适配
 │   ├── execution_coordinator.py           # 预览到执行的唯一门控
-│   ├── pose_execution_node.py             # 位姿目标规划与 FollowJointTrajectory 执行
 │   ├── paired_trajectory_protocol.py      # 真机/仿真共用轨迹命令协议
 │   ├── trajectory_time_parameterization.py# 示教轨迹重定时策略选择
 │   ├── trajectory_runtime_limits.py       # 速度/力矩/加速度/jerk 运行时守卫
@@ -32,7 +31,6 @@ rebotarm_motion/
 
 ## 关键脚本
 
-- `moveit_planner.py` 只请求规划并返回轨迹；`pose_execution_node.py` 负责规划/可选执行服务，执行最终走控制器 Action。
 - `pose_preview_solver.py` 可在无 ROS/无硬件条件下做 FK/IK 预览；`execution_coordinator.py` 防止绕过预览直接执行。
 - `trajectory_time_parameterization.py` 选择 Ruckig 或回退重定时实现；`trajectory_runtime_limits.py` 和 `trajectory_safety_monitor.py` 分别检查运行时物理限值与跟踪误差。
 - `collision_precheck.py` 在下发前按采样点调用 MoveIt 状态有效性服务；它只检查，不发送运动。
@@ -41,9 +39,7 @@ rebotarm_motion/
 
 ## 对外入口
 
-```bash
-ros2 run rebotarm_motion PoseExecutionNode
-```
+`PoseCompatNode`、`TrajectoryPreparationNode` 和 `TrajectoryRetimingNode` 由相应操作组合启动。
 
 
 ## 依赖边界

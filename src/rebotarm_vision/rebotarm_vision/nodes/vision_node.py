@@ -54,7 +54,7 @@ from sensor_msgs.msg import CameraInfo, Image
 
 from rebotarm_msgs.msg import Detection2DArray
 
-from ..camera.gemini2_driver import Gemini2Config, Gemini2Driver
+from ..camera.d405_driver import D405Config, D405Driver
 from ..policies.camera_info_policy import calibrated_intrinsics
 from ..converters.detection_msgs import result_to_detection_array_msg
 from ..converters.image_msgs import camera_info_to_msg, color_to_msg, depth_to_msg
@@ -153,8 +153,13 @@ class RebotArmVisionNode(Node):
 
         # open() 会按请求的分辨率/帧率匹配设备 profile，匹配不到直接抛异常；
         # warmup 只是丢弃前若干帧等自动曝光/白平衡稳定，不完整也不致命，后续取帧仍会继续重试。
-        self.camera.open()
-        ready = self.camera.warmup(self.warmup_frames)
+        try:
+            self.camera.open()
+            ready = self.camera.warmup(self.warmup_frames)
+        except Exception:
+            # 构造尚未返回，main 的退出清理还未接管；在此释放已打开的 USB 会话。
+            self.camera.close()
+            raise
         if not ready:
             self.get_logger().warn("camera warmup incomplete, continuing with frame retries")
 
@@ -192,12 +197,11 @@ class RebotArmVisionNode(Node):
     def _create_camera_driver(self):
         """按 ``camera.type`` 构造相机驱动。
 
-        目前只支持 ``gemini2``（Orbbec Gemini 2，USB 直连）。未知类型直接抛异常而**不**
-        回退到其它后端：避免配置写错时静默切换到非预期的数据源。
+        当前只支持 USB 直连 D405，未知型号在启动时直接报错。
         """
-        if self.camera_type == "gemini2":
-            return Gemini2Driver(
-                Gemini2Config(
+        if self.camera_type == "d405":
+            return D405Driver(
+                D405Config(
                     color_width=self.color_width,
                     color_height=self.color_height,
                     color_fps=self.color_fps,
@@ -207,7 +211,6 @@ class RebotArmVisionNode(Node):
                     depth_fps=self.depth_fps,
                     frame_timeout_ms=self.frame_timeout_ms,
                     enable_align=self.enable_align,
-                    enable_frame_sync=self.enable_frame_sync,
                     color_format=self.color_format,
                 )
             )
@@ -219,27 +222,25 @@ class RebotArmVisionNode(Node):
         ``camera.*`` 为采集参数，``yolo.*`` 为检测参数，``ros.*`` 为发布/可视化参数。
         默认值故意偏保守：不启用检测、不弹预览窗口，仅做相机桥接。
         """
-        # 相机后端类型；当前仅 "gemini2" 合法，其它取值会在创建驱动时抛错。
-        self.declare_parameter("camera.type", "gemini2")
+        # 腕部相机为 D405，其余型号在创建驱动时显式拒绝。
+        self.declare_parameter("camera.type", "d405")
         # 彩色流分辨率（像素）。必须命中设备支持的 profile，否则驱动抛 profile unavailable。
         self.declare_parameter("camera.color_width", 640)
         self.declare_parameter("camera.color_height", 480)
         # 彩色流帧率（Hz），需与所选 profile 完全一致。
         self.declare_parameter("camera.color_fps", 30)
-        # 彩色流像素格式。注意：该参数当前未被 _load_parameters 或驱动读取，驱动固定按
-        # MJPG -> RGB 的顺序尝试设备 profile；保留声明只为兼容 YAML/launch 的覆盖习惯。
-        self.declare_parameter("camera.color_format", "MJPG")
+        # SDK 输出 BGR8 或 RGB8，发布前统一为 OpenCV BGR。
+        self.declare_parameter("camera.color_format", "BGR8")
         # 是否启用深度流。关闭时本节点只发布彩色图，深度话题不再有数据。
         self.declare_parameter("camera.enable_depth", True)
-        # 深度流分辨率（像素）。宽或高任一为 0 时使用设备默认 profile（同驱动约定）。
-        self.declare_parameter("camera.depth_width", 0)
-        self.declare_parameter("camera.depth_height", 0)
+        # 显式指定深度档位；SDK 按实际 profile 提供内参。
+        self.declare_parameter("camera.depth_width", 640)
+        self.declare_parameter("camera.depth_height", 480)
         # 深度流帧率（Hz）。
         self.declare_parameter("camera.depth_fps", 30)
-        # 是否启用深度到彩色的硬件对齐（D2C）。开启后深度图与彩色图逐像素对应，下游可以
+        # 是否启用 RealSense SDK 深度到彩色对齐。开启后深度图与彩色图逐像素对应，下游可以
         # 直接用彩色像素坐标取深度；此时深度内参改用彩色内参。
-        self.declare_parameter("camera.enable_align", False)
-        self.declare_parameter("camera.enable_frame_sync", True)
+        self.declare_parameter("camera.enable_align", True)
         # 打开相机后用于预热的取帧次数上限，等待自动曝光/白平衡稳定；数值越大启动越慢。
         self.declare_parameter("camera.warmup_frames", 15)
         # 单次等待一帧的超时（毫秒）。超时按空帧处理；过小会频繁判空，过大会拖慢循环。
@@ -289,14 +290,13 @@ class RebotArmVisionNode(Node):
         self.color_height = int(self.get_parameter("camera.color_height").value)
         self.color_fps = int(self.get_parameter("camera.color_fps").value)
         self.color_format = str(self.get_parameter("camera.color_format").value).strip().upper()
-        if self.color_format not in {"MJPG", "RGB"}:
-            raise RuntimeError("camera.color_format must be 'MJPG' or 'RGB'")
+        if self.color_format not in {"BGR8", "RGB8"}:
+            raise RuntimeError("camera.color_format must be 'BGR8' or 'RGB8'")
         self.enable_depth = bool(self.get_parameter("camera.enable_depth").value)
         self.depth_width = int(self.get_parameter("camera.depth_width").value)
         self.depth_height = int(self.get_parameter("camera.depth_height").value)
         self.depth_fps = int(self.get_parameter("camera.depth_fps").value)
         self.enable_align = bool(self.get_parameter("camera.enable_align").value)
-        self.enable_frame_sync = bool(self.get_parameter("camera.enable_frame_sync").value)
         self.warmup_frames = int(self.get_parameter("camera.warmup_frames").value)
         self.frame_timeout_ms = int(self.get_parameter("camera.frame_timeout_ms").value)
         self.max_empty_frames = int(self.get_parameter("camera.max_empty_frames").value)
@@ -562,7 +562,8 @@ class RebotArmVisionNode(Node):
                 cv2.destroyWindow(self.preview_window_name)
                 self._preview_window_created = False
         finally:
-            return super().destroy_node()
+            destroyed = super().destroy_node()
+        return destroyed
 
 
 def main(args=None) -> None:

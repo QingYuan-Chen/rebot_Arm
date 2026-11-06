@@ -11,6 +11,32 @@ from rebotarm_simulation.control.control_config import load_motor_control_parame
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _registered_interfaces() -> list[str]:
+    cmake_text = (ROOT / "src/rebotarm_msgs/CMakeLists.txt").read_text(encoding="utf-8")
+    interfaces: list[str] = []
+    for line in cmake_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('"') and stripped.endswith('"'):
+            value = stripped.strip('"')
+            if value.startswith(("msg/", "srv/", "action/")):
+                interfaces.append(value)
+    return interfaces
+
+
+def test_rebotarm_msgs_registered_interfaces_exist():
+    missing = [
+        interface for interface in _registered_interfaces()
+        if not (ROOT / "src/rebotarm_msgs" / interface).is_file()
+    ]
+    assert missing == []
+
+
+def test_retired_visual_execution_interfaces_are_absent():
+    for name in ("ExecutePose", "PublishTrajectoryPreview", "GraspGripper"):
+        assert f"srv/{name}.srv" not in _registered_interfaces()
+        assert not (ROOT / "src/rebotarm_msgs/srv" / f"{name}.srv").exists()
+
+
 def test_bringup_installs_launch_structure_documentation():
     launch_readme = ROOT / "src/rebotarm_bringup/launch/README.md"
     setup_source = (ROOT / "src/rebotarm_bringup/setup.py").read_text(

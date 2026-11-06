@@ -12,10 +12,11 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_ubuntu_camera_profile_uses_native_gemini_and_local_yolo() -> None:
+def test_ubuntu_camera_profile_uses_native_d405_and_local_yolo() -> None:
     config = _read("src/rebotarm_vision/config/camera_ubuntu.yaml")
 
-    assert "camera.type: gemini2" in config
+    assert "camera.type: d405" in config
+    assert "camera.color_format: BGR8" in config
     assert "camera.enable_depth: true" in config
     assert "yolo.device: \"0\"" in config
     assert "      - bottle" in config
@@ -26,13 +27,13 @@ def test_ubuntu_camera_profile_uses_native_gemini_and_local_yolo() -> None:
     assert "https://" not in config
 
 
-def test_ubuntu_camera_config_uses_verified_hw_alignment_profiles() -> None:
+def test_ubuntu_camera_config_requests_d405_aligned_profiles() -> None:
     config = _read("src/rebotarm_vision/config/camera_ubuntu.yaml")
 
     assert "camera.color_width: 640" in config
     assert "camera.color_height: 480" in config
     assert "camera.depth_width: 640" in config
-    assert "camera.depth_height: 400" in config
+    assert "camera.depth_height: 480" in config
     assert "camera.enable_align: true" in config
 
 
@@ -69,8 +70,8 @@ def test_vision_dependencies_preserve_ros_numpy_abi() -> None:
     tensorrt_requirements = _read("docs/setup/dependencies/tensorrt.md")
 
     assert "numpy==1.26.4" in requirements
-    assert "pyorbbecsdk2==2.0.18" in requirements
-    assert "pyorbbecsdk2==2.1.1" not in requirements
+    assert "pyrealsense2==2.59.1.11053" in requirements
+    assert "pyorbbecsdk" not in requirements
     assert "tensorrt-cu12==10.13.3.9.post1" in tensorrt_requirements
     assert "tensorrt-cu12-bindings==10.13.3.9.post1" in tensorrt_requirements
     assert "tensorrt-cu12-libs==10.13.3.9.post1" in tensorrt_requirements
@@ -93,6 +94,14 @@ def test_ubuntu_vision_setup_does_not_rebuild_workspace_with_venv() -> None:
     assert 'torch==2.11.0+cu128 torchvision==0.26.0+cu128' in setup
     assert 'install_python_dependencies.py" tensorrt --python "${python_bin}" --no-deps' in setup
     assert "import tensorrt" in setup
+    assert "import pyrealsense2" in setup
+    assert "pyorbbecsdk" not in setup
+
+
+def test_handeye_ui_camera_frame_matches_default_color_image() -> None:
+    calibration = _read("src/rebotarm_dashboard/rebotarm_dashboard/status_panel_assets/calibration.html")
+    assert "image_topic:'/camera/color/image_raw'" in calibration
+    assert "camera_frame:'camera_color_frame'" in calibration
 
 
 @pytest.mark.parametrize(

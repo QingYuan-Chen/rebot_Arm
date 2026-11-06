@@ -18,12 +18,9 @@ rebotarm_msgs/
 │   ├── ExecutionState.msg             # 执行阶段状态
 │   └── TaskStatus.msg                 # 任务级状态
 ├── srv/
-│   ├── ExecutePose.srv                # 规划并可选执行末端位姿
-│   ├── PublishTrajectoryPreview.srv   # 一次发布多段 RViz 纯规划预览
 │   ├── MoveToPoseIK.srv               # 位姿到关节目标/IK 请求
 │   ├── PlanGraspForLabel.srv          # 按标签规划抓取
 │   ├── SetGripper.srv                 # 设置夹爪开口
-│   ├── GraspGripper.srv               # 受限闭合抓取
 │   ├── SetMode.srv                    # 设置控制模式
 │   ├── SetZero.srv                    # 电机/夹爪置零
 │   └── SetTeachRecordPath.srv         # 设置示教记录路径
@@ -41,9 +38,9 @@ rebotarm_msgs/
 | --- | --- | --- |
 | `ArmStatus`、`JointMotorState` | dashboard、teach、验收工具 | 读取连接、使能、反馈新鲜度和故障状态 |
 | `Detection2D*`、`GraspCandidate*`、`GraspPlan` | vision、仿真/可视化 | 传递检测、候选和经过筛选的抓取计划 |
-| `ExecutionState`、`TaskStatus` | dashboard、voice、vision | 汇报执行阶段和任务占用 |
+| `ExecutionState`、`TaskStatus` | 公共接口 | 预留执行阶段与任务状态 |
 | `JointMotorCmd` | controller 低层透传 | 明确表示绕过规划的底层命令，必须满足控制器安全门 |
-| `ExecutePose`、`PublishTrajectoryPreview`、`MoveToPoseIK`、抓取/夹爪服务 | motion、vision、controller | 规划、连续 RViz 预览、IK 和夹爪服务边界 |
+| `MoveToPoseIK`、`SetGripper` 等服务 | motion、controller、simulation | IK 和夹爪位置服务边界 |
 | 三个 action | motion、controller、voice/simulation | 表达需要反馈、取消和结果的长时任务 |
 
 ## 构建关系

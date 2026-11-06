@@ -82,7 +82,6 @@ def test_candidate_filter_rejects_low_confidence_before_target_or_ik_work() -> N
     from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
     from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
     from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
-    from types import SimpleNamespace
 
     msg = GraspCandidateArray()
     candidate = GraspCandidate()
@@ -121,8 +120,7 @@ def test_candidate_filter_runs_geometry_gate_before_ik_service_calls() -> None:
     from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
     from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
     from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
-    from types import SimpleNamespace
-    from rebotarm_vision.visual_grasp_sequence import PoseTarget
+    from rebotarm_vision.candidate_pose import PoseTarget
 
     msg = GraspCandidateArray()
     candidate = GraspCandidate()

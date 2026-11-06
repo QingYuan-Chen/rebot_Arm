@@ -21,16 +21,6 @@ def _detection():
     return det
 
 
-def _candidate():
-    from rebotarm_msgs.msg import GraspCandidate
-
-    candidate = GraspCandidate()
-    candidate.valid = True
-    candidate.jaw_width = 0.04
-    candidate.confidence = 0.9
-    return candidate
-
-
 def test_graspnet_depth_crop_projects_detection_roi_to_point_cloud():
     from rebotarm_vision.graspnet_baseline_adapter import (
         CameraIntrinsics,
@@ -107,7 +97,7 @@ def test_graspnet_outputs_convert_to_ranked_grasp_candidates():
     assert candidates.candidates[1].confidence == pytest.approx(0.75)
 
 
-def test_network_graspnet_payload_converts_to_candidates():
+def test_inprocess_graspnet_payload_converts_to_candidates():
     from rebotarm_vision.graspnet_baseline_adapter import payload_to_candidate_array
 
     payload = {
@@ -217,72 +207,3 @@ def test_inprocess_graspnet_calls_full_rgbd_backend_without_http(tmp_path):
     assert infer_call["max_grasps"] == 10
     assert infer_call["max_jaw_width_m"] == pytest.approx(0.085)
     assert backend.last_stage_counts["published"] == 1
-
-
-def test_candidate_filter_tf_failure_publishes_no_ranked_candidates():
-    from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
-    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
-    from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
-    from types import SimpleNamespace
-
-    msg = GraspCandidateArray()
-    msg.header.frame_id = "camera_depth_frame"
-    candidate = GraspCandidate()
-    candidate.confidence = 0.8
-    candidate.jaw_width = 0.04
-    msg.candidates.append(candidate)
-    published = []
-    warnings = []
-    node = object.__new__(CandidateIkPolicy)
-    parameters = {
-        "max_candidates_per_frame": 10,
-        "candidate_min_confidence": 0.4,
-        "candidate_min_jaw_width_m": 0.006,
-        "candidate_max_jaw_width_m": 0.085,
-    }
-    node.get_parameter = lambda name: type(
-        "Parameter", (), {"value": parameters[name]}
-    )()
-    node._candidate_target_variants = lambda _msg, _pose: (_ for _ in ()).throw(
-        RuntimeError("TF lookup unavailable")
-    )
-    node._publish_ranked = lambda original, ranked: published.append((original, ranked))
-    node.get_logger = lambda: type("Logger", (), {"warn": warnings.append})()
-
-    CandidateIkRuntime(
-        policy=node, gateway=SimpleNamespace(
-            check_target=getattr(node, "_check_ik_and_collision", None),
-            publish_ranked=node._publish_ranked, publish_empty=lambda message: None,
-        ), max_candidates=10, logger=node.get_logger(),
-    ).filter_frame(msg)
-
-    assert published == [(msg, [])]
-    assert warnings == ["candidate IK filter rejected candidate: TF lookup unavailable"]
-
-
-def test_preserve_input_safety_gate_allows_low_grasp_when_width_is_valid():
-    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
-    from rebotarm_vision.candidate_ik_runtime import CandidateIkRuntime
-    from types import SimpleNamespace
-    from rebotarm_vision.visual_grasp_sequence import PoseTarget
-
-    class NodeForGate:
-        def get_parameter(self, name):
-            values = {
-                "candidate_min_jaw_width_m": 0.006,
-                "candidate_max_jaw_width_m": 0.082,
-                "candidate_min_grasp_z_m": 0.0,
-            }
-            return type("Param", (), {"value": values[name]})()
-
-        def get_logger(self):
-            return type("Logger", (), {"warn": lambda self, message: None})()
-
-    candidate = _candidate()
-    candidate.jaw_width = 0.04
-    low_grasp = PoseTarget(position=(0.38, 0.0, 0.035), orientation=(0.0, 0.0, 0.0, 1.0))
-    safe_grasp = PoseTarget(position=(0.38, 0.0, 0.18), orientation=(0.0, 0.0, 0.0, 1.0))
-    node = NodeForGate()
-
-    assert CandidateIkPolicy._candidate_gate_allows(node, candidate, grasp=low_grasp) is True
-    assert CandidateIkPolicy._candidate_gate_allows(node, candidate, grasp=safe_grasp) is True

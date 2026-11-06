@@ -30,7 +30,7 @@ rebotarm_bringup/
 | `teleop_keyboard.launch.py` | 键盘点动和基础 RViz |
 | `teleop_system.launch.py` | 键盘点动、示教和 Dashboard 组合 |
 | `rviz_ee_drag_sim.launch.py` | 无硬件仿真规划与 RViz 拖动 |
-| `visual_grasp_system.launch.py` | 视觉只读、plan-only 和受控执行组合 |
+| `visual_grasp_system.launch.py` | 视觉感知、候选筛选和显示组合 |
 
 日常可复制命令统一维护在 [`docs/reference/commands/`](../../docs/reference/commands/README.md)，
 本包不在多个文档中重复维护同一套命令。

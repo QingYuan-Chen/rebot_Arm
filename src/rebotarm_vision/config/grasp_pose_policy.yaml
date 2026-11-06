@@ -1,7 +1,5 @@
 # 抓取姿态与候选筛选策略参数（按节点名分组）。
-# 由上层启动组合包按 profile 直接作为参数文件加载；同一个键在不同节点下的取值不同是正常的
-# （例如 pose_policy 在候选过滤节点用混合策略、在执行器里用 base_axis），改动前先确认属于哪个节点。
-# 所有长度为米、角度为弧度、四元数顺序为 (x, y, z, w)；只允许增加注释，禁止改键名或数值。
+# 参数按节点分组；长度为米、角度为弧度，四元数顺序为 (x, y, z, w)。
 
 rebotarm_grasp_candidate_ik_filter:
   ros__parameters:
@@ -65,41 +63,6 @@ rebotarm_grasp_candidate_ik_filter:
     # 抓取位姿在 base Z 方向的额外偏移，单位米；0.0 表示抓取点取深度反投影的原始高度，
     # 调正会让抓取点整体抬高（例如物体易被压扁时）。
     grasp_base_z_offset_m: 0.0
-
-rebotarm_visual_grasp_executor:
-  ros__parameters:
-    # 执行器使用的姿态策略：base_axis = 只按 base 接近轴构造抓取姿态，
-    # 不采用候选自身几何（执行阶段要求姿态确定、可复现）。
-    pose_policy: base_axis
-    # 固定抓取姿态四元数 (x, y, z, w)，含义同候选过滤节点的同名参数（绕 Z 转 -90°）。
-    fixed_grasp_orientation_xyzw: [0.0, 0.0, 0.0, 1.0]
-    # 接近轴方向单位向量（base_link 下的 +X）。
-    base_approach_axis_xyz: [1.0, 0.0, 0.0]
-    # 预抓取点沿接近轴后退的距离，单位米（0.08 m = 8 cm）。
-    base_pregrasp_distance_m: 0.08
-    # 允许的最低抓取高度，单位米；低于此值拒绝执行（防撞台面的硬门限）。
-    min_grasp_z_m: 0.0
-    # end_link -> 抓取 TCP 的平移，单位米（沿末端 X 轴 -4 cm），含义同上。
-    tcp_offset_xyz: [-0.04, 0.0, 0.0]
-    # 目标点整体平移补偿，单位米；全 0 表示不补偿。
-    target_base_offset_xyz: [0.0, 0.0, 0.0]
-    # 抓取位姿的 base Z 额外偏移，单位米；0.0 表示不偏移。
-    grasp_base_z_offset_m: 0.0
-
-rebotarm_grasp_preview_sender:
-  ros__parameters:
-    # 预览发送的位姿模式：pregrasp 表示发送预抓取位姿（更安全，末端不贴住物体）；
-    # 另一可选值为抓取位姿，用于细看夹爪闭合点。
-    pose_mode: pregrasp
-    # 预览目标坐标系（TF 目标 frame），抓取位姿会被换算到该坐标系后再发送。
-    target_frame: base_link
-    # end_link -> 抓取 TCP 的平移，单位米（沿末端 X 轴 -4 cm），用于把位姿换算到 TCP。
-    tcp_offset_xyz: [-0.04, 0.0, 0.0]
-    # 目标点整体平移补偿，单位米；全 0 表示不补偿。
-    target_base_offset_xyz: [0.0, 0.0, 0.0]
-    # 预览目标的最低 Z 高度，单位米；大于 0 时会把目标点抬高到该值（安全下限），
-    # 0.0 表示不做下限抬升。
-    min_target_z_m: 0.0
 
 rebotarm_visual_grasp_markers:
   ros__parameters:

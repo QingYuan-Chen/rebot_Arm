@@ -9,7 +9,6 @@ from types import SimpleNamespace as NS
 import pytest
 from sensor_msgs.msg import JointState
 from rebotarm_motion.feedback_receiver import MotionFeedbackStore
-from rebotarm_vision.grasp_input_receiver import GraspInputMailbox
 
 
 def joints(seconds):
@@ -88,31 +87,6 @@ def test_snapshot_cannot_mutate_receiver_owned_messages():
     store.error = 'injected executor failure'
     with pytest.raises(RuntimeError, match='executor failure'):
         store.snapshot(10., 10_000_000_000)
-
-
-def test_empty_candidate_revocation_survives_new_candidates_and_bounded_mailbox():
-    mailbox = GraspInputMailbox()
-    mailbox.receive('plan', 'old-plan')
-    mailbox.receive('candidates', NS(candidates=[]))
-    for i in range(100):
-        mailbox.receive('candidates', NS(candidates=[i]))
-    events = mailbox.take()
-    assert len(events) == 3
-    assert events[0][2] == 'old-plan'
-    assert events[1][2].candidates == []
-    assert events[2][2].candidates == [99]
-    assert mailbox.take() == []
-
-
-def test_confirmed_stop_requires_inputs_received_after_reopening():
-    mailbox = GraspInputMailbox()
-    mailbox.receive('plan', 'before-stop')
-    mailbox.block(True)
-    mailbox.receive('plan', 'during-stop')
-    mailbox.block(False)
-    assert mailbox.take() == []
-    mailbox.receive('plan', 'after-stop')
-    assert mailbox.take()[0][2] == 'after-stop'
 
 
 def test_success_result_after_feedback_gap_still_cancels_old_pose():

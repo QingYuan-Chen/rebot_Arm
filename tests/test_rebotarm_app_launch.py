@@ -50,6 +50,8 @@ def test_rebotarm_app_launch_exposes_simple_modes_and_profiles() -> None:
     assert 'executable="TeleopKeyboardNode"' not in launch_text
     assert 'safe_name = os.path.basename(safe_name.replace("\\\\", "/")) or "teach_record"' in launch_text
     assert 'return f"teleop_records/{safe_name}"' in launch_text
+    calibration = launch_text.split('executable="rebotarm_handeye_capture"',1)[1].split('return actions',1)[0]
+    assert '"arm_namespace": arm_namespace' in calibration
 
 
 def test_web_teleop_rviz_is_robot_status_only() -> None:
@@ -121,10 +123,6 @@ def test_operator_configs_are_split_by_consumer() -> None:
         text = _read(f"src/rebotarm_bringup/launch/{launch_path}")
         assert 'DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy"' in text
         assert '"trajectory_execution_mode":' in text
-    visual = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
-    backend = _read("src/rebotarm_bringup/launch/includes/visual_backend.launch.py")
-    assert '"trajectory_execution_mode": "legacy"' in visual
-    assert '"trajectory_execution_mode": trajectory_mode' in backend
     interactive = _read("src/rebotarm_bringup/launch/interactive_system.launch.py")
     assert '"prepare_trajectories": prepare_trajectories' in interactive
     assert "condition=IfCondition(use_moveit_stack)" in interactive
@@ -161,7 +159,6 @@ def test_keyboard_no_hardware_mode_uses_one_simulated_trajectory_backend() -> No
     assert "interactive_system.launch.py" in keyboard
     assert keyboard.count("condition=UnlessCondition(use_prepared_hardware)") == 2
     assert '"use_moveit_fake_joint_states": "false"' in keyboard
-    assert '"grasp_hold_timeout_sec": "30.0"' in keyboard
 
 
 def test_teleop_system_forwards_execution_mode_to_dashboard() -> None:

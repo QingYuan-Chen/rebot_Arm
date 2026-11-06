@@ -1,37 +1,32 @@
-# Ubuntu 原生视觉链路的参数文件（vision_profile:=ubuntu_native）。
+# Ubuntu 原生 D405 视觉链路的参数文件。
 # 由启动文件加载，节点之间的输入/输出话题、相机取流 profile 与检测模型都集中在这里。
-# 三个顶层键必须与节点名完全一致，否则参数不会生效：
+# 顶层键必须与节点名完全一致，否则参数不会生效：
 #   rebotarm_vision_node            —— 相机取流 + YOLO 检测节点
 #   rebotarm_grasp_tcp_frame        —— 抓取 TCP 静态坐标系广播节点
-# 注意：本文件中的话题名、坐标系名、参数键都是对外接口，禁止改动；只允许增加注释。
+# 话题名和坐标系名沿用现有下游接口。
 
 rebotarm_vision_node:
   ros__parameters:
-    # 相机型号选择器：目前仅支持 gemini2（其它取值会让节点在启动时抛 unsupported camera.type）。
-    camera.type: gemini2
-    # 已在本 Ubuntu 主机验证的 Gemini 2 硬件深度到彩色对齐流组合。
-    # 以下 color_*/depth_* 五元组是本机实测可用的 Gemini 2 硬件 D2C（深度-彩色对齐）配对组合，
-    # 改动任一项都可能破坏对齐，导致深度图与彩色图不再逐像素对应；非必要不要调整。
-    # 彩色流宽/高（像素）：640x480 是检测与内参默认值所对应的分辨率，换分辨率需同步更新内参。
+    # 腕部 D405；640x480@30 为请求档位，实际设备验收另行记录。
+    camera.type: d405
+    # 内参从 SDK 实际 profile 读取，随分辨率更新。
     camera.color_width: 640
     camera.color_height: 480
     # 彩色流帧率（fps）。提高会增加 USB 带宽与 CPU 占用；降低会让检测结果更新变慢。
     camera.color_fps: 30
-    # 彩色流像素格式：MJPG 为压缩传输，可在 USB 带宽受限时保住 640x480@30；
-    # 改为 YUYV 等未压缩格式会显著增加带宽占用，可能掉帧。
-    camera.color_format: MJPG
+    # SDK 直接提供 BGR8，保持既有 ROS bgr8 接口。
+    camera.color_format: BGR8
     # 是否启用深度流。关闭后没有点云/深度，抓取链路无法工作（仅剩二维检测）。
     camera.enable_depth: true
-    # 深度流宽/高（像素）：640x400 是该相机的原生深度分辨率，与彩色不同宽高比。
+    # 原始深度为 Z16；按 SDK 实际 depth scale 转成毫米 uint16。
     camera.depth_width: 640
-    camera.depth_height: 400
+    camera.depth_height: 480
     # 深度流帧率（fps）。
     camera.depth_fps: 30
     # 是否开启深度对齐到彩色坐标系（D2C）。开启后深度图可按彩色像素坐标索引，
     # 检测框无需再做坐标换算即可取深度；本仓库的相机内参与该开关配套使用，务必保持 true。
     camera.enable_align: true
-    # Gemini 2 SDK 按硬件时间戳配合彩色/深度帧；正式 RGB-D 抓取保持开启。
-    camera.enable_frame_sync: true
+    # RealSense pipeline 提供同步 frameset；缺流时保持空检测，不借用历史帧。
     # 启动时丢弃的前若干帧：自动曝光/自动白平衡与深度引擎尚未稳定，前几帧深度常为无效值。
     camera.warmup_frames: 15
     # 单帧等待超时，单位毫秒。超时即视为本帧失败（USB 抖动或设备被抢占）。

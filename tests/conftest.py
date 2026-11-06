@@ -222,9 +222,6 @@ def _ensure_ros_stubs() -> None:
     rebotarm_msgs_msg.GraspPlan = GraspPlan
     _module("rebotarm_msgs").msg = rebotarm_msgs_msg
     rebotarm_msgs_srv = _module("rebotarm_msgs.srv")
-    rebotarm_msgs_srv.ExecutePose = _Service
-    rebotarm_msgs_srv.PublishTrajectoryPreview = _Service
-    rebotarm_msgs_srv.GraspGripper = _Service
     rebotarm_msgs_srv.SetGripper = _Service
     _module("rebotarm_msgs").srv = rebotarm_msgs_srv
 

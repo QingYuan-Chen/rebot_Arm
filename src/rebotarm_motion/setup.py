@@ -42,7 +42,6 @@ setup(
             "PoseCompatNode = rebotarm_motion.pose_compat_node:main",
             "TrajectoryPreparationNode = rebotarm_motion.trajectory_preparation_node:main",
             "TrajectoryRetimingNode = rebotarm_motion.trajectory_retiming_node:main",
-            "PoseExecutionNode = rebotarm_motion.pose_execution_node:main",
             "rebotarm_mujoco_moveit_acceptance = rebotarm_motion.mujoco_moveit_acceptance:main",
         ],
     },

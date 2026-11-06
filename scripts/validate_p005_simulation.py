@@ -461,53 +461,6 @@ def ros_acceptance(output, dashboard, teach_record=None):
         results['teach_coordinated']=replay
         assert replay['state']=='done',replay
         assert raw.read_bytes()==original,'raw teach recording was overwritten'
-        # 复用视觉序列和服务网关；只给已知可达的接触前目标，不启动相机或抓取续动。
-        from rebotarm_vision.visual_grasp_sequence import (
-            PoseTarget,VisualGraspSequenceConfig,build_visual_grasp_sequence)
-        from rebotarm_vision.visual_grasp_service_gateway import VisualGraspServiceGateway
-        from rebotarm_vision.visual_grasp_state import VisualGraspState
-        from rebotarm_motion.pose_kinematics import PoseKinematics
-        from rebotarm_msgs.srv import ExecutePose,PublishTrajectoryPreview
-        from types import SimpleNamespace
-        import pinocchio as pin
-        pause(.8)
-        current=dict(zip(latest['joint'].name,latest['joint'].position))
-        model=PoseKinematics()
-        def pose_for(delta):
-            q=[current[n]+(delta if n=='joint1' else 0.) for n in names]
-            pose=model.pose(q)
-            return PoseTarget(tuple(pose.translation),tuple(pin.Quaternion(pose.rotation).coeffs()))
-        width=current['left_finger_joint']*2.+.0004
-        # 目标须超过节点的位姿容差；亚毫米目标会让 IK 在容差内任选解，无法稳定验证移动。
-        stages=build_visual_grasp_sequence(pose_for(.03),pose_for(.06),
-            VisualGraspSequenceConfig(coordinated_position_only=True,open_position_m=width))
-        config=dict(trajectory_execution_mode='prepared_v1',execution_mode='plan_only',
-            target_frame='base_link',acceleration_scaling=.03,move_velocity_scaling=.03,
-            approach_velocity_scaling=.03,retreat_velocity_scaling=.03)
-        def visual_call(key,request,timeout):
-            if key=='gripper':
-                return call(SetGripper,'/rebotarm/gripper/set',request,timeout),''
-            service,path=(ExecutePose,'execute_pose') if key=='execute_pose' else (PublishTrajectoryPreview,'publish_trajectory_preview')
-            return call(service,'/rebotarm/motion_execution/'+path,request,timeout),''
-        visual_state=VisualGraspState()
-        gateway=VisualGraspServiceGateway(state=visual_state,config=config,
-            io_gateway=SimpleNamespace(call=visual_call))
-        ok,message=gateway._call_gripper(stages[0]);assert ok,message
-        pause(.5)
-        for stage in stages[1:]:
-            ok,message=gateway._send_execute_pose(stage,execute=False)
-            assert ok,message
-        assert len(visual_state.preview_trajectories)==2 and not visual_state.preview_gripper_events
-        assert all(len(t.joint_names)==6 for t in visual_state.preview_trajectories)
-        ok,message=gateway._publish_preview_sequence();assert ok,message
-        gateway._execution_mode='execute'
-        ok,message=gateway._call_gripper(stages[0]);assert ok,message
-        for stage in stages[1:]:
-            pause(.8)
-            ok,message=gateway._send_execute_pose(stage,execute=True)
-            assert ok,message
-        results['visual_precontact']=dict(stages=[s.name for s in stages],message=message,
-            preview_tracks=[message_to_ordereddict(t) for t in visual_state.preview_trajectories])
         # 显式取消并等新帧静止确认，之后继续接纳。
         target=list(latest['joint'].position[:6]);target[0]+=.03
         handle=send(arm,make(target,2.))

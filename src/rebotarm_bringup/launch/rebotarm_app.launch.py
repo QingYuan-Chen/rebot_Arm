@@ -212,7 +212,8 @@ def _launch_setup(context, *args, **kwargs):
     actions.append(Node(
         package="rebotarm_calibration", executable="rebotarm_handeye_capture",
         output="screen", condition=IfCondition(LaunchConfiguration("calibration")),
-        parameters=[{"image_topic": LaunchConfiguration("calibration_image_topic"),
+        parameters=[{"arm_namespace": arm_namespace,
+                     "image_topic": LaunchConfiguration("calibration_image_topic"),
                      "camera_info_topic": LaunchConfiguration("calibration_camera_info_topic"),
                      "session_directory": LaunchConfiguration("calibration_session_directory")}],
     ))

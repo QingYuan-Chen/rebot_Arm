@@ -159,8 +159,6 @@ def generate_launch_description():
                     "arm_namespace": arm_namespace,
                     "trajectory_execution_mode": trajectory_mode,
                     "use_local_rviz": use_local_rviz,
-                    # 保留旧键盘直接包含硬件片段时的夹持超时，不继承组合的 10 s 默认。
-                    "grasp_hold_timeout_sec": "30.0",
                 }.items(),
             ),
             # 无硬件分支的轨迹服务端：提供键盘所需的 FollowJointTrajectory，并发布可视化用的

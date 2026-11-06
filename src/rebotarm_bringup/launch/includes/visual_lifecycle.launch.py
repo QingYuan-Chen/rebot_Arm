@@ -11,6 +11,5 @@ def generate_launch_description():
         IncludeLaunchDescription(PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare("rebotarm_bringup"), "launch", "includes", name + ".launch.py"
         ])))
-        for name in ("visual_input", "grasp_candidate", "candidate_filter",
-                     "motion_execution", "grasp_executor", "grasp_preview")
+        for name in ("visual_input", "grasp_candidate", "candidate_filter", "grasp_preview")
     ])
