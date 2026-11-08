@@ -178,8 +178,8 @@ def create_status_panel_server(
                         self.wfile.write(encode_sse_event(store.snapshot_dict()).encode("utf-8"))
                         self.wfile.flush()
                         time.sleep(sse_interval_sec)
-                except Exception:
-                    # 连接断开或写入失败都会中断循环，静默结束该请求线程。
+                except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                    # 浏览器断连时结束该请求线程。
                     return
             # 以上分支都没命中时的兜底响应（/events 分支内部是死循环，正常不会走到这里）。
             self.send_response(404)

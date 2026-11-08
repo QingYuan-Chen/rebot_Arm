@@ -65,15 +65,18 @@ def test_gravity_status_requires_fresh_healthy_enabled_feedback(arm, age, state,
 def test_dispatch_blocks_conflicting_start():
     from rebotarm_dashboard.status_panel_api import dispatch_post_request
     from types import SimpleNamespace
-    node=SimpleNamespace(_calibration_gravity_owned=True)
+    import threading
+    node=SimpleNamespace(_calibration_gravity_owned=True, _operator_request_lock=threading.RLock())
     assert dispatch_post_request(node,'/api/keyboard_enable',lambda:{})['state']=='blocked'
 
 
 def test_dispatch_allows_teach_record_stop_during_gravity_compensation():
     from rebotarm_dashboard.status_panel_api import dispatch_post_request
     from types import SimpleNamespace
+    import threading
 
     node = SimpleNamespace(
+        _operator_request_lock=threading.RLock(),
         _calibration_gravity_owned=True,
         _handle_teach_record_stop=lambda: {"accepted": True, "state": "stopped"},
     )
@@ -84,8 +87,10 @@ def test_dispatch_allows_teach_record_stop_during_gravity_compensation():
 def test_dispatch_allows_teach_dry_run_during_gravity_compensation():
     from rebotarm_dashboard.status_panel_api import dispatch_post_request
     from types import SimpleNamespace
+    import threading
 
     node = SimpleNamespace(
+        _operator_request_lock=threading.RLock(),
         _calibration_gravity_owned=True,
         _handle_teach_dry_run=lambda payload: {"accepted": True, "state": "dry_run"},
     )

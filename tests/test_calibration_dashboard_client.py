@@ -38,7 +38,7 @@ def test_calibration_wait_does_not_block_operator_stop():
         entered.set()
         assert release.wait(2)
         return {}
-    node=NS(_operator_request_lock=threading.RLock(),_handle_calibration_command=slow,
+    node=NS(_operator_request_lock=threading.RLock(),_calibration_gravity_owned=False,_handle_calibration_command=slow,
             _handle_stop_execute=lambda:{'stopped':True})
     thread=threading.Thread(target=lambda:dispatch_post_request(node,'/api/calibration/command',lambda:{}))
     thread.start()

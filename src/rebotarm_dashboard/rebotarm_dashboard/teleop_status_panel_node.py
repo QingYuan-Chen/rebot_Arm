@@ -80,7 +80,6 @@ from .arm_command_api import (
     should_stop_trajectory_before_arm_command,
     status_state,
 )
-from .parameter_helpers import build_joint_limits
 from .parameter_helpers import sensor_qos_kwargs
 from .status_panel_http import create_status_panel_server
 from .status_panel_page import HTML_PAGE
@@ -95,12 +94,9 @@ from rebotarm_teach.teach_replay_trajectory_builder import set_duration
 from .web_robot_assets import (
     DEFAULT_GRIPPER_LIMITS_M,
     gripper_opening_to_finger_joint_positions,
-    load_gripper_limits,
-    load_moveit_velocity_limits,
     load_urdf_joint_limits,
-    merge_velocity_limits,
-    merge_joint_limits,
 )
+from rebotarm_motion.trajectory_runtime_limits import load_joint_runtime_limits
 from rebotarm_teleop.web_execute import (
     WebExecuteDecision,
     WebGripperDecision,
@@ -117,33 +113,15 @@ def _set_duration(duration_msg, seconds: float) -> None:
     set_duration(duration_msg, seconds)
 
 
-def _is_number_like(value) -> bool:
-    """判断 ``value`` 能否被 ``float()`` 接受（字符串形式的数字也算）。
-
-    注意：不接受 ``None``、非法字符串等无法转换的对象；本函数不判断有限性，
-    NaN/Infinity 会返回 True。
-    """
+def _request_number(payload: dict, key: str, default: float) -> float:
+    """缺省使用声明值；显式提供的值必须为有限数。"""
     try:
-        float(value)
-    except (TypeError, ValueError):
-        return False
-    return True
-
-
-def _number_or_default(value, default: float) -> float:
-    """把 Web 请求里的数值类字段转成 float，取不到有效值时退回 ``default``。
-
-    Web 传来的 JSON 值可能是字符串、null 或缺失，因此先尝试转换；再排除非有限值，
-    因为 NaN/Infinity 会污染后续的插值与限位比较（限位比较对 NaN 恒为假，会导致
-    越界值被静默放过）。
-    """
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return float(default)
-    if not _is_number_like(number) or not math.isfinite(number):
-        return float(default)
-    return float(number)
+        value = float(payload[key] if key in payload else default)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid {key}") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"invalid {key}")
+    return value
 
 
 def _decision_response(decision: WebExecuteDecision) -> dict:
@@ -198,8 +176,7 @@ class TeleopStatusPanelNode(Node):
         - Web 点对点运动：``web_execute_*``、``web_keyboard_*``。
         - 运行模式与安全开关：``use_hardware``、``execution_mode``、``panel_mode``、
           ``web_execute_enabled``。
-        - 关节几何：``joint_names``、``joint_lower_limits``、``joint_upper_limits``
-          （仅作 URDF 读取失败时的回退值）。
+        - 关节几何：``joint_names``；位置限位读取规范 URDF。
 
     线程与并发
         HTTP 线程与执行器线程并发访问状态存储（内部加锁）；:attr:`_execute_lock` 保护当前
@@ -319,8 +296,7 @@ class TeleopStatusPanelNode(Node):
         # resample_enabled（bool）/ resample_rate_hz（Hz）：是否重采样及目标采样率，默认 150 Hz。
         self.declare_parameter("resample_enabled", True)
         self.declare_parameter("resample_rate_hz", 150.0)
-        # time_parameterization_method：重定时方法，取值 "auto" / "current_jerk_retime" / "ruckig"，
-        # 非法值回落为 "auto"。
+        # time_parameterization_method：重定时方法，取值 "auto" / "current_jerk_retime" / "ruckig"。
         self.declare_parameter("time_parameterization_method", "auto")
         # max_prepared_jump_rad（rad）：预处理后允许的最大相邻点跳变，真实回放的门控之一。
         self.declare_parameter("max_prepared_jump_rad", 0.02)
@@ -348,21 +324,11 @@ class TeleopStatusPanelNode(Node):
         self._physical_simulation = self.get_parameter('simulation_backend').value == 'mujoco'
         # panel_mode：界面工作模式，"control" 可操作；"check" 为只读，仅观察状态。
         self.declare_parameter("panel_mode", "control")
-        # ---------------- 关节几何（URDF 读取失败时的回退值） ----------------
+        # ---------------- 关节几何 ----------------
         # joint_names：受控关节名，顺序即位置向量顺序，也是各类轨迹消息中的关节顺序。
         self.declare_parameter(
             "joint_names",
             ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
-        )
-        # joint_lower_limits / joint_upper_limits（rad）：回退关节限位，默认 ±3.14159 rad（±180°）；
-        # 正常情况下会被 URDF 中的真实限位覆盖（见下方 merge_joint_limits 调用）。
-        self.declare_parameter(
-            "joint_lower_limits",
-            [-3.14159, -3.14159, -3.14159, -3.14159, -3.14159, -3.14159],
-        )
-        self.declare_parameter(
-            "joint_upper_limits",
-            [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159],
         )
         # ---------------- Web 点对点运动与键盘遥操作参数 ----------------
         # web_execute_enabled（bool）：面板是否允许下发运动命令；默认关闭，必须显式打开。
@@ -403,35 +369,18 @@ class TeleopStatusPanelNode(Node):
         moveit_share = Path(get_package_share_directory("rebotarm_moveit_config"))
         self._urdf_path = moveit_share / "config" / "rebotarm.urdf"
         self._mesh_dir = moveit_share / "meshes"
-        lower = tuple(float(v) for v in self.get_parameter("joint_lower_limits").value)
-        upper = tuple(float(v) for v in self.get_parameter("joint_upper_limits").value)
-        fallback_limits = build_joint_limits(
-            joint_names=self._joint_names,
-            lower_limits=lower,
-            upper_limits=upper,
-        )
-        try:
-            urdf_limits = load_urdf_joint_limits(self._urdf_path, self._joint_names)
-        except Exception as exc:
-            # URDF 缺失或损坏不应让面板起不来：退回参数限位继续运行，但必须留下告警。
-            self.get_logger().warn(f"failed to load URDF joint limits, using parameter limits: {exc}")
-            urdf_limits = {}
-        # 优先用 URDF 中的真实限位，缺失的关节才退回参数值（合并逻辑不改变逐关节覆盖关系）。
-        self._joint_limits = merge_joint_limits(
-            joint_names=self._joint_names,
-            fallback_limits=fallback_limits,
-            preferred_limits=urdf_limits,
-        )
-        # 速度限位优先取机械臂配置包 joint_limits.yaml（MoveIt 标定值），缺失时回退到 Web 速度上限。
-        moveit_velocity_limits = load_moveit_velocity_limits(
+        self._joint_limits = load_urdf_joint_limits(self._urdf_path, self._joint_names)
+        runtime_limits = load_joint_runtime_limits(
             moveit_share / "config" / "joint_limits.yaml",
             self._joint_names,
         )
-        self._joint_velocity_limits = merge_velocity_limits(
-            joint_names=self._joint_names,
-            default_limit=float(self.get_parameter("web_execute_max_joint_speed_rad_s").value),
-            preferred_limits=moveit_velocity_limits,
-        )
+        web_speed_limit = float(self.get_parameter("web_execute_max_joint_speed_rad_s").value)
+        if not math.isfinite(web_speed_limit) or web_speed_limit <= 0:
+            raise ValueError("web_execute_max_joint_speed_rad_s must be positive and finite")
+        self._joint_velocity_limits = {
+            name: web_speed_limit if limit.max_velocity is None else limit.max_velocity
+            for name, limit in runtime_limits.items()
+        }
         gripper_lower = float(self.get_parameter("gripper_lower_limit_m").value)
         gripper_upper = float(self.get_parameter("gripper_upper_limit_m").value)
         # 参数可能被写反（下限大于上限），这里统一排序，后续限位比较才可以只按 (low, high) 处理。
@@ -549,6 +498,7 @@ class TeleopStatusPanelNode(Node):
         self._calibration_gravity_owned = False
         self._calibration_gravity_tracker = GravityRequestTracker()
         self._arm_status_received_at = None
+        self._gripper_source_ns = 0
         self._operator_request_lock = threading.RLock()
         self._execute_lock = threading.Lock()
         self._execute_goal_handle = None
@@ -703,7 +653,7 @@ class TeleopStatusPanelNode(Node):
 
         前端据此渲染输入框的取值范围、限位滑块与只读/可写状态；因此这里回传的是
         "面板实际生效的限位与阈值"，而不是原始参数字典——例如 ``joint_limits`` 已经
-        合并过 URDF 限位，``joint_velocity_limits`` 已回退过默认速度上限。
+        位置限位来自 URDF，关闭的可选速度限位使用配置的 Web 速度上限。
         """
         return {
             # use_hardware 是前端功能裁剪的唯一后端类型依据：仿真模式隐藏只对真机有意义的
@@ -796,7 +746,7 @@ class TeleopStatusPanelNode(Node):
 
     def _collision_default_joint_positions(self, joint_names: tuple[str, ...]) -> tuple[tuple[str, float], ...]:
         """示教使用新鲜真实开度；网页的闭合策略只在新 Action 的准备副本中生效。"""
-        stamp = getattr(self,'_gripper_source_ns',0)
+        stamp = self._gripper_source_ns
         if stamp <= 0 or not -.05 <= (self.get_clock().now().nanoseconds-stamp)/1e9 <= .15:
             raise ValueError('fresh actual gripper feedback required for teach collision checking')
         width = float(self._store.snapshot().joints['gripper']['position'])
@@ -890,19 +840,23 @@ class TeleopStatusPanelNode(Node):
             return gateway_result
         return self._teach_workflow.stop()
 
-    def _request_controller_trajectory_stop(self, *, timeout_sec: float) -> bool:
-        """请求控制器级急停（非阻塞）：返回是否成功发出请求。
+    def _request_controller_trajectory_stop(self, *, timeout_sec: float) -> tuple[bool, str]:
+        """请求控制器级急停（非阻塞）：返回发出状态及说明。
 
         等待服务最多 0.2 s（即使调用方给了更长的超时），因为停止属于紧急路径，不能在
         这里阻塞执行器线程；发出请求后不等待响应，避免与动作层取消相互等待造成死锁。
         """
         try:
             if not self._trajectory_stop_client.wait_for_service(timeout_sec=min(timeout_sec, 0.2)):
-                return False
+                message = "trajectory_stop service unavailable"
+                self.get_logger().error(message)
+                return False, message
             self._trajectory_stop_client.call_async(Trigger.Request())
-            return True
-        except Exception:
-            return False
+            return True, "trajectory_stop requested"
+        except Exception as exc:
+            message = f"trajectory_stop request failed: {exc}"
+            self.get_logger().error(message)
+            return False, message
 
     def _call_trigger_service(self, client, *, timeout_sec: float) -> tuple[bool, str]:
         """同步调用触发器服务的薄封装（复用整臂客户端的超时/等待实现），返回 (成功, 说明)。"""
@@ -1012,9 +966,12 @@ class TeleopStatusPanelNode(Node):
             message = "web keyboard blocked: check mode is read-only"
             self._store.update_teleop_status("status", {"source": "web_keyboard", "state": "blocked", "message": message})
             return {"accepted": False, "message": message}
-        step = _number_or_default(payload.get("step_rad"), self._web_keyboard_step_rad)
-        duration = _number_or_default(payload.get("duration"), self._web_keyboard_duration)
-        speed = _number_or_default(payload.get("max_joint_speed_rad_s"), self._web_keyboard_speed)
+        try:
+            step = _request_number(payload, "step_rad", self._web_keyboard_step_rad)
+            duration = _request_number(payload, "duration", self._web_keyboard_duration)
+            speed = _request_number(payload, "max_joint_speed_rad_s", self._web_keyboard_speed)
+        except ValueError as exc:
+            return {"accepted": False, "message": str(exc)}
         with self._web_keyboard_lock:
             self._web_keyboard_step_rad = min(
                 max(step, float(self.get_parameter("web_keyboard_min_step_rad").value)),
@@ -1052,12 +1009,12 @@ class TeleopStatusPanelNode(Node):
             return gateway_result
         with self._web_keyboard_lock:
             self._web_keyboard_enabled = False
-        stop_requested = self._request_controller_trajectory_stop(timeout_sec=0.2)
+        stop_requested, stop_message = self._request_controller_trajectory_stop(timeout_sec=0.2)
         result = {
             "accepted": True,
             "source": "web_keyboard",
             "state": "disabled",
-            "message": "web keyboard teleop disabled; trajectory_stop requested" if stop_requested else "web keyboard teleop disabled",
+            "message": f"web keyboard teleop disabled; {stop_message}",
             "trajectory_stop_requested": stop_requested,
         }
         self._store.update_teleop_status("status", result)
@@ -1410,15 +1367,14 @@ class TeleopStatusPanelNode(Node):
     def _on_gripper_result(self, future, decision: WebGripperDecision) -> None:
         """夹爪动作最终结果回调：``reached_goal`` 为真记 done，否则记 failed。
 
-        位置/力矩字段在部分控制器实现中可能缺失，因此取默认值兜底而不是直接抛错——
-        一次缺字段不应让面板状态卡在中间态。
+        消息字段缺失或 Future 失败时明确显示失败。
         """
         try:
             result_response = future.result()
             result = result_response.result
-            reached = bool(getattr(result, "reached_goal", False))
-            position = float(getattr(result, "position", decision.position))
-            effort = float(getattr(result, "effort", 0.0))
+            reached = bool(result.reached_goal)
+            position = float(result.position)
+            effort = float(result.effort)
         except Exception as exc:
             self._store.update_teleop_status("web_gripper", {"state": "failed", "message": str(exc)})
             return
@@ -1454,7 +1410,7 @@ class TeleopStatusPanelNode(Node):
         """取消响应只表示请求处理；整体终态只由本 Goal 的 Result 确认。"""
         try:
             response = future.result()
-            goals_canceling = len(getattr(response, "goals_canceling", []))
+            goals_canceling = len(response.goals_canceling)
             message = ('trajectory cancel accepted; waiting for task result' if goals_canceling
                 else 'cancel response has no accepted goal; waiting for task result')
         except Exception as exc:
@@ -1519,8 +1475,12 @@ class TeleopStatusPanelNode(Node):
             result_response = future.result()
             result = result_response.result
             status = int(result_response.status)
-            error_code = int(getattr(result, "error_code", 0))
-            error_string = str(getattr(result, "error_string", ""))
+            error_code = int(result.error_code)
+            error_string = str(result.error_string)
+            if self._trajectory_capability.expected == 'prepared_v1':
+                arm_state, gripper_state = result.arm_state, result.gripper_state
+            else:
+                arm_state, gripper_state = '', ''
         except Exception as exc:
             self._store.update_teleop_status("web_execute", {"state": "failed", "message": str(exc)})
             with self._execute_lock:
@@ -1540,7 +1500,7 @@ class TeleopStatusPanelNode(Node):
             {
                 "state": state,
                 "message": f"trajectory result status={status}, error_code={error_code}: {error_string}",
-                "arm_state": getattr(result,"arm_state",""), "gripper_state": getattr(result,"gripper_state",""),
+                "arm_state": arm_state, "gripper_state": gripper_state,
                 "max_delta": decision.max_delta,
                 "max_delta_limit": decision.max_delta_limit,
                 "duration": decision.duration,
@@ -1617,7 +1577,7 @@ class TeleopStatusPanelNode(Node):
         """
         try:
             value = json.loads(msg.data)
-        except Exception:
+        except json.JSONDecodeError:
             value = msg.data
         self._store.update_teleop_status(key, value)
 
@@ -1633,7 +1593,7 @@ class TeleopStatusPanelNode(Node):
         """
         snapshot = self._store.snapshot()
         arm_state = str(snapshot.arm.get("state_machine", ""))
-        received = getattr(self, '_arm_status_received_at', None)
+        received = self._arm_status_received_at
         age = time.monotonic() - received if received is not None else None
         fresh = age is not None and 0 <= age <= .5
         self._store.update_teleop_status('arm_feedback', {

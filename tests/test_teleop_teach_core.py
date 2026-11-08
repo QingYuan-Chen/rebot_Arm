@@ -68,11 +68,7 @@ from rebotarm_dashboard.web_robot_assets import (
     DEFAULT_GRIPPER_LIMITS_M,
     clamp_gripper_opening,
     gripper_opening_to_finger_joint_positions,
-    load_gripper_limits,
-    load_moveit_velocity_limits,
     load_urdf_joint_limits,
-    merge_velocity_limits,
-    merge_joint_limits,
     rewrite_package_mesh_uris,
     safe_mesh_path,
 )
@@ -84,6 +80,13 @@ from rebotarm_teleop.web_execute import (
 
 
 class KeyboardTeleopCoreTests(unittest.TestCase):
+    def test_keyboard_parameters_reject_explicit_invalid_values(self) -> None:
+        from rebotarm_dashboard.teleop_status_panel_node import _request_number
+        self.assertEqual(_request_number({}, "step_rad", .2), .2)
+        for value in (None, "invalid", float("nan"), float("inf")):
+            with self.assertRaisesRegex(ValueError, "invalid step_rad"):
+                _request_number({"step_rad": value}, "step_rad", .2)
+
     def test_keyboard_mapping_uses_configured_joint_pairs(self) -> None:
         mapper = KeyboardCommandMapper(
             joint_names=("joint1", "joint2"),
@@ -111,6 +114,13 @@ class KeyboardTeleopCoreTests(unittest.TestCase):
         self.assertTrue(target.accepted)
         self.assertEqual(target.positions, (1.0, 0.0))
         self.assertIn("clamped", target.message)
+
+    def test_target_planner_rejects_incomplete_or_nonfinite_feedback(self) -> None:
+        planner = TeleopTargetPlanner(joint_names=("joint1", "joint2"),
+            joint_limits={"joint1": (-1., 1.), "joint2": (-1., 1.)}, joint_step_rad=.1)
+        for current in ({"joint1": 0.}, {"joint1": 0., "joint2": float("nan")}):
+            self.assertFalse(planner.apply_delta(current_positions=current,
+                joint_name="joint1", direction=1.).accepted)
 
     def test_web_keyboard_command_uses_key_mapping_and_duration(self) -> None:
         decision = validate_web_keyboard_command(
@@ -207,6 +217,9 @@ class ArmCommandApiTests(unittest.TestCase):
 class StatusPanelApiRouterTests(unittest.TestCase):
     class FakePanelNode:
         def __init__(self) -> None:
+            import threading
+            self._operator_request_lock = threading.RLock()
+            self._calibration_gravity_owned = False
             self.calls: list[tuple[str, object]] = []
 
         def _handle_arm_service_command(self, command: str) -> dict:
@@ -1202,29 +1215,12 @@ class WebRobotAssetTests(unittest.TestCase):
     def test_load_urdf_joint_limits_reads_revolute_limits(self) -> None:
         urdf_path = ROOT / "src" / "rebotarm_moveit_config" / "config" / "rebotarm.urdf"
 
-        limits = load_urdf_joint_limits(urdf_path, ("joint1", "joint2", "missing_joint"))
+        limits = load_urdf_joint_limits(urdf_path, ("joint1", "joint2"))
 
         self.assertEqual(limits["joint1"], (-2.8, 2.8))
         self.assertEqual(limits["joint2"], (-3.14, 0.02))
-        self.assertNotIn("missing_joint", limits)
-
-    def test_merge_joint_limits_prefers_urdf_and_falls_back_to_params(self) -> None:
-        merged = merge_joint_limits(
-            joint_names=("joint1", "joint2"),
-            fallback_limits={"joint1": (-1.0, 1.0), "joint2": (-2.0, 2.0)},
-            preferred_limits={"joint2": (-0.5, 0.5)},
-        )
-
-        self.assertEqual(merged["joint1"], (-1.0, 1.0))
-        self.assertEqual(merged["joint2"], (-0.5, 0.5))
-
-    def test_load_gripper_limits_defaults_to_controller_opening_range(self) -> None:
-        self.assertEqual(load_gripper_limits({}), DEFAULT_GRIPPER_LIMITS_M)
-
-    def test_load_gripper_limits_accepts_explicit_opening_range(self) -> None:
-        limits = load_gripper_limits({"closed_position_m": 0.01, "open_position_m": 0.08})
-
-        self.assertEqual(limits, (0.01, 0.08))
+        with self.assertRaisesRegex(ValueError, "missing_joint"):
+            load_urdf_joint_limits(urdf_path, ("missing_joint",))
 
     def test_gripper_opening_maps_to_symmetric_visual_finger_joints(self) -> None:
         self.assertEqual(clamp_gripper_opening(0.12, (0.0, 0.09)), 0.09)
@@ -1335,23 +1331,6 @@ class WebRobotAssetTests(unittest.TestCase):
                     "parent_group": "arm",
                 },
             )
-
-    def test_load_moveit_velocity_limits_reads_joint_limits_yaml(self) -> None:
-        path = ROOT / "src" / "rebotarm_moveit_config" / "config" / "joint_limits.yaml"
-
-        limits = load_moveit_velocity_limits(path, ("joint1", "joint6", "left_finger_joint"))
-
-        self.assertEqual(limits, {"joint1": 3.0, "joint6": 1.8, "left_finger_joint": 0.2})
-
-    def test_merge_velocity_limits_uses_default_when_missing(self) -> None:
-        merged = merge_velocity_limits(
-            joint_names=("joint1", "joint2"),
-            default_limit=0.5,
-            preferred_limits={"joint2": 1.0},
-        )
-
-        self.assertEqual(merged, {"joint1": 0.5, "joint2": 1.0})
-
 
 class WebExecuteCoreTests(unittest.TestCase):
     def test_web_execute_requires_confirmation(self) -> None:

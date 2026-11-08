@@ -112,7 +112,7 @@ def validate_web_execute_request(
       上限 rad，只会被收紧）、``duration``（期望时长 s）、``max_joint_speed_rad_s``
       （请求速度上限 rad/s，只会被收紧）。
     - ``current_positions``：实时关节反馈（关节名 → 当前角 rad），缺失即拒绝；
-    - ``joint_limits``：关节名 → (下限, 上限) rad，缺项时保守地按 ±π 处理；
+    - ``joint_limits``：完整的关节名 → (下限, 上限) rad 映射；
     - ``max_delta_rad`` / ``min_duration`` / ``max_duration``：服务端安全上限与时长区间；
     - ``joint_velocity_limits`` / ``max_joint_speed_rad_s``：逐关节与服务端速度上限
       （rad/s），二者都存在时逐关节取更小值。
@@ -157,7 +157,7 @@ def validate_web_execute_request(
         if not math.isfinite(target):
             return WebExecuteDecision(False, f"non-finite target for {name}")
 
-        lower, upper = joint_limits.get(name, (-math.pi, math.pi))
+        lower, upper = joint_limits[name]
         if upper < lower:
             lower, upper = upper, lower
         if target < lower or target > upper:
@@ -166,7 +166,10 @@ def validate_web_execute_request(
         if name not in current_positions:
             missing_current.append(name)
         else:
-            max_delta = max(max_delta, abs(target - float(current_positions[name])))
+            current = float(current_positions[name])
+            if not math.isfinite(current):
+                return WebExecuteDecision(False, f"non-finite live joint state: {name}")
+            max_delta = max(max_delta, abs(target - current))
         positions.append(target)
 
     # 增量门依赖实时反馈；反馈不全时不做「以 0 为基准」的乐观估算，直接拒绝。

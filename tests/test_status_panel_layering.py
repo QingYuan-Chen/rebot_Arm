@@ -1,6 +1,71 @@
 from __future__ import annotations
 
 
+def test_stop_request_reports_service_exception():
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    errors = []
+    def fail(**_kwargs):
+        raise RuntimeError('transport failed')
+    owner = NS(_trajectory_stop_client=NS(wait_for_service=fail),
+               get_logger=lambda: NS(error=errors.append))
+    ok, message = TeleopStatusPanelNode._request_controller_trajectory_stop(owner, timeout_sec=.2)
+    assert not ok
+    assert 'transport failed' in message
+    assert 'transport failed' in errors[-1]
+
+
+def test_keyboard_disable_reports_stop_failure():
+    import threading
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates = []
+    owner = NS(
+        _route_web_command=lambda *_args: None,
+        _web_keyboard_lock=threading.Lock(),
+        _web_keyboard_enabled=True,
+        _request_controller_trajectory_stop=lambda **_kwargs: (False, "transport failed"),
+        _store=NS(update_teleop_status=lambda *args: updates.append(args)),
+    )
+    result = TeleopStatusPanelNode._handle_keyboard_disable(owner)
+    assert not result["trajectory_stop_requested"]
+    assert "transport failed" in result["message"]
+    assert updates[-1][1] == result
+
+
+def test_status_callback_accepts_plain_text():
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates = []
+    owner = NS(_store=NS(update_teleop_status=lambda key, value: updates.append((key, value))))
+    TeleopStatusPanelNode._on_status(owner, 'status', NS(data='ready'))
+    assert updates == [('status', 'ready')]
+
+
+def test_incomplete_action_result_is_reported_as_failed():
+    import threading
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates = []
+    owner = NS(_store=NS(update_teleop_status=lambda key, value: updates.append((key, value))),
+               _execute_lock=threading.Lock(), _execute_goal_handle=object())
+    future = NS(result=lambda: NS(status=4, result=NS()))
+    TeleopStatusPanelNode._on_execute_result(owner, future, NS())
+    assert updates[-1][1]['state'] == 'failed'
+    assert 'error_code' in updates[-1][1]['message']
+    assert owner._execute_goal_handle is None
+
+
+def test_incomplete_gripper_result_is_reported_as_failed():
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates = []
+    owner = NS(_store=NS(update_teleop_status=lambda key, value: updates.append((key, value))))
+    TeleopStatusPanelNode._on_gripper_result(owner, NS(result=lambda: NS(result=NS())), NS())
+    assert updates[-1][1]['state'] == 'failed'
+    assert 'reached_goal' in updates[-1][1]['message']
+
+
 def test_web_cancel_reply_is_not_a_terminal_result_and_cannot_overwrite_next_goal():
     import threading
     from types import SimpleNamespace as NS

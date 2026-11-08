@@ -143,8 +143,8 @@ class TeleopTargetPlanner:
     ) -> TeleopTarget:
         """对 ``joint_name`` 施加 ``direction × joint_step_rad`` 的增量。
 
-        ``direction`` 来自键位表，通常为 ±1.0；``current_positions`` 中缺失的关节按 0.0 兜底
-        （关节反馈尚未到达时的保守初值）。越界时夹紧到限位而不是拒绝：操作者顶到限位后
+        ``direction`` 来自键位表，通常为 ±1.0；每个关节都必须有有限的当前位置。
+        越界时夹紧到限位：操作者顶到限位后
         继续按键应保持不动，而不是让命令失效或反向弹回。
         """
         if joint_name not in self._joint_names:
@@ -152,10 +152,15 @@ class TeleopTargetPlanner:
                 accepted=False,
                 message=f"unknown joint: {joint_name}",
                 joint_names=self._joint_names,
-                positions=self._ordered_positions(current_positions),
+                positions=(),
             )
 
+        missing = [name for name in self._joint_names if name not in current_positions]
+        if missing:
+            return TeleopTarget(False, f"missing live joint state: {', '.join(missing)}", self._joint_names, ())
         positions = list(self._ordered_positions(current_positions))
+        if not all(math.isfinite(value) for value in positions):
+            return TeleopTarget(False, "non-finite live joint state", self._joint_names, ())
         index = self._joint_names.index(joint_name)
         lower, upper = self._joint_limits[joint_name]
         proposed = positions[index] + (float(direction) * self._joint_step_rad)
@@ -175,8 +180,8 @@ class TeleopTargetPlanner:
         )
 
     def _ordered_positions(self, current_positions: dict[str, float]) -> tuple[float, ...]:
-        """按 ``joint_names`` 的顺序取出当前角度（rad）；缺失关节按 0.0 兜底。"""
-        return tuple(float(current_positions.get(name, 0.0)) for name in self._joint_names)
+        """按 ``joint_names`` 的顺序取出当前角度（rad）。"""
+        return tuple(float(current_positions[name]) for name in self._joint_names)
 
 
 def _float_from_payload(
