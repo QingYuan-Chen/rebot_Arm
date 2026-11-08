@@ -64,7 +64,7 @@ def solve_dataset(dataset):
         if not isinstance(samples, list):
             raise ValueError(f'{name} requires at least five samples')
         samples = [sample for sample in samples if not isinstance(sample, dict) or sample.get('sample_id') not in excluded]
-        if not isinstance(samples, list) or len(samples) < 5:
+        if len(samples) < 5:
             raise ValueError(f'{name} requires at least five samples')
         normalized = []
         for sample in samples:

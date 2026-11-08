@@ -55,12 +55,14 @@ class HandeyeCaptureNode(Node):
                 raise ValueError(f'{key} must be finite and positive')
             self.settings[key] = value
         self.provenance = runtime_provenance(self.settings)
-        self.store = SessionStore(self.settings['session_directory'])
+        self.store = SessionStore(self.settings['session_directory'],
+                                  image_topic=self.settings['image_topic'],
+                                  camera_info_topic=self.settings['camera_info_topic'])
         self.bridge = CvBridge()
         self._inputs = CaptureInputReceiver(self)
         self.buffer = self._inputs.buffer
         try:
-            self.configure_topics({})
+            self.configure_topics(self.settings)
             self.commands = MutuallyExclusiveCallbackGroup()
             self.service = self.create_service(CalibrationCommand, '~/command', self.command,
                                                callback_group=self.commands)
@@ -74,7 +76,7 @@ class HandeyeCaptureNode(Node):
             raise
 
     def configure_topics(self, metadata):
-        topics = tuple(metadata.get(key, self.settings[key]) for key in ('image_topic', 'camera_info_topic'))
+        topics = tuple(metadata[key] for key in ('image_topic', 'camera_info_topic'))
         for topic in topics:
             if not isinstance(topic, str):
                 raise ValueError('camera topics must be absolute ROS topic names')
@@ -92,7 +94,7 @@ class HandeyeCaptureNode(Node):
         if checks:
             checks.start('image')
         snapshot = self._inputs.snapshot()
-        topics = tuple(self.resolve_topic_name(metadata.get(key, self.settings[key]))
+        topics = tuple(self.resolve_topic_name(metadata[key])
                        for key in ('image_topic', 'camera_info_topic'))
         if snapshot.topics != topics:
             raise ValueError('camera topics differ from active session')
@@ -130,8 +132,8 @@ class HandeyeCaptureNode(Node):
         marker = detect_aruco_pose(self.bridge.imgmsg_to_cv2(image, desired_encoding='bgr8'),
                  camera_matrix=np.asarray(info.k).reshape(3, 3), distortion=info.d,
                  marker_length_m=metadata['marker_length_m'],
-                 dictionary_name=metadata.get('dictionary', 'DICT_4X4_50'),
-                 marker_id=metadata.get('marker_id', 0))
+                 dictionary_name=metadata['dictionary'],
+                 marker_id=metadata['marker_id'])
         if marker['reprojection_rmse_px'] > self.settings['maximum_reprojection_px']:
             raise ValueError('reprojection error too large')
         if marker['area_px2'] < self.settings['minimum_area_px2']:
@@ -169,7 +171,7 @@ class HandeyeCaptureNode(Node):
                                 'height': info.height, 'distortion_model': info.distortion_model}}
 
     def capture(self, metadata, checks=None):
-        if metadata.get('mode') != 'tcp':
+        if metadata['mode'] != 'tcp':
             self.configure_topics(metadata)
         deadline = time.monotonic() + self.settings['capture_timeout_sec']
         # Require observations acquired after this request, not a buffered window.
@@ -182,7 +184,7 @@ class HandeyeCaptureNode(Node):
             try:
                 if checks:
                     checks.reset()
-                if metadata.get('mode') == 'tcp':
+                if metadata['mode'] == 'tcp':
                     if checks:
                         checks.start('tf')
                     checked = self.check_tf(metadata)
@@ -199,7 +201,7 @@ class HandeyeCaptureNode(Node):
                     checks.start('stability')
                 after = sample['tf_stamp_ns']
                 pose = transform_matrix(sample['base_to_end'])
-                marker = transform_matrix(sample['camera_to_marker']) if metadata.get('mode') != 'tcp' else None
+                marker = transform_matrix(sample['camera_to_marker']) if metadata['mode'] != 'tcp' else None
                 if samples and sample.get('camera_info') != samples[0].get('camera_info'):
                     raise ValueError('camera intrinsics changed within window')
                 ready = window.add(after, pose, marker)
@@ -284,7 +286,7 @@ class HandeyeCaptureNode(Node):
             if request.command != 'observe':
                 raise ValueError('observation service accepts observe only')
             metadata = self.store.read(request.session_id)['metadata']
-            if metadata.get('mode') == 'tcp':
+            if metadata['mode'] == 'tcp':
                 raise ValueError('TCP mode has no camera distance')
             image, info, age = self.camera_frame(metadata, 0)
             marker = self.marker_pose(metadata, image, info)
@@ -313,22 +315,22 @@ class HandeyeCaptureNode(Node):
                     self.configure_topics(metadata)
                 data = self.preview()
             elif request.command == 'create':
-                metadata = payload.get('metadata', {})
+                metadata = self.store.normalize_metadata(payload.get('metadata'))
                 length = metadata.get('marker_length_m', 0)
-                if metadata.get('mode') != 'tcp' and (not isinstance(length, (float, int)) or not math.isfinite(length) or length <= 0):
+                if metadata['mode'] != 'tcp' and (not isinstance(length, (float, int)) or not math.isfinite(length) or length <= 0):
                     raise ValueError('positive marker_length_m required')
-                if metadata.get('mode') != 'tcp':
+                if metadata['mode'] != 'tcp':
                     for key in ('image_topic', 'camera_info_topic'):
-                        validate_full_topic_name(metadata.get(key, self.settings[key]))
+                        validate_full_topic_name(metadata[key])
                 data = self.store.create(metadata, session_id=request.session_id)
-                if metadata.get('mode') != 'tcp':
+                if metadata['mode'] != 'tcp':
                     self.configure_topics(metadata)
             elif request.command == 'tf_check':
                 data = self.store.read(request.session_id)
                 data = dict(data, tf_check=self.check_tf(data['metadata']))
             elif request.command == 'status':
                 data = self.store.read(request.session_id)
-                if data['metadata'].get('mode') != 'tcp':
+                if data['metadata']['mode'] != 'tcp':
                     self.configure_topics(data['metadata'])
             elif request.command in ('capture', 'preflight'):
                 data = self.store.read(request.session_id)
@@ -349,18 +351,17 @@ class HandeyeCaptureNode(Node):
                         payload={'split': payload['split'], 'sample': sample})
                 else:
                     from .preflight_checks import PreflightChecks
-                    data = dict(data, preflight=self.capture(data['metadata'], PreflightChecks(data['metadata'].get('mode') == 'tcp')))
+                    data = dict(data, preflight=self.capture(data['metadata'], PreflightChecks(data['metadata']['mode'] == 'tcp')))
             else:
                 data = self.store.mutate(request.session_id, request_id=request.request_id,
                     revision=request.expected_revision, operation=request.command, payload=payload)
             from .calibration_quality import sample_coverage
             if 'training_samples' in data:
                 excluded = set(data.get('excluded_sample_ids', []))
-                data = dict(data, coverage={split: sample_coverage([sample for sample in data[split + '_samples'] if sample['sample_id'] not in excluded], mode=data['metadata'].get('mode', 'handeye'))
+                data = dict(data, coverage={split: sample_coverage([sample for sample in data[split + '_samples'] if sample['sample_id'] not in excluded], mode=data['metadata']['mode'])
                                            for split in ('training', 'validation')})
-            data.setdefault('schema_version', 1)
-            data.setdefault('session_id', request.session_id)
-            data.setdefault('state', 'preview')
+            if request.command == 'preview':
+                data.update(session_id=request.session_id, state='preview')
             response.session_json = json.dumps(data, allow_nan=False)
             response.success = True
             response.reason_code = 'OK'

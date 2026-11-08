@@ -90,7 +90,7 @@ try:
     png = base64.b64decode(sample['image']['data_base64'])
     assert hashlib.sha256(png).hexdigest()==sample['image']['sha256']
     pixels = cv2.imdecode(np.frombuffer(png,np.uint8),cv2.IMREAD_COLOR)
-    solved = node.marker_pose(metadata,bridge.cv2_to_imgmsg(pixels,'bgr8'),node._inputs.snapshot().infos[-1])
+    solved = node.marker_pose(saved['metadata'],bridge.cv2_to_imgmsg(pixels,'bgr8'),node._inputs.snapshot().infos[-1])
     assert np.allclose(solved['corners_px'],sample['corners_px'])
     path = Path(sys.argv[1])/('a'*32+'.json')
     raw = path.read_bytes()

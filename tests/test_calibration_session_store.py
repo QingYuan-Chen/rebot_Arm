@@ -3,6 +3,50 @@ from rebotarm_calibration.session_store import SessionStore
 from test_handeye_workflow import dataset
 
 
+def test_legacy_metadata_defaults_are_normalized_without_rewriting(tmp_path):
+    import json
+    store = SessionStore(tmp_path, image_topic='/custom/image', camera_info_topic='/custom/info')
+    created = store.create(dataset()['metadata'])
+    path = tmp_path / (created['session_id'] + '.json')
+    legacy = json.loads(path.read_text())
+    for key in ('mode', 'image_topic', 'camera_info_topic', 'dictionary', 'marker_id'):
+        legacy['metadata'].pop(key, None)
+    path.write_text(json.dumps(legacy))
+    before = path.read_bytes()
+    restored = store.read(created['session_id'])
+    assert restored['metadata']['mode'] == 'handeye'
+    assert restored['metadata']['image_topic'] == '/custom/image'
+    assert path.read_bytes() == before
+    assert store.create(dataset()['metadata'], session_id=created['session_id']) == restored
+
+
+@pytest.mark.parametrize('field,value', [
+    ('metadata', None), ('revision', -1), ('training_samples', None),
+    ('requests', []), ('state', 'bogus'), ('report', []),
+])
+def test_corrupt_saved_session_is_rejected(tmp_path, field, value):
+    import json
+    store = SessionStore(tmp_path)
+    created = store.create(dataset()['metadata'])
+    path = tmp_path / (created['session_id'] + '.json')
+    data = json.loads(path.read_text())
+    data[field] = value
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match='invalid'):
+        store.read(created['session_id'])
+
+
+def test_nonfinite_saved_session_is_rejected(tmp_path):
+    store = SessionStore(tmp_path)
+    created = store.create(dataset()['metadata'])
+    path = tmp_path / (created['session_id'] + '.json')
+    content = path.read_text().replace('"training_samples": []', '"training_samples": [NaN]')
+    assert content != path.read_text()
+    path.write_text(content)
+    with pytest.raises(ValueError, match='invalid saved session number'):
+        store.read(created['session_id'])
+
+
 def test_durable_workflow_retry_accept_and_restart(tmp_path):
     source = dataset()
     store = SessionStore(tmp_path)
