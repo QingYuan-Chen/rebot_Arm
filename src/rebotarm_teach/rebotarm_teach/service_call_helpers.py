@@ -30,6 +30,6 @@ def call_trigger_service(client, *, timeout_sec: float) -> tuple[bool, str]:
         if not future.done():
             return False, "service timeout"
         response = future.result()
-        return bool(getattr(response, "success", False)), str(getattr(response, "message", ""))
+        return bool(response.success), str(response.message)
     except Exception as exc:
         return False, str(exc)

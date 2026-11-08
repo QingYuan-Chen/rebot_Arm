@@ -407,10 +407,10 @@ class TeachRecorderNode(Node):
         except Exception as exc:
             self._publish_status("waiting", f"gravity compensation start failed: {exc}")
             return
-        if bool(getattr(response, "success", False)):
+        if bool(response.success):
             self._publish_status("starting", "gravity compensation start requested")
         else:
-            message = str(getattr(response, "message", "gravity compensation start rejected"))
+            message = str(response.message)
             self._publish_status("waiting", message)
 
     def _on_joint_state(self, msg: JointState) -> None:

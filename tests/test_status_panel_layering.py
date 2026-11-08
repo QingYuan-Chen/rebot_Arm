@@ -307,10 +307,12 @@ class _RetimedPoint:
         self.time_from_start = time_from_start
         self.positions = positions
         self.velocities = velocities
+        self.accelerations = ()
 
 
 class _PreparedReplay:
     def __init__(self) -> None:
+        self.reference_grade = "q/v"
         self.samples = [_TeachSample(stamp=0.0, positions=(0.1, -0.1))]
         self.effective_replay_speed = 1.0
         self.after_quality = _ReplayQuality()
@@ -318,6 +320,15 @@ class _PreparedReplay:
             _RetimedPoint(time_from_start=0.0, positions=(0.1, -0.1), velocities=(0.0, 0.0)),
             _RetimedPoint(time_from_start=0.5, positions=(0.2, -0.2), velocities=(0.0, 0.0)),
         ]
+
+
+def test_teach_builder_rejects_invalid_prepared_grade():
+    import pytest
+    prepared = _PreparedReplay()
+    prepared.reference_grade = ""
+    builder = TeachReplayTrajectoryBuilder(trajectory_factory=_Trajectory, trajectory_point_factory=_TrajectoryPoint)
+    with pytest.raises(ValueError, match="reference grade"):
+        builder.build(prepared=prepared, current_positions={}, start_band="direct", settings={}, config=None)
 
 
 class _PlanResult:
@@ -952,7 +963,8 @@ def test_teach_replay_coordinator_builds_execute_rejection_payload() -> None:
         },
         settings={"replay_speed": 1.0, "align_duration": 3.0, "align_steps": 20, "final_hold_sec": 1.0},
         decision=decision,
-        prepared_payload={"after_quality": {"risk_level": "green", "max_jump_rad": 0.01}},
+        prepared_payload={"after_quality": {"risk_level": "green", "max_jump_rad": 0.01,
+                                             "max_acceleration_rad_s2": 0.0, "max_jerk_rad_s3": 0.0}},
         prepared_record_path="teleop_records/teach1.prepared.jsonl",
         moveit_align={"state": "ready", "message": "MoveIt ready"},
         collision_precheck={"state": "pass", "message": "ok"},
@@ -979,7 +991,8 @@ def test_teach_replay_coordinator_accepts_execute_when_dry_run_token_matches() -
     decision = coordinator.evaluate_execute_request(
         info_payload={"path": "teleop_records/teach1.jsonl", "start_band": "direct", "quality": {"risk_level": "green"}},
         settings=settings,
-        prepared_quality={"risk_level": "green", "max_jump_rad": 0.01},
+        prepared_quality={"risk_level": "green", "max_jump_rad": 0.01,
+                          "max_acceleration_rad_s2": 0.0, "max_jerk_rad_s3": 0.0},
         dry_run_token={
             "accepted": True,
             "record_path": "teleop_records/teach1.jsonl",
@@ -1005,7 +1018,8 @@ def test_teach_replay_coordinator_blocks_execute_when_dry_run_token_is_stale() -
     decision = coordinator.evaluate_execute_request(
         info_payload={"path": "teleop_records/new.jsonl", "start_band": "direct", "quality": {"risk_level": "green"}},
         settings=settings,
-        prepared_quality={"risk_level": "green", "max_jump_rad": 0.01},
+        prepared_quality={"risk_level": "green", "max_jump_rad": 0.01,
+                          "max_acceleration_rad_s2": 0.0, "max_jerk_rad_s3": 0.0},
         dry_run_token={
             "accepted": True,
             "record_path": "teleop_records/old.jsonl",
@@ -1022,6 +1036,16 @@ def test_teach_replay_coordinator_blocks_execute_when_dry_run_token_is_stale() -
 
     assert decision.accepted is False
     assert decision.message == "real replay requires a successful dry-run first"
+
+
+def test_teach_replay_coordinator_rejects_incomplete_prepared_quality():
+    import pytest
+    with pytest.raises(KeyError, match="risk_level"):
+        TeachReplayCoordinator().evaluate_execute_request(
+            info_payload={}, settings={"replay_speed": 1.0}, prepared_quality={},
+            dry_run_token={}, limits=TeachReplayLimits(0.02, 5.0, 20.0),
+            yellow_max_speed=0.6,
+        )
 
 
 def test_teach_replay_trajectory_builder_appends_soft_start_retimed_points_and_final_hold() -> None:
@@ -1061,6 +1085,15 @@ def test_teach_replay_trajectory_builder_appends_soft_start_retimed_points_and_f
     ]
     assert trajectory.points[-1].positions == [0.2, -0.2]
     assert trajectory.points[-1].velocities == [0.0, 0.0]
+
+
+def test_teach_replay_trajectory_builder_rejects_missing_or_nonfinite_feedback():
+    import pytest
+    builder = TeachReplayTrajectoryBuilder(trajectory_factory=_Trajectory, trajectory_point_factory=_TrajectoryPoint)
+    for current in ({"joint1": 0.0}, {"joint1": 0.0, "joint2": float("nan")}):
+        with pytest.raises(ValueError, match="joint feedback"):
+            builder.build(prepared=_PreparedReplay(), current_positions=current, start_band="direct",
+                          settings={}, config=None)
 
 
 def test_teach_replay_trajectory_builder_calls_moveit_alignment_with_keywords() -> None:
@@ -1263,3 +1296,13 @@ def test_teach_replay_settings_provider_honors_manual_align_duration_when_disabl
     settings = provider.from_payload({"settings": {"align_duration": 6.0}}, max_error=0.5)
 
     assert settings["align_duration"] == 6.0
+
+
+def test_teach_replay_settings_reject_invalid_values():
+    import pytest
+    provider = TeachReplaySettingsProvider(1.0, 3.0, True, 0.1, 2.0, 8.0, 30)
+    assert provider.from_payload({})["replay_speed"] == 1.0
+    for value in (None, [], "wrong", {"replay_speed": float("nan")},
+                  {"align_duration": float("inf")}, {"align_steps": None}, {"replay_speed": True}):
+        with pytest.raises(ValueError):
+            provider.from_payload({"settings": value})

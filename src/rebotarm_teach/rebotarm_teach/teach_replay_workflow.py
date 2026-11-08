@@ -432,6 +432,8 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         凭该令牌才允许下发；令牌绑定记录路径、预处理风险等级与设置，防止"用 A 记录演练、
         下发 B 记录"或"演练后偷改速度"。本方法只发布状态，不发送 Action。
         """
+        # 每次新的 dry-run 都撤销旧令牌，输入校验失败也不能沿用上次结果。
+        self._last_teach_dry_run = None
         record_path = payload.get("record_path")
         info_payload = self.record_info(str(record_path) if record_path else None)
         settings = self._teach_replay_settings_from_payload(
@@ -510,7 +512,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         # quality 是原始记录的质量报告，prepared_quality 是预处理后的报告（后续覆盖）。
         quality = info_payload.get("quality") if isinstance(info_payload.get("quality"), dict) else {}
         prepared_payload = {}
-        prepared_quality = {}
+        prepared_quality = None
         prepared_record_path = ""
         collision_precheck = {"state": "not_checked", "message": "完整轨迹尚未生成，碰撞未检查"}
         preparation = {"state": "not_checked", "message": "轨迹未准备"}
@@ -526,7 +528,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             prepared_record_path = str(write_prepared_teach_record(str(info_payload.get("path", "")), prepared))
             prepared_payload = prepared_teach_replay_to_dict(prepared)
             # 放行判定使用"预处理后"的质量等级：原始记录的质量只作参考。
-            prepared_quality = prepared_payload.get("after_quality") if isinstance(prepared_payload.get("after_quality"), dict) else {}
+            prepared_quality = prepared_payload["after_quality"]
             # execute 前只做轻量对齐评估（plan=False），真正规划留给轨迹构建阶段。
             moveit_align = self._moveit_align_summary(info_payload, source_samples, plan=False)
         except Exception as exc:

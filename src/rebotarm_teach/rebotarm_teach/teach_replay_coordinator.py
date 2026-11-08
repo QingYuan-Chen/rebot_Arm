@@ -56,7 +56,7 @@ class TeachReplayCoordinator:
         *,
         info_payload: dict,
         settings: dict[str, float | int],
-        prepared_quality: dict,
+        prepared_quality: dict | None,
         dry_run_token: dict,
         limits: TeachReplayLimits,
         yellow_max_speed: float,
@@ -78,6 +78,10 @@ class TeachReplayCoordinator:
         yellow_max_speed：yellow 风险下允许的最大回放速度倍率，取值 <= 1。
         """
         quality = info_payload.get("quality") if isinstance(info_payload.get("quality"), dict) else {}
+        prepared_risk = str(prepared_quality["risk_level"]) if prepared_quality is not None else ""
+        prepared_jump = prepared_quality["max_jump_rad"] if prepared_quality is not None else None
+        prepared_acceleration = prepared_quality["max_acceleration_rad_s2"] if prepared_quality is not None else None
+        prepared_jerk = prepared_quality["max_jerk_rad_s3"] if prepared_quality is not None else None
         # 自动时长来自当前反馈，不是用户设置。执行仍重新规划并检查完整曲线；
         # 不能因正常停稳后的反馈变化要求用户反复 dry-run。手动时长及其他设置仍严格绑定。
         def bound_settings(values):
@@ -86,19 +90,19 @@ class TeachReplayCoordinator:
         dry_run_passed = (
             bool(dry_run_token.get("accepted"))
             and str(dry_run_token.get("record_path", "")) == str(info_payload.get("path", ""))
-            and str(dry_run_token.get("prepared_risk_level", "")) == str(prepared_quality.get("risk_level", ""))
+            and str(dry_run_token.get("prepared_risk_level", "")) == prepared_risk
             and bound_settings(dry_run_token.get("settings") or {}) == bound_settings(settings)
         )
         return validate_teach_replay_execute_request(
             str(info_payload.get("start_band", "")),
             dry_run_passed=dry_run_passed,
             risk_level=str(quality.get("risk_level", "unknown")),
-            prepared_risk_level=str(prepared_quality.get("risk_level", "")) or None,
-            prepared_max_jump_rad=prepared_quality.get("max_jump_rad"),
+            prepared_risk_level=prepared_risk or None,
+            prepared_max_jump_rad=prepared_jump,
             max_prepared_jump_rad=float(limits.max_prepared_jump_rad),
-            retimed_max_acceleration_rad_s2=prepared_quality.get("max_acceleration_rad_s2"),
+            retimed_max_acceleration_rad_s2=prepared_acceleration,
             max_replay_acceleration_rad_s2=float(limits.max_replay_acceleration_rad_s2),
-            retimed_max_jerk_rad_s3=prepared_quality.get("max_jerk_rad_s3"),
+            retimed_max_jerk_rad_s3=prepared_jerk,
             max_replay_jerk_rad_s3=float(limits.max_replay_jerk_rad_s3),
             replay_speed=float(settings["replay_speed"]),
             yellow_max_speed=float(yellow_max_speed),
@@ -226,11 +230,11 @@ class TeachReplayCoordinator:
         """
         quality = info_payload.get("quality") if isinstance(info_payload.get("quality"), dict) else {}
         # 预处理质量以 after_quality（重定时后的结果）为准。
-        prepared_quality = (
-            prepared_payload.get("after_quality")
-            if isinstance(prepared_payload.get("after_quality"), dict)
-            else {}
-        )
+        prepared_quality = prepared_payload["after_quality"] if "after_quality" in prepared_payload else None
+        prepared_risk = str(prepared_quality["risk_level"]) if prepared_quality is not None else "unknown"
+        prepared_jump = prepared_quality["max_jump_rad"] if prepared_quality is not None else None
+        prepared_acceleration = prepared_quality["max_acceleration_rad_s2"] if prepared_quality is not None else None
+        prepared_jerk = prepared_quality["max_jerk_rad_s3"] if prepared_quality is not None else None
         estimate = estimate_teach_replay(
             samples=int(info_payload.get("samples") or 0),
             record_duration_sec=float(info_payload.get("duration_sec") or 0.0),
@@ -258,11 +262,11 @@ class TeachReplayCoordinator:
             "settings": settings,
             "quality": quality,
             "risk_level": str(quality.get("risk_level", "unknown")),
-            "prepared_risk_level": str(prepared_quality.get("risk_level", "unknown")),
-            "effective_risk_level": str(prepared_quality.get("risk_level", quality.get("risk_level", "unknown"))),
-            "prepared_max_jump_rad": prepared_quality.get("max_jump_rad"),
-            "retimed_max_acceleration_rad_s2": prepared_quality.get("max_acceleration_rad_s2"),
-            "retimed_max_jerk_rad_s3": prepared_quality.get("max_jerk_rad_s3"),
+            "prepared_risk_level": prepared_risk,
+            "effective_risk_level": prepared_risk if prepared_quality is not None else str(quality.get("risk_level", "unknown")),
+            "prepared_max_jump_rad": prepared_jump,
+            "retimed_max_acceleration_rad_s2": prepared_acceleration,
+            "retimed_max_jerk_rad_s3": prepared_jerk,
             "max_prepared_jump_rad": float(limits.max_prepared_jump_rad),
             "max_replay_acceleration_rad_s2": float(limits.max_replay_acceleration_rad_s2),
             "max_replay_jerk_rad_s3": float(limits.max_replay_jerk_rad_s3),

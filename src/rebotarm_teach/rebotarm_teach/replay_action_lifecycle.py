@@ -58,7 +58,7 @@ class ReplayActionLifecycleMixin:
         """取消响应回调：区分"取消已受理"与"取消前目标已结束"两种情况。"""
         try:
             response = future.result()
-            goals_canceling = len(getattr(response, "goals_canceling", []))
+            goals_canceling = len(response.goals_canceling)
         except Exception as exc:
             self._publish_status("replay", {"state": "failed", "message": str(exc)})
             return
@@ -91,10 +91,10 @@ class ReplayActionLifecycleMixin:
             monitor_stop_requested = self._replay_runtime_monitor.stop_requested
         try:
             wrapped_result = future.result()
-            status = int(getattr(wrapped_result, "status", -1))
-            result = getattr(wrapped_result, "result", None)
-            error_code = int(getattr(result, "error_code", 0)) if result is not None else 0
-            error_string = str(getattr(result, "error_string", "")) if result is not None else ""
+            status = int(wrapped_result.status)
+            result = wrapped_result.result
+            error_code = int(result.error_code)
+            error_string = str(result.error_string)
         except Exception as exc:
             self._publish_status("replay", {"state": "failed", "message": str(exc)})
             with self._teach_replay_lock:

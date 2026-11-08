@@ -79,6 +79,26 @@ def test_workflow_without_valid_dry_run_never_sends_goal(tmp_path):
     assert calls == []
 
 
+def test_missing_action_result_is_reported_as_failure(tmp_path):
+    workflow, events, _ = workflow_fixture(tmp_path)
+    workflow._teach_replay_goal_handle = object()
+    future = Future()
+    future.set_result(SimpleNamespace(status=4, result=None))
+    workflow._on_teach_replay_result(future, {}, 0)
+    assert events["replay"]["state"] == "failed"
+    assert "error_code" in events["replay"]["message"]
+    assert workflow._teach_replay_goal_handle is None
+
+
+def test_invalid_dry_run_settings_invalidate_previous_token(tmp_path):
+    import pytest
+    workflow, _, _ = workflow_fixture(tmp_path)
+    workflow._last_teach_dry_run = {"accepted": True}
+    with pytest.raises(ValueError, match="settings"):
+        workflow.dry_run({"settings": None})
+    assert workflow._last_teach_dry_run is None
+
+
 def test_workflow_stop_uses_controller_fallback_without_active_goal(tmp_path):
     workflow, events, calls = workflow_fixture(tmp_path)
     result = workflow.stop()
