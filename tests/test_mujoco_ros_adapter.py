@@ -26,9 +26,9 @@ from rebotarm_simulation.ros.message_codec import (
 )
 
 
-class _LegacySimulation:
+class _Simulation:
     def __init__(self):
-        self.control_mode = "pos_vel"
+        self.control_mode = "position"
         self.control_targets = (0.0,) * 8
         self.positions = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.03, -0.03)
         self.events = []
@@ -36,21 +36,24 @@ class _LegacySimulation:
     def reset_home(self):
         self.events.append(("reset_home",))
 
-    def set_control_mode(self, mode):
+    def set_mode(self, mode):
         self.control_mode = mode
         self.events.append(("mode", mode))
         return mode
 
-    def set_joint_position_targets(self, values):
+    def command_joint_positions(self, values):
         reached = tuple(values)
         self.control_targets = reached + (0.03, -0.03)
-        self.control_mode = "pos_vel"
+        self.control_mode = "position"
         self.events.append(("positions", reached))
         return reached
 
-    def set_gripper_width(self, width):
-        self.events.append(("gripper", width))
+    def command_gripper_width(self, width, *, max_force_n=None):
+        self.events.append(("gripper", width, max_force_n))
         return width
+
+    def get_control_status(self):
+        return SimpleNamespace(mode=self.control_mode)
 
     def get_state(self):
         return SimpleNamespace(joint_positions=self.positions)
@@ -109,25 +112,34 @@ def test_independent_gripper_requires_a_new_physics_frame_after_final_target():
     assert task.state=='succeeded' and events[-1]==('neutral',)
 
 
-def test_ros_control_api_starts_home_hold_and_tracks_positions_with_legacy_core():
-    simulation = _LegacySimulation()
+def test_ros_control_api_starts_home_hold_and_tracks_positions():
+    simulation = _Simulation()
     control = SimulationControlApi(simulation)
     control.reset_home_and_hold()
     assert simulation.events[:2] == [("reset_home",), ("mode", "hold")]
     assert control.command_joint_positions((1, 2, 3, 4, 5, 6)) == (1, 2, 3, 4, 5, 6)
-    assert simulation.events[-1] == ("mode", "pos_vel")
-    assert control.get_control_status()["mode"] == "position"
+    assert simulation.events[-1] == ("mode", "position")
+    assert control.get_control_status().mode == "position"
 
 
 def test_ros_control_api_hold_captures_current_position_and_gripper_is_width_based():
-    simulation = _LegacySimulation()
+    simulation = _Simulation()
     control = SimulationControlApi(simulation)
     control.hold_current_position()
-    assert simulation.events[-2:] == [
-        ("positions", simulation.positions[:6]),
-        ("mode", "hold"),
-    ]
+    assert simulation.events[-1] == ("mode", "hold")
     assert control.command_gripper_width(0.04) == pytest.approx(0.04)
+    assert simulation.events[-1] == ("gripper", 0.04, None)
+
+
+def test_control_diagnostic_requires_complete_status():
+    from rebotarm_simulation.ros.ros_diagnostics import build_control_diagnostic
+    params = dict(arm_namespace="audit", configured_rate_hz=100., measured_rate_hz=100.,
+                  state=SimpleNamespace(joint_positions=(0.,) * 8), contacts=(),
+                  max_contact_force_n=20., max_contact_penetration_m=.01)
+    with pytest.raises(AttributeError):
+        build_control_diagnostic(status=SimpleNamespace(mode="hold"), **params)
+    with pytest.raises(ValueError, match="six arm positions"):
+        build_control_diagnostic(status=SimpleNamespace(mode="hold", joint_targets=(0.,)), **params)
 
 
 def test_gripper_effort_zero_means_default_and_positive_value_is_forwarded():
@@ -592,6 +604,19 @@ def test_preparation_failure_and_late_reply_never_start_children(change):
     execution.cleanup(token)
     assert not execution.stop(token)
     assert execution.active.token is other and len(sim.events) == before
+
+
+@pytest.mark.parametrize('field', ['gripper_collision_policy', 'capability_revision'])
+def test_preparation_requires_binding_fields(field):
+    execution, sim, curve = _execution_fixture()
+    token, payload = _reserve_simulation(execution, curve, width=.001)
+    del payload[field]
+    before = len(sim.events)
+    with pytest.raises(KeyError, match=field):
+        execution.admit(token, payload, 'scene-a', lambda: False)
+    assert not any(event[0] in ('arm', 'finger') for event in sim.events[before:])
+    execution.stop(token)
+    execution.cleanup(token)
 
 
 def test_unconfirmed_stop_retains_resources_and_old_wait_cannot_release_new_goal():

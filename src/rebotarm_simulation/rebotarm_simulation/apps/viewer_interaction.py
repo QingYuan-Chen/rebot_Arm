@@ -312,12 +312,8 @@ def _state_from_sim(
     targets = tuple(float(value) for value in sim.control_targets[:6])
     positions = tuple(float(value) for value in state.joint_positions[:6])
     velocities = tuple(float(value) for value in state.joint_velocities[:6])
-    ee_position = tuple(
-        float(value) for value in getattr(state, "end_effector_position", (0.0, 0.0, 0.0))
-    )
-    ee_rpy = _quaternion_xyzw_to_rpy(
-        getattr(state, "end_effector_orientation", (0.0, 0.0, 0.0, 1.0))
-    )
+    ee_position = tuple(float(value) for value in state.end_effector_position)
+    ee_rpy = _quaternion_xyzw_to_rpy(state.end_effector_orientation)
     contacts = _contact_summary(sim)
     control = _control_status(sim)
     return ViewerControlState(
@@ -367,23 +363,18 @@ def _quaternion_wxyz_to_rpy(quaternion: Sequence[float]) -> tuple[float, float, 
 
 
 def _control_status(sim) -> tuple[tuple[float, ...], tuple[float, ...], tuple[bool, ...], float, str]:
-    if hasattr(sim, "get_control_status"):
-        status = sim.get_control_status()
-        remaining = status.watchdog_remaining_s
-        return (
-            tuple(float(value) for value in status.requested_torques[:6]),
-            tuple(float(value) for value in status.applied_torques[:6]),
-            tuple(bool(value) for value in status.saturated[:6]),
-            0.0 if remaining is None else float(remaining),
-            str(status.mode),
-        )
-    mode = str(getattr(sim, "control_mode", "hold"))
-    return (0.0,) * 6, (0.0,) * 6, (False,) * 6, 0.0, mode
+    status = sim.get_control_status()
+    remaining = status.watchdog_remaining_s
+    return (
+        tuple(float(value) for value in status.requested_torques),
+        tuple(float(value) for value in status.applied_torques),
+        tuple(bool(value) for value in status.saturated),
+        0.0 if remaining is None else float(remaining),
+        str(status.mode),
+    )
 
 
 def _contact_summary(sim) -> tuple[float, int]:
-    if not hasattr(sim, "get_contacts"):
-        return 0.0, 0
     contacts = tuple(sim.get_contacts())
     if not contacts:
         return 0.0, 0
@@ -406,35 +397,21 @@ def _refresh_observed_state(sim, state: ViewerControlState) -> ViewerControlStat
         saturated=control[2],
         watchdog_remaining_s=control[3],
         active_mode=control[4],
-        ee_position=tuple(
-            float(value)
-            for value in getattr(
-                sim_state, "end_effector_position", state.ee_position
-            )
-        ),
-        ee_rpy=(
-            _quaternion_xyzw_to_rpy(sim_state.end_effector_orientation)
-            if hasattr(sim_state, "end_effector_orientation")
-            else state.ee_rpy
-        ),
+        ee_position=tuple(float(value) for value in sim_state.end_effector_position),
+        ee_rpy=_quaternion_xyzw_to_rpy(sim_state.end_effector_orientation),
     )
 
 
 def _set_mode(sim, mode: str) -> str:
-    setter = getattr(sim, "set_mode", None) or getattr(sim, "set_control_mode")
-    return str(setter(mode))
+    return str(sim.set_mode(mode))
 
 
 def _command_positions(sim, targets):
-    command = getattr(sim, "command_joint_positions", None) or getattr(
-        sim, "set_joint_position_targets"
-    )
-    return command(targets)
+    return sim.command_joint_positions(targets)
 
 
 def _command_gripper(sim, width: float) -> float:
-    command = getattr(sim, "command_gripper_width", None) or getattr(sim, "set_gripper_width")
-    return float(command(width))
+    return float(sim.command_gripper_width(width))
 
 
 def apply_pending_commands(
@@ -474,14 +451,14 @@ def apply_pending_commands(
     if state.mode is not None:
         active_mode = _set_mode(sim, state.mode)
     else:
-        active_mode = getattr(sim, "control_mode", state.active_mode)
+        active_mode = sim.control_mode
 
     targets = state.joint_targets
     if state.joint_delta:
         name = ARM_JOINT_NAMES[state.selected_joint]
         requested = targets[state.selected_joint] + state.joint_delta * joint_step
         targets = tuple(_command_positions(sim, {name: requested}))
-        active_mode = getattr(sim, "control_mode", "position")
+        active_mode = sim.control_mode
 
     width = state.gripper_width
     if state.gripper_delta:
@@ -537,16 +514,9 @@ def apply_continuous_jog(
         cartesian_accumulator += dt
         rate = gripper_rate if state.interaction_mode == "xyz" else joint_rate
         distance_or_angle = rate * speed_scale * cartesian_accumulator
-        options = getattr(cartesian_controller, "options", None)
-        tolerance = float(
-            getattr(
-                options,
-                "position_tolerance_m"
-                if state.interaction_mode == "xyz"
-                else "orientation_tolerance_rad",
-                0.0,
-            )
-        )
+        options = cartesian_controller.options
+        tolerance = float(options.position_tolerance_m if state.interaction_mode == "xyz"
+                          else options.orientation_tolerance_rad)
         # An increment inside the IK convergence tolerance succeeds at
         # iteration zero without changing a joint. Accumulate it instead of
         # repeatedly reporting a no-op as CONVERGED.
@@ -569,12 +539,8 @@ def apply_continuous_jog(
             if result.success:
                 targets = tuple(result.joint_positions)
                 _set_mode(sim, "position")
-                target_position = tuple(
-                    getattr(result, "target_position_m", state.target_position)
-                )
-                target_rpy = tuple(
-                    getattr(result, "target_rpy_rad", state.target_rpy)
-                )
+                target_position = tuple(result.target_position_m)
+                target_rpy = tuple(result.target_rpy_rad)
             else:
                 target_position = state.target_position
                 target_rpy = state.target_rpy
@@ -597,7 +563,7 @@ def apply_continuous_jog(
         joint_targets=targets,
         gripper_width=width,
         jog_time_remaining=0.0,
-        active_mode=str(getattr(sim, "control_mode", state.active_mode)),
+        active_mode=str(sim.control_mode),
         cartesian_accumulator_s=cartesian_accumulator,
         ik_status=ik_status,
         ik_error=ik_error,

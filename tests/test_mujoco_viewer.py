@@ -47,6 +47,8 @@ class FakeSim:
             joint_velocities=(0.01,) * 6 + (0.0, 0.0),
             gripper_width=self.width,
             simulation_time=self.time,
+            end_effector_position=(0.0, 0.0, 0.0),
+            end_effector_orientation=(0.0, 0.0, 0.0, 1.0),
         )
 
     def get_contacts(self):
@@ -85,6 +87,10 @@ class FakeSim:
             applied_torques=(0.0,) * 6,
             saturated=(False,) * 6,
             watchdog_remaining_s=0.0,
+            joint_targets=tuple(self.targets),
+            joint_positions=tuple(self.targets),
+            joint_velocities=(0.01,) * 6,
+            gripper_width_m=self.width,
         )
 
     def step(self):
@@ -113,6 +119,7 @@ class FakeSim:
 
 
 class FakeViewer:
+    m = None
     def __init__(self, callback, keys):
         self.callback = callback
         self.keys = iter(keys)
@@ -642,6 +649,7 @@ def test_cartesian_jog_is_rate_limited_and_uses_selected_axis():
 
     class FakeCartesian:
         calls = []
+        options = SimpleNamespace(position_tolerance_m=0.0, orientation_tolerance_rad=0.0)
 
         def command_delta(self, delta):
             self.calls.append(delta)
@@ -651,6 +659,8 @@ def test_cartesian_jog_is_rate_limited_and_uses_selected_axis():
                 position_error_m=0.0001,
                 orientation_error_rad=0.0,
                 joint_positions=(0.1,) * 6,
+                target_position_m=(0., 0., 0.),
+                target_rpy_rad=(0., 0., 0.),
             )
 
     controller = FakeCartesian()
@@ -698,6 +708,8 @@ def test_cartesian_jog_accumulates_past_ik_tolerance_and_enters_position(
                 position_error_m=0.0,
                 orientation_error_rad=0.0,
                 joint_positions=(0.1,) * 6,
+                target_position_m=(0., 0., 0.),
+                target_rpy_rad=(0., 0., 0.),
             )
 
     controller = FakeCartesian()
@@ -880,6 +892,7 @@ def test_runtime_accepts_terminal_joint_commands_while_viewer_runs():
     holder = {}
 
     class ThreeCycleViewer:
+        m = None
         def __init__(self, key_callback):
             self.key_callback = key_callback
             self.cycles = 0
@@ -923,6 +936,7 @@ def test_duration_stops_at_requested_simulation_time_and_closes():
     sim = FakeSim()
 
     class RunningViewer:
+        m = None
         closed = False
 
         def is_running(self):
@@ -951,6 +965,7 @@ def test_keyboard_interrupt_from_sync_returns_130_and_closes_without_escaping():
     sim = FakeSim()
 
     class InterruptingViewer:
+        m = None
         closed = False
 
         def is_running(self):
@@ -979,6 +994,7 @@ def test_callback_from_other_thread_only_enqueues_until_main_loop_drains():
     main_thread = threading.get_ident()
 
     class ConcurrentViewer:
+        m = None
         def __init__(self, callback):
             self.callback = callback
             self.iteration = 0
@@ -1022,6 +1038,7 @@ def test_runtime_terminal_is_quiet_when_viewer_is_already_closed():
     status = io.StringIO()
 
     class ClosedViewer:
+        m = None
         def is_running(self):
             return False
 
@@ -1176,3 +1193,16 @@ def test_close_error_with_unreadable_public_model_conservatively_retains_handles
         mujoco_viewer._close_viewer_then_sim(viewer, sim, object(), object())
     assert sim.closed is False
     assert len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS) == retained_before + 1
+
+
+def test_successful_close_with_unreadable_model_retains_resources():
+    sim = FakeSim()
+    class UnreadableViewer:
+        def close(self):
+            pass
+
+    before = len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS)
+    with pytest.raises(AttributeError, match="m"):
+        mujoco_viewer._close_viewer_then_sim(UnreadableViewer(), sim, object(), object())
+    assert not sim.closed
+    assert len(viewer_lifecycle._RETAINED_UNSAFE_VIEWERS) == before + 1

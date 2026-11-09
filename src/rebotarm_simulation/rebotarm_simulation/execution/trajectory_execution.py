@@ -248,8 +248,8 @@ class TrajectoryExecution:
                         or hold != request.hold_positions or curve.points[0].positions[:6] != hold
                         or payload['gripper_generation'] != request.gripper_generation
                         or tuple(payload['gripper_positions']) != request.gripper_positions
-                        or payload.get('gripper_collision_policy', 0) != request.gripper_collision_policy
-                        or payload.get('capability_revision') != self.capability['revision']
+                        or payload['gripper_collision_policy'] != request.gripper_collision_policy
+                        or payload['capability_revision'] != self.capability['revision']
                         or tuple(curve.joint_names) != tuple(ARM_JOINT_NAMES)):
                     raise RuntimeError('prepared simulation context changed')
                 accepted = AcceptedTrajectory(curve, state.simulation_time, response_revision)

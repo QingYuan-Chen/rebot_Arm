@@ -149,6 +149,7 @@ def create_node_class():
             model_path = str(self.get_parameter("model_path").value).strip()
             self._sim = RebotArmMujoco(model_path or None)
             self._control = SimulationControlApi(self._sim)
+            self._retain_simulation = False
             self._lock = threading.RLock()
             self._sim_access = SerializedSimulationAccess(self._sim, self._lock)
             def initialize(_sim) -> None:
@@ -280,6 +281,9 @@ def create_node_class():
 
         def sync_viewer(self, viewer) -> None:
             self._sim_access.run(lambda _sim: viewer.sync())
+
+        def close(self) -> None:
+            self._sim_access.run(lambda sim: sim.close())
 
 
 
@@ -686,7 +690,8 @@ def create_node_class():
             if hasattr(self,'_teleop_server'):
                 self._teleop_server.destroy()
             self._trace.close()
-            self._sim_access.run(lambda sim: sim.close())
+            if not self._retain_simulation:
+                self.close()
             return super().destroy_node()
 
     return RebotArmMujocoNode
@@ -696,6 +701,9 @@ def main(args=None) -> None:
     import importlib
     import rclpy
     from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
+    from rebotarm_simulation.apps.viewer_lifecycle import (
+        close_passive_viewer_safely, retain_unsafe_resources, stop_executor,
+    )
 
     rclpy.init(args=args)
     node = create_node_class()()
@@ -703,28 +711,55 @@ def main(args=None) -> None:
     executor.add_node(node)
     viewer = None
     executor_thread = None
+    model = data = None
+    worker_errors = []
+
+    def spin_viewer_executor():
+        try:
+            executor.spin()
+        except (KeyboardInterrupt, ExternalShutdownException):
+            pass
+        except BaseException as exc:
+            worker_errors.append(exc)
+
     try:
         if node.show_viewer:
             model, data = node.viewer_handles()
             viewer = importlib.import_module("mujoco.viewer").launch_passive(model, data)
-            executor_thread = threading.Thread(target=executor.spin, daemon=True)
+            executor_thread = threading.Thread(target=spin_viewer_executor, daemon=True)
             executor_thread.start()
             while rclpy.ok() and viewer.is_running():
+                if worker_errors:
+                    raise RuntimeError("simulation executor failed") from worker_errors[0]
+                if not executor_thread.is_alive():
+                    raise RuntimeError("simulation executor stopped unexpectedly")
                 node.sync_viewer(viewer)
                 time.sleep(0.01)
-            return
-        executor.spin()
+        else:
+            executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        if viewer is not None:
-            viewer.close()
-        executor.shutdown()
-        if executor_thread is not None:
-            executor_thread.join(timeout=2.0)
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        try:
+            stop_executor(executor, executor_thread, multi_threaded=True)
+        except BaseException:
+            retain_unsafe_resources(viewer, node, model, data, executor, executor_thread)
+            if rclpy.ok():
+                rclpy.shutdown()
+            raise
+        try:
+            close_passive_viewer_safely(viewer, node, model, data)
+        except BaseException:
+            node._retain_simulation = True
+            raise
+        finally:
+            try:
+                node.destroy_node()
+            finally:
+                if rclpy.ok():
+                    rclpy.shutdown()
+    if worker_errors:
+        raise RuntimeError("simulation executor failed") from worker_errors[0]
 
 
 if __name__ == "__main__":

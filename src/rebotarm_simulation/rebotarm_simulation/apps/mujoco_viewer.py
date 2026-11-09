@@ -279,17 +279,12 @@ def main(
                         or simulation_time - last_telemetry_sample_sim_time
                         >= 1.0 / TELEMETRY_SAMPLE_HZ
                     )
-                    if telemetry_due and hasattr(sim, "get_control_status"):
-                        try:
-                            telemetry.append(
-                                float(sim.get_state().simulation_time),
-                                sim.get_control_status(),
-                                sim.get_contacts() if hasattr(sim, "get_contacts") else (),
-                            )
-                        except (AttributeError, TypeError, ValueError):
-                            # Test doubles and third-party adapters may expose only
-                            # the older, smaller status record.
-                            pass
+                    if telemetry_due:
+                        telemetry.append(
+                            float(sim.get_state().simulation_time),
+                            sim.get_control_status(),
+                            sim.get_contacts(),
+                        )
                         last_telemetry_sample_sim_time = simulation_time
                 current_status = overlay_text(state)
                 if args.verbose_status and current_status != previous_status:
