@@ -46,7 +46,7 @@ from .hardware_manager import HardwareManager
 from .runtime.lifecycle import shutdown_policy
 from .ros.motor_passthrough import MotorPassthrough
 from .ros.ros_actions import ArmActions
-from .ros.ros_publishers import JointStatePublisher
+from .ros.ros_publishers import JointStatePublisher, validated_publish_rate
 from .ros.ros_services import ArmServices
 
 
@@ -133,7 +133,7 @@ class reBotArmController(Node):
         gripper_config = self.get_parameter("gripper_config").value or None
         channel = str(self.get_parameter("channel").value or "")
         self.arm_namespace = str(self.get_parameter("arm_namespace").value or "rebotarm").strip("/")
-        joint_state_rate = float(self.get_parameter("joint_state_rate").value)
+        joint_state_rate = validated_publish_rate(self.get_parameter("joint_state_rate").value)
         hardware_feedback_rate_hz = float(
             self.get_parameter("hardware_feedback_rate_hz").value
         )

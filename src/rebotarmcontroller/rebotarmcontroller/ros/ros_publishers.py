@@ -11,12 +11,14 @@
     非阻塞发布锁防止堆积, 状态锁保护定时器与服务回调并发发布.
 
 文件结构(按定义顺序)
+    validated_publish_rate: 在连接前校验发布周期可表示且为正.
     JointStatePublisher: 按固定速率发布关节, 电机, 夹爪与机械臂状态话题.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 
@@ -25,7 +27,20 @@ from builtin_interfaces.msg import Time
 from rebotarm_msgs.msg import ArmStatus, JointMotorState
 from sensor_msgs.msg import JointState
 
+from ..contracts.controller_contracts import FeedbackUnavailableError
 from ..contracts.ros_ports import RuntimeStatePort, LifecycleStatePort, JointFeedbackPort, GripperStatePort
+
+
+def validated_publish_rate(rate_hz: float) -> float:
+    """检查状态发布频率, 供节点在连接设备前及发布器构造时复用."""
+    rate = float(rate_hz)
+    if not math.isfinite(rate) or rate <= 0.0:
+        raise ValueError("joint_state_rate must be finite and positive")
+    # rclpy 将周期转换为 int64 纳秒, 范围外须在设备连接前拒绝.
+    period_ns = (1.0 / rate) * 1_000_000_000
+    if not math.isfinite(period_ns) or not 1 <= period_ns < (1 << 63):
+        raise ValueError("joint_state_rate cannot be represented as a ROS timer period")
+    return rate
 
 
 class JointStatePublisher:
@@ -46,6 +61,7 @@ class JointStatePublisher:
     def __init__(self, node, namespace: str, rate_hz: float, *, runtime: RuntimeStatePort,
                  lifecycle: LifecycleStatePort, feedback: JointFeedbackPort, gripper: GripperStatePort) -> None:
         """创建缓存发布器, 独立发布/状态锁及心跳定时器, 立即发布一次锁存状态; 不访问设备."""
+        rate = validated_publish_rate(rate_hz)
         self._node = node
         self._runtime, self._lifecycle = runtime, lifecycle
         self._feedback, self._gripper = feedback, gripper
@@ -97,8 +113,7 @@ class JointStatePublisher:
                 node.sensor_qos,
                 callback_group=node.reentrant_group,
             )
-        # 发布频率下限 1 Hz: 参数为 0 或负数时兜住除法, 发布周期最长 1 s.
-        period = 1.0 / max(float(rate_hz), 1.0)
+        period = 1.0 / rate
         self._timer = node.create_timer(
             period,
             self.publish,
@@ -123,7 +138,7 @@ class JointStatePublisher:
             # 一次原子读取拿到"最近一批已校验反馈"及其接收序号, 两者必须配套使用.
             pos, vel, effort, status_codes, sequences, observed_at = self._feedback.get_cached_joint_sample()
             identity = (sequences, observed_at)
-        except Exception as exc:
+        except FeedbackUnavailableError as exc:
             self._node.get_logger().warn(f"joint state read failed: {exc}")
             # 不把陈旧的关节位置重新打时间戳当作当前值, 但仍刷新锁存状态, 让 Web UI
             # 报告通信故障, 而不是看起来停在健康的最后一帧.

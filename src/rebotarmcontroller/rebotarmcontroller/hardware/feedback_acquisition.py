@@ -34,6 +34,10 @@ _UINT64_HALF_RANGE = 1 << 63
 _JOINT_POSITION_LIMITS_RAD = MappingProxyType(dict(zip(JOINT_NAMES, POSITION_LIMITS)))
 
 
+class _FeedbackBatchError(RuntimeError):
+    """一次设备反馈事务失败, 周期可保留逐路错误等待恢复."""
+
+
 class _FeedbackValidationError(RuntimeError):
     """保留采集失败分类, 供状态发布与故障判断使用."""
 
@@ -103,16 +107,9 @@ class FeedbackAcquisition:
     def _feedback_state_with_sequence(label: str, motor) -> tuple[object, int]:
         """读取 (状态, 接收序号); 依赖打过补丁的 MotorBridge 提供序号接口.
 
-        没有 ``get_state_with_sequence`` 就无法证明反馈是"新帧", 因此在采集路径
-        上直接报错, 而不是退化为读缓存.
+        正式驱动接入前确认此接口; 序号范围仍按每次设备观测校验.
         """
-        getter = getattr(motor, "get_state_with_sequence", None)
-        if not callable(getter):
-            raise RuntimeError(
-                f"{label} feedback requires patched MotorBridge "
-                "get_state_with_sequence()"
-            )
-        state, sequence_value = getter()
+        state, sequence_value = motor.get_state_with_sequence()
         sequence = int(sequence_value)
         if not 0 <= sequence <= _UINT64_MAX:
             raise RuntimeError(f"{label} feedback sequence outside uint64 range")
@@ -218,18 +215,8 @@ class FeedbackAcquisition:
         )
         if sample is None:
             return _CachedMotorFeedback(None, None, reason, None)
-        try:
-            self._validate_feedback_sample(label, sample.state)
-            values = (float(sample.state.pos), float(sample.state.vel), float(sample.state.torq))
-            status = int(sample.state.status_code)
-        except Exception as exc:
-            detail = self._classified_feedback_error(
-                str(exc), getattr(exc, "code", "READ_FAILED")
-            )
-            return _CachedMotorFeedback(
-                None, None, reason or f"{label} feedback unavailable: {detail}", sample,
-            )
-        return _CachedMotorFeedback(values, status, reason, sample)
+        state = sample.state
+        return _CachedMotorFeedback((state.pos, state.vel, state.torq), state.status_code, reason, sample)
 
     def _validate_feedback_sample(self, label: str, state) -> None:
         """校验单条反馈的合法性: 有限数值 + 位于该关节硬件软限位内.
@@ -237,11 +224,11 @@ class FeedbackAcquisition:
         关节越限或非有限值都说明编码器/通信异常, 必须报错, 绝不能当作有效
         位置参与运动命令.
         """
+        if state is None:
+            raise _FeedbackValidationError("READ_FAILED", f"{label} feedback unavailable")
         if label == "gripper":
             self._validated_gripper_feedback_values(state)
             return
-        if state is None:
-            raise RuntimeError(f"{label} feedback unavailable")
         values = (float(state.pos), float(state.vel), float(state.torq))
         if not all(np.isfinite(value) for value in values):
             raise _FeedbackValidationError(
@@ -272,9 +259,13 @@ class FeedbackAcquisition:
         observed_at: float,
     ) -> None:
         """校验通过后登记为"已验证反馈", 并清除该标签的错误标记."""
+        # 先复制再校验, 同一个不可变数值快照用于缓存与后续查询.
+        if state is None:
+            raise _FeedbackValidationError("READ_FAILED", f"{label} feedback unavailable")
+        state = MotorFeedback.copy_from(state)
         self._validate_feedback_sample(label, state)
         sample = _VerifiedFeedbackSample(
-            state=MotorFeedback.copy_from(state),
+            state=state,
             sequence=int(sequence),
             observed_at=float(observed_at),
         )
@@ -306,7 +297,7 @@ class FeedbackAcquisition:
         if arm_errors:
             self._record_arm_feedback_error("; ".join(arm_errors))
         elif missing_arm:
-            if not getattr(self, "_feedback_force_refresh_active", False):
+            if not self._feedback_force_refresh_active:
                 self._record_arm_feedback_error(
                     "[WAITING_FIRST_FRAME] verified feedback pending: " + ",".join(missing_arm)
                 )
@@ -352,7 +343,7 @@ class FeedbackAcquisition:
                         sequence,
                         observed_at,
                     )
-                except Exception as exc:
+                except (_FeedbackValidationError, ValueError) as exc:
                     self._record_feedback_label_error(
                         label, f"{label} feedback invalid: {exc}",
                         code=getattr(exc, "code", "READ_FAILED"),
@@ -380,17 +371,6 @@ class FeedbackAcquisition:
             for label, motor in entries:
                 observations[label] = self._feedback_state_with_sequence(label, motor)
         return observations
-
-    @staticmethod
-    def _require_feedback_sequence_api(groups) -> None:
-        """确认全部电机都支持带序号的反馈读取, 否则反馈无法被证明为"新帧"."""
-        for _ctrl, entries in groups:
-            for label, motor in entries:
-                if not callable(getattr(motor, "get_state_with_sequence", None)):
-                    raise RuntimeError(
-                        f"{label} feedback requires patched MotorBridge "
-                        "get_state_with_sequence()"
-                    )
 
     def _record_arm_feedback_success(self, observed_at: float) -> None:
         """用六轴最旧观测时刻更新健康聚合, 清除当前采集错误并记录恢复."""
@@ -438,7 +418,6 @@ class FeedbackAcquisition:
         ``request_new_feedback`` 为假时仅轮询并结算已有请求, 不建立新截止时间.
         """
         groups = self._feedback_controller_groups()
-        self._require_feedback_sequence_api(groups)
         observations: dict[str, tuple[object, int]] = {}
         group_errors: list[str] = []
         readable_groups = []
@@ -447,7 +426,7 @@ class FeedbackAcquisition:
                 for label, motor in entries:
                     observations[label] = self._feedback_state_with_sequence(label, motor)
                 readable_groups.append((ctrl, entries))
-            except Exception as exc:
+            except (RuntimeError, OSError) as exc:
                 labels = ",".join(label for label, _motor in entries)
                 message = f"controller={type(ctrl).__name__} motors={labels}: {exc}"
                 group_errors.append(message)
@@ -470,8 +449,6 @@ class FeedbackAcquisition:
 
         successful_groups = []
         for ctrl, entries in readable_groups:
-            lock = getattr(ctrl, "bus_lock", None)
-
             def transaction() -> None:
                 """在同一总线锁事务内请求分组反馈并轮询, 防止其他事务插入."""
                 # 同一控制器上的"请求 + 轮询"必须在一次持锁事务内完成,
@@ -482,13 +459,10 @@ class FeedbackAcquisition:
                 ctrl.poll_feedback_once()
 
             try:
-                if lock is None:
+                with ctrl.bus_lock:
                     transaction()
-                else:
-                    with lock:
-                        transaction()
                 successful_groups.append((ctrl, entries))
-            except Exception as exc:
+            except (RuntimeError, OSError) as exc:
                 labels = ",".join(label for label, _motor in entries)
                 message = (
                     f"controller={type(ctrl).__name__} motors={labels}: {exc}"
@@ -509,7 +483,7 @@ class FeedbackAcquisition:
                 try:
                     for label, motor in entries:
                         observations[label] = self._feedback_state_with_sequence(label, motor)
-                except Exception as exc:
+                except (RuntimeError, OSError) as exc:
                     labels = ",".join(label for label, _motor in entries)
                     message = f"controller={type(ctrl).__name__} motors={labels}: {exc}"
                     group_errors.append(message)
@@ -521,7 +495,7 @@ class FeedbackAcquisition:
             )
         self._sync_feedback_health()
         if group_errors:
-            raise RuntimeError("shared feedback batch failed: " + "; ".join(group_errors))
+            raise _FeedbackBatchError("shared feedback batch failed: " + "; ".join(group_errors))
 
     def _force_feedback_refresh(self) -> None:
         """同步强制刷新: 必须拿到"请求之后新到"的反馈, 否则报错.
@@ -533,14 +507,13 @@ class FeedbackAcquisition:
         只轮询, 不追加请求; 不能把"请求已写出"当作"应答已接收".
         """
         groups = self._feedback_controller_groups()
-        self._require_feedback_sequence_api(groups)
         initial: dict[str, tuple[object, int]] = {}
         initial_errors: list[str] = []
         for ctrl, entries in groups:
             try:
                 for label, motor in entries:
                     initial[label] = self._feedback_state_with_sequence(label, motor)
-            except Exception as exc:
+            except (RuntimeError, OSError) as exc:
                 labels = ",".join(label for label, _motor in entries)
                 message = f"controller={type(ctrl).__name__} motors={labels}: {exc}"
                 initial_errors.append(message)
@@ -548,7 +521,7 @@ class FeedbackAcquisition:
                     self._record_feedback_label_error(label, message)
         if initial_errors:
             self._sync_feedback_health()
-            raise RuntimeError(
+            raise _FeedbackBatchError(
                 "forced feedback baseline failed before request: "
                 + "; ".join(initial_errors)
             )
@@ -590,7 +563,7 @@ class FeedbackAcquisition:
                         observed_at=time.monotonic(),
                         inspect_after_poll=True,
                     )
-                except Exception as exc:
+                except _FeedbackBatchError as exc:
                     last_error = exc
                     attempt_error = exc
                 if attempt_error is None and all(
@@ -616,7 +589,7 @@ class FeedbackAcquisition:
                             observed_at=time.monotonic(), inspect_after_poll=True,
                             request_new_feedback=False,
                         )
-                    except Exception as exc:
+                    except _FeedbackBatchError as exc:
                         last_error = exc
                         break
                     if all(forced_sample_satisfies(label, baseline)
@@ -641,7 +614,7 @@ class FeedbackAcquisition:
         self._sync_feedback_health()
         if last_error is not None:
             raise last_error
-        raise RuntimeError("shared feedback batch failed: " + "; ".join(missing))
+        raise _FeedbackBatchError("shared feedback batch failed: " + "; ".join(missing))
 
     def refresh_feedback_if_due(
         self,
@@ -658,7 +631,7 @@ class FeedbackAcquisition:
         observed_at = time.monotonic() if now is None else float(now)
         control_thread = self._backend.control_thread
         if (
-            (self.control_loop_active or getattr(self._backend, "writer_active", False))
+            (self.control_loop_active or self._backend.writer_active)
             and control_thread is not None
             and threading.current_thread() is not control_thread
         ):
@@ -681,7 +654,7 @@ class FeedbackAcquisition:
                 else:
                     self._refresh_feedback_batch(observed_at=observed_at)
                 return True
-            except Exception:
+            except _FeedbackBatchError:
                 if force:
                     raise
                 return False

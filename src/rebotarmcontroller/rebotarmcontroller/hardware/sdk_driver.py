@@ -209,7 +209,10 @@ class SdkMotorDriver:
     @staticmethod
     def _open_controller(channel, baud):
         """按通道创建 MotorBridge 控制器, 串口与伪终端走达妙串口构造入口."""
-        from motorbridge import Controller
+        from motorbridge import Controller, Motor
+        # 接口缺失必须在建立串口及注册电机前失败, 避免清理时产生设备写入.
+        if not callable(getattr(Motor, 'get_state_with_sequence', None)):
+            raise RuntimeError('feedback requires patched MotorBridge get_state_with_sequence()')
         if channel.startswith(('/dev/tty', '/dev/pts/')):
             return Controller.from_dm_serial(channel, baud)
         return Controller(channel)

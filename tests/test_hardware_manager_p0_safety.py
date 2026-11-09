@@ -521,7 +521,7 @@ def testvalidate_status_uses_verified_cache_after_refresh(
     manager.lifecycle.connected = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     manager.gripper._gripper_mot = FakeMotor(position=gripper_state.pos)
-    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     before = seed_verified_feedback(
         manager,
         arm_status=1,
@@ -540,7 +540,7 @@ def test_gripper_publication_uses_verified_cache_only() -> None:
     manager.lifecycle.connected = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     manager.gripper._gripper_mot = FakeMotor(position=gripper_state.pos)
-    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     before = seed_verified_feedback(
         manager,
         arm_status=1,
@@ -559,7 +559,7 @@ def test_gripper_target_start_uses_verified_cache_only() -> None:
     manager.test_arm.control_loop_active = True
     gripper_state = SimpleNamespace(pos=-1.25, vel=0.1, torq=0.2, status_code=1)
     manager.gripper._gripper_mot = FakeMotor(position=gripper_state.pos)
-    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     before = seed_verified_feedback(
         manager,
         arm_status=1,
@@ -620,7 +620,7 @@ def test_gripper_motor_command_defaults_use_verified_cache_only() -> None:
     manager.gripper._gripper_mot.send_mit = (
         lambda *values: commands.append(tuple(float(value) for value in values))
     )
-    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     manager.gripper._gripper_cfg = SimpleNamespace(kp=3.0, kd=0.4, vlim=1.5)
     before = seed_verified_feedback(
         manager,
@@ -1198,7 +1198,7 @@ def test_zero_margin_accepts_feedback_but_rejects_larger_positive_feedback(joint
 
 def test_connect_does_not_swallow_active_feedback_refresh_failure() -> None:
     manager = make_manager()
-    controller = SimpleNamespace(poll_feedback_once=lambda: None)
+    controller = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     manager.test_arm._ctrl_map = {"fake": controller}
     for joint in manager.test_arm._joints:
         joint.vendor = "fake"
@@ -1220,7 +1220,7 @@ def test_feedback_refresh_batches_requests_before_one_controller_poll() -> None:
     manager = make_manager()
     events: list[str] = []
     controller = SimpleNamespace(
-        poll_feedback_once=lambda: events.append("poll"),
+        poll_feedback_once=lambda: events.append("poll"), bus_lock=threading.RLock(),
     )
     manager.test_arm._ctrl_map = {"fake": controller}
     for joint in manager.test_arm._joints:
@@ -1309,7 +1309,7 @@ def test_forced_lifecycle_feedback_refresh_retries_transient_failure() -> None:
         ),
     )
     manager.gripper._gripper_ctrl = SimpleNamespace(
-        poll_feedback_once=poll_feedback_once,
+        poll_feedback_once=poll_feedback_once, bus_lock=threading.RLock(),
     )
 
     manager.feedback._refresh_all_feedback()
@@ -1347,7 +1347,7 @@ def test_gripper_mode_is_set_before_explicit_gripper_enable() -> None:
         disable=gripper_disable,
     )
     manager.gripper._gripper_ctrl = SimpleNamespace(
-        poll_feedback_once=lambda: sequence.update(value=sequence["value"] + 1)
+        poll_feedback_once=lambda: sequence.update(value=sequence["value"] + 1), bus_lock=threading.RLock()
     )
     original_arm_enable = manager.test_arm.enable
 
@@ -1381,7 +1381,7 @@ def test_gripper_target_does_not_create_an_independent_control_thread(
     del manager.gripper._start_gripper_loop
     manager.gripper._gripper_mot = FakeMotor(position=-1.0)
     manager.gripper._gripper_mot.state.status_code = 1
-    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     seed_verified_feedback(
         manager,
         arm_status=1,
@@ -1429,7 +1429,7 @@ def test_shared_feedback_scheduler_batches_all_seven_motors_at_50hz() -> None:
     manager = make_manager(hardware_feedback_rate_hz=50.0)
     poll_calls: list[int] = []
     controller = SimpleNamespace(
-        poll_feedback_once=lambda: poll_calls.append(1),
+        poll_feedback_once=lambda: poll_calls.append(1), bus_lock=threading.RLock(),
     )
     manager.test_arm._ctrl_map = {"fake": controller}
     manager.gripper._gripper_mot = FakeMotor(position=-1.0)
@@ -1755,7 +1755,7 @@ def test_forced_initial_getter_failure_records_group_before_any_request() -> Non
 
 def test_ros_thread_cannot_refresh_bus_while_hardware_loop_is_active() -> None:
     manager = make_manager()
-    controller = SimpleNamespace(poll_feedback_once=lambda: None)
+    controller = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     manager.test_arm._ctrl_map = {"fake": controller}
     manager.test_arm.control_loop_active = True
     manager.test_arm._ctrl_thread = object()
@@ -1778,7 +1778,7 @@ def test_failed_feedback_batch_stops_gripper_before_next_target() -> None:
     controller = SimpleNamespace(
         poll_feedback_once=lambda: (_ for _ in ()).throw(
             RuntimeError("serial feedback timeout")
-        )
+        ), bus_lock=threading.RLock()
     )
     manager.test_arm._ctrl_map = {"fake": controller}
     manager.gripper._gripper_ctrl = controller
@@ -1813,7 +1813,7 @@ def _configure_gripper_position_move(
         send_mit=send_mit,
         request_feedback=lambda: None,
     )
-    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     manager.gripper._gripper_execution._gripper_pos = state.pos
     manager.gripper._gripper_execution._gripper_vel = state.vel
     manager.gripper._gripper_execution._gripper_torque = state.torq
@@ -2528,7 +2528,7 @@ def test_gripper_position_target_uses_full_90mm_range(
         get_state=lambda: SimpleNamespace(pos=0.0, vel=0.0, torq=0.0, status_code=1),
         request_feedback=lambda: None,
     )
-    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None)
+    manager.gripper._gripper_ctrl = SimpleNamespace(poll_feedback_once=lambda: None, bus_lock=threading.RLock())
     manager.gripper._start_gripper_loop = lambda: None
     seed_verified_feedback(
         manager,

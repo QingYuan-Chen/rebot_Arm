@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from builtin_interfaces.msg import Time
 
+from rebotarmcontroller.contracts.controller_contracts import FeedbackUnavailableError
 from rebotarmcontroller.ros.ros_publishers import JointStatePublisher
 import rebotarmcontroller.ros.ros_publishers as ros_publishers
 
@@ -134,7 +135,7 @@ def test_joint_state_publisher_reports_status_when_feedback_cache_is_invalid() -
     publisher._feedback = _CacheOnlyHardware()
     publisher._runtime = publisher._lifecycle = publisher._gripper = publisher._feedback
     publisher._feedback.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
-        RuntimeError("arm feedback stale")
+        FeedbackUnavailableError("arm feedback stale")
     )
     publisher._publisher = _Recorder()
     publisher._joint_state_publishers = {
@@ -171,7 +172,7 @@ def test_joint_state_publisher_refreshes_latched_status_after_feedback_recovers(
 
     original_get_sample = publisher._feedback.get_cached_joint_sample
     publisher._feedback.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
-        RuntimeError("arm feedback stale")
+        FeedbackUnavailableError("arm feedback stale")
     )
     publisher.publish()
 
@@ -281,7 +282,7 @@ def test_gripper_timestamp_tracks_its_own_feedback_and_preserves_age(monkeypatch
 def test_gripper_still_publishes_when_arm_cache_is_unavailable() -> None:
     publisher = _feedback_publisher()
     publisher._feedback.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
-        RuntimeError("joint3 [INVALID_COORDINATE]")
+        FeedbackUnavailableError("joint3 [INVALID_COORDINATE]")
     )
     publisher.publish()
     assert publisher._publisher.messages == []
@@ -304,3 +305,11 @@ def test_motor_fault_codes_are_published_without_remapping() -> None:
     publisher.publish()
     assert [publisher._joint_state_publishers[name].messages[-1].status_code
             for name in publisher._feedback.joint_names] == [0, 1, 8, 9, 11, 14]
+
+
+def test_publisher_propagates_internal_contract_errors():
+    publisher = _feedback_publisher()
+    publisher._feedback.get_cached_joint_sample = lambda: (_ for _ in ()).throw(
+        AttributeError('missing required snapshot field'))
+    with pytest.raises(AttributeError, match='snapshot field'):
+        publisher.publish()

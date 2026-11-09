@@ -125,6 +125,17 @@ def test_partial_construction_releases_all_acquired_handles():
     assert bus.closed and all(m.closed for m in bus.motors)
 
 
+def test_driver_rejects_missing_sequence_interface_before_open(monkeypatch):
+    class Controller:
+        @staticmethod
+        def from_dm_serial(*args):
+            pytest.fail('device was opened before capability validation')
+    monkeypatch.setitem(sys.modules, 'motorbridge',
+                        SimpleNamespace(Controller=Controller, Motor=SimpleNamespace()))
+    with pytest.raises(RuntimeError, match='get_state_with_sequence'):
+        SdkMotorDriver._open_controller('/dev/tty-test', 921600)
+
+
 def test_failed_position_batch_has_receipt_and_stops_remaining_writes():
     driver,bus,_=make_driver();driver.connect();bus.failure=(3,'position')
     command=PositionCommand((0.,)*6,(.3,)*6,0)
@@ -473,6 +484,35 @@ def test_runtime_cycle_budget_includes_callback_without_catchup(
     assert runtime.last_error is None
     assert np.diff(starts) == pytest.approx(intervals)
     assert timing.faulted is faulted
+
+
+def test_disabled_release_does_not_poll_after_motor_handles_are_closed(monkeypatch):
+    manager, buses = make_local_manager(monkeypatch)
+    manager.runtime.driver._sleep = manager.runtime.device_wait
+    manager.lifecycle.connect()
+    bus = buses[0]
+    idle = manager.runtime.idle_callback
+    def guarded_idle():
+        assert not any(motor.closed for motor in bus.motors), 'feedback polled during release'
+        idle()
+    manager.runtime.idle_callback = guarded_idle
+    manager.lifecycle.shutdown()
+    assert bus.closed and all(motor.closed for motor in bus.motors)
+    assert not manager.runtime.writer_active and manager.runtime.last_error is None
+
+
+def test_failed_disabled_release_restores_wait_state(monkeypatch):
+    manager, _ = make_local_manager(monkeypatch)
+    manager.lifecycle.connect()
+    close = manager.runtime.driver.close
+    monkeypatch.setattr(manager.runtime.driver, 'close',
+                        lambda: (_ for _ in ()).throw(RuntimeError('release failure')))
+    with pytest.raises(RuntimeError, match='release failure'):
+        manager.lifecycle.shutdown()
+    assert manager.lifecycle.connected and not manager.runtime._waiting
+    assert manager.runtime.driver.connected
+    monkeypatch.setattr(manager.runtime.driver, 'close', close)
+    manager.lifecycle.shutdown()
 
 
 def test_real_manager_local_path_default_disabled_enable_recover_reconnect(monkeypatch):

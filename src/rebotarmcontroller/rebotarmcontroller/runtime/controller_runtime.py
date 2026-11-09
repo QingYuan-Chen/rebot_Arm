@@ -191,7 +191,13 @@ class ControllerRuntime:
         因而这是带设备副作用的释放入口, 不能用于未知使能状态的只读探测收尾.
         """
         self.stop_control_loop()
-        self.driver.close()
+        # 句柄释放后不能在 shutdown 等待中重入反馈采集; 失败时恢复等待状态.
+        waiting = self._waiting
+        self._waiting = True
+        try:
+            self.driver.close()
+        finally:
+            self._waiting = waiting
         self._closing = True
         self.requests.close()
         self._wake.set()

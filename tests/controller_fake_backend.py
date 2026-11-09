@@ -52,6 +52,10 @@ class FakeBackend:
     @property
     def control_thread(self): return getattr(self._arm,'_ctrl_thread',None)
     @property
+    def writer_active(self):
+        thread = self.control_thread
+        return thread is not None and thread.is_alive()
+    @property
     def execution_running(self): return self.execution.running
     def set_execution_running(self, value): self.execution.running = bool(value)
     @property

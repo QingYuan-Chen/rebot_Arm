@@ -195,3 +195,30 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
         if assembly.lifecycle.enabled:
             assembly.lifecycle.disable()
         assembly.lifecycle.shutdown()
+
+
+@pytest.mark.parametrize('rate', [0., -1., float('nan'), float('inf'), -float('inf'), 1e-320, 1e20])
+def test_invalid_joint_state_rate_fails_before_hardware_construction(monkeypatch, rate):
+    import rebotarmcontroller.rebotarm_controller as module
+
+    values = {}
+    monkeypatch.setattr(module.Node, '__init__', lambda self, name: None)
+    monkeypatch.setattr(module.Node, 'declare_parameter',
+                        lambda self, name, default, **kwargs: values.setdefault(name, default))
+    monkeypatch.setattr(module.Node, 'get_parameter',
+                        lambda self, name: SimpleNamespace(value=rate if name == 'joint_state_rate' else values[name]))
+    monkeypatch.setattr(module, 'HardwareManager', lambda **kwargs: pytest.fail('hardware constructed'))
+    with pytest.raises(ValueError, match='joint_state_rate'):
+        module.reBotArmController()
+
+
+def test_fractional_publish_rate_is_preserved():
+    node = RegistrationNode()
+    periods = []
+    node.create_timer = lambda period, callback, **kwargs: periods.append(period)
+    runtime = SimpleNamespace(joint_names=[], mode='pos_vel', control_loop_active=False)
+    lifecycle = SimpleNamespace(enabled=False, execution='IDLE')
+    feedback = SimpleNamespace(get_feedback_status=lambda: ([], []))
+    JointStatePublisher(node, 'ports', .5, runtime=runtime, lifecycle=lifecycle,
+                        feedback=feedback, gripper=SimpleNamespace(has_gripper=False))
+    assert periods == [2.0]

@@ -17,8 +17,8 @@
 from __future__ import annotations
 from ..contracts.component_ports import GripperAcquisitionPort
 from ..contracts.controller_values import JointSnapshot
+from ..contracts.controller_contracts import FeedbackUnavailableError
 from .feedback_acquisition import FeedbackAcquisition
-from .feedback_acquisition import _JOINT_POSITION_LIMITS_RAD
 import numpy as np
 import time
 
@@ -246,33 +246,15 @@ class FeedbackReader:
             if feedback_failure is not None:
                 raise RuntimeError(feedback_failure)
         joint_names = self._backend.joint_names
-        if len(joint_names) != len(set(joint_names)):
-            raise RuntimeError("joint names contain duplicates")
-        if len(joint_names) != len(_JOINT_POSITION_LIMITS_RAD):
-            raise RuntimeError(
-                f"joint count mismatch: got {len(joint_names)}, "
-                f"expected {len(_JOINT_POSITION_LIMITS_RAD)}"
-            )
-
         positions: list[float] = []
         velocities: list[float] = []
         torques: list[float] = []
         statuses: list[int] = []
         samples = self._verified_feedback_samples(joint_names)
         for name, sample in zip(joint_names, samples):
-            if name not in _JOINT_POSITION_LIMITS_RAD:
-                raise RuntimeError(f"no hardware soft limit configured for {name}")
             state = sample.state
-            values = (float(state.pos), float(state.vel), float(state.torq))
-            if not all(np.isfinite(value) for value in values):
-                raise RuntimeError(f"{name} feedback contains non-finite values")
-            lower, upper = _JOINT_POSITION_LIMITS_RAD[name]
-            if values[0] < lower or values[0] > upper:
-                raise RuntimeError(
-                    f"{name} position {values[0]:.6f} rad outside "
-                    f"hardware soft limit [{lower:.6f}, {upper:.6f}]"
-                )
-            status = int(state.status_code)
+            values = (state.pos, state.vel, state.torq)
+            status = state.status_code
             if expected_status is not None and status != expected_status:
                 raise RuntimeError(
                     f"{name} status_code={status}, expected {expected_status}"
@@ -334,11 +316,11 @@ class FeedbackReader:
             now = time.monotonic()
             failure = self._arm_feedback_failure_reason(now=now)
             if failure is not None:
-                raise RuntimeError(failure)
+                raise FeedbackUnavailableError(failure)
             feedback = [self._cached_motor_feedback_locked(name, now=now) for name in self._backend.joint_names]
             for item in feedback:
                 if item.failure_reason is not None:
-                    raise RuntimeError(item.failure_reason)
+                    raise FeedbackUnavailableError(item.failure_reason)
             positions, velocities, torques = (
                 tuple(item.values[index] for item in feedback)
                 for index in range(3)
@@ -366,4 +348,3 @@ class FeedbackReader:
     _feedback_state_with_sequence = staticmethod(FeedbackAcquisition._feedback_state_with_sequence)
     _feedback_sequence_advanced = staticmethod(FeedbackAcquisition._feedback_sequence_advanced)
     _classified_feedback_error = staticmethod(FeedbackAcquisition._classified_feedback_error)
-    _require_feedback_sequence_api = staticmethod(FeedbackAcquisition._require_feedback_sequence_api)

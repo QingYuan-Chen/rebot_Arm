@@ -514,7 +514,7 @@ ros2 topic pub --once /rebotarm/joints/joint1/cmd rebotarm_msgs/msg/JointMotorCm
 | `arm_config` | bringup 内置 `arm.yaml` | 机械臂配置路径 |
 | `gripper_config` | bringup 内置 `gripper.yaml` | 夹爪配置路径 |
 | `channel` | 空字符串 | 留空使用 YAML，非空时覆盖串口 |
-| `joint_state_rate` | `100.0` | `/rebotarm/joint_states` 发布频率 |
+| `joint_state_rate` | `100.0` | `/rebotarm/joint_states` 发布频率，须为正有限值；非法值在连接设备前拒绝 |
 | `cmd_arbitration` | `reject` | 轨迹运行中 per-joint cmd 仲裁，`reject` 或 `preempt` |
 | `arm_namespace` | `rebotarm` | ROS 命名空间前缀 |
 | `frame_id` | `base_link` | 机械臂基座坐标系，预留给 TF、视觉和规划集成 |
