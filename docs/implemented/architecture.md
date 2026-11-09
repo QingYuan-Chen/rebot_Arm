@@ -19,7 +19,7 @@ motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查
 执行代次、任务与资源占用；仿真保留物理时间、模式与生命周期。
 三者单向依赖共享包，控制器及仿真不导入 motion 实现。
 
-`PrepareArmTrajectory` 属于内部准备接口。公共 FJT 只执行完整六轴；网页 prepared_v1
+`PrepareArmTrajectory` 属于内部准备接口。公共 FJT 只执行完整六轴；网页 continuous
 通过 `ExecuteTeleopMotion` 提交六轴轨迹和可选的独立夹爪目标。
 后端先预留机械臂与夹爪，motion 在 MoveItPy 同一只读场景锁内完成采样检查，
 后端原子复核会话、代次、已发送保持目标、新鲜反馈、夹爪起始状态与场景版本后使用原系数；

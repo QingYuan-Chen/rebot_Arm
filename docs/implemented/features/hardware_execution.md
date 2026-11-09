@@ -19,8 +19,8 @@
 
 本节保留第一批（`39028d1`）的历史验证。第二批已迁移共享内核并接入准备服务、
 正式控制周期和 MuJoCo；当前契约与软件/仿真结果见
-[P005 共享轨迹与 prepared_v1 执行](p005_prepared_trajectory.md)。
-实机默认仍为 legacy，尚未进行第二批对应的实机验证。
+[P005 共享轨迹与 continuous 执行](p005_prepared_trajectory.md)。
+实机默认 continuous，用户已完成模式功能测试；定量硬件验收另行安排。
 
 第一批仅实现离线数值参考、校验及假设备交接, **没有切换生产 FJT 执行器**。
 新增实现位于 motion 的 `polynomial_trajectory.py` 和 `trajectory_preparation.py`;

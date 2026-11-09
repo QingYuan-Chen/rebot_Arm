@@ -1,6 +1,6 @@
 <!--
   文件职责：登记执行曲线重定时和能力绑定的 MoveIt 插件。
-  对外接口：下列两个 pluginlib 类名由 prepared_v1 启动配置引用。
+  对外接口：下列两个 pluginlib 类名由 continuous 启动配置引用。
   安全约束：不新增执行 Action；原 simple controller manager 继续负责 FJT 发送。
   文件结构：共享库及其响应适配器、控制器管理器声明。
 -->

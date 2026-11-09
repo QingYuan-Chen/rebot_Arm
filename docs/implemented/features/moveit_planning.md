@@ -15,7 +15,7 @@
 - RViz 原生 MotionPlanning Plan/Execute；
 - 示教起点对齐和运行时跟踪安全门。
 
-`prepared_v1` 保留 `arm`、`gripper` 两组独立 Plan/Execute，移除 `arm_with_gripper`。
+`continuous` 保留 `arm`、`gripper` 两组独立 Plan/Execute，移除 `arm_with_gripper`。
 `arm` 映射完整六轴 FJT；`gripper` 取规划末点，通过
 `/rebotarm/gripper/moveit_command`（GripperCommand）转换为独立开合，左指 m ×2 得到
 原接口的双指总开口 m，实际反馈和结果再 ÷2。规划时间按生效夹爪限速核定，不向 FJT 发送手指点。

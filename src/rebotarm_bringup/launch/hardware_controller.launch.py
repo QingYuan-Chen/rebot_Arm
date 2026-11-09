@@ -4,7 +4,7 @@
     不启动 MoveIt、RViz、示教、网页或轨迹准备服务，其他硬件组合复用本片段。
 对外接口：generate_launch_description 返回参数声明与节点组合；命名空间须与上层一致。
 安全约束：启动默认失能，获得新鲜反馈、完成现场检查并显式 enable 后才允许运动。
-    实机轨迹模式继续默认 legacy；选择 prepared_v1 还需要上层提供匹配的准备服务，
+    实机轨迹模式默认 continuous；执行需要上层提供匹配的准备服务，
     参数切换不代表实机验收或自动获得运动授权；默认退出不自动回位。
 文件结构：launch 导入 → 配置路径/参数映射 → 公共参数声明 → 位姿适配与唯一硬件节点。
 """
@@ -79,8 +79,8 @@ def generate_launch_description():
             # arm_namespace：话题/服务/动作命名空间前缀，必须与 MoveIt 配置一致。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             # 仿真默认值不能传染到实机入口；模式不匹配或准备服务缺失时由执行链拒绝。
-            DeclareLaunchArgument('trajectory_execution_mode', default_value='legacy',
-                choices=['legacy', 'prepared_v1']),
+            DeclareLaunchArgument('trajectory_execution_mode', default_value='continuous',
+                choices=['legacy', 'continuous']),
             # frame_id / ee_frame_id：对外位姿的参考坐标系与末端坐标系名称，需与 URDF 一致。
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             DeclareLaunchArgument("ee_frame_id", default_value="end_link"),

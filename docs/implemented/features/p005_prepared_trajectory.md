@@ -1,8 +1,11 @@
-# P005 共享轨迹与 prepared_v1 执行
+# P005 共享轨迹与 continuous 执行
+
+`prepared_v1` 已正式更名为 `continuous`，启动参数、能力话题与能力快照统一使用新名称；
+历史验收记录中的模式名称按当前名称表述。旧名称不再作为启动参数或能力值接受。
 
 > 问题状态：**已解决**。用户已确认本轮测试无问题，稳定代码已合入 main。
 > 本页开头为当前接口与行为；带日期的旧方案、排查及验收段落保留历史证据，不表示仍在执行。
-> 当前状态不等同于整机硬件全项或实机定量连续性验收，也不自动改变实机 legacy 默认值。
+> 当前状态涵盖用户的真机功能测试；整机硬件全项及实机定量连续性验收另行安排。
 
 > 范围：共享六轴轨迹、网页组合与独立夹爪执行及软件/MuJoCo 验证；现场运动表现由用户验证。
 
@@ -14,7 +17,7 @@
 七轴、单手指及携带右指的旧 FJT 明确拒绝，不静默投影。六轴 q/qv/qva 的 C0/C1/C2
 兼容及系数载荷 v1/v2 保留。URDF mimic、模型、惯量、限位和控制增益不变。
 
-网页 prepared_v1 的关节、键盘和组合操作使用
+网页 continuous 的关节、键盘和组合操作使用
 `/rebotarm/execute_teleop_motion`（[ExecuteTeleopMotion](../../../src/rebotarm_msgs/action/ExecuteTeleopMotion.action)）：
 
 - Goal：完整六轴 trajectory、move_gripper、gripper_position（双指总开口 m）、gripper_max_effort。
@@ -59,7 +62,7 @@ simple controller manager 的装饰器匹配后下发权威轨迹及绑定；缓
 机械臂末点仍须满足原 0.03 rad 到位容差，独立夹爪沿用电机角 0.12 rad 到位容差；
 不恢复已删除的逐周期参考误差中止或约 0.001144 rad 位置偏差准入门限。
 
-MoveIt 公共启动配置的执行起点容差现为 `0.03 rad`（legacy / prepared_v1 共用），
+MoveIt 公共启动配置的执行起点容差现为 `0.03 rad`（legacy / continuous 共用），
 与实机控制器普通轨迹的终点到位容差一致。前者比较规划首点与 MoveIt 当前状态，后者
 比较实际反馈与已发送终点，两者用途不同。示教起点分档、对齐跳过阈值和 Safe Home
 专用到位容差不变；MoveIt 执行预算仍为 `1.2T + 0.5 s`。修改需重启 MoveIt 后生效。
@@ -179,7 +182,7 @@ MoveIt/MoveItPy 正常退出，本轮进程已清理。
 
 ### 机械臂再次准入（2026-11-04）
 
-按用户要求，prepared_v1 与 legacy 一样不以六轴静止窗口作为再次接纳任务的条件。
+按用户要求，continuous 与 legacy 一样不以六轴静止窗口作为再次接纳任务的条件。
 控制器预约、接纳和诊断以及 MuJoCo 对应路径同步调整；运动层保留内部 `stationary`
 兼容字段，但不再依赖该字段作准入，也不虚报机械臂已静止。正常结束后可在其他检查
 通过时立即申请下一轨迹；取消或停止后仍须等待停止事务完成。准备曲线仍从最后成功
@@ -225,7 +228,7 @@ C++ 重定时插件及控制器映射由实际 MoveIt Plan/Execute 验证。
 限值处理。`simulation_confirmed_launch.log` 和假设备启动日志确认 move_group/MoveItPy
 均正常退出，无本轮测试进程残留；本轮未重认定实机指标。
 
-软件/仿真结论不代表现场通过；实机仍 legacy、默认失能。用户使用现有网页和 MoveIt
+当时软件/仿真结论不代表现场通过；当时实机仍 legacy、默认失能。用户使用现有网页和 MoveIt
 验证现场运动后再决定默认切换。视觉只验到接触前服务链，完整感知与抓取工作流未验收。
 
 ### 全部量化位置门限移除（2026-11-03）
@@ -241,7 +244,7 @@ C++ 重定时插件及控制器映射由实际 MoveIt Plan/Execute 验证。
 继续核验。已检查曲线不会因准备之后的夹爪被动位移而自动重新检查碰撞；单独位置变化
 不再触发上述拒绝或中止，因此速度反馈偏低时无法靠这些窗口排除漂移或振荡。
 
-实机仍默认 legacy、默认失能，MuJoCo 默认 prepared_v1。用户通过现有网页及 MoveIt
+当时实机默认 legacy、默认失能，MuJoCo 默认 continuous。用户通过现有网页及 MoveIt
 验证现场运动表现后再决定实机默认切换；本批不包含接触后夹持协同、搬运、撤退或实机定量同步验收。
 
 ### 修订协同验收（2026-11-03）
@@ -304,7 +307,7 @@ motion、controller、simulation 三包在上轮独立非软链接安装区重�
 SIGINT `KeyboardInterrupt/-2`。证据在 `log/p005_admission_residual_20261103/`。
 
 本轮复用了其余已构建依赖，未重新做 13 包全新构建；现场残差的物理根因仍未确认，
-不增加实机验收结论。实机默认 legacy、默认失能保持不变，未操作实机、提交或推送。
+不增加实机验收结论。当时实机默认 legacy、默认失能保持不变，未操作实机、提交或推送。
 
 ### 资源占用提示排查（2026-11-03）
 
@@ -384,7 +387,7 @@ FJT、默认失能、显式使能、MoveIt Plan/Execute、协同执行、IK/Pose
 
 控制器包使用新的非软链接 build/install 构建，复用上一轮其余 ROS 依赖；日常默认安装区
 也同步重建控制器。本轮修改只涉及控制器停止/收尾，不重做 MuJoCo 物理指标验收，
-不新增实机结论。实机仍 legacy、默认失能，未操作实机、提交或推送；现场首次组合失败
+不新增实机结论。当时实机仍 legacy、默认失能，未操作实机、提交或推送；现场首次组合失败
 的原始触发原因仍缺日志，不能据软件修复认定所有现场任务失败已消除。
 
 ## 组件与契约
@@ -442,20 +445,20 @@ MoveItPy `read_only()` 场景锁中完成所有样本。按段内速度极值安
 
 ## 模式与启动
 
-`trajectory_execution_mode` 只接受 `legacy / prepared_v1`。
+`trajectory_execution_mode` 只接受 `legacy / continuous`。
 后端以锁存 `/<ns>/trajectory_execution_mode` 发布能力；网页和键盘必须观察到匹配模式，
-不匹配或能力未知拒绝，无失败后回退。真实硬件默认 legacy，专用 safe_home 等路径保留原语义。
-日常 `mujoco_moveit_sim.launch.py` 已默认 prepared_v1，终端键盘须显式选择相同模式。
-轻量 RViz preview 发布 legacy 能力，保留旧入口兼容，不提供 prepared_v1。
+不匹配或能力未知拒绝，无失败后回退。真实硬件默认 continuous，专用 safe_home 等路径保留原语义。
+日常 `mujoco_moveit_sim.launch.py` 已默认 continuous，终端键盘须显式选择相同模式。
+轻量 RViz preview 发布 legacy 能力，保留旧入口兼容，不提供 continuous。
 
 第三批将 `trajectory_execution_mode` 显式贯通 MoveIt、网页工作台、键盘遥操作和视觉抓取
-的现有启动链。真机 prepared_v1 组合复用 `moveit_demo` 提供场景和准备服务，
+的现有启动链。真机 continuous 组合复用 `moveit_demo` 提供场景和准备服务，
 唯一控制器及真实反馈仍由硬件片段拥有；键盘新分支不重复启动控制器、状态发布或 RViz。
-轻量预演保持 legacy，四类真机日常入口首次交付也保留 legacy 默认；用户明确确认实测通过后
-才另行切换其默认。独立底层启动始终保留 legacy 默认和显式选择，不自行补齐准备服务。
+轻量预演保持 legacy，真机入口默认 continuous；legacy 可显式选择。
+独立底层启动默认 continuous，准备服务由外部组合提供。
 
 随包键盘与网页 YAML 不再固定覆盖时长；节点已有的模式默认实际生效：
-prepared_v1 为 0.02 rad / 0.4 s，legacy 仍为 0.02 rad / 0.2 s。
+continuous 为 0.02 rad / 0.4 s，legacy 仍为 0.02 rad / 0.2 s。
 用户 YAML 显式配置仍有效，独立单步、busy 拒绝、不排队和超限拒绝语义不变。
 
 先构建并 source 安装区：
@@ -466,7 +469,7 @@ colcon build --symlink-install --packages-up-to rebotarm_bringup
 source install/setup.bash
 export ROS_DOMAIN_ID=77 ROS_LOCALHOST_ONLY=1
 ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py \
-  use_rviz:=false use_mujoco_viewer:=false trajectory_execution_mode:=prepared_v1 \
+  use_rviz:=false use_mujoco_viewer:=false trajectory_execution_mode:=continuous \
   use_dashboard:=true dashboard_port:=18088 \
   trajectory_trace_path:=/tmp/p005_physics.jsonl
 ```
@@ -475,7 +478,7 @@ ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py \
 Dashboard 的 `simulation_backend=mujoco` 消费物理后端的反馈，独立夹爪发往仿真服务，
 新模式关节、键盘及组合操作提交 ExecuteTeleopMotion，组合夹爪独立推进，
 不再发布模拟落点污染物理反馈。`use_dashboard` 默认 false，不改变既有界面启动偏好。
-终端键盘可另启动 `TeleopKeyboardNode --ros-args -p trajectory_execution_mode:=prepared_v1`。
+终端键盘可另启动 `TeleopKeyboardNode --ros-args -p trajectory_execution_mode:=continuous`。
 
 ### 第三批首次软件交付与用户实测
 
@@ -537,7 +540,7 @@ Fast DDS 在该隔离方式下须共享 `/dev/shm`，否则跨隔离客户端发
 固定夹爪忙拒绝、执行中取消与场景变化停止、原始 jerk 样本以及环境/附着物碰撞拒绝。
 终端经 PTY 真正读键，第二键在首步结束前明确拒绝，最终只完成一个步长。
 
-| 冻结物理对照 | 旧阶梯 | prepared_v1 | 要求 |
+| 冻结物理对照 | 旧阶梯 | continuous | 要求 |
 | --- | --- | --- | --- |
 | 0.02 rad / 0.4 s 最大跟踪误差 | 0.020000 rad | 0.003398 rad | ≤0.005 rad 且改善 |
 | 结束后达到并保持 0.5 s 的观察耗时 | 0.842 s | 0.504 s | ≤5 s |
@@ -569,9 +572,9 @@ MotorBridge 和串口模块导入。
 两条 Gymnasium 提示沿用既有基线。
 
 13 包在全新目录完成非软链接构建。隔离真实串口，隐藏原 src/build/install，
-仅加载 Jazzy 与新安装区后，展开四类入口（含键盘组合）的默认/legacy/prepared_v1
+仅加载 Jazzy 与新安装区后，展开四类入口（含键盘组合）的默认/legacy/continuous
 及 RViz 开关，确认唯一控制器、状态发布链、准备服务和 RViz，真机分支无假反馈源。
-实际构造网页/键盘节点核验：随包 YAML 下 legacy 为 0.2 s、prepared_v1 为 0.4 s，
+实际构造网页/键盘节点核验：随包 YAML 下 legacy 为 0.2 s、continuous 为 0.4 s，
 HTTP `/api/config` 回显一致，显式 0.6/0.7 s 参数覆盖仍生效。
 
 复用正式 ROS 假设备探针，等待场景初始化及静止证据后验证默认失能拒绝、显式假使能、
@@ -587,7 +590,7 @@ FJT 执行、忙时拒绝、最终命令保持、取消、真实 MoveIt Execute�
 固定夹爪忙拒绝及环境/附着物碰撞拒绝均通过，原 jerk 样本仍正确拒绝。
 模型、增益及限值的 37 个冻结资源摘要与第二批完全一致。
 
-| 冻结物理对照 | 旧阶梯 | prepared_v1 |
+| 冻结物理对照 | 旧阶梯 | continuous |
 | --- | --- | --- |
 | 0.02 rad / 0.4 s 最大跟踪误差 | 0.020000 rad | 0.003398 rad |
 | 结束后完成连续 0.5 s 收敛观察 | 0.842 s | 0.504 s |
@@ -596,7 +599,7 @@ FJT 执行、忙时拒绝、最终命令保持、取消、真实 MoveIt Execute�
 
 以上满足第二批原门槛；正式 ROS 首个单步的独立物理记录最大误差为
 0.002812 rad，收敛观察 0.504 s。它们只证明冻结仿真条件，未验证实机定量指标。
-实机入口保留 legacy 默认，状态为“新模式可供用户实测”；尚无本轮用户实机反馈。
+当时实机入口保留 legacy 默认，状态为“新模式可供用户实测”；尚无本轮用户实机反馈。
 视觉仅贯通配置和公共执行链，工作流未验收。
 
 收尾复现既有 Jazzy MoveIt/MoveItPy 原生退出异常：准备节点在 SIGINT 后报告 -11；
@@ -720,4 +723,4 @@ manager 仍只装配；分层与职责门禁继续覆盖这些约束。
 MoveIt 和准备节点退出码为 0；本次向隔离 launch 单独发送 SIGINT 后，子进程由 launch
 升级发送 SIGTERM，夹爪可视化辅助节点出现既有 `ExternalShutdownException`，MuJoCo
 退出有既有发布协程提示。日志及对照数据保留在 `log/p005_maintenance_20261104/`。
-实机保持 legacy、默认失能；本轮软件与仿真检查未增加实机定量或整机验收结论。
+当时实机保持 legacy、默认失能；本轮软件与仿真检查未增加实机定量或整机验收结论。

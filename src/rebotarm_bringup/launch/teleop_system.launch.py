@@ -20,7 +20,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -52,8 +52,9 @@ def generate_launch_description():
             # use_hardware=false（默认）：无真机/只演练流程；true 时才由被包含的启动
             # 文件拉起硬件控制器。真机分支不会自动使能电机。
             DeclareLaunchArgument("use_hardware", default_value="false"),
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
-                choices=["legacy", "prepared_v1"]),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value=PythonExpression(
+                ["'continuous' if '", use_hardware, "'.lower() == 'true' else 'legacy'"]),
+                choices=["legacy", "continuous"]),
             # use_local_rviz：是否随键盘遥操作一起打开本机 RViz，便于直接观察机械臂。
             DeclareLaunchArgument("use_local_rviz", default_value="true"),
             # channel：电机总线通道覆盖值；空串表示交给机械臂配置文件或自动探测。

@@ -349,7 +349,7 @@ class TeleopStatusPanelNode(Node):
         # web_keyboard_default_duration / min / max（s）：键盘单步默认时长及其允许区间，
         # 它与步长共同决定该步的等效角速度，进而触发限速校验。
         self.declare_parameter("web_keyboard_default_duration",
-            .4 if self._trajectory_capability.expected == 'prepared_v1' else .2)
+            .4 if self._trajectory_capability.expected == 'continuous' else .2)
         self.declare_parameter("web_keyboard_min_duration", 0.1)
         self.declare_parameter("web_keyboard_max_duration", 2.0)
         # web_keyboard_default_speed_rad_s（rad/s）：键盘遥操作默认速度上限。
@@ -396,8 +396,8 @@ class TeleopStatusPanelNode(Node):
         # 关节轨迹动作与夹爪动作：名称空间与控制器侧保持一致，缺一不可。
         self._action_client = ActionClient(
             self,
-            ExecuteTeleopMotion if self._trajectory_capability.expected == 'prepared_v1' else FollowJointTrajectory,
-            f"/{self._arm_namespace}/" + ('execute_teleop_motion' if self._trajectory_capability.expected == 'prepared_v1' else 'follow_joint_trajectory'),
+            ExecuteTeleopMotion if self._trajectory_capability.expected == 'continuous' else FollowJointTrajectory,
+            f"/{self._arm_namespace}/" + ('execute_teleop_motion' if self._trajectory_capability.expected == 'continuous' else 'follow_joint_trajectory'),
         )
         self._gripper_action_client = ActionClient(
             self,
@@ -466,7 +466,7 @@ class TeleopStatusPanelNode(Node):
             joint_velocity_limits=self._joint_velocity_limits,
             trajectory_factory=JointTrajectory,
             trajectory_point_factory=JointTrajectoryPoint,
-            follow_goal_factory=ExecuteTeleopMotion.Goal if self._trajectory_capability.expected == 'prepared_v1' else FollowJointTrajectory.Goal,
+            follow_goal_factory=ExecuteTeleopMotion.Goal if self._trajectory_capability.expected == 'continuous' else FollowJointTrajectory.Goal,
             gripper_action_client=self._gripper_action_client,
             gripper_goal_factory=GripperCommand.Goal,
             trajectory_execution_mode=self._trajectory_capability.expected,
@@ -1081,15 +1081,15 @@ class TeleopStatusPanelNode(Node):
         trajectory.joint_names = list(decision.joint_names)
         point = JointTrajectoryPoint()
         point.positions = [float(v) for v in decision.positions]
-        # legacy 保留单位置点；prepared_v1 下方替换为含起点及首末 v/a 的完整约束。
+        # legacy 保留单位置点；continuous 下方替换为含起点及首末 v/a 的完整约束。
         _set_duration(point.time_from_start, decision.duration)
         trajectory.points = [point]
-        if self._trajectory_capability.expected == 'prepared_v1':
+        if self._trajectory_capability.expected == 'continuous':
             trajectory = point_to_point_message(decision.joint_names,
                 tuple(current_positions[name] for name in decision.joint_names),
                 decision.positions, decision.duration, trajectory_factory=JointTrajectory,
                 point_factory=JointTrajectoryPoint)
-        goal = ExecuteTeleopMotion.Goal() if self._trajectory_capability.expected == 'prepared_v1' else FollowJointTrajectory.Goal()
+        goal = ExecuteTeleopMotion.Goal() if self._trajectory_capability.expected == 'continuous' else FollowJointTrajectory.Goal()
         goal.trajectory = trajectory
         with self._web_keyboard_lock:
             # HTTP 请求可能并发到达；先原子占用，再异步发送，不能等 Goal 回执才标 busy。
@@ -1477,7 +1477,7 @@ class TeleopStatusPanelNode(Node):
             status = int(result_response.status)
             error_code = int(result.error_code)
             error_string = str(result.error_string)
-            if self._trajectory_capability.expected == 'prepared_v1':
+            if self._trajectory_capability.expected == 'continuous':
                 arm_state, gripper_state = result.arm_state, result.gripper_state
             else:
                 arm_state, gripper_state = '', ''

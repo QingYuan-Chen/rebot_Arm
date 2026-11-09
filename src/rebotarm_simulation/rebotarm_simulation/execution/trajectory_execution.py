@@ -286,7 +286,7 @@ class TrajectoryExecution:
                     raise RuntimeError(grip.reason or 'independent gripper failed')
                 if settling == 'succeeded' and grip and grip.state != 'succeeded':
                     settling = 'settling'
-                if self.mode == 'prepared_v1' and settling == 'succeeded':
+                if self.mode == 'continuous' and settling == 'succeeded':
                     if active is None or active.sent_at is None or state.simulation_time <= active.sent_at:
                         settling = 'settling'
                 return ExecutionObservation(state, elapsed, desired, settling, arm_state,
@@ -298,7 +298,7 @@ class TrajectoryExecution:
     def complete(self, token, sampler, cancel_requested, notify):
         """终态通知与释放保持原闸门事务顺序，通知回调在仿真锁外运行。"""
         def succeed():
-            if self.mode == 'prepared_v1':
+            if self.mode == 'continuous':
                 self.access.run(lambda _sim: self.control.command_joint_positions(sampler.sample(sampler.duration)[:6]))
             else:
                 self.hold()
@@ -311,7 +311,7 @@ class TrajectoryExecution:
             def advance(sim):
                 for _ in range(count):
                     active = self.active.prepared
-                    if self.mode == 'prepared_v1' and active is not None and not self.active.cancel_requested:
+                    if self.mode == 'continuous' and active is not None and not self.active.cancel_requested:
                         current = sim.get_state()
                         elapsed = current.simulation_time-active.start
                         self.control.command_joint_positions(active.curve.sample(elapsed)[0])
@@ -319,12 +319,12 @@ class TrajectoryExecution:
                             active.sent_at = current.simulation_time
                     self.gripper.advance()
                     state = sim.step()
-                    if self.mode == 'prepared_v1':
+                    if self.mode == 'continuous':
                         # 记录器只读本步快照，任务写权限留在执行组件。
                         record(state, sim.get_control_status(),
                             dict(curve=active.curve, start=active.start) if active else None)
                         self._sample_history.append(state)
-                if self.mode == 'prepared_v1':
+                if self.mode == 'continuous':
                     self._last_physics_wall = self.clock()
                 return state
             return self.access.run(advance)

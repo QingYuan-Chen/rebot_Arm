@@ -79,6 +79,7 @@ worker = threading.Thread(target=executor.spin, daemon=True)
 worker.start()
 report = dict(domain=os.environ['ROS_DOMAIN_ID'], backend='in-memory fake motor handles', sdk_blocked=True)
 try:
+    report['trajectory_mode'] = controller.get_parameter('trajectory_execution_mode').value
     def trigger(name):
         connection = client.create_client(Trigger, '/rebotarm/'+name)
         assert connection.wait_for_service(timeout_sec=5.)
@@ -86,7 +87,7 @@ try:
         assert result.success, result.message
         return result.message
     def ready():
-        if controller.get_parameter('trajectory_execution_mode').value != 'prepared_v1':
+        if controller.get_parameter('trajectory_execution_mode').value != 'continuous':
             return
         deadline = time.monotonic()+5.
         while not controller.hardware.arm.admission_snapshot()['ready'] and time.monotonic()<deadline:
@@ -112,7 +113,7 @@ try:
         return value
     assert not wait(fjt.send_goal_async(goal(start))).accepted
     report['default_disabled_reject'] = True
-    if controller.get_parameter('trajectory_execution_mode').value == 'prepared_v1':
+    if controller.get_parameter('trajectory_execution_mode').value == 'continuous':
         from rebotarm_msgs.srv import PrepareArmTrajectory,GetArmPlanningState,RetimeArmTrajectory
         preparation = client.create_client(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory')
         assert preparation.wait_for_service(timeout_sec=20.)
@@ -131,7 +132,7 @@ try:
         report['disabled_preview']=True
     report['enable'] = trigger('enable')
     ready()
-    if controller.get_parameter('trajectory_execution_mode').value == 'prepared_v1':
+    if controller.get_parameter('trajectory_execution_mode').value == 'continuous':
         assert not wait(fjt.send_goal_async(FollowJointTrajectory.Goal(trajectory=preview.trajectory))).accepted
         report['preview_rejected_after_enable']=True
     target = start.copy(); target[0] += .03
@@ -173,7 +174,7 @@ try:
     report['moveit_execute'] = [completed.status, completed.result.error_code.val]
     report['planned_points'] = len(value.trajectory.joint_trajectory.points)
     ready()
-    if controller.get_parameter('trajectory_execution_mode').value == 'prepared_v1':
+    if controller.get_parameter('trajectory_execution_mode').value == 'continuous':
         from rebotarm_msgs.srv import RetimeArmTrajectory
         from rebotarm_motion.coordinated_trajectory import generate_schedule, curve_message
         from trajectory_msgs.msg import JointTrajectory
@@ -186,7 +187,7 @@ try:
         query = RetimeArmTrajectory.Request(trajectory=curve_message(curve,
             trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint),
             velocity_scaling=1.,acceleration_scaling=1.,
-            capability_revision=controller.hardware.arm.trajectory_capability('prepared_v1')['revision'])
+            capability_revision=controller.hardware.arm.trajectory_capability('continuous')['revision'])
         plan = wait(service.call_async(query)); assert plan.success, plan.message
         teleop = ActionClient(client,ExecuteTeleopMotion,'/rebotarm/execute_teleop_motion')
         assert teleop.wait_for_server(timeout_sec=5.)

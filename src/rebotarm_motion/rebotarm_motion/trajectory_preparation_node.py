@@ -204,7 +204,7 @@ def main(args=None):
                 payload, revision = checker.prepare(request)
                 response.prepared_json = json.dumps(payload, allow_nan=False)
                 response.scene_revision, response.success = revision, True
-                response.message = 'prepared_v1'
+                response.message = 'continuous'
         except Exception as exc:
             response.success, response.message = False, str(exc)
         node.get_logger().info(f'prepare success={response.success} '

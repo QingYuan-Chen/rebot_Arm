@@ -76,7 +76,7 @@ for both independent executors. Web checks use closed fingers only in a calculat
 copy; other arm requests freeze fresh actual opening. Feedback and the public scene
 always remain real, with separate arm/gripper source timestamps. MoveIt arm and gripper
 execute independently; teach replay is six-axis. Real
-hardware stays disabled by default and uses legacy until user field validation.
+hardware stays disabled by default and uses continuous; legacy remains explicitly selectable.
 See [P005 coordination](../implemented/features/p005_prepared_trajectory.md#修订协同接口).
 
 The visual entrypoint owns perception, candidate filtering and display. Offline mode

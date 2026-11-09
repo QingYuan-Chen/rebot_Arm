@@ -2,7 +2,7 @@
 """P005 冻结物理对照及隔离 ROS 操作链验收。
 
 文件职责
-    比较旧阶梯与 prepared_v1 的跟踪和保持效果，按需验证已启动的 MuJoCo/MoveIt/
+    比较旧阶梯与 continuous 的跟踪和保持效果，按需验证已启动的 MuJoCo/MoveIt/
     Dashboard/键盘正式链；保存原始轨迹、配置摘要和检查结论。
 对外接口
     main 接受必需的 --output；--ros 启用 ROS/HTTP 操作链，--dashboard 指定对应仿真界面。
@@ -41,7 +41,7 @@ def physics_acceptance(output):
     target = (.02, *start[1:])
     curve = build_curve(JOINT_NAMES, point_to_point(start, target, .4))
     report = {}
-    for mode in ('legacy_step', 'prepared_v1'):
+    for mode in ('legacy_step', 'continuous'):
         # 每组重新建模并先保持 2 s，防止上一组的积分、速度或接触状态影响对照。
         with RebotArmMujoco() as sim:
             sim.reset_joint_positions(start)
@@ -54,7 +54,7 @@ def physics_acceptance(output):
             settled = None
             for _ in range(round(5.4/sim.timestep)):
                 elapsed = sim.get_state().simulation_time-origin
-                command = curve.sample(elapsed)[0] if mode == 'prepared_v1' else start if elapsed < .4 else target
+                command = curve.sample(elapsed)[0] if mode == 'continuous' else start if elapsed < .4 else target
                 sim.command_joint_positions(command)
                 state = sim.step()
                 elapsed = state.simulation_time-origin
@@ -85,10 +85,10 @@ def physics_acceptance(output):
             trace.close()
             report[mode] = dict(max_tracking_error=maximum, settle_observation=settled,
                 hold_drift=drift, switch_torque_jump=torque_jump)
-    assert report['prepared_v1']['max_tracking_error'] <= .005, report
-    assert report['prepared_v1']['max_tracking_error'] < report['legacy_step']['max_tracking_error'], report
-    assert report['prepared_v1']['settle_observation'] is not None and report['prepared_v1']['settle_observation'] <= 5., report
-    assert report['prepared_v1']['switch_torque_jump'] <= .01, report
+    assert report['continuous']['max_tracking_error'] <= .005, report
+    assert report['continuous']['max_tracking_error'] < report['legacy_step']['max_tracking_error'], report
+    assert report['continuous']['settle_observation'] is not None and report['continuous']['settle_observation'] <= 5., report
+    assert report['continuous']['switch_torque_jump'] <= .01, report
     write_json(output/'physics_acceptance.json', report)
     return report
 
@@ -184,7 +184,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
     results={}
     try:
         wait(lambda:len(samples)>30 and 'trajectory_scene_revision' in latest)
-        assert latest['trajectory_execution_mode']=='prepared_v1'
+        assert latest['trajectory_execution_mode']=='continuous'
         nodes=node.get_node_names()
         assert 'rebotarm_mujoco_node' in nodes and 'reBotArmController' not in nodes,nodes
         from rclpy.action import get_action_server_names_and_types_by_node
@@ -498,7 +498,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         master,slave=pty.openpty()
         terminal_log=(output/'terminal_keyboard.log').open('w')
         process=subprocess.Popen(['ros2','run','rebotarm_teleop','TeleopKeyboardNode',
-            '--ros-args','-p','trajectory_execution_mode:=prepared_v1'],
+            '--ros-args','-p','trajectory_execution_mode:=continuous'],
             stdin=slave,stdout=terminal_log,stderr=subprocess.STDOUT,start_new_session=True)
         os.close(slave)
         try:
@@ -531,6 +531,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         req.hold_positions=req.feedback_positions=fixture['points'][0]['positions']
         req.feedback_observed_at=time.monotonic();req.stationary=req.enabled=True
         req.gripper_positions=[0.,0.];req.scene_revision=latest['trajectory_scene_revision']
+        req.capability_json=latest['trajectory_capabilities']
         req.deadline_monotonic=time.monotonic()+2.
         rejection=call(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory',req)
         assert not rejection.success and 'jerk' in rejection.message,rejection.message

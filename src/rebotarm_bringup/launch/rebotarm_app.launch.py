@@ -236,8 +236,8 @@ def generate_launch_description():
             # 机械臂命名空间（话题前缀）
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             # 模式同时传给后端和网页；不能只切换其中一端。
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
-                choices=["legacy", "prepared_v1"]),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="continuous",
+                choices=["legacy", "continuous"]),
             # 串口通道：auto 表示自动探测 ttyACM0/ttyACM1
             DeclareLaunchArgument("channel", default_value="auto"),
             # 真机入口：默认 true，且传 false 会被 _launch_setup 拒绝

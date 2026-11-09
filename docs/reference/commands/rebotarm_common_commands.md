@@ -45,15 +45,15 @@ ros2 launch rebotarm_bringup rebotarm_app.launch.py \
 
 打开 `http://127.0.0.1:8088/`。网页功能含 Preview、Execute、Stop、Safe Home、夹爪、示教录制和回放。
 
-P005 新模式实测使用同一工作台，显式增加模式参数：
+真机工作台默认使用 continuous：
 
 ```bash
 ros2 launch rebotarm_bringup rebotarm_app.launch.py \
   use_hardware:=true channel:=/dev/ttyACM0 \
-  trajectory_execution_mode:=prepared_v1
+  trajectory_execution_mode:=continuous
 ```
 
-首次交付的真机默认仍为 `legacy`，启动后仍默认失能。新模式同时传给网页与控制器，
+真机默认使用 `continuous`，启动后仍默认失能。该模式同时传给网页与控制器，
 组合自动提供唯一 MoveIt 场景和准备服务。网页的 `web_keyboard` 配置由
 `http://127.0.0.1:8088/api/config` 回显；默认步长为 0.02 rad、时长为 0.4 s。
 legacy 仍为 0.2 s；自定义 YAML 的显式时长继续生效，过短或超限会拒绝，不自动延时。
@@ -95,17 +95,17 @@ ros2 launch rebotarm_bringup teleop_system.launch.py \
 
 ```bash
 ros2 launch rebotarm_bringup teleop_keyboard.launch.py \
-  use_hardware:=true channel:=/dev/ttyACM0 trajectory_execution_mode:=prepared_v1
+  use_hardware:=true channel:=/dev/ttyACM0 trajectory_execution_mode:=continuous
 # 若需要同时使用网页和示教，将上行入口改成 teleop_system.launch.py。
 ```
 
-prepared_v1 的真机键盘分支复用已有 MoveIt 组合，提供碰撞场景和准备服务，
+continuous 的真机键盘分支复用已有 MoveIt 组合，提供碰撞场景和准备服务，
 不重复启动控制器、状态发布器或 RViz。轻量预演仍只支持 legacy；
 需要新模式物理仿真时使用 [MuJoCo 组合](../../implemented/features/p005_prepared_trajectory.md#模式与启动)。
 
 ## P005 用户实机功能验证
 
-prepared_v1 的“联合预览”显示六轴重定时后的时长、独立夹爪目标和生效力矩上限。
+continuous 的“联合预览”显示六轴重定时后的时长、独立夹爪目标和生效力矩上限。
 机械臂保留关键点；夹爪仅单次开合，不再支持延迟或多关键点。组合按钮通过一个
 ExecuteTeleopMotion 同周期登记两侧，分别限速和到位，整体结果等两侧完成，不保证同时到达。
 网页关节及键盘也使用该 Action；独立夹爪按钮保留，活动组合期间忙时拒绝。
@@ -115,7 +115,7 @@ ExecuteTeleopMotion 同周期登记两侧，分别限速和到位，整体结果
 关键点格式和时序约束见 [P005 协同接口](../../implemented/features/p005_prepared_trajectory.md#修订协同接口)。
 
 先完成现场净空、支撑、急停、唯一串口和新鲜反馈检查，记录当次可安全恢复的基线。
-确认控制器、网页模式均为 prepared_v1，且准备服务就绪后，再显式 Enable。
+确认控制器、网页模式均为 continuous，且准备服务就绪后，再显式 Enable。
 本流程由操作者执行，软件交付不包含代理连接或驱动真机。
 
 1. 网页关节点对点从小幅单轴开始：Preview 后 Execute，观察平滑起停、到达目标及结束后保持。

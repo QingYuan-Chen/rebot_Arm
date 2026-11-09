@@ -38,7 +38,7 @@ def test_rebotarm_app_launch_exposes_simple_modes_and_profiles() -> None:
     assert "full MoveIt + web teleop workbench" in launch_text
     assert 'DeclareLaunchArgument("channel", default_value="auto")' in launch_text
     assert 'DeclareLaunchArgument("execution_mode", default_value="execute")' in launch_text
-    assert 'DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy"' in launch_text
+    assert 'DeclareLaunchArgument("trajectory_execution_mode", default_value="continuous"' in launch_text
     assert '"trajectory_execution_mode": trajectory_mode' in launch_text
     assert '"trajectory_execution_mode": trajectory_execution_mode' in launch_text
     assert 'trajectory_execution_mode=trajectory_mode' in launch_text
@@ -121,7 +121,7 @@ def test_operator_configs_are_split_by_consumer() -> None:
         "teleop_keyboard.launch.py", "teleop_system.launch.py", "bringup.launch.py",
     ):
         text = _read(f"src/rebotarm_bringup/launch/{launch_path}")
-        assert 'DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy"' in text
+        assert 'DeclareLaunchArgument("trajectory_execution_mode"' in text
         assert '"trajectory_execution_mode":' in text
     interactive = _read("src/rebotarm_bringup/launch/interactive_system.launch.py")
     assert '"prepare_trajectories": prepare_trajectories' in interactive
@@ -213,3 +213,30 @@ def test_feature_commands_document_web_teleop_next_to_rviz_drag() -> None:
     operator_doc = _read("docs/reference/commands/rebotarm_common_commands.md")
     assert "ros2 launch rebotarm_bringup rebotarm_app.launch.py" in operator_doc
     assert "Preview、Execute、Stop" in operator_doc
+
+
+def test_hardware_defaults_to_continuous_and_preview_to_legacy():
+    import importlib.util
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+
+    launch_dir = ROOT / "src/rebotarm_bringup/launch"
+    for filename in ("interactive_system.launch.py", "teleop_keyboard.launch.py", "teleop_system.launch.py"):
+        spec = importlib.util.spec_from_file_location("default_" + filename.replace(".", "_"), launch_dir / filename)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        declaration = next(entity for entity in module.generate_launch_description().entities
+            if isinstance(entity, DeclareLaunchArgument) and entity.name == "trajectory_execution_mode")
+        for hardware, expected in (("true", "continuous"), ("false", "legacy")):
+            context = LaunchContext()
+            context.launch_configurations["use_hardware"] = hardware
+            declaration.execute(context)
+            assert context.launch_configurations["trajectory_execution_mode"] == expected
+        context = LaunchContext()
+        context.launch_configurations.update(use_hardware="true", trajectory_execution_mode="legacy")
+        declaration.execute(context)
+        assert context.launch_configurations["trajectory_execution_mode"] == "legacy"
+
+    for filename in ("moveit_hardware.launch.py", "rebotarm_app.launch.py", "bringup.launch.py", "hardware_controller.launch.py"):
+        text = (launch_dir / filename).read_text()
+        assert re.search(r"DeclareLaunchArgument\(['\"]trajectory_execution_mode['\"], default_value=['\"]continuous['\"]", text)

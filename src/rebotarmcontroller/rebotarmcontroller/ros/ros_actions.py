@@ -5,7 +5,7 @@
 
 对外接口
     ArmActions 注册回调, 提交数值请求, 发布缓存反馈并映射任务终态.
-    同一公共 FJT 按配置选择 legacy 或 prepared_v1；后者异步调用内部准备服务，
+    同一公共 FJT 按配置选择 legacy 或 continuous；后者异步调用内部准备服务，
     经原所有者复核后提交，准备失败不回退到 legacy。
 
 安全与并发约束
@@ -38,8 +38,8 @@ class ArmActions:
         self._node = node
         self._runtime, self._lifecycle = runtime, lifecycle
         self._feedback, self._arm, self._gripper = feedback, arm, gripper
-        if trajectory_execution_mode not in ('legacy', 'prepared_v1'):
-            raise ValueError('trajectory_execution_mode must be legacy or prepared_v1')
+        if trajectory_execution_mode not in ('legacy', 'continuous'):
+            raise ValueError('trajectory_execution_mode must be legacy or continuous')
         self._trajectory_mode = trajectory_execution_mode
         # 保留请求对象本身，避免只用 id 时对象被回收重用而把迟到回调配到另一 Goal。
         self._pending_preparations = {}
@@ -82,7 +82,7 @@ class ArmActions:
         self._planning_state_service = node.create_service(GetArmPlanningState,
             f'/{namespace}/get_arm_planning_state', get_planning_state,
             callback_group=node.reentrant_group)
-        if trajectory_execution_mode == 'prepared_v1':
+        if trajectory_execution_mode == 'continuous':
             from rebotarm_msgs.srv import PrepareArmTrajectory
             self._prepare_type = PrepareArmTrajectory
             self._prepare_client = node.create_client(PrepareArmTrajectory,
@@ -105,7 +105,7 @@ class ArmActions:
             execute_callback=lambda goal: self.execute_gripper_command(goal, moveit=True),
             goal_callback=self.goal_callback, cancel_callback=self.cancel_gripper_command,
             callback_group=node.reentrant_group)
-        if trajectory_execution_mode == 'prepared_v1':
+        if trajectory_execution_mode == 'continuous':
             self._teleop_server = ActionServer(
                 node, ExecuteTeleopMotion, f'/{namespace}/execute_teleop_motion',
                 execute_callback=lambda goal: self.execute_follow_joint_trajectory(goal, web=True),
@@ -115,7 +115,7 @@ class ArmActions:
     def goal_callback(self, _request):
         """只按当前 ready_for_motion 做第一层准入; 实际提交仍要在设备线程重新校验."""
         return (GoalResponse.ACCEPT if self._lifecycle.ready_for_motion
-                and not (self._trajectory_mode == 'prepared_v1' and self._runtime.arm_resource_reserved)
+                and not (self._trajectory_mode == 'continuous' and self._runtime.arm_resource_reserved)
                 else GoalResponse.REJECT)
 
     def trajectory_goal_callback(self, request, *, web=False):
@@ -194,7 +194,7 @@ class ArmActions:
 
     def cancel_follow_joint_trajectory(self, goal):
         """准备路径先撤销本 Goal 令牌；旧路径由执行回调按任务身份停止。"""
-        if self._trajectory_mode == 'prepared_v1':
+        if self._trajectory_mode == 'continuous':
             pending = self._pending_preparations.get(id(goal.request))
             if pending is not None and pending[0] is goal.request:
                 try:
@@ -218,7 +218,7 @@ class ArmActions:
         result = ExecuteTeleopMotion.Result() if web else FollowJointTrajectory.Result()
         task = None
         pending = (self._pending_preparations.get(id(goal_handle.request))
-            if self._trajectory_mode == 'prepared_v1' else None)
+            if self._trajectory_mode == 'continuous' else None)
         token = pending[1] if pending is not None and pending[0] is goal_handle.request else None
         try:
             if goal_handle.is_cancel_requested:
@@ -233,7 +233,7 @@ class ArmActions:
             points = [tuple(point.positions) for point in trajectory.points]
             times = [float(p.time_from_start.sec)+p.time_from_start.nanosec*1e-9
                      for p in trajectory.points]
-            if self._trajectory_mode == 'prepared_v1':
+            if self._trajectory_mode == 'continuous':
                 if token is None:
                     raise RuntimeError('trajectory was not reserved')
                 if web:

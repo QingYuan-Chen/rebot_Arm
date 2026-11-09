@@ -154,7 +154,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             frame_id="base_link",
             planning_service=str(self.get_parameter("moveit_planning_service").value),
             planning_pipeline=('ompl_reference' if str(self.get_parameter('trajectory_execution_mode').value)
-                == 'prepared_v1' else str(self.get_parameter("moveit_planning_pipeline").value)),
+                == 'continuous' else str(self.get_parameter("moveit_planning_pipeline").value)),
             planner_id=str(self.get_parameter("moveit_planner_id").value),
             planning_time=float(self.get_parameter("moveit_planning_time").value),
             num_attempts=int(self.get_parameter("moveit_num_planning_attempts").value),
@@ -747,7 +747,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         final = curve_message(curve,trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
         if self._trajectory_capability is not None and self._retime_trajectory is not None:
             capability = self._trajectory_capability()
-            if capability['mode'] == 'prepared_v1':
+            if capability['mode'] == 'continuous':
                 final = self._retime_trajectory(final,capability,False,
                     float(self.get_parameter('max_replay_velocity_rad_s').value))
         duration = final.points[-1].time_from_start.sec + final.points[-1].time_from_start.nanosec*1e-9

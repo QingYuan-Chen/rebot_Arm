@@ -22,7 +22,7 @@
     - ``use_fake_joint_states=false``：关节状态必须来自真实物理步进，不能用假发布器，
       否则规划会基于与仿真不一致的状态；
     - ``use_sim_time=true``：规划消息与曲线执行使用仿真时钟；准备期限仍使用主机单调时钟；
-    - ``trajectory_execution_mode=prepared_v1``：日常仿真使用已验收的新路径，实机入口默认值独立；
+    - ``trajectory_execution_mode=continuous``：日常仿真使用已验收的新路径，实机入口默认值独立；
     - ``trajectory_trace_path``：空串禁用逐步记录，指定路径时由仿真后端写 JSONL；
     - ``use_rviz`` 默认 true，只影响可视化，不影响控制；
     - ``use_mujoco_viewer`` 默认 true，仅打开本地查看器；无显示环境设置
@@ -70,9 +70,9 @@ def generate_launch_description():
         [
             # 命名空间：关节状态、动作与服务名都带该前缀，必须与规划侧一致。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
-            # 软件及物理操作链验收通过；仅仿真日常默认切换，实机仍为 legacy。
-            DeclareLaunchArgument('trajectory_execution_mode', default_value='prepared_v1',
-                choices=['legacy', 'prepared_v1']),
+            # 仿真日常默认 continuous，与真机执行模式保持一致。
+            DeclareLaunchArgument('trajectory_execution_mode', default_value='continuous',
+                choices=['legacy', 'continuous']),
             DeclareLaunchArgument('use_dashboard', default_value='false'),
             DeclareLaunchArgument('dashboard_port', default_value='8080'),
             DeclareLaunchArgument('trajectory_trace_path', default_value=''),

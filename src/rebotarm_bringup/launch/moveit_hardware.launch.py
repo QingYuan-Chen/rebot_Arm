@@ -70,8 +70,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             # 首次交付保留旧默认；现场实测新路径时由操作者显式选择。
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
-                choices=["legacy", "prepared_v1"]),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="continuous",
+                choices=["legacy", "continuous"]),
             DeclareLaunchArgument("channel", default_value=""),
             DeclareLaunchArgument("shutdown_safe_home", default_value="false"),
             DeclareLaunchArgument("joint_state_rate", default_value="100.0"),

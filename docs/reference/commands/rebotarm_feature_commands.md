@@ -13,7 +13,7 @@ source install/setup.bash
 ```
 
 确认已安装 `ros-jazzy-moveit-simple-controller-manager`。Plan 成功而 Execute 失败时，先检查控制器插件和唯一 Action server。
-使用 prepared_v1 还需要 `ros-jazzy-moveit-py`；准备服务不就绪时明确失败，不回退到旧执行方式。
+使用 continuous 还需要 `ros-jazzy-moveit-py`；准备服务不就绪时明确失败，不回退到旧执行方式。
 
 ## 仿真 RViz 拖动
 
@@ -51,7 +51,7 @@ ros2 action list | grep follow_joint_trajectory
 ```bash
 ros2 launch rebotarm_bringup moveit_hardware.launch.py \
   channel:=/dev/ttyACM0 \
-  use_rviz:=true trajectory_execution_mode:=prepared_v1
+  use_rviz:=true trajectory_execution_mode:=continuous
 ```
 
 这是第三批首次交付的新模式显式选择命令；省略模式参数仍使用 legacy。
@@ -105,7 +105,7 @@ ros2 topic echo --once /rebotarm/trajectory_scene_revision std_msgs/msg/String \
 ros2 param get /reBotArmController trajectory_execution_mode
 ```
 
-新模式能力应为 `prepared_v1`，服务类型应为 `rebotarm_msgs/srv/PrepareArmTrajectory`。
+新模式能力应为 `continuous`，服务类型应为 `rebotarm_msgs/srv/PrepareArmTrajectory`。
 网页/键盘组合中的 `trajectory_execution_mode` 也必须相同，准备期间保持当前位置，
 普通夹爪运动会因资源占用拒绝；场景变化停止保持，本批不承担动态避障。
 

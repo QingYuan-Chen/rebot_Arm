@@ -185,7 +185,7 @@ class ExecutionLifecycle:
     执行回调抛异常时，若只 abort 而不释放执行权，动作服务器会永久处于 busy
     状态、后续所有目标都被拒绝。这里先尽量把当前位置保持住（失败也不影响
     清理），再 abort，最后无论如何都 finish 掉 token。
-    prepared_v1 由轨迹执行组件确认物理停止后再清理。
+    continuous 由轨迹执行组件确认物理停止后再清理。
     """
 
     def __init__(self, active: ActiveTrajectory, gate: TrajectoryCommandGate) -> None:

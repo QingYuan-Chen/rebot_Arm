@@ -6,7 +6,7 @@
 对外接口
     submit_arm_trajectory 返回独立任务; stop_active_motion 等待确认;
     set_joint_target, send_joint_motor_cmd 和 safe_home 提供按职责组织的命令.
-    prepared_v1 通过 reserve_arm_preparation 预约、decode_prepared_arm_trajectory 解码、
+    continuous 通过 reserve_arm_preparation 预约、decode_prepared_arm_trajectory 解码、
     admit_prepared_arm_trajectory 接纳，cancel_arm_preparation 撤销预约。
     设备线程预约和复核，调用线程等待准备与解码；周期内不等待碰撞服务。
 
@@ -449,7 +449,7 @@ class ArmController:
         token = ArmPreparation(self._backend.requests.generations['device'], execution.generation,
             hold, sample.positions, sample.observed_at, tuple(gripper['positions']),
             gripper['generation'], gripper['raw_position'], self._scene_revision, deadline,
-            self.trajectory_capability('prepared_v1')['revision'], 1 if web else 0, command)
+            self.trajectory_capability('continuous')['revision'], 1 if web else 0, command)
         # 规划快照失效时在建立预约之前拒绝；没有新运动，也无须自动 Stop 解锁。
         from rebotarm_trajectory.planning import require_plan_context
         require_plan_context(planning, capability_revision=token.capability,
@@ -499,7 +499,7 @@ class ArmController:
             raise RuntimeError('prepared trajectory context changed')
         curve = handoff.curve
         if (handoff.capability != token.capability
-                or token.capability != self.trajectory_capability('prepared_v1')['revision']):
+                or token.capability != self.trajectory_capability('continuous')['revision']):
             raise RuntimeError('trajectory capability changed')
         if curve.points[0].positions != token.hold:
             raise ValueError('prepared initial hold mismatch')

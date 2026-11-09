@@ -51,7 +51,7 @@
 ### 当前操作
 
 - [`implemented/features/hardware_execution.md`](implemented/features/hardware_execution.md)：真机控制器、反馈、夹爪和执行边界。
-- [`implemented/features/p005_prepared_trajectory.md`](implemented/features/p005_prepared_trajectory.md)：共享轨迹、prepared_v1 执行和验证范围。
+- [`implemented/features/p005_prepared_trajectory.md`](implemented/features/p005_prepared_trajectory.md)：共享轨迹、continuous 执行和验证范围。
 - [`implemented/features/moveit_planning.md`](implemented/features/moveit_planning.md)：MoveIt 规划、碰撞和轨迹执行。
 - [`implemented/features/operator_control.md`](implemented/features/operator_control.md)：网页、键盘和 RViz 操作。
 - [`implemented/features/teach_replay.md`](implemented/features/teach_replay.md)：示教录制、准备和回放。

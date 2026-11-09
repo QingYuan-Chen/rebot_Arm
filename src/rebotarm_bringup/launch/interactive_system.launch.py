@@ -5,7 +5,7 @@
 #后端选择逻辑（互斥，同一条启动里只会生效一个）：
 #
 #- use_moveit_preview=true：复用 MoveIt 组合；接硬件时只使用真实反馈，无硬件时可选择假状态；
-#- use_moveit_preview=false：默认只提供状态与可选硬件；硬件 prepared_v1 自动复用 MoveIt 场景和准备服务。
+#- use_moveit_preview=false：默认只提供状态与可选硬件；硬件 continuous 自动复用 MoveIt 场景和准备服务。
 #
 #关键话题约定：机器人模型订阅 "/<arm_namespace>/visual_joint_states"（可视化用的关节状态，可能来自控制器反馈，也可能由假状态源填充）；"/<arm_namespace>/joint_states"则是控制器/仿真后端发布的执行侧关节状态。
 #
@@ -57,7 +57,7 @@ def generate_launch_description():
     trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
     # 新模式必须有完整规划场景；复用同一 MoveIt 组合，状态发布器随组合互斥。
     prepare_trajectories = PythonExpression([
-        "'", use_hardware, "'.lower() == 'true' and '", trajectory_mode, "' == 'prepared_v1'",
+        "'", use_hardware, "'.lower() == 'true' and '", trajectory_mode, "' == 'continuous'",
     ])
     use_moveit_stack = PythonExpression([
         "'", use_moveit_preview, "'.lower() == 'true' or (", prepare_trajectories, ")",
@@ -139,8 +139,9 @@ def generate_launch_description():
             DeclareLaunchArgument("use_moveit_preview", default_value="false"),
             # 是否打开真实硬件通道：默认 false，必须显式开启
             DeclareLaunchArgument("use_hardware", default_value="false"),
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
-                choices=["legacy", "prepared_v1"]),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value=PythonExpression(
+                ["'continuous' if '", use_hardware, "'.lower() == 'true' else 'legacy'"]),
+                choices=["legacy", "continuous"]),
             # 规划与执行使用的基座坐标系
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             # 末端（法兰）坐标系名

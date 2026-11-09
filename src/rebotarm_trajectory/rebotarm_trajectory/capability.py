@@ -23,7 +23,7 @@ def constraint_revision(*documents):
 
 def make_capability(mode, session, speed, torque, limits_revision):
     """速度为夹爪电机 rad/s，力矩为 N·m；与开口单位的转换必须显式。"""
-    if mode not in ('legacy', 'prepared_v1') or type(session) is not int or session < 0:
+    if mode not in ('legacy', 'continuous') or type(session) is not int or session < 0:
         raise ValueError('invalid capability identity')
     if not all(math.isfinite(v) and v > 0 for v in (speed, torque)):
         raise ValueError('positive finite gripper capabilities required')

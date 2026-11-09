@@ -9,7 +9,7 @@
   ROS 消息类型，可以在没有 ROS 运行时的环境下做单元测试。
 
 对外交互（客户端由调用方注入）：
-- 关节动作：legacy 使用 ``/<ns>/follow_joint_trajectory``；prepared_v1 使用
+- 关节动作：legacy 使用 ``/<ns>/follow_joint_trajectory``；continuous 使用
   ``/<ns>/execute_teleop_motion`` 提交六轴五次约束和可选独立夹爪目标；
 - 夹爪动作 ``/<ns>/gripper/command``：接收目标开口与最大力矩；
 - 触发器服务 ``/<ns>/trajectory_stop``：请求硬件控制器停止当前轨迹。
@@ -201,7 +201,7 @@ class WebTeleopClient:
         trajectory.joint_names = list(decision.joint_names)
         # 起点必须与决策里的关节顺序对齐，否则位置会挂到错误的关节上
         current = tuple(current_positions[name] for name in decision.joint_names)
-        if self._trajectory_mode == 'prepared_v1':
+        if self._trajectory_mode == 'continuous':
             # 两点包含 q/v/a，连续曲线由运动层准备；此处不离散化或修改请求时长。
             from rebotarm_motion.trajectory_messages import point_to_point_message
             trajectory = point_to_point_message(decision.joint_names, current,
@@ -235,8 +235,8 @@ class WebTeleopClient:
     def send_planned(self, trajectory, decision, *, gripper=(), feedback_callback=None):
         """提交已预览的准确联合消息；不再插值、改时长或发送独立夹爪 Action。"""
         self._require_trajectory_capability()
-        if self._trajectory_mode != 'prepared_v1':
-            raise ValueError('coordinated execution requires prepared_v1')
+        if self._trajectory_mode != 'continuous':
+            raise ValueError('coordinated execution requires continuous')
         if not self._action_client.wait_for_server(timeout_sec=.1):
             raise ValueError('follow_joint_trajectory action unavailable')
         goal = self._follow_goal_factory()

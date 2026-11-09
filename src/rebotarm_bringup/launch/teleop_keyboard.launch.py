@@ -10,7 +10,7 @@
 #    - "use_hardware=true"：启动硬件控制器（唯一硬件入口）；robot_state_publisher订阅控制器发布的视觉关节状态；
 #    - "use_hardware=false"（默认）：不启动硬件节点，由仿真轨迹控制器发布关节状态并提供
 #      FollowJointTrajectory 动作服务；按键会反馈到 RViz 姿态，也绝不会驱动真实电机；
-#    - 真机 prepared_v1 复用完整 MoveIt 组合提供场景和准备服务，其他分支保留本地状态链；
+#    - 真机 continuous 复用完整 MoveIt 组合提供场景和准备服务，其他分支保留本地状态链；
 #    - RViz 仅当 "use_local_rviz=true" 时启动。
 #
 #参数来源
@@ -36,7 +36,7 @@ def generate_launch_description():
     use_hardware = LaunchConfiguration("use_hardware")
     trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
     use_prepared_hardware = PythonExpression([
-        "'", use_hardware, "'.lower() == 'true' and '", trajectory_mode, "' == 'prepared_v1'",
+        "'", use_hardware, "'.lower() == 'true' and '", trajectory_mode, "' == 'continuous'",
     ])
     use_local_rviz = LaunchConfiguration("use_local_rviz")
     arm_config = LaunchConfiguration("arm_config")
@@ -84,8 +84,9 @@ def generate_launch_description():
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             # use_hardware：true=驱动真机；false=启动轻量仿真轨迹控制器。默认 false，防止误启动真机。
             DeclareLaunchArgument("use_hardware", default_value="false"),
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
-                choices=["legacy", "prepared_v1"]),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value=PythonExpression(
+                ["'continuous' if '", use_hardware, "'.lower() == 'true' else 'legacy'"]),
+                choices=["legacy", "continuous"]),
             # use_local_rviz：是否启动 RViz 可视化。
             DeclareLaunchArgument("use_local_rviz", default_value="true"),
             # channel：电机总线串口设备；空串表示交由 arm.yaml/gripper.yaml 决定。

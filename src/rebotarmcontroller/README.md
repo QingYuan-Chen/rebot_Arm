@@ -6,7 +6,7 @@
 
 P005 网页组合路径由 `runtime/coordinated_trajectory.py` 持有整体任务，同一设备周期
 登记六轴曲线和独立夹爪目标，复用原六轴采样及夹爪限速、到位、超时和中性释放。
-FJT 只接受完整六轴；网页 prepared_v1 使用 `/rebotarm/execute_teleop_motion`。
+FJT 只接受完整六轴；网页 continuous 使用 `/rebotarm/execute_teleop_motion`。
 整体成功等待两侧完成与清理，不保证同时到达；部分发送失败保留真实回执，停止确认前不释放两侧资源。
 机械臂保持命令终点；健康任务失败不自动失能。接口见
 [P005 协同位置](../../docs/implemented/features/p005_prepared_trajectory.md#修订协同接口)。

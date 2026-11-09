@@ -23,7 +23,7 @@ launch 参数（由上层启动组合包传入，命名必须与控制器/驱动
 - use_fake_joint_states：true 时用 joint_state_publisher 造假的六轴关节角；接真机或
   接仿真时上层传 false，改为消费真实反馈；
 - use_sim_time：是否使用 /clock 仿真时间，接仿真时必须为 true。
-- prepare_trajectories：是否提供 prepared_v1 内部准备服务，默认 false；不切换后端模式。
+- prepare_trajectories：是否提供 continuous 内部准备服务，默认 false；不切换后端模式。
 
 安全约束：本文件不下发任何轨迹执行目标，也不启用硬件；执行权限由控制器与上层启动
 组合包掌握。这里的轨迹执行容差只用于判断规划结果能否被执行器接受，不放宽硬件保护。
@@ -80,7 +80,7 @@ def generate_launch_description():
     allow_trajectory_execution = LaunchConfiguration("allow_trajectory_execution")
     use_sim_time = LaunchConfiguration("use_sim_time")
     trajectory_mode = LaunchConfiguration('trajectory_execution_mode')
-    prepared_mode = PythonExpression(["'", trajectory_mode, "' == 'prepared_v1'"])
+    prepared_mode = PythonExpression(["'", trajectory_mode, "' == 'continuous'"])
     # Jazzy 2.12.4 的 TEM 先卸载控制器插件，再释放节点回调组；弱引用的析构代码仍在
     # 插件中，会访问已卸载地址。仅为这两个进程保留插件映射至进程退出，对象照常析构。
     # shortcut: 待配套 MoveIt 修复插件/回调组销毁顺序并通过退出回归后移除此兼容处理。
@@ -198,7 +198,7 @@ def generate_launch_description():
             DeclareLaunchArgument('prepare_trajectories', default_value='false'),
             DeclareLaunchArgument('planning_trace_path', default_value=''),
             DeclareLaunchArgument('trajectory_execution_mode', default_value='legacy',
-                choices=['legacy', 'prepared_v1']),
+                choices=['legacy', 'continuous']),
             Node(package='rebotarm_motion', executable='TrajectoryRetimingNode',
                 name='trajectory_retiming', output='screen', condition=IfCondition(prepared_mode),
                 parameters=[{'arm_namespace': arm_namespace,

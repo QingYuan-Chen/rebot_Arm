@@ -26,8 +26,8 @@ class CoordinatedWebPlans:
     def preview(self, payload, current, *, max_delta, min_duration, max_duration, max_speed):
         """预览不获得执行资源；新关键点必须逐点满足现有位移/位置门限。"""
         capability = self.capability()
-        if capability['mode'] != 'prepared_v1':
-            raise ValueError('coordinated motion requires explicit prepared_v1 mode')
+        if capability['mode'] != 'continuous':
+            raise ValueError('coordinated motion requires explicit continuous mode')
         decision = validate_web_execute_request(dict(payload,confirm='EXECUTE'), joint_names=self.names,
             current_positions=current,joint_limits=self.limits,max_delta_rad=max_delta,
             min_duration=min_duration,max_duration=max_duration)

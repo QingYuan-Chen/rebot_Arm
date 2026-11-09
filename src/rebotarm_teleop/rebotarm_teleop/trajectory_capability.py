@@ -1,7 +1,7 @@
 """网页和键盘入口共用的轨迹执行能力核对。
 
 文件职责
-    对照前端配置与后端发布的 legacy/prepared_v1，防止生成规则与执行规则错配。
+    对照前端配置与后端发布的 legacy/continuous，防止生成规则与执行规则错配。
 对外接口
     TrajectoryCapability(expected) 保存期望模式；update 接收 String 消息；
     require 在未观察到能力或模式不一致时抛出 ValueError，由入口报告拒绝原因。
@@ -20,8 +20,8 @@ from rebotarm_trajectory.capability import decode_capability
 class TrajectoryCapability:
     """由入口节点持有的能力快照；初始 observed=None 表示尚无后端声明。"""
     def __init__(self, expected):
-        if expected not in ('legacy', 'prepared_v1'):
-            raise ValueError('trajectory_execution_mode must be legacy or prepared_v1')
+        if expected not in ('legacy', 'continuous'):
+            raise ValueError('trajectory_execution_mode must be legacy or continuous')
         self.expected = expected
         self.observed = None
         self.snapshot = None

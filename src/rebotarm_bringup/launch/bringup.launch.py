@@ -68,8 +68,8 @@ def generate_launch_description():
             # arm_namespace：话题/服务/动作命名空间段，去首尾斜杠后拼成 /{ns}/...。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             # 底层启动不提供准备服务；新模式需由外部完整 MoveIt 组合提供。
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
-                choices=["legacy", "prepared_v1"]),
+            DeclareLaunchArgument("trajectory_execution_mode", default_value="continuous",
+                choices=["legacy", "continuous"]),
             # use_rviz：是否启动 RViz。默认 false，无可视化也能完成启动与执行。
             DeclareLaunchArgument("use_rviz", default_value="false"),
             # frame_id / ee_frame_id：对外位姿的参考坐标系与末端坐标系名，需与 URDF 中的 link 名一致，否则 TF 查询与可视化会失败。

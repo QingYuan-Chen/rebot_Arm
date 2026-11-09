@@ -6,7 +6,7 @@
 工作方式：以 ``poll_period`` 为周期轮询终端（非阻塞），每个有效按键由
 ``KeyboardCommandMapper`` 映射为「某关节 ±1 步」，再由 ``TeleopTargetPlanner``
 在当前反馈角上叠加 ``joint_step_rad`` 并夹紧到关节限位，再发送 FJT。
-legacy 保留单个位置点；prepared_v1 由运动层生成完整五次首末约束，默认单步 0.02 rad / 0.4 s。
+legacy 保留单个位置点；continuous 由运动层生成完整五次首末约束，默认单步 0.02 rad / 0.4 s。
 
 对外话题/动作（``<ns>`` 取自参数 arm_namespace，默认 rebotarm）：
 - 动作 ``/<ns>/follow_joint_trajectory``：下发目标关节角；
@@ -95,7 +95,7 @@ class TeleopKeyboardNode(Node):
         self.declare_parameter("trajectory_execution_mode", 'legacy')
         from .trajectory_capability import TrajectoryCapability
         self._capability = TrajectoryCapability(self.get_parameter('trajectory_execution_mode').value)
-        self.declare_parameter("trajectory_duration", .4 if self._capability.expected == 'prepared_v1' else .2)
+        self.declare_parameter("trajectory_duration", .4 if self._capability.expected == 'continuous' else .2)
         self._busy = False
         self._step_generation = 0
         self._retime_pending = None
@@ -265,7 +265,7 @@ class TeleopKeyboardNode(Node):
         point.positions = [float(v) for v in positions]
         _set_duration(point.time_from_start, self._trajectory_duration)
         trajectory.points = [point]
-        if self._capability.expected == 'prepared_v1':
+        if self._capability.expected == 'continuous':
             # 前端不实现插值数学；运动层给出完整约束，后端准备后逐周期采样。
             from rebotarm_motion.trajectory_messages import point_to_point_message
             trajectory = point_to_point_message(joint_names,

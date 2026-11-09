@@ -20,8 +20,8 @@ def effective_limits(config_directory, names, capability):
     from .trajectory_preparation import load_reference_limits
     low, high, limits = load_reference_limits(config_directory, names)
     capability = decode_capability(capability)
-    if capability['mode'] != 'prepared_v1':
-        raise ValueError('prepared_v1 backend capability required')
+    if capability['mode'] != 'continuous':
+        raise ValueError('continuous backend capability required')
     from pathlib import Path
     directory = Path(config_directory)
     revision = constraint_revision(*(directory.joinpath(name).read_bytes()
