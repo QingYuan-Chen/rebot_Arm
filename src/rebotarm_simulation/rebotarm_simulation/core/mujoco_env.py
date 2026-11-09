@@ -66,9 +66,8 @@ class RebotArmReachEnv:
         if sample is not None and not isinstance(sample, RandomizationSample):
             raise TypeError("sample must be a RandomizationSample or None")
         if sample is None:
-            if hasattr(self._sim, "restore_randomization"):
-                self._sim.restore_randomization()
-        elif hasattr(self._sim, "apply_randomization"):
+            self._sim.restore_randomization()
+        else:
             self._sim.apply_randomization(sample)
         self._randomization_sample = sample
 
@@ -83,7 +82,7 @@ class RebotArmReachEnv:
         self._action_history = []
         self._randomization_rng = np.random.default_rng(seed)
         self.set_randomization_sample(None)
-        if self.config.home_on_reset and hasattr(self._sim, "reset_home"):
+        if self.config.home_on_reset:
             self._sim.reset_home(seed=seed)
         else:
             self._sim.reset(seed=seed)
@@ -167,7 +166,7 @@ class RebotArmReachEnv:
             contact_count=len(contacts),
             source="sim",
             max_contact_penetration=max(
-                (float(getattr(contact, "penetration_depth", 0.0)) for contact in contacts),
+                (float(contact.penetration_depth) for contact in contacts),
                 default=0.0,
             ),
         )

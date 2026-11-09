@@ -137,6 +137,11 @@ def test_same_direction_finger_contacts_are_not_force_closure():
     assert summary.force_closure_candidate(-0.3) is False
 
 
+def test_finger_contact_requires_a_valid_normal():
+    with pytest.raises(ValueError, match="normal must be finite and nonzero"):
+        summarize_cube_contacts([_contact("left_finger_link", normal=(0., 0., 0.))])
+
+
 @pytest.mark.parametrize(
     ("changes", "expected"),
     [

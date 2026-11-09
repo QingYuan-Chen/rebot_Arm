@@ -26,6 +26,7 @@ from rebotarm_simulation.core.resource_paths import model_resource
 from rebotarm_simulation.control.sim_control_runtime import SimControlRuntime
 from rebotarm_simulation.core.state_snapshot import StateSnapshot
 from rebotarm_simulation.core.observations import read_state, read_contacts
+from rebotarm_simulation.core.validation import finite_vector as _finite_vector
 
 
 ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
@@ -33,20 +34,6 @@ FINGER_JOINT_NAMES = ("left_finger_joint", "right_finger_joint")
 JOINT_NAMES = ARM_JOINT_NAMES + FINGER_JOINT_NAMES
 CONTROL_MODES = ("position", "hold", "gravity_comp", "raw_torque")
 _CONTROL_MODE_ALIASES = {"pos_vel": "position"}
-
-
-def _finite_vector(values: Sequence[float], length: int, label: str) -> tuple[float, ...]:
-    if isinstance(values, (str, bytes)):
-        raise TypeError(f"{label} must be a numeric sequence")
-    try:
-        result = tuple(float(value) for value in values)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"{label} must be a numeric sequence") from exc
-    if len(result) != length:
-        raise ValueError(f"{label} must contain exactly {length} values")
-    if not all(math.isfinite(value) for value in result):
-        raise ValueError(f"{label} values must be finite")
-    return result
 
 
 def _ordered_bounds(values: Sequence[float], label: str) -> tuple[float, float]:

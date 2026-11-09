@@ -101,7 +101,7 @@ def summarize_cube_contacts(contacts: Sequence, *, cube_body: str = "test_cube")
         count += 1
         names = f"{contact.body1} {contact.body2}"
         force = float(contact.force)
-        penetration = float(getattr(contact, "penetration_depth", 0.0))
+        penetration = float(contact.penetration_depth)
         max_force = max(max_force, force)
         max_penetration = max(max_penetration, penetration)
         if "left_finger" in names:
@@ -133,12 +133,12 @@ def summarize_cube_contacts(contacts: Sequence, *, cube_body: str = "test_cube")
 
 
 def _cube_outward_normal(contact, cube_body: str) -> tuple[float, float, float]:
-    normal = tuple(float(value) for value in getattr(contact, "normal", (0.0, 0.0, 0.0)))
+    normal = tuple(float(value) for value in contact.normal)
     if contact.body2 == cube_body:
         normal = tuple(-value for value in normal)
     magnitude = math.sqrt(sum(value * value for value in normal))
-    if magnitude <= 1e-12:
-        return (0.0, 0.0, 0.0)
+    if not math.isfinite(magnitude) or magnitude <= 1e-12:
+        raise ValueError("finger contact normal must be finite and nonzero")
     return tuple(value / magnitude for value in normal)
 
 

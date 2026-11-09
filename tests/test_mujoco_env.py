@@ -11,7 +11,7 @@ from rebotarm_simulation.diagnostics import mujoco_batch
 from rebotarm_simulation.core.mujoco_env import RebotArmReachEnv, ReachEnvConfig
 from rebotarm_simulation.sim2real.randomization import RandomizationSample
 from rebotarm_simulation.sim2real.trajectory_log import TrajectoryRecorder
-from rebotarm_simulation.core.mujoco_types import RandomizedScene
+from rebotarm_simulation.core.mujoco_types import ContactInfo, RandomizedScene
 
 
 class FakeSim:
@@ -63,7 +63,7 @@ class FakeSim:
         return self.get_state()
 
     def get_contacts(self):
-        return (SimpleNamespace(force=0.25),)
+        return (ContactInfo("table", "link1", "table", "link1", (0., 0., 0.), 0.25, 0.0, (0., 0., 1.)),)
 
     def get_state(self):
         self.positions[-2:] = (self.width / 2.0, -self.width / 2.0)

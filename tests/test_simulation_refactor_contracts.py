@@ -72,6 +72,22 @@ def test_resource_resolution_uses_ament_prefix_without_source(tmp_path, monkeypa
     assert resource_paths.package_resource('rebotarm_simulation', 'config/test.yaml') == expected
 
 
+def test_real2sim_and_randomization_use_package_resource(monkeypatch, tmp_path):
+    from rebotarm_simulation.core import real2sim
+    from rebotarm_simulation.sim2real import randomization
+
+    requests = []
+    def resolve(package, relative):
+        requests.append((package, relative))
+        return tmp_path / relative
+    monkeypatch.setattr(real2sim, "package_resource", resolve)
+    monkeypatch.setattr(randomization, "package_resource", resolve)
+    assert real2sim.default_real2sim_mapping_path() == tmp_path / "config/real2sim_mapping.yaml"
+    assert randomization.default_randomization_config_path() == tmp_path / "config/sim2real_randomization.yaml"
+    assert requests == [("rebotarm_simulation", "config/real2sim_mapping.yaml"),
+                        ("rebotarm_simulation", "config/sim2real_randomization.yaml")]
+
+
 def test_simulation_layers_do_not_import_frontends_from_core_or_control():
     base = ROOT/'src/rebotarm_simulation/rebotarm_simulation'
     assert not (base/'mujoco_adapter_core.py').exists()
