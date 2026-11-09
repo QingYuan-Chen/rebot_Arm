@@ -18,7 +18,7 @@
 
 关键流程与状态：
     ``_goal_callback`` 只接纳完整六轴轨迹；``_execute_goal`` 用单调时钟推进插值，直到轨迹末端或被取消；
-    订阅端（上层流程）可随时通过取消或停止服务打断。轨迹点时间戳非法时会按默认总时长做均匀回退。
+    订阅端（上层流程）可随时通过取消或停止服务打断。轨迹时间须非负且严格递增。
 
 线程模型：
     ``main`` 使用多线程执行器（3 线程）：动作执行回调内部会 sleep 等待轨迹推进，
@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import bisect
+import math
 import threading
 import time
 
@@ -47,6 +48,7 @@ from std_srvs.srv import Trigger
 from rebotarm_msgs.msg import JointMotorState
 from rebotarm_msgs.srv import SetGripper
 from trajectory_msgs.msg import JointTrajectory
+from rebotarm_trajectory.sampling import validate_samples
 
 from .preview_config import SAFE_HOME_JOINT_POSITIONS
 from .sim_gripper import gripper_joint_positions_for_width
@@ -69,8 +71,7 @@ class SimTrajectoryControllerNode(Node):
 
     def __init__(self) -> None:
         super().__init__("rebotarm_sim_trajectory_controller")
-        # joint_names：状态发布与轨迹匹配使用的关节名列表，顺序即发布顺序；
-        # 默认 6 个臂关节 + 2 个手指关节，改名需与模型/上层接口保持一致。
+        # 状态发布顺序固定为规范六轴及左右手指；轨迹消息允许六轴重排。
         self.declare_parameter(
             "joint_names",
             [
@@ -88,25 +89,32 @@ class SimTrajectoryControllerNode(Node):
         self.declare_parameter("arm_namespace", "rebotarm")
         # publish_rate_hz：关节状态发布频率（Hz），同时决定轨迹执行时的插值步长。
         self.declare_parameter("publish_rate_hz", 30.0)
-        # default_duration_sec：轨迹点缺少合法时间戳时的默认总时长（秒）。
-        self.declare_parameter("default_duration_sec", 2.0)
         # gripper_max_width_m / gripper_min_width_m：夹爪开口宽度的物理上下限（米）。
         self.declare_parameter("gripper_max_width_m", 0.09)
         self.declare_parameter("gripper_min_width_m", 0.0)
         # initial_joint_positions：启动时的臂关节初始位置（弧度），按 joint1..joint6 顺序，
-        # 只覆盖前 6 个；手指关节位置默认保持 0（即完全闭合）。
+        # 手指初始位置根据配置的最小开口宽度生成。
         self.declare_parameter("initial_joint_positions", list(SAFE_HOME_JOINT_POSITIONS))
 
         self._arm_namespace = str(self.get_parameter("arm_namespace").value).strip("/")
         self._joint_names = [str(v) for v in list(self.get_parameter("joint_names").value)]
-        # 频率与时长做下限裁剪，避免参数误设导致忙循环或零时长轨迹
-        self._publish_rate_hz = max(float(self.get_parameter("publish_rate_hz").value), 1.0)
-        self._default_duration_sec = max(float(self.get_parameter("default_duration_sec").value), 0.1)
-        self._gripper_max_width_m = max(float(self.get_parameter("gripper_max_width_m").value), 0.0)
-        self._gripper_min_width_m = max(float(self.get_parameter("gripper_min_width_m").value), 0.0)
-        self._positions_by_name = {name: 0.0 for name in self._joint_names}
-        for name, position in zip(self._joint_names, list(self.get_parameter("initial_joint_positions").value)):
-            self._positions_by_name[str(name)] = float(position)
+        expected_names = [*(f"joint{i}" for i in range(1, 7)), "left_finger_joint", "right_finger_joint"]
+        if self._joint_names != expected_names:
+            raise ValueError("joint_names must contain joint1..joint6 followed by both finger joints")
+        self._publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
+        self._gripper_max_width_m = float(self.get_parameter("gripper_max_width_m").value)
+        self._gripper_min_width_m = float(self.get_parameter("gripper_min_width_m").value)
+        if not math.isfinite(self._publish_rate_hz) or self._publish_rate_hz <= 0:
+            raise ValueError("publish_rate_hz must be finite and positive")
+        if (not math.isfinite(self._gripper_min_width_m)
+                or not math.isfinite(self._gripper_max_width_m)
+                or not 0 <= self._gripper_min_width_m <= self._gripper_max_width_m):
+            raise ValueError("gripper width bounds must be finite, nonnegative and ordered")
+        initial, _ = validate_samples([self.get_parameter("initial_joint_positions").value], [0.0])
+        left, right, _ = gripper_joint_positions_for_width(
+            self._gripper_min_width_m, min_width=self._gripper_min_width_m,
+            max_width=self._gripper_max_width_m)
+        self._positions_by_name = dict(zip(self._joint_names, (*initial[0], left, right)))
         self._velocities_by_name = {name: 0.0 for name in self._joint_names}
         # 最近一次设置的夹爪开口宽度（米），定时器每周期都会把它作为夹爪状态重发
         self._last_gripper_width_m = self._gripper_min_width_m
@@ -153,9 +161,15 @@ class SimTrajectoryControllerNode(Node):
         保守起见这里不做范围校验——本节点只做可视化，位置越界由上层规划与安全监控负责。
         """
         names = goal_request.trajectory.joint_names
-        if (self._recovery_lock.locked() or self._motion_lock.locked()
-                or len(names) != 6 or set(names) != set(self._joint_names[:6])):
+        if (self._recovery_lock.locked()
+                or len(names) != 6 or set(names) != set(self._joint_names[:6])
+                or not self._motion_lock.acquire(blocking=False)):
             self.get_logger().warn("rejecting non-six-axis trajectory or busy simulation controller")
+            return GoalResponse.REJECT
+        # 清除旧停止请求后立即复核回位；之后到达的 Stop 必须留给本次执行。
+        self._stop_requested.clear()
+        if self._recovery_lock.locked():
+            self._motion_lock.release()
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
@@ -187,7 +201,7 @@ class SimTrajectoryControllerNode(Node):
                 return response
             motion_owned = True
             with self._lock:
-                start = [self._positions_by_name.get(name, 0.0) for name in self._joint_names[:6]]
+                start = [self._positions_by_name[name] for name in self._joint_names[:6]]
             duration = 2.0
             steps = max(1, int(duration * self._publish_rate_hz))
             self._stop_requested.clear()
@@ -219,24 +233,26 @@ class SimTrajectoryControllerNode(Node):
         请求字段 ``position`` 为目标开口宽度（米），会先被裁剪到配置的上下限；
         响应中 ``reached_position`` 回填裁剪后实际生效的宽度，便于调用方判断是否被限位。
         """
+        requested = float(request.position)
+        if not math.isfinite(requested):
+            response.success = False
+            with self._lock:
+                response.reached_position = self._last_gripper_width_m
+            return response
         left_position, right_position, width = gripper_joint_positions_for_width(
-            float(request.position),
+            requested,
             min_width=self._gripper_min_width_m,
             max_width=self._gripper_max_width_m,
         )
         with self._lock:
-            if "left_finger_joint" in self._positions_by_name:
-                self._positions_by_name["left_finger_joint"] = left_position
-            if "right_finger_joint" in self._positions_by_name:
-                self._positions_by_name["right_finger_joint"] = right_position
+            self._positions_by_name["left_finger_joint"] = left_position
+            self._positions_by_name["right_finger_joint"] = right_position
             # 夹爪是位置型执行器，直接跳变到位，速度按 0 上报
-            if "left_finger_joint" in self._velocities_by_name:
-                self._velocities_by_name["left_finger_joint"] = 0.0
-            if "right_finger_joint" in self._velocities_by_name:
-                self._velocities_by_name["right_finger_joint"] = 0.0
+            self._velocities_by_name["left_finger_joint"] = 0.0
+            self._velocities_by_name["right_finger_joint"] = 0.0
+            self._last_gripper_width_m = width
         response.success = True
         response.reached_position = width
-        self._last_gripper_width_m = width
         self._publish_gripper_state(width)
         self.get_logger().info(f"sim gripper set: width={width:.4f} m")
         return response
@@ -257,12 +273,6 @@ class SimTrajectoryControllerNode(Node):
         self._gripper_state_pub.publish(msg)
 
     def _execute_goal(self, goal_handle):
-        if self._recovery_lock.locked() or not self._motion_lock.acquire(blocking=False):
-            result = FollowJointTrajectory.Result()
-            result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
-            result.error_string = "another motion owns the simulation controller"
-            goal_handle.abort()
-            return result
         try:
             return self._execute_owned_goal(goal_handle)
         finally:
@@ -273,15 +283,14 @@ class SimTrajectoryControllerNode(Node):
 
         时间基准用 ``time.monotonic()``（不受系统时间调整影响），相对轨迹起点计 elapsed；
         ``elapsed`` 上限截断到轨迹末点时间，保证不会越过最后一个轨迹点。
-        取消或停止请求都会走 ``canceled()`` 分支，并把 ``error_code`` 记为 SUCCESSFUL
-        （按该动作协议，取消成功不算错误）。
+        Action 取消以 canceled 结算，Stop 和关闭以失败结算。
         """
-        self._stop_requested.clear()
-        trajectory = self._normalize_trajectory(goal_handle.request.trajectory)
         result = FollowJointTrajectory.Result()
-        if trajectory is None:
+        try:
+            trajectory = self._normalize_trajectory(goal_handle.request.trajectory)
+        except (TypeError, ValueError) as exc:
             result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
-            result.error_string = "trajectory contains no usable points"
+            result.error_string = f"invalid trajectory: {exc}"
             goal_handle.abort()
             return result
 
@@ -295,10 +304,12 @@ class SimTrajectoryControllerNode(Node):
             if goal_handle.is_cancel_requested or self._stop_requested.is_set():
                 if goal_handle.is_cancel_requested:
                     goal_handle.canceled()
+                    result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+                    result.error_string = "sim trajectory canceled"
                 else:
                     goal_handle.abort()
-                result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
-                result.error_string = "sim trajectory canceled"
+                    result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
+                    result.error_string = "sim trajectory stopped by service"
                 return result
             elapsed = min(time.monotonic() - start_time, end_time)
             positions = self._interpolate(points, times, elapsed)
@@ -308,13 +319,16 @@ class SimTrajectoryControllerNode(Node):
             feedback.desired.positions = positions
             goal_handle.publish_feedback(feedback)
             if elapsed >= end_time:
-                break
+                goal_handle.succeed()
+                result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+                result.error_string = "sim trajectory finished"
+                return result
             # 用固定周期 sleep 控制插值步长；执行回调阻塞在这里，因此执行器必须多线程
             time.sleep(1.0 / self._publish_rate_hz)
 
-        goal_handle.succeed()
-        result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
-        result.error_string = "sim trajectory finished"
+        goal_handle.abort()
+        result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
+        result.error_string = "simulation shutting down"
         return result
 
     def _set_positions(self, names: list[str], positions: list[float]) -> None:
@@ -325,54 +339,24 @@ class SimTrajectoryControllerNode(Node):
                 self._velocities_by_name[name] = 0.0
 
     def _normalize_trajectory(self, trajectory: JointTrajectory):
-        """把外部轨迹整理成本节点可直接插值的 ``(names, points, times)``。
-
-        处理内容：
-            1. 只保留本节点认识的关节名（按轨迹给出的顺序），全都不认识或点为空则返回 ``None``；
-            2. 轨迹点位置数量不足时，用该关节的当前位置补齐（避免索引越界）；
-            3. 时间戳非正（缺省或非法）时，按点序号在 ``default_duration_sec`` 上均匀分摊；
-            4. 强制时间严格递增（相邻至少间隔 1 ms），杜绝重复或回退时间导致的插值除零。
-
-        返回：``names`` 为关节名列表，``points`` 为 ``[点][关节]`` 的位置矩阵，``times`` 为相对秒数。
-        """
-        source_names = list(trajectory.joint_names)
-        if not source_names or not trajectory.points:
-            return None
-
-        names = [name for name in source_names if name in self._positions_by_name]
-        if not names:
-            return None
-        name_to_source_index = {name: index for index, name in enumerate(source_names)}
-
-        points: list[list[float]] = []
-        times: list[float] = []
-        last_time = 0.0
-        for index, point in enumerate(trajectory.points):
-            positions = []
-            with self._lock:
-                current = dict(self._positions_by_name)
-            for name in names:
-                source_index = name_to_source_index[name]
-                if source_index < len(point.positions):
-                    positions.append(float(point.positions[source_index]))
-                else:
-                    positions.append(float(current.get(name, 0.0)))
-            point_time = _duration_to_sec(point.time_from_start)
-            if point_time <= 0.0:
-                # 时间戳缺失/非法：按点序号在默认总时长内均匀分摊
-                point_time = self._default_duration_sec * float(index + 1) / float(len(trajectory.points))
-            # 至少 1 ms 间隔，保证后续线性插值不会出现零长度区间
-            point_time = max(point_time, last_time + 1e-3)
-            last_time = point_time
-            points.append(positions)
-            times.append(point_time)
+        """验证六轴位置与原始时间，保留请求的关节顺序。"""
+        names = list(trajectory.joint_names)
+        if len(names) != 6 or set(names) != set(self._joint_names[:6]):
+            raise ValueError("trajectory must contain each arm joint exactly once")
+        for point in trajectory.points:
+            if not 0 <= point.time_from_start.nanosec < 1_000_000_000:
+                raise ValueError("invalid duration nanoseconds")
+        points, times = validate_samples(
+            [point.positions for point in trajectory.points],
+            [_duration_to_sec(point.time_from_start) for point in trajectory.points],
+        )
         return names, points, times
 
     def _interpolate(self, points: list[list[float]], times: list[float], elapsed: float) -> list[float]:
         """在相邻轨迹点之间做线性插值，返回 elapsed 时刻各关节的位置。
 
         边界：``elapsed`` 早于首个点则返回首点，晚于末点则返回末点（不外推）。
-        区间定位用二分查找；若区间时长为 0（理论上已被规范化排除）则比例取 0 以防除零。
+        区间定位用二分查找；入口已保证相邻时刻严格递增。
         """
         if elapsed <= times[0]:
             return list(points[0])
@@ -382,7 +366,7 @@ class SimTrajectoryControllerNode(Node):
         left = max(0, right - 1)
         t0 = times[left]
         t1 = times[right]
-        ratio = 0.0 if t1 <= t0 else (elapsed - t0) / (t1 - t0)
+        ratio = (elapsed - t0) / (t1 - t0)
         return [float(p0) + (float(p1) - float(p0)) * ratio for p0, p1 in zip(points[left], points[right])]
 
     def _publish_joint_state(self) -> None:
@@ -396,9 +380,10 @@ class SimTrajectoryControllerNode(Node):
         with self._lock:
             msg.position = [float(self._positions_by_name[name]) for name in self._joint_names]
             msg.velocity = [float(self._velocities_by_name[name]) for name in self._joint_names]
+            width = self._last_gripper_width_m
         msg.effort = [0.0 for _ in self._joint_names]
         self._joint_state_pub.publish(msg)
-        self._publish_gripper_state(self._last_gripper_width_m)
+        self._publish_gripper_state(width)
 
 
 def main(args=None) -> None:

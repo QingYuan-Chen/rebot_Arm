@@ -269,7 +269,7 @@ def test_lightweight_preview_uses_the_same_six_joint_fjt_contract(names):
     from rclpy.action import GoalResponse
     from rebotarm_preview.rviz_preview_controller_node import SimTrajectoryControllerNode
     owner = NS(_recovery_lock=threading.Lock(),_motion_lock=threading.Lock(),
-        _joint_names=JOINT_NAMES,get_logger=lambda:NS(warn=lambda message:None))
+        _stop_requested=threading.Event(),_joint_names=JOINT_NAMES,get_logger=lambda:NS(warn=lambda message:None))
     result = SimTrajectoryControllerNode._goal_callback(owner,NS(trajectory=NS(joint_names=names)))
     assert result == (GoalResponse.ACCEPT if names == JOINT_NAMES else GoalResponse.REJECT)
 
