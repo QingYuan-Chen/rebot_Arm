@@ -55,8 +55,7 @@ from ..candidate_pose import PoseTarget
 
 
 def _parameter(node, name: str):
-    reader = getattr(node, "_parameter", None)
-    return reader(name) if reader is not None else node.get_parameter(name)
+    return node._parameter(name)
 
 
 def _pose_from_target(target: PoseTarget) -> Pose:
@@ -248,14 +247,8 @@ class CandidateIkFilterNode(Node):
         )
 
     def _parameter(self, name: str):
-        """读取当前候选帧配置；构造阶段回退到 ROS 参数对象。"""
-        config = getattr(self, "_config", None)
-        if config is not None and name in config.values:
-            return type("ParameterValue", (), {"value": config.values[name]})()
-        try:
-            return super().get_parameter(name)
-        except AttributeError:
-            return self.get_parameter(name)
+        """读取当前候选帧的配置快照。"""
+        return type("ParameterValue", (), {"value": self._config.values[name]})()
 
     def _refresh_config(self) -> None:
         """在每帧开始时复制一次参数，保证该帧不混用新旧值。"""
@@ -317,6 +310,7 @@ class CandidateIkFilterNode(Node):
                 counts = self._on_candidates_unlocked(work.item)
             except Exception as exc:
                 self.get_logger().error(f"candidate IK filter frame failed: {exc}")
+                self._publish_filtered(work.item, [])
             completed_at = time.monotonic()
             # 单帧实际处理耗时（含服务调用等待），单位 ms
             processing_ms = (completed_at - started_at) * 1000.0

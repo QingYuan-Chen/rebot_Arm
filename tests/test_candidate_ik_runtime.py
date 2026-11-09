@@ -17,6 +17,9 @@ class _Node:
     def get_parameter(self, name):
         return SimpleNamespace(value=self.values[name])
 
+    def list_parameters(self, _prefixes, depth):
+        return SimpleNamespace(names=list(self.values))
+
 
 def _candidate_values():
     return {
@@ -80,6 +83,9 @@ def test_candidate_runtime_runs_without_a_ros_node():
     published = []
 
     class Gateway:
+        def begin_frame(self):
+            pass
+
         def check_target(self, _target, _label):
             return object()
 
@@ -98,6 +104,7 @@ def test_candidate_runtime_runs_without_a_ros_node():
 
 
 def test_candidate_filter_tf_failure_publishes_no_ranked_candidates():
+    from tf2_ros import TransformException
     from rebotarm_msgs.msg import GraspCandidate, GraspCandidateArray
     from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
 
@@ -116,17 +123,19 @@ def test_candidate_filter_tf_failure_publishes_no_ranked_candidates():
         "candidate_min_jaw_width_m": 0.006,
         "candidate_max_jaw_width_m": 0.085,
     }
+    node._config = SimpleNamespace(values=parameters)
     node.get_parameter = lambda name: type(
         "Parameter", (), {"value": parameters[name]}
     )()
     node._candidate_target_variants = lambda _msg, _pose: (_ for _ in ()).throw(
-        RuntimeError("TF lookup unavailable")
+        TransformException("TF lookup unavailable")
     )
     node._publish_ranked = lambda original, ranked: published.append((original, ranked))
     node.get_logger = lambda: type("Logger", (), {"warn": warnings.append})()
 
     CandidateIkRuntime(
         policy=node, gateway=SimpleNamespace(
+            begin_frame=lambda: None,
             check_target=getattr(node, "_check_ik_and_collision", None),
             publish_ranked=node._publish_ranked, publish_empty=lambda message: None,
         ), max_candidates=10, logger=node.get_logger(),
@@ -134,3 +143,15 @@ def test_candidate_filter_tf_failure_publishes_no_ranked_candidates():
 
     assert published == [(msg, [])]
     assert warnings == ["candidate IK filter rejected candidate: TF lookup unavailable"]
+
+
+def test_object_center_transform_failure_is_not_silently_ignored():
+    from tf2_ros import TransformException
+    from rebotarm_msgs.msg import GraspCandidate
+    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
+    policy = object.__new__(CandidateIkPolicy)
+    def fail(*_args):
+        raise TransformException("object frame unavailable")
+    policy._transform_pose_to_target_frame = fail
+    with pytest.raises(TransformException, match="object frame unavailable"):
+        policy._candidate_object_center_in_target_frame(GraspCandidate())

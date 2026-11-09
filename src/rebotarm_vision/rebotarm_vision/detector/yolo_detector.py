@@ -7,8 +7,7 @@
 两种工作模式：
     - 闭集模式：普通 COCO 权重，类别集合由权重自身决定；
     - 开放词表模式：World/YOLOE 权重，需要文本提示（自定义类别名）。提示设置
-      失败时不抛异常，而是记录错误并退回闭集模式，让节点继续运行并把降级原因
-      打到日志里。
+      设置失败时在初始化阶段报告错误。
 """
 
 from __future__ import annotations
@@ -47,18 +46,15 @@ class YoloDetector:
         self._conf_threshold = conf_threshold
         self._iou_threshold = iou_threshold
         self._open_vocab_enabled = False
-        self._class_prompt_error = None
         # World/YOLOE 权重依赖文本提示才能工作。这里同时把「权重身份」当作显式
         # 开关，这样即使启动文件的参数替换把 use_world 悄悄置假，开放词表配置也
         # 不会被静默降级；而普通 COCO 权重的行为保持完全不变。
         world_checkpoint = "world" in model_path.lower() or "yoloe" in model_path.lower()
+        if use_world and not custom_classes:
+            raise ValueError("open-vocabulary mode requires custom classes")
         if (use_world or world_checkpoint) and custom_classes:
-            try:
-                self._model.set_classes(list(custom_classes))
-                self._open_vocab_enabled = True
-            except Exception as exc:
-                # 记录失败原因而不是抛出：节点可据此提示已回退到闭集模式。
-                self._class_prompt_error = f"{type(exc).__name__}: {exc}"
+            self._model.set_classes(list(custom_classes))
+            self._open_vocab_enabled = True
 
     def infer(self, image_bgr):
         """对单帧 BGR 图像推理，返回后端的原始结果列表（框/掩膜/置信度等）。
@@ -78,8 +74,3 @@ class YoloDetector:
     @property
     def open_vocab_enabled(self) -> bool:
         return self._open_vocab_enabled
-
-    # set_classes 失败时的 "异常类型: 文本"；None 表示未失败。
-    @property
-    def class_prompt_error(self) -> str | None:
-        return self._class_prompt_error

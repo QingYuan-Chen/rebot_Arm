@@ -58,10 +58,7 @@ class CandidateIkConfig:
 
     @classmethod
     def from_node(cls, node) -> "CandidateIkConfig":
-        try:
-            names = node.list_parameters([], depth=10).names
-        except AttributeError:
-            names = list(_candidate_parameter_names())
+        names = node.list_parameters([], depth=10).names
         values = MappingProxyType({name: (tuple(value) if isinstance(value, (list, tuple)) else deepcopy(value)) for name, value in ((name, node.get_parameter(name).value) for name in names)})
         validate_candidate_parameters(values)
         value = values.__getitem__
@@ -99,18 +96,3 @@ class CandidateIkConfig:
             collision_check_enabled=bool(value("collision_check_enabled")),
             collision_group_name=str(value("collision_group_name")),
         )
-
-
-def _candidate_parameter_names() -> tuple[str, ...]:
-    return (
-        "input_topic", "target_frame", "service_timeout_sec", "max_candidates_per_frame",
-        "candidate_min_confidence", "candidate_min_jaw_width_m", "candidate_max_jaw_width_m",
-        "candidate_workspace_gate_enabled", "candidate_workspace_min_xyz", "candidate_workspace_max_xyz",
-        "candidate_max_grasp_to_object_center_m", "candidate_min_grasp_z_m", "pose_policy",
-        "fixed_grasp_orientation_xyzw", "base_approach_axis_xyz", "base_pregrasp_distance_m",
-        "tcp_offset_xyz", "target_base_offset_xyz", "candidate_pregrasp_min_z_m", "grasp_base_z_offset_m",
-        "orientation_yaw_offsets_rad", "candidate_grasp_z_offsets_m", "candidate_joint6_symmetry_enabled",
-        "candidate_joint6_symmetry_angle_rad", "candidate_score_joint_distance_weight",
-        "candidate_score_joint6_weight", "candidate_max_joint6_delta_rad", "moveit_group_name",
-        "ee_frame_id", "collision_check_enabled", "collision_group_name",
-    )

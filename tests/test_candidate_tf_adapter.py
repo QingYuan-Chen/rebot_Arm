@@ -106,6 +106,7 @@ def test_candidate_tf_query_uses_frame_stamp_and_reuses_same_frame_transform():
 @pytest.mark.parametrize("stamp", [None, SimpleNamespace(sec=0, nanosec=0)])
 def test_candidate_tf_rejects_missing_sensor_stamp_before_lookup(stamp):
     from rebotarm_vision.candidate_ik_gateway import CandidateIkGateway
+    from tf2_ros import TransformException
 
     calls = []
     gateway = CandidateIkGateway(
@@ -115,6 +116,6 @@ def test_candidate_tf_rejects_missing_sensor_stamp_before_lookup(stamp):
         joint_state=None, logger=SimpleNamespace(warn=lambda *_args: None),
         publish_ranked=lambda *_args: None, publish_empty=lambda *_args: None,
     )
-    with pytest.raises(RuntimeError, match="sensor timestamp"):
+    with pytest.raises(TransformException, match="sensor timestamp"):
         gateway.lookup_transform("base_link", "camera", stamp)
     assert calls == []

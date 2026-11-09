@@ -100,6 +100,13 @@ def test_preserve_input_safety_gate_allows_low_grasp_when_width_is_valid():
     from rebotarm_vision.candidate_pose import PoseTarget
 
     class NodeForGate:
+        _config = type("Config", (), {"values": {
+            "candidate_workspace_gate_enabled": False,
+            "candidate_min_jaw_width_m": 0.006,
+            "candidate_max_jaw_width_m": 0.082,
+            "candidate_min_grasp_z_m": 0.0,
+        }})()
+
         def get_parameter(self, name):
             values = {
                 "candidate_min_jaw_width_m": 0.006,

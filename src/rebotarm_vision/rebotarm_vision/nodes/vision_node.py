@@ -140,16 +140,8 @@ class RebotArmVisionNode(Node):
                 use_world=self.use_world,
                 custom_classes=self.custom_classes,
             )
-            # 开放词表（World/YOLOE）权重需要文本提示词；这里只报告提示词是否设置成功，
-            # 设置失败时检测器自行回退到闭集模式，不阻止节点启动。
-            if self.use_world:
-                if self.detector.open_vocab_enabled:
-                    self.get_logger().info("YOLO open-vocabulary prompts enabled")
-                elif self.detector.class_prompt_error:
-                    self.get_logger().warn(
-                        "YOLO open-vocabulary prompts unavailable, "
-                        f"falling back to closed-set mode: {self.detector.class_prompt_error}"
-                    )
+            if self.detector.open_vocab_enabled:
+                self.get_logger().info("YOLO open-vocabulary prompts enabled")
 
         # open() 会按请求的分辨率/帧率匹配设备 profile，匹配不到直接抛异常；
         # warmup 只是丢弃前若干帧等自动曝光/白平衡稳定，不完整也不致命，后续取帧仍会继续重试。
@@ -518,10 +510,7 @@ class RebotArmVisionNode(Node):
         必须改用接收时刻；否则优先采用相机硬件时间戳（更接近真实曝光时刻），拿不到才回退。
         返回 ROS 时间消息；走回退分支时直接返回传入的 ``fallback_stamp``，避免重复构造。
         """
-        camera_timestamp_ns = None
-        getter = getattr(self.camera, "get_frame_timestamp_ns", None)
-        if callable(getter):
-            camera_timestamp_ns = getter(stream)
+        camera_timestamp_ns = self.camera.get_frame_timestamp_ns(stream)
         # 把 ROS 时间消息摊平成纳秒整数，便于与相机硬件时间戳比较。
         receipt_timestamp_ns = (
             int(fallback_stamp.sec) * 1_000_000_000 + int(fallback_stamp.nanosec)
@@ -537,17 +526,12 @@ class RebotArmVisionNode(Node):
 
     def _camera_info_payload(self, stream: str, image):
         """仅返回与当前图像尺寸一致的驱动内参；缺失或无效时返回 ``None``。"""
-        getter = getattr(self.camera, "get_camera_info", None)
-        if callable(getter):
-            try:
-                camera_info = getter(stream)
-            except TypeError:
-                camera_info = getter()
-            height, width = image.shape[:2]
-            if isinstance(camera_info, dict) and calibrated_intrinsics(
-                camera_info, width=width, height=height
-            ):
-                return camera_info
+        camera_info = self.camera.get_camera_info(stream)
+        height, width = image.shape[:2]
+        if isinstance(camera_info, dict) and calibrated_intrinsics(
+            camera_info, width=width, height=height
+        ):
+            return camera_info
         return None
 
     def destroy_node(self):

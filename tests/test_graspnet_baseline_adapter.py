@@ -131,6 +131,29 @@ def test_inprocess_graspnet_payload_converts_to_candidates():
     assert candidates.candidates[0].header.stamp.sec == 1_700_000_000
 
 
+def test_corrupt_prediction_rejects_whole_payload():
+    from rebotarm_vision.graspnet_baseline_adapter import payload_to_candidate_array
+    good = {"score": .8, "width_m": .04, "translation_xyz": [0, 0, .4],
+            "rotation_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]}
+    for bad in ({**good, "score": float("nan")}, {key: value for key, value in good.items() if key != "width_m"},
+                {**good, "rotation_matrix": [[0, 0, 0]] * 3}, None):
+        with pytest.raises((ValueError, KeyError)):
+            payload_to_candidate_array({"candidates": [good, bad]}, fallback_frame_id="camera", max_candidates=1)
+    assert payload_to_candidate_array({"candidates": []}, fallback_frame_id="camera", max_candidates=1).candidates == []
+
+
+def test_graspnet_node_fails_startup_when_backend_unavailable(monkeypatch):
+    from types import SimpleNamespace
+    from rebotarm_vision.nodes import graspnet_baseline_node as module
+    monkeypatch.setattr(module, "InProcessGraspNetBackend",
+                        lambda **_: SimpleNamespace(available=False, backend_error="missing weights"))
+    values = {"model_root": "", "checkpoint_path": "", "device": "cpu",
+              "backend_module": "", "backend_module_path": "", "max_points": 32}
+    node = SimpleNamespace(get_parameter=lambda name: SimpleNamespace(value=values[name]))
+    with pytest.raises(RuntimeError, match="missing weights"):
+        module.GraspNetBaselineNode._create_inprocess_backend(node)
+
+
 def test_inprocess_graspnet_calls_full_rgbd_backend_without_http(tmp_path):
     from rebotarm_vision.graspnet_baseline_adapter import InProcessGraspNetBackend
 

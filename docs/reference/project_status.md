@@ -12,7 +12,11 @@ P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控�
 
 ## 当前基线
 
-- 2026-11-08 [工程规范审核批次 06](../design/engineering_audit_scope.md#批次-06手眼与-tcp-标定)完成手眼与 TCP 标定契约整理：历史会话模式和话题在入口归一，损坏会话及成功响应明确拒绝，请求参数错误与通信错误分别报告；保留采集、求解、质量门、幂等及人工接受。B/N/D/E/S 定向对照 **38/38/48/40/50 passed**；固定会话 `ba3e4c65` 各组 PARK 数值报告一致，原始文件摘要保持。完整回归 **1807 passed / 2 skipped**（两条既有 Gymnasium 提示），合成相机/TF 与分层定向 **37 passed**，规定编译及标定/Dashboard 隔离构建通过。源码边界校验净增 **94 行**、22 个条件、3 个捕获，默认值减少 **6**；详细对照及固定输入证据位于 `log/engineering_audit_20261108/`。批次 07 待执行，真机验收另行安排。
+- 2026-11-09 批次 07 收尾补测：用户确认非商业内部研究用途及本机 checkpoint 来自官方 RealSense 权重；上游下载校验未完成。已配置本机部署路径及 NMS，隔离域 232 的 D405 实时 RGB-D、CUDA YOLO 和真实 GraspNet 发布 **20 个候选**，临时检测类别为 banana；域 230 回放实拍帧验证候选和 Marker 输出。定向及分层 **75 passed / 1 skipped**，规定及视觉 compileall 通过；上游 `torch.cross` 发出弃用提示。当前工作区完整回归 **1817 passed / 2 skipped**（包含 continuous 改动），13 个 ROS 包隔离构建通过；资产摘要、版本及证据见 `log/engineering_audit_07_closeout_20261109/`；候选未用于运动，本轮未操作机械臂。
+
+- 2026-11-08 [工程规范审核批次 07](../design/engineering_audit_scope.md#批次-07d405yolo-与抓取候选)的软件精简和软件验证完成。固定相机、消息与策略字段直接访问；缺失模型或启用的过滤依赖启动失败，损坏推理结果清空候选及显示。B/N/D/E/S 同范围对照 **106/106/109/109/112 passed，各 1 skipped**；完整回归 **1815 passed / 2 skipped**（两条既有 Gymnasium 提示），分层 **27 passed**，规定编译与视觉/bringup 隔离构建通过。隔离域 223 的离线 RGB-D、真实 CUDA YOLO 与 GraspNet 替身覆盖有效候选、损坏帧和 Marker 清理；固定有效输入 B/S 一致，KNN 在 GraspNet 虚拟环境单独通过。后续真实推理和部署验证见上文；分类补丁和证据在 `log/engineering_audit_20261108/`，真机验收另行安排。
+
+- 2026-11-08 [工程规范审核批次 06](../design/engineering_audit_scope.md#批次-06手眼与-tcp-标定)完成手眼与 TCP 标定契约整理：历史会话模式和话题在入口归一，损坏会话及成功响应明确拒绝，请求参数错误与通信错误分别报告；保留采集、求解、质量门、幂等及人工接受。B/N/D/E/S 定向对照 **38/38/48/40/50 passed**；固定会话 `ba3e4c65` 各组 PARK 数值报告一致，原始文件摘要保持。完整回归 **1807 passed / 2 skipped**（两条既有 Gymnasium 提示），合成相机/TF 与分层定向 **37 passed**，规定编译及标定/Dashboard 隔离构建通过。源码边界校验净增 **94 行**、22 个条件、3 个捕获，默认值减少 **6**；详细对照及固定输入证据位于 `log/engineering_audit_20261108/`。批次 07 后续进展见上文，真机验收另行安排。
 
 - 2026-11-08 [工程规范审核批次 05](../design/engineering_audit_scope.md#批次-05示教录制准备与回放)完成示教录制与回放精简：固定服务和 Action 字段直接访问，缺失回放结果明确失败；实时起点反馈须完整且有限，显式非法设置被拒绝，新 dry-run 开始时撤销旧令牌。B/N/D/S 定向对照 **157/160/160/163 passed**，E 不适用；完整回归 **1795 passed / 2 skipped**（两条既有 Gymnasium 提示），分层 **27 passed**，规定编译及 teach/Dashboard 隔离构建通过。隔离域 221 完成示教 dry-run、回放、取消及再次回放，域 222 复核最终版本，原始合成记录摘要一致；退出时部分进程报告 SIGINT -2，MuJoCo 发布器出现 context invalid 提示。证据在 `log/engineering_audit_20261108/`；真机验收另行安排。
 
