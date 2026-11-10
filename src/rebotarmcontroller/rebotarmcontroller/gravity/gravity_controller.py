@@ -226,15 +226,8 @@ class GravityController:
         delta = (delta + np.pi) % (2.0 * np.pi) - np.pi
         return reference + delta
 
-    def _read_gravity_comp_positions(
-        self,
-        *,
-        request: bool = False,
-        reference: np.ndarray | None = None,
-    ) -> np.ndarray:
-        """取得已验证的六轴角度副本, 可相对参考角解分支; request 仅为兼容保留."""
-        # request 参数保留为兼容接口: 实际采集一律通过统一反馈批次完成.
-        del request
+    def _read_gravity_comp_positions(self, *, reference: np.ndarray | None = None) -> np.ndarray:
+        """取得已验证的六轴角度副本, 可相对参考角解分支."""
         q, _qd = self._read_gravity_comp_feedback(reference=reference)
         return q
 

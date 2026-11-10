@@ -179,7 +179,8 @@ class reBotArmController(Node):
         try:
             self.hardware.lifecycle.connect()
         except Exception as exc:
-            self.get_logger().error(f"hardware connect failed; disabled before exit: {exc}")
+            # 连接失败不等于失能已验证; 清理结果可能仍有未释放资源, 如实上报原因.
+            self.get_logger().error(f"hardware connect failed; disable confirmation not guaranteed: {exc}")
             raise
         self.joint_state_publisher = JointStatePublisher(
             self,

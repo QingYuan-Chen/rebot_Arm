@@ -19,8 +19,9 @@
     ControllerConfig: 共享通道, 六轴, 夹爪与设备时序的完整配置.
     default_config: 定位 arm 或 gripper 的默认 YAML, 优先采用安装资源并兼容源码布局.
     _mapping: 读取 YAML 并要求顶层为映射; 结构错误直接失败, 不使用静默默认值.
-    _motor: 将一项电机映射规范为 MotorConfig, 检查型号, 标识, 增益与速度范围.
-    load_configuration: 解析两份配置并校验设备归属; 显式通道覆盖不会改写 YAML.
+    _required: 读取必填字段, 缺失时携带文件与字段位置失败.
+    _motor: 将一项电机映射规范为 MotorConfig; 名称, 标识, 型号, 厂商及两种控制参数全部必填.
+    load_configuration: 解析两份完整配置并校验设备归属; 显式通道覆盖不会改写 YAML.
 """
 
 from __future__ import annotations
@@ -134,57 +135,78 @@ def _mapping(path):
     return value
 
 
-def _motor(item, *, gripper=False):
-    """将一项电机映射规范为 MotorConfig, 检查型号, 标识, 增益与速度范围."""
-    if not isinstance(item,dict): raise ValueError('motor configuration must be a mapping')
-    defaults = dict(kp=18. if gripper else 0.,kd=2. if gripper else 0.,
-                    vel_kp=.0008 if gripper else 0.,vel_ki=.002 if gripper else 0.,
-                    pos_kp=50. if gripper else 0.,pos_ki=1. if gripper else 0.,
-                    vlim=3. if gripper else 2.)
-    name=str(item['name']); vendor=str(item.get('vendor','damiao')).lower()
+def _required(item, key, *, path, label):
+    """读取必填字段; 缺失或类型明显不符时带文件与字段位置失败."""
+    if key not in item:
+        raise ValueError(f"{path}: {label}.{key} is required")
+    return item[key]
+
+
+def _motor(item, *, path, label):
+    """将一项电机映射规范为 MotorConfig; 所有字段必填并检查型号, 标识与数值范围."""
+    if not isinstance(item,dict): raise ValueError(f'{path}: {label} must be a mapping')
+    name=str(_required(item,'name',path=path,label=label))
+    vendor=str(_required(item,'vendor',path=path,label=label)).lower()
     if vendor != 'damiao': raise ValueError(f"{name}: only damiao is supported")
-    model=str(item.get('model','4310' if gripper else '4340P'))
+    model=str(_required(item,'model',path=path,label=label))
     if model not in ('4310','4340P'): raise ValueError(f"{name}: unsupported damiao model {model}")
     ids=[]
     for key in ('motor_id','feedback_id'):
-        value=item[key]
+        value=_required(item,key,path=path,label=label)
         if isinstance(value,bool) or not isinstance(value,int) or not 1<=value<=0x7ff:
             raise ValueError(f"{name}: invalid {key}")
         ids.append(value)
     values={}
     for section,keys in (('MIT',('kp','kd')),('POS_VEL',('vel_kp','vel_ki','pos_kp','pos_ki','vlim'))):
-        section_value=item.get(section,{})
+        section_value=_required(item,section,path=path,label=label)
         if not isinstance(section_value,dict): raise ValueError(f"{name}: {section} must be a mapping")
         for key in keys:
-            value=float(section_value.get(key,defaults[key]))
+            raw=_required(section_value,key,path=path,label=f'{label}.{section}')
+            try:
+                value=float(raw)
+            except (TypeError,ValueError) as exc:
+                raise ValueError(
+                    f"{path}: {label}.{section}.{key} must be a finite number"
+                ) from exc
             if not math.isfinite(value) or value<0 or (key=='vlim' and value==0):
-                raise ValueError(f"{name}: invalid safety parameter {key}")
+                raise ValueError(
+                    f"{path}: {label}.{section}.{key}: invalid safety parameter"
+                )
             values[key]=value
-    # 保留已评审默认值(包括 J1~J3 的 kd=8); 重力补偿 MIT 有独立约束.
     return MotorConfig(name,*ids,model,vendor,**values)
 
 
 def load_configuration(arm_path=None,gripper_path=None,channel='') -> ControllerConfig:
-    """解析两份配置并校验设备归属; 显式通道覆盖不会改写 YAML."""
-    arm=_mapping(arm_path or default_config('arm'))
-    grip=_mapping(gripper_path or default_config('gripper'))
-    joints=tuple(_motor(item) for item in arm.get('joints',[]))
+    """解析两份必填完整的配置并校验设备归属; 显式通道覆盖不会改写 YAML."""
+    arm_file=Path(arm_path).expanduser() if arm_path else default_config('arm')
+    grip_file=Path(gripper_path).expanduser() if gripper_path else default_config('gripper')
+    arm=_mapping(arm_file)
+    grip=_mapping(grip_file)
+    raw_joints=_required(arm,'joints',path=arm_file,label='root')
+    if not isinstance(raw_joints,list): raise ValueError(f'{arm_file}: joints must be a list')
+    joints=tuple(_motor(item,path=arm_file,label=f'joints[{index}]')
+                 for index,item in enumerate(raw_joints))
     if tuple(j.name for j in joints)!=JOINT_NAMES:
         raise ValueError(f"joints must be ordered {JOINT_NAMES}")
-    items=grip.get('gripper',[])
+    items=_required(grip,'gripper',path=grip_file,label='root')
     if not isinstance(items,list) or len(items)!=1: raise ValueError('exactly one gripper is required')
-    gripper=_motor(items[0],gripper=True)
+    gripper=_motor(items[0],path=grip_file,label='gripper[0]')
     if gripper.name!='gripper': raise ValueError('gripper name must be gripper')
     all_motors=(*joints,gripper)
     # 两类 ID 分别在七台电机内唯一, 避免同一总线上的设备或反馈混淆.
     for key in ('motor_id','feedback_id'):
         if len({getattr(j,key) for j in all_motors})!=len(all_motors):
             raise ValueError(f"duplicate {key} on shared bus")
-    arm_channel=str(arm.get('channel','/dev/ttyACM0')).strip()
-    grip_channel=str(grip.get('channel',arm_channel)).strip()
+    arm_channel=str(_required(arm,'channel',path=arm_file,label='root')).strip()
+    grip_channel=str(_required(grip,'channel',path=grip_file,label='root')).strip()
     if not arm_channel or grip_channel!=arm_channel: raise ValueError('arm and gripper channel must match')
     override=str(channel or '').strip()
     effective=arm_channel if not override or override.lower()=='auto' else override
-    rate=float(arm.get('rate',500.))
+    raw_rate=_required(arm,'rate',path=arm_file,label='root')
+    if isinstance(raw_rate,bool): raise ValueError(f'{arm_file}: rate must be finite and positive')
+    try:
+        rate=float(raw_rate)
+    except (TypeError,ValueError) as exc:
+        raise ValueError(f'{arm_file}: rate must be finite and positive') from exc
     if not math.isfinite(rate) or rate<=0: raise ValueError('rate must be finite and positive')
     return ControllerConfig(str(arm.get('name','reBotArm')),effective,rate,joints,gripper)

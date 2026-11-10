@@ -39,6 +39,10 @@ class GravityCompensationCoreTests(unittest.TestCase):
         np.testing.assert_allclose(scaled, tau)
         np.testing.assert_allclose(tau, np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
 
+    def test_tau_scale_rejects_non_six_axis_vector(self) -> None:
+        with self.assertRaisesRegex(ValueError, "6 values"):
+            apply_gravity_compensation_tau_scale(np.array([1.0, 2.0]))
+
 
 if __name__ == "__main__":
     unittest.main()

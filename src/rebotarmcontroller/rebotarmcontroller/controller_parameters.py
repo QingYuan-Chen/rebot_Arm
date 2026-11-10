@@ -83,8 +83,9 @@ _SAFE_HOME_TIMEOUT_SEC = 30.0
 
 
 def apply_gravity_compensation_tau_scale(tau: np.ndarray) -> np.ndarray:
-    """对六轴广义重力力矩施加补偿增益, 返回独立副本."""
+    """对六轴广义重力力矩施加补偿增益, 返回独立副本; 维数不符明确失败."""
     scaled = np.array(tau, dtype=np.float64, copy=True)
-    if scaled.shape == _GC_TAU_SCALE.shape:
-        scaled *= _GC_TAU_SCALE
+    if scaled.shape != _GC_TAU_SCALE.shape:
+        raise ValueError('gravity torque must contain 6 values')
+    scaled *= _GC_TAU_SCALE
     return scaled

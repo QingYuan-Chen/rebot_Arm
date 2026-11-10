@@ -19,13 +19,14 @@ class Session:
         self.calls = []
         self.status = 0
         self.failure = None
+        self.failures = set()
         self.mode = "mit"
         self.control_loop_active = False
         self.positions = (0.1,) * 6
 
     def record(self, name):
         self.calls.append(name)
-        if name == self.failure:
+        if name == self.failure or name in self.failures:
             raise RuntimeError(f"injected {name}")
 
     def connect(self):
@@ -171,6 +172,18 @@ def test_failed_connect_cleans_all_resources_without_enabling():
     assert device.calls[-4:] == ["stop_gripper", "stop_control", "disable", "disconnect"]
     assert not owner.connected and not owner.enabled
     assert "enable" not in device.calls
+
+
+def test_failed_connect_reports_cleanup_failure_and_retains_unreleased_resource():
+    """清理释放未确认时保留连接引用, 不发布 DISCONNECTED, 并汇总原错误."""
+    owner, device = lifecycle()
+    device.failures = {"init_gripper", "disconnect"}
+    with pytest.raises(RuntimeError, match="init_gripper.*cleanup failed.*disconnect"):
+        owner.connect()
+    assert owner.connected and not owner.enabled
+    assert owner.state == "DISABLING"
+    assert any("CONNECT_CLEANUP_FAILED" in error for error in owner.errors)
+    assert device.calls[-4:] == ["stop_gripper", "stop_control", "disable", "disconnect"]
 
 
 def test_disable_failure_does_not_permit_enable_or_mode_change():
