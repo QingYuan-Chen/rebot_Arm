@@ -41,7 +41,7 @@ def reserve(manager, duration=.4):
     payload = dict(curve=curve.to_payload(), context=dict(session=token.session,
         generation=token.generation, hold=token.hold), gripper_positions=token.gripper_positions,
         gripper_generation=token.gripper_generation, scene_revision=token.scene_revision,
-        capability_revision=token.capability)
+        capability_revision=token.capability,gripper_collision_policy=token.collision_policy)
     return token, curve, manager.arm.decode_prepared_arm_trajectory(payload)
 
 
@@ -137,7 +137,8 @@ def test_stationary_hold_residual_allows_two_checked_trajectories_without_reanch
             assert manager.runtime.execution.last_sent_target==hold
             payload=prepared.to_payload()
             payload.update(gripper_positions=token.gripper_positions,gripper_generation=token.gripper_generation,
-                scene_revision=token.scene_revision,capability_revision=token.capability)
+                scene_revision=token.scene_revision,capability_revision=token.capability,
+                gripper_collision_policy=token.collision_policy)
             task=manager.arm.admit_prepared_arm_trajectory(token,manager.arm.decode_prepared_arm_trajectory(payload))
             assert task.event.wait(3.)
             assert task.result.state=='succeeded'
@@ -647,3 +648,50 @@ def test_coordinated_stop_waits_for_both_sides_without_restart_or_late_cleanup(m
         for worker in workers:
             worker.join(3.)
         shutdown(manager)
+
+
+@pytest.mark.parametrize('missing', ['capability_revision', 'gripper_collision_policy'])
+def test_missing_prepared_field_aborts_action_and_releases_reservation(missing):
+    """损坏准备结果经 Action 失败结算, 不进入设备接纳."""
+    import json
+    from control_msgs.action import FollowJointTrajectory
+    from rebotarm_msgs.srv import PrepareArmTrajectory
+    from rebotarmcontroller.arm.arm_controller import ArmController
+    from rebotarmcontroller.ros.ros_actions import ArmActions
+    start = (0., 0., -.01, 0., 0., 0.)
+    curve = build_curve(JOINT_NAMES, point_to_point(start, start, 1.))
+    payload = dict(curve=curve.to_payload(), context=dict(session=1, generation=2, hold=start),
+                   gripper_positions=(0., 0.), gripper_generation=3, scene_revision='scene',
+                   capability_revision='a'*64, gripper_collision_policy=0)
+    del payload[missing]
+    token = SimpleNamespace(session=1, generation=2, hold=start, feedback=start, observed_at=1.,
+        gripper_positions=(0., 0.), gripper_generation=3, collision_policy=0,
+        scene_revision='scene', deadline=time.monotonic()+2., capability='a'*64)
+    response = SimpleNamespace(success=True, prepared_json=json.dumps(payload))
+    future = SimpleNamespace(done=lambda: True, result=lambda: response)
+    request = FollowJointTrajectory.Goal()
+    request.trajectory.joint_names = list(JOINT_NAMES)
+    actions = ArmActions.__new__(ArmActions)
+    actions._trajectory_mode, actions._prepare_type = 'continuous', PrepareArmTrajectory
+    actions._pending_preparations = {id(request): (request, token)}
+    actions._prepare_client = SimpleNamespace(call_async=lambda _: future)
+    canceled, terminal = [], []
+    actions._arm = SimpleNamespace(trajectory_capability=lambda _: {'revision': 'a'*64},
+        decode_prepared_arm_trajectory=ArmController.decode_prepared_arm_trajectory,
+        cancel_arm_preparation=canceled.append)
+    actions._node = SimpleNamespace(publish_arm_status=lambda: None)
+    goal = SimpleNamespace(request=request, is_cancel_requested=False, abort=lambda: terminal.append('aborted'))
+    result = actions.execute_follow_joint_trajectory(goal)
+    assert missing in result.error_string
+    assert terminal == ['aborted'] and canceled == [token] and not actions._pending_preparations
+
+
+def test_safe_home_rejects_missing_configured_joint_limit(monkeypatch):
+    import rebotarmcontroller.arm.arm_controller as arm_module
+    manager, opened = make_local_manager(monkeypatch)
+    limits = dict(arm_module._JOINT_POSITION_LIMITS_RAD)
+    del limits['joint2']
+    monkeypatch.setattr(arm_module, '_JOINT_POSITION_LIMITS_RAD', limits)
+    with pytest.raises(KeyError, match='joint2'):
+        manager.arm._validated_safe_home_target((0., 0., -.01, 0., 0., 0.))
+    assert not opened

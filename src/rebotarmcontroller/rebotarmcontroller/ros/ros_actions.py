@@ -155,8 +155,7 @@ class ArmActions:
             self._pending_preparations[id(request)] = (request, token)
             return GoalResponse.ACCEPT
         except (ValueError, RuntimeError, IndexError, AttributeError, TypeError) as exc:
-            if hasattr(self._node, 'get_logger'):
-                self._node.get_logger().warning(f'FJT goal rejected: {exc}')
+            self._node.get_logger().warning(f'FJT goal rejected: {exc}')
             return GoalResponse.REJECT
 
     def _prepare_follow_goal(self, goal_handle, token):

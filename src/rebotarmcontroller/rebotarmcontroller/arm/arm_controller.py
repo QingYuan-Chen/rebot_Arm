@@ -65,7 +65,6 @@ class ArmController:
         self._hold_confirmed_at = None
         self._stop_wait = None
         self._scene_revision = ''
-        self.gripper = None
 
     def _task_owner(self):
         """任务状态仍由各自所有者持有；活动协同优先，终态查询继续使用原句柄。"""
@@ -86,7 +85,7 @@ class ArmController:
         self._backend.execution.last_sent_target = None
 
     def bind(self, *, cycle: CyclePort, feedback: ArmFeedbackPort, gravity: GravityArmPort,
-             protection: ProtectionPort, gripper: ArmGripperPort=None):
+             protection: ProtectionPort, gripper: ArmGripperPort):
         """装配阶段一次注入明确组件接口; 运行后不替换依赖."""
         if self._bound:
             raise RuntimeError("component already bound")
@@ -351,8 +350,6 @@ class ArmController:
         reasons = self._admission_reasons(sample, hold, now)
         if reasons:
             raise RuntimeError('fresh acknowledged hold required: '+ '; '.join(reasons))
-        if self.gripper is None:
-            raise RuntimeError('fixed gripper snapshot port unavailable')
         return sample, tuple(hold), self.gripper.snapshot()
 
     def _admission_reasons(self, sample, hold, now):
@@ -473,8 +470,8 @@ class ArmController:
         context = payload['context']
         return PreparedArmHandoff(curve, context['session'], context['generation'],
             tuple(context['hold']), tuple(payload['gripper_positions']),
-            payload['gripper_generation'], payload['scene_revision'], payload.get('capability_revision', ''),
-            payload.get('gripper_collision_policy', 0))
+            payload['gripper_generation'], payload['scene_revision'], payload['capability_revision'],
+            payload['gripper_collision_policy'])
 
     @device_request
     def admit_prepared_arm_trajectory(self, token, handoff):
@@ -652,10 +649,7 @@ class ArmController:
         if not np.all(np.isfinite(values)):
             raise ValueError("safe_home target must be finite")
         for name, value in zip(self._backend.joint_names, values):
-            limits = _JOINT_POSITION_LIMITS_RAD.get(name)
-            if limits is None:
-                continue
-            low, high = limits
+            low, high = _JOINT_POSITION_LIMITS_RAD[name]
             if not low <= value <= high:
                 raise ValueError(
                     f"safe_home target for {name} is {value:.4f} rad, "
@@ -767,8 +761,6 @@ class ArmController:
                 elif int(cmd.mode) == 1:
                     mot.send_pos_vel(pos, vlim)
                 elif int(cmd.mode) == 2:
-                    if not hasattr(mot, "send_vel"):
-                        raise RuntimeError(f"{joint_name} does not support send_vel")
                     mot.send_vel(vel)
                 else:
                     raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
@@ -817,5 +809,5 @@ class ArmController:
         self._backend.set_execution_running(False)
         self.reset_session()
         owner = self._arm_trajectory
-        if owner is not None and owner.task is not None:
+        if owner.task is not None:
             owner.finish(owner.task, 'aborted', 'control mode or lifecycle changed')
