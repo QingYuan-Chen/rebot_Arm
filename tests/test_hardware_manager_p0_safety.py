@@ -2099,7 +2099,7 @@ def test_get_gripper_state_reports_unknown_status_without_verified_sample() -> N
 
     position, velocity, torque, status = manager.gripper.get_gripper_state()
 
-    assert (position, velocity, torque) == (0.0, 0.0, 0.0)
+    assert all(np.isnan(value) for value in (position, velocity, torque))
     assert status == 255
     assert "verified feedback unavailable" in manager.gripper.gripper_feedback_error
 
@@ -2186,6 +2186,20 @@ def test_arm_and_gripper_report_original_status_from_verified_cache(status) -> N
     assert manager.gripper.gripper_feedback_error is None
     assert manager.feedback.get_feedback_status()[1] == []  # 电机故障原码与反馈不可用分别表达。
     assert_verified_feedback_unchanged(manager, before)
+
+
+def test_gripper_cached_sample_without_verified_feedback_reports_nan_and_empty_identity() -> None:
+    """无已验证样本时不得用控制镜像冒充反馈数值, 也不得伪造样本身份。"""
+    manager = make_manager()
+    manager.gripper._gripper_mot = FakeMotor(position=-1.0)
+    manager.gripper._gripper_execution._gripper_pos = -4.0
+    manager.gripper._gripper_execution._gripper_vel = 4.0
+    manager.gripper._gripper_execution._gripper_torque = 5.0
+
+    position, velocity, torque, status, sequence, observed_at = manager.gripper.get_cached_gripper_sample()
+
+    assert all(np.isnan(value) for value in (position, velocity, torque))
+    assert (status, sequence, observed_at) == (255, None, None)
 
 
 def test_first_frame_wait_is_derived_and_recovers_without_status_initialization() -> None:

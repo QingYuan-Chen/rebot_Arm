@@ -545,7 +545,7 @@ class GripperController:
         """
         with self.feedback.transaction(), self._gripper_execution._gripper_lock:
             feedback = self._cached_gripper_feedback()
-            values = feedback.values or (self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel, self._gripper_execution._gripper_torque)
+            values = feedback.values or (float("nan"), float("nan"), float("nan"))
             distance = float("nan") if feedback.failure_reason is not None else float(
                 np.clip(values[0] / _G_ANGLE_OPEN * _G_MAX_DIST_M, 0.0, _G_MAX_DIST_M)
             )
@@ -560,15 +560,12 @@ class GripperController:
         """返回同一缓存快照的 (位置 rad, 速度 rad/s, 力矩 N.m, 状态码).
 
         与关节共用可用性判定; 可信反馈返回电机原码, 否则派生 255.
-        读取不刷新总线, 不登记错误, 不改变反馈时间. 无样本时沿用最后缓存数值,
-        这些回退数值必须结合 255 解读, 不能视为当前有效反馈.
+        读取不刷新总线, 不登记错误, 不改变反馈时间. 无可用样本时三个数值返回 NaN,
+        调用方必须结合 255 判断其不可用, 不能把控制镜像当作反馈.
         """
         with self.feedback.transaction():
             feedback = self._cached_gripper_feedback()
-            values = feedback.values
-            if values is None:
-                with self._gripper_execution._gripper_lock:
-                    values = (self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel, self._gripper_execution._gripper_torque)
+            values = feedback.values or (float("nan"), float("nan"), float("nan"))
             return (*values, feedback.status_code)
 
     def gripper_position_m(self) -> float:
@@ -611,8 +608,8 @@ class GripperController:
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
         state = self.feedback.verified_sample("gripper").state
-        pos = float(cmd.pos) if cmd.use_pos else float(state.pos if state is not None else 0.0)
-        vel = float(cmd.vel) if cmd.use_vel else float(state.vel if state is not None else 0.0)
+        pos = float(cmd.pos) if cmd.use_pos else float(state.pos)
+        vel = float(cmd.vel) if cmd.use_vel else float(state.vel)
         kp = float(cmd.kp) if cmd.use_kp else float(self._gripper_cfg.kp)
         kd = float(cmd.kd) if cmd.use_kd else float(self._gripper_cfg.kd)
         tau = float(cmd.tau) if cmd.use_tau else 0.0
@@ -621,8 +618,6 @@ class GripperController:
         mode = int(cmd.mode)
         if mode not in (0, 1, 2):
             raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
-        if mode == 2 and not hasattr(self._gripper_mot, "send_vel"):
-            raise RuntimeError("gripper does not support send_vel")
         passthrough_decision(pos, vel, kp, kd, tau, vlim,
             (_G_ANGLE_OPEN, 0.), self._gripper_cfg.vlim, _G_TAU_MAX, mode).require_allowed()
         with self._gripper_execution._gripper_lock:
@@ -673,12 +668,8 @@ class GripperController:
         pos_cmd, vel, kp, kd, tau_safe = GripperControl.bounded_mit(
             pos, vel, kp, kd, tau_ff, tau_limit, self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel,
         )
-        lock = getattr(self._gripper_ctrl, "bus_lock", None)
         try:
-            if lock:
-                with lock:
-                    self._gripper_mot.send_mit(pos_cmd, vel, kp, kd, tau_safe)
-            else:
+            with self._gripper_ctrl.bus_lock:
                 self._gripper_mot.send_mit(pos_cmd, vel, kp, kd, tau_safe)
         except Exception as exc:
             if isinstance(exc,CommandTransportError):

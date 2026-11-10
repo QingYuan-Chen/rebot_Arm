@@ -358,11 +358,13 @@ class ArmActions:
                     return result
                 time.sleep(.05)
         except Exception as exc:
+            message = f'gripper action failed: {exc}'
             if generation is not None:
                 try:
                     self._gripper.cancel_gripper_position_command(str(exc), expected_generation=generation)
-                except Exception:
-                    pass
-            self._node.get_logger().error(f'gripper action failed: {exc}')
+                except Exception as cleanup_error:
+                    # 取消失败不能覆盖原 Action 失败; 两者一并上报运行边界。
+                    message += f'; gripper cleanup failed: {cleanup_error}'
+            self._node.get_logger().error(message)
             goal_handle.abort()
             return result
