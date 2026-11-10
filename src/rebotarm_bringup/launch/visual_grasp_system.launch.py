@@ -12,7 +12,6 @@ def _prepare_stages(context):
     """分域 YAML 是正式入口的唯一默认值来源。"""
     import os
     import json
-    from pathlib import Path
     from rebotarm_bringup.visual_profiles import read_section
 
     retired = {
@@ -61,18 +60,11 @@ def _prepare_stages(context):
         "graspnet_python_executable": os.environ.get("GRASPNET_PYTHON", "python3"),
         "vision_yolo_model_path": PathJoinSubstitution([FindPackageShare("rebotarm_vision"), "models", "yolo26s-seg.pt"]).perform(context),
     }
-    for name, env, relative in (
-        ("graspnet_model_root", "GRASPNET_MODEL_ROOT", "third_party/graspnet-baseline"),
-        ("graspnet_checkpoint_path", "GRASPNET_CHECKPOINT_PATH", ".local-models/checkpoints/checkpoint-rs.tar"),
-    ):
-        value = os.environ.get(env, "").strip()
-        if not value:
-            for parent in Path(__file__).resolve().parents:
-                candidate = parent / relative
-                if candidate.exists():
-                    value = str(candidate)
-                    break
-        defaults[name] = value
+    # GraspNet 资源只接受部署环境显式提供, 不沿工作区父目录猜测第三方位置;
+    # 未设置时由启用后的推理节点在加载阶段明确失败.
+    for name, env in (("graspnet_model_root", "GRASPNET_MODEL_ROOT"),
+                      ("graspnet_checkpoint_path", "GRASPNET_CHECKPOINT_PATH")):
+        defaults[name] = os.environ.get(env, "").strip()
     for key, value in defaults.items():
         context.launch_configurations.setdefault(key, value)
     context.launch_configurations["start_candidate_ik_filter"] = "true"

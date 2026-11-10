@@ -44,17 +44,18 @@ def install_training_knn_fallback() -> None:
     sys.modules["knn_modules"] = module
 
 
-def load_grasp_group(model_root: str):
-    """Load GraspGroup without importing graspnetAPI's evaluation-only stack."""
+def load_grasp_group():
+    """Load GraspGroup without importing graspnetAPI's evaluation-only stack.
+
+    显式 ``GRASPNET_API_ROOT`` 优先；未设置时只尝试已安装的 ``graspnetAPI``。
+    不沿模型目录父级猜测第三方源码位置。
+    """
     configured = os.environ.get("GRASPNET_API_ROOT", "").strip()
-    candidates = []
-    if configured:
-        candidates.append(Path(configured).expanduser())
-    candidates.append(Path(model_root).resolve().parent / "graspnetAPI" / "graspnetAPI")
+    candidates = [Path(configured).expanduser()] if configured else []
     for api_root in candidates:
         grasp_path = api_root / "grasp.py"
         if not grasp_path.is_file():
-            continue
+            raise FileNotFoundError(f"GRASPNET_API_ROOT does not contain grasp.py: {grasp_path}")
         package = types.ModuleType("graspnetAPI")
         package.__path__ = [str(api_root)]
         package.__package__ = "graspnetAPI"
@@ -552,7 +553,7 @@ class GraspNetBaselineInference:
         import torch
         install_training_knn_fallback()
         from graspnet import GraspNet, pred_decode
-        GraspGroup = load_grasp_group(self.model_root)
+        GraspGroup = load_grasp_group()
         from grasp_nms import nms_grasp  # noqa: F401
 
         self._torch = torch

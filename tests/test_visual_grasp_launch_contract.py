@@ -134,3 +134,13 @@ def test_interface_profile_is_documented_as_the_authoritative_connection_contrac
     docs = (ROOT / 'docs/reference/parameters/current_parameter_sources.md').read_text()
     assert 'visual_grasp_interfaces.yaml' in docs
     assert 'visual_grasp_system.launch.py' in docs
+
+
+def test_graspnet_resources_require_explicit_deployment_paths():
+    launch = (LAUNCH / 'visual_grasp_system.launch.py').read_text()
+    assert 'for parent in Path(__file__).resolve().parents' not in launch
+    assert 'third_party/graspnet-baseline' not in launch
+    assert '.local-models/checkpoints' not in launch
+    inference = (ROOT / 'src/rebotarm_vision/rebotarm_vision/backends/graspnet_baseline_inference.py').read_text()
+    assert 'resolve().parent / "graspnetAPI"' not in inference
+    assert 'GRASPNET_API_ROOT' in inference

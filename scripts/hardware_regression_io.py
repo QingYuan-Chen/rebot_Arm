@@ -16,6 +16,7 @@ class Audit:
         self.written = 0
         self.dropped = 0
         self.errors = 0
+        self.last_error = None
         self._worker = threading.Thread(target=self._write, name='regression-audit', daemon=True)
         self._worker.start()
 
@@ -43,8 +44,9 @@ class Audit:
                 self._file.write(json.dumps(item, ensure_ascii=False, allow_nan=False) + '\n')
                 self._file.flush()
                 self.written += 1
-            except Exception:
+            except Exception as exc:
                 self.errors += 1
+                self.last_error = f'{type(exc).__name__}: {exc}'
                 self._failure.set()
 
     def close(self):
@@ -54,12 +56,12 @@ class Audit:
             self._failure.set()
             raise RuntimeError('验收审计线程未退出')
         summary = dict(event='audit_summary', accepted=self.accepted, written=self.written,
-                       dropped=self.dropped, errors=self.errors)
+                       dropped=self.dropped, errors=self.errors, last_error=self.last_error)
         try:
             self._file.write(json.dumps(summary) + '\n')
             self._file.close()
-        except Exception:
+        except Exception as exc:
             self._failure.set()
-            raise
+            raise RuntimeError(f'验收审计摘要写入失败: {type(exc).__name__}: {exc}') from exc
         if self._failure.is_set() or self.accepted != self.written:
             raise RuntimeError(f'验收审计不完整: {summary}')

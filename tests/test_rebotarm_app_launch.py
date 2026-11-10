@@ -42,8 +42,9 @@ def test_rebotarm_app_launch_exposes_simple_modes_and_profiles() -> None:
     assert '"trajectory_execution_mode": trajectory_mode' in launch_text
     assert '"trajectory_execution_mode": trajectory_execution_mode' in launch_text
     assert 'trajectory_execution_mode=trajectory_mode' in launch_text
-    assert "def _resolve_channel" in launch_text
-    assert 'for candidate in ("/dev/ttyACM0", "/dev/ttyACM1")' in launch_text
+    assert "def _resolve_channel" not in launch_text
+    assert 'for candidate in ("/dev/ttyACM0", "/dev/ttyACM1")' not in launch_text
+    assert '"channel": channel' in launch_text
     assert '"use_rviz": "false"' in launch_text
     assert 'arguments=["-d", web_rviz_config]' in launch_text
     assert '"web_teleop_status.rviz"' in launch_text

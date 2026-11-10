@@ -27,7 +27,7 @@ def test_enabled_filter_dependencies_are_required_at_startup(monkeypatch, tmp_pa
     monkeypatch.setitem(sys.modules, 'torch', SimpleNamespace())
     monkeypatch.setitem(sys.modules, 'graspnet', SimpleNamespace(GraspNet=object, pred_decode=object()))
     monkeypatch.setattr(module, 'install_training_knn_fallback', lambda: None)
-    monkeypatch.setattr(module, 'load_grasp_group', lambda _root: object)
+    monkeypatch.setattr(module, 'load_grasp_group', lambda: object)
     monkeypatch.setitem(sys.modules, 'grasp_nms', None)
     with pytest.raises(ModuleNotFoundError, match='grasp_nms'):
         runner._load_network()

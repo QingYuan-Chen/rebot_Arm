@@ -114,7 +114,7 @@ def generate_launch_description():
             ),
             # 机械臂命名空间：决定话题前缀（/<ns>/joint_states 等）
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
-            # 串口设备路径；留空表示由上层自行解析（例如 auto 探测 ttyACM0/1）
+            # 串口设备路径；留空或 auto 表示由控制器配置选择通道，显式路径优先
             DeclareLaunchArgument("channel", default_value=""),
             # 退出时是否先回到安全位再失能：默认 false，避免退出流程带动机械臂
             DeclareLaunchArgument("shutdown_safe_home", default_value="false"),

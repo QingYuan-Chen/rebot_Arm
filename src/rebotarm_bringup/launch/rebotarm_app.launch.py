@@ -10,7 +10,7 @@
 #- "panel=true" 时启动网页遥操作状态面板节点，参数里的 "panel_mode="control"" 表示面板处于可下发控制命令的模式（"web_execute_enabled” 再叠加一层执行许可）。
 #
 #安全语义：这是"真机全量启动"，因此 "use_hardware" 默认 "true" 且在"_launch_setup" 中强制校验——传 "use_hardware:=false" 会直接抛错拒绝启动，避免有人误把真机入口当仿真入口用；
-#"execution_mode" 默认 "execute"，"web_execute_enabled" 默认 "true："。串口通道 "auto" 会在检测到设备后解析为具体路径（优先 ttyACM0，其次 ttyACM1）。
+#"execution_mode" 默认 "execute"，"web_execute_enabled" 默认 "true"。串口通道为空或 "auto" 时由控制器配置解析，不在启动入口探测设备名。
 
 import os
 
@@ -50,20 +50,6 @@ def _record_path(name: str, explicit_path: str) -> str:
     if not safe_name.endswith(".jsonl"):
         safe_name = f"{safe_name}.jsonl"
     return f"teleop_records/{safe_name}"
-
-
-def _resolve_channel(channel: str) -> str:
-    """解析真实硬件串口通道。
-
-    非空且不等于 ``auto`` 时按用户给定值使用；``auto`` 时先探测 ttyACM0 再探测
-    ttyACM1，都没有则回落到 ttyACM0 交给控制器报错，而不是静默换一个设备。
-    """
-    if channel and channel != "auto":
-        return channel
-    for candidate in ("/dev/ttyACM0", "/dev/ttyACM1"):
-        if os.path.exists(candidate):
-            return candidate
-    return "/dev/ttyACM0"
 
 
 def _panel_node(
@@ -110,8 +96,8 @@ def _panel_node(
 def _launch_setup(context, *args, **kwargs):
     """OpaqueFunction 回调：在启动时（而非描述构建时）求值参数并组装动作列表。
 
-    需要 OpaqueFunction 的原因是这里要根据 ``use_hardware`` 做硬校验、并做一次
-    文件系统探测（串口 auto 解析），这些只能在 launch 上下文里完成。
+    需要 OpaqueFunction 的原因是这里要根据 ``use_hardware`` 做硬校验并组装条件节点，
+    这些只能在 launch 上下文里完成；串口 auto 解析由控制器配置负责。
     """
     name = LaunchConfiguration("name").perform(context).strip()
     explicit_record_path = LaunchConfiguration("record_path").perform(context).strip()
@@ -135,7 +121,6 @@ def _launch_setup(context, *args, **kwargs):
     bringup_share = FindPackageShare("rebotarm_bringup")
     moveit_launch = PathJoinSubstitution([bringup_share, "launch", "moveit_hardware.launch.py"])
     web_rviz_config = PathJoinSubstitution([bringup_share, "rviz", "web_teleop_status.rviz"])
-    resolved_channel = _resolve_channel(channel)
 
     # 安全门：本入口只服务真机，显式传 use_hardware:=false 时直接失败，防止误当仿真入口
     if use_hardware != "true":
@@ -145,14 +130,14 @@ def _launch_setup(context, *args, **kwargs):
 
     actions = [
         LogInfo(msg="reBotArm app: starting full MoveIt + web teleop workbench"),
-        # 硬件 + MoveIt 主体：通道用解析后的具体设备路径；RViz 由本文件统一决定是否启动，
-        # 因此这里固定传 "false" 避免重复
+        # 硬件 + MoveIt 主体：空串或 auto 原样下传，由控制器配置选择通道；
+        # RViz 由本文件统一决定是否启动，因此这里固定传 "false" 避免重复
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(moveit_launch),
             launch_arguments={
                 "arm_namespace": arm_namespace,
                 "trajectory_execution_mode": trajectory_mode,
-                "channel": resolved_channel,
+                "channel": channel,
                 "use_rviz": "false",
                 "hardware_feedback_rate_hz": hardware_feedback_rate_hz,
                 "gripper_position_torque_cap_nm": gripper_position_torque_cap_nm,
@@ -238,7 +223,7 @@ def generate_launch_description():
             # 模式同时传给后端和网页；不能只切换其中一端。
             DeclareLaunchArgument("trajectory_execution_mode", default_value="continuous",
                 choices=["legacy", "continuous"]),
-            # 串口通道：auto 表示自动探测 ttyACM0/ttyACM1
+            # 串口通道：空串或 auto 表示使用控制器配置中的通道，显式路径优先
             DeclareLaunchArgument("channel", default_value="auto"),
             # 真机入口：默认 true，且传 false 会被 _launch_setup 拒绝
             DeclareLaunchArgument("use_hardware", default_value="true"),

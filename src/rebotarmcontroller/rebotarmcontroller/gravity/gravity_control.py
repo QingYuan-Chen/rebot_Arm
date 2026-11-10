@@ -295,22 +295,29 @@ def load_gravity_model(path, settings):
 
 
 def package_file(package, relative):
-    """定位包内资源: 优先查 ROS 安装索引, 再查当前源码工作区.
+    """定位包内资源: ROS 安装索引优先, 未加载索引的源码环境才回退源码布局.
 
-    package 为包名, relative 为包内相对路径; 两处都不存在时抛出 FileNotFoundError.
-    回退路径按本仓库 src/<package>/ 的布局解析, 便于未加载 ROS 环境时进行离线测试.
+    package 为包名, relative 为包内相对路径; 选中位置缺少文件时报告实际路径,
+    不再静默改用另一处资源. 源码回退仅用于没有 ament 索引的离线环境.
     """
     try:
         from ament_index_python.packages import get_package_share_directory
-        path = Path(get_package_share_directory(package)) / relative
-        if path.is_file():
-            return path
-    except (ImportError, LookupError):
-        pass
+    except ImportError:
+        share = None
+    else:
+        try:
+            share = Path(get_package_share_directory(package))
+        except LookupError:
+            share = None
+    if share is not None:
+        path = share / relative
+        if not path.is_file():
+            raise FileNotFoundError(f'missing {path}')
+        return path
     # 本模块位于包内 gravity/，parents[3] 才是源码工作区的 src/。
     path = Path(__file__).resolve().parents[3] / package / relative
     if not path.is_file():
-        raise FileNotFoundError(f'missing {package}/{relative}')
+        raise FileNotFoundError(f'missing {path}')
     return path
 
 

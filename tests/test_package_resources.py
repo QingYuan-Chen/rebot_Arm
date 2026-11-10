@@ -1,4 +1,5 @@
 from pathlib import Path
+import pytest
 import ast
 import shutil
 from urllib.parse import urlsplit
@@ -160,3 +161,18 @@ def test_hardware_has_no_teach_file_or_workflow_dependency():
         source = path.read_text()
         assert "rebotarm_teach" not in source
         assert "teleop/teach_record/" not in source
+
+
+def test_package_file_reports_selected_install_path_when_resource_missing(tmp_path, monkeypatch):
+    """已选安装位置缺文件时报告实际路径, 不回退到源码目录.\n"""
+    from rebotarmcontroller.gravity import gravity_control
+
+    share = tmp_path / "install" / "rebotarmcontroller"
+    share.mkdir(parents=True)
+    monkeypatch.setattr(
+        "ament_index_python.packages.get_package_share_directory",
+        lambda _name: str(share),
+    )
+    missing = share / "config" / "missing.yaml"
+    with pytest.raises(FileNotFoundError, match=str(missing)):
+        gravity_control.package_file("rebotarmcontroller", "config/missing.yaml")

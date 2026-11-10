@@ -12,7 +12,7 @@
 #
 #参数来源：键盘、网页和示教分别加载自己的配置，并额外加载 operator_common.yaml。launch 参数只覆盖命名空间、记录路径与面板开关等运行期选择项。
 #
-#安全默认值：web_execute_enabled=false（网页不开放执行，只能看状态）、channel 留空表示由机械臂配置文件或自动探测决定、use_local_rviz=true 便于操作者直接看到机械臂状态。
+#安全默认值：web_execute_enabled=false（网页不开放执行，只能看状态）、channel 留空或 auto 表示由机械臂配置文件决定、use_local_rviz=true 便于操作者直接看到机械臂状态。
 #网页执行模式默认为 execute，但 web_execute_enabled 默认关闭；只有显式打开网页执行开关后，
 #Dashboard 才会把命令发送给当前后端（无硬件时为轻量仿真控制器，真机时为真实控制器）。
 
@@ -57,7 +57,7 @@ def generate_launch_description():
                 choices=["legacy", "continuous"]),
             # use_local_rviz：是否随键盘遥操作一起打开本机 RViz，便于直接观察机械臂。
             DeclareLaunchArgument("use_local_rviz", default_value="true"),
-            # channel：电机总线通道覆盖值；空串表示交给机械臂配置文件或自动探测。
+            # channel：电机总线通道覆盖值；空串或 auto 表示交给机械臂配置文件。
             DeclareLaunchArgument("channel", default_value=""),
             # panel：是否启动网页状态面板；关掉后没有任何 HTTP 界面与命令入口。
             DeclareLaunchArgument("panel", default_value="true"),
