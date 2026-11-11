@@ -58,7 +58,7 @@ def test_rejected_velocity_preserves_hold_and_allows_valid_retry(velocity):
             trajectory.submit_home(points[-1], velocity, 1.)
         assert trajectory.task is None and not execution.moving
         assert execution.generation == generation
-        # 即使已过被拒轨迹的末点，发送也必须沿用旧保持目标与速度覆盖。
+        # 即使已过被拒轨迹的末点, 发送也必须沿用旧保持目标与速度覆盖.
         command = control.command(execution.sample(12.))
         driver.send_positions(command)
         assert command.positions == (0.,) * 6 and command.velocity_limits == (.1,) * 6
@@ -84,7 +84,7 @@ def test_rejected_trajectory_never_reaches_fake_device_and_valid_retry_completes
             manager.arm.submit_home(goal, [0.] * 6, 1.)
         assert manager.runtime.target_generation == generation
         assert manager.arm._arm_trajectory.task is None
-        # 经过被拒请求的末点后，唯一运行时仍只能发送原保持目标。
+        # 经过被拒请求的末点后, 唯一运行时仍只能发送原保持目标.
         after = time.monotonic() + .02
         wait_until(lambda: manager.feedback.get_cached_joint_sample()[-1] > after)
         assert all(args[0] == current[0] for number, method, args in opened[0].events

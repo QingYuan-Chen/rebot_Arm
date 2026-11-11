@@ -1,30 +1,30 @@
-"""控制器组件间的具名能力端口。
+"""控制器组件间的具名能力端口.
 
 职责与位置
-    装配层按调用职责裁剪组件能力；每个冻结端口只保存约定的回调。
+    装配层按调用职责裁剪组件能力; 每个冻结端口只保存约定的回调.
 
 对外接口
-    各 *Port 数据类供 HardwareManager 构造期间接线；组件通过字段调用所有者的公开窄接口。
+    各 *Port 数据类供 HardwareManager 构造期间接线; 组件通过字段调用所有者的公开窄接口.
 
 安全与并发约束
-    端口不复制业务状态，也不替代运行时仲裁。 冻结字段限制能力面，不保证回调本身线程安全。
+    端口不复制业务状态, 也不替代运行时仲裁. 冻结字段限制能力面, 不保证回调本身线程安全.
 
-文件结构（按定义顺序）
-    ArmGripperPort：固定夹爪快照及受预约身份约束的独立位置任务接口，不直接发送设备命令。
-    ArmFeedbackPort：六轴目标和停止确认所需的新鲜值查询。
-    GripperFeedbackPort：夹爪坐标与目标事务所需的缓存，刷新和健康查询。
-    GravityFeedbackPort：重力计算所需的同组新鲜反馈和限位验证。
-    CycleFeedbackPort：周期采集，健康检查和会话重置。
-    GripperAcquisitionPort：采集路径所需的夹爪绑定，复制和诊断；不含目标修改能力。
-    ArmCyclePort：周期对六轴任务和透传租约的推进，不暴露任务对象或锁。
-    GripperCyclePort：周期对夹爪租约，执行和会话的推进。
-    ArmProtectionPort：保护只能清透传和终止任务，不接纳运动。
-    GripperProtectionPort：保护清理及设备绑定，不提供目标或执行状态的可写引用。
-    GravityProtectionPort：保护清除补偿执行，失能验证后确认故障；不切换模式。
-    GravityArmPort：六轴交接需要的补偿状态，停止与只读力矩限位。
-    ArmGravityPort：重力交接需要的六轴保持能力，停止待确认时拒绝启动补偿。
-    CyclePort：统一周期分发入口，调用方不掌握其他执行器状态。
-    ProtectionPort：设备故障的统一保护入口，由接收端锁存并去重。
+文件结构(按定义顺序)
+    ArmGripperPort: 固定夹爪快照及受预约身份约束的独立位置任务接口，不直接发送设备命令。
+    ArmFeedbackPort: 六轴目标和停止确认所需的新鲜值查询.
+    GripperFeedbackPort: 夹爪坐标与目标事务所需的缓存, 刷新和健康查询.
+    GravityFeedbackPort: 重力计算所需的同组新鲜反馈和限位验证.
+    CycleFeedbackPort: 周期采集, 健康检查和会话重置.
+    GripperAcquisitionPort: 采集路径所需的夹爪绑定, 复制和诊断; 不含目标修改能力.
+    ArmCyclePort: 周期对六轴任务和透传租约的推进, 不暴露任务对象或锁.
+    GripperCyclePort: 周期对夹爪租约, 执行和会话的推进.
+    ArmProtectionPort: 保护只能清透传和终止任务, 不接纳运动.
+    GripperProtectionPort: 保护清理及设备绑定, 不提供目标或执行状态的可写引用.
+    GravityProtectionPort: 保护清除补偿执行，失能验证后确认故障；不切换模式。
+    GravityArmPort: 六轴交接需要的补偿状态, 停止与只读力矩限位.
+    ArmGravityPort: 重力交接需要的六轴保持能力, 停止待确认时拒绝启动补偿.
+    CyclePort: 统一周期分发入口, 调用方不掌握其他执行器状态.
+    ProtectionPort: 设备故障的统一保护入口, 由接收端锁存并去重.
 """
 
 from dataclasses import dataclass
@@ -49,7 +49,7 @@ class ArmGripperPort:
 
 @dataclass(frozen=True)
 class ArmFeedbackPort:
-    """六轴目标和停止确认所需的新鲜值查询。"""
+    """六轴目标和停止确认所需的新鲜值查询."""
 
     arm_failure: Callable[..., str | None]
     get_joint_state: Callable[[], tuple]
@@ -59,7 +59,7 @@ class ArmFeedbackPort:
 
 @dataclass(frozen=True)
 class GripperFeedbackPort:
-    """夹爪坐标与目标事务所需的缓存，刷新和健康查询。"""
+    """夹爪坐标与目标事务所需的缓存, 刷新和健康查询."""
 
     cached_motor: Callable[..., CachedMotorFeedback]
     failure_reason: Callable[..., str | None]
@@ -70,7 +70,7 @@ class GripperFeedbackPort:
 
 @dataclass(frozen=True)
 class GravityFeedbackPort:
-    """重力计算所需的同组新鲜反馈和限位验证。"""
+    """重力计算所需的同组新鲜反馈和限位验证."""
 
     arm_failure: Callable[..., str | None]
     refresh_feedback_if_due: Callable[..., object]
@@ -81,7 +81,7 @@ class GravityFeedbackPort:
 
 @dataclass(frozen=True)
 class CycleFeedbackPort:
-    """周期采集，健康检查和会话重置。"""
+    """周期采集, 健康检查和会话重置."""
 
     arm_failure: Callable[..., str | None]
     joint_snapshot: Callable[[], JointSnapshot]
@@ -92,7 +92,7 @@ class CycleFeedbackPort:
 
 @dataclass(frozen=True)
 class GripperAcquisitionPort:
-    """采集路径所需的夹爪绑定，复制和诊断；不含目标修改能力。"""
+    """采集路径所需的夹爪绑定, 复制和诊断; 不含目标修改能力."""
 
     feedback_binding: Callable[[], tuple[object | None, object | None]]
     feedback_values: Callable[[MotorFeedback], tuple[float, float, float, int]]
@@ -104,7 +104,7 @@ class GripperAcquisitionPort:
 
 @dataclass(frozen=True)
 class ArmCyclePort:
-    """周期对六轴任务和透传租约的推进，不暴露任务对象或锁。"""
+    """周期对六轴任务和透传租约的推进, 不暴露任务对象或锁."""
 
     reset_session: Callable[[], None]
     clear_passthrough: Callable[[], None]
@@ -118,7 +118,7 @@ class ArmCyclePort:
 
 @dataclass(frozen=True)
 class GripperCyclePort:
-    """周期对夹爪租约，执行和会话的推进。"""
+    """周期对夹爪租约, 执行和会话的推进."""
 
     clear_passthrough: Callable[[], None]
     expire_passthrough: Callable[[float], None]
@@ -129,7 +129,7 @@ class GripperCyclePort:
 
 @dataclass(frozen=True)
 class ArmProtectionPort:
-    """保护只能清透传和终止任务，不接纳运动。"""
+    """保护只能清透传和终止任务, 不接纳运动."""
 
     clear_passthrough: Callable[[], None]
     abort_task: Callable[[str], None]
@@ -137,7 +137,7 @@ class ArmProtectionPort:
 
 @dataclass(frozen=True)
 class GripperProtectionPort:
-    """保护清理及设备绑定，不提供目标或执行状态的可写引用。"""
+    """保护清理及设备绑定, 不提供目标或执行状态的可写引用."""
 
     clear_passthrough: Callable[[], None]
     prepare_protection: Callable[[str], None]
@@ -154,7 +154,7 @@ class GravityProtectionPort:
 
 @dataclass(frozen=True)
 class GravityArmPort:
-    """六轴交接需要的补偿状态，停止与只读力矩限位。"""
+    """六轴交接需要的补偿状态, 停止与只读力矩限位."""
 
     stop_gravity_compensation: Callable[[], None]
     gravity_compensation_active: Callable[[], bool]
@@ -163,7 +163,7 @@ class GravityArmPort:
 
 @dataclass(frozen=True)
 class ArmGravityPort:
-    """重力交接需要的六轴保持能力，停止待确认时拒绝启动补偿。"""
+    """重力交接需要的六轴保持能力, 停止待确认时拒绝启动补偿."""
 
     clear_passthrough: Callable[[], None]
     require_available: Callable[[], None]
@@ -173,13 +173,13 @@ class ArmGravityPort:
 
 @dataclass(frozen=True)
 class CyclePort:
-    """统一周期分发入口，调用方不掌握其他执行器状态。"""
+    """统一周期分发入口, 调用方不掌握其他执行器状态."""
 
     control_tick: Callable[[object, float, Callable], None]
 
 
 @dataclass(frozen=True)
 class ProtectionPort:
-    """设备故障的统一保护入口，由接收端锁存并去重。"""
+    """设备故障的统一保护入口, 由接收端锁存并去重."""
 
     protect: Callable[..., None]

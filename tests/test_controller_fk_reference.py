@@ -1,4 +1,4 @@
-"""FK 固定样本及显式模型对照的离线失败用例；不需要旧 SDK 或设备。"""
+"""FK 固定样本及显式模型对照的离线失败用例; 不需要旧 SDK 或设备."""
 import copy
 import importlib.util
 import hashlib
@@ -75,7 +75,7 @@ def test_explicit_missing_model_is_not_replaced(probe, tmp_path):
 
 
 def test_explicit_model_reports_actual_source_and_failure(probe, tmp_path, capsys):
-    # 简单六轴链作为不同模型的反例，避免测试重新依赖厂商参考树。
+    # 简单六轴链作为不同模型的反例, 避免测试重新依赖厂商参考树.
     names = probe.load_reference()['legacy_joints']
     xml = ['<robot name="different"><link name="base_link"/>']
     parent = 'base_link'

@@ -38,7 +38,7 @@ setup(
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
-            # 可执行名 = 模块：函数；左侧名字被上层启动文件以 executable=... 引用。
+            # 可执行名 = 模块:函数；左侧名字被上层启动文件以 executable=... 引用。
             "PoseCompatNode = rebotarm_motion.pose_compat_node:main",
             "TrajectoryPreparationNode = rebotarm_motion.trajectory_preparation_node:main",
             "TrajectoryRetimingNode = rebotarm_motion.trajectory_retiming_node:main",

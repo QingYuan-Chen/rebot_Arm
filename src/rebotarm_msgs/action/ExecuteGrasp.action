@@ -1,4 +1,4 @@
-# ── Goal：一次抓取任务的目标，可用“标签”或“位姿”二选一（或同时给出）指定 ──
+# ── Goal：一次抓取任务的目标，可用"标签"或"位姿"二选一（或同时给出）指定 ──
 # 目标类别名，需与 Detection2D.class_name / GraspCandidate.class_name 匹配（例如 "bottle"）。
 string target_label
 # 目标位姿，位置单位 m，姿态为四元数；坐标系由服务端约定。

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""离线核对规范模型 FK，默认读取固定参考数值，不连接设备。
+"""离线核对规范模型 FK, 默认读取固定参考数值, 不连接设备.
 
 职责与位置
-    本脚本是控制器退出旧 SDK 后的数值回归工具，不导入旧 SDK 的 Python 实现。
+    本脚本是控制器退出旧 SDK 后的数值回归工具, 不导入旧 SDK 的 Python 实现.
 
 对外接口与文件结构
-    load_reference 校验固定样本；compare 返回逐输入误差及来源；main 提供命令行入口。
-    无参数时只读规范 URDF 和版本化 JSON；--legacy-urdf 显式选择实时模型对照。
+    load_reference 校验固定样本; compare 返回逐输入误差及来源; main 提供命令行入口.
+    无参数时只读规范 URDF 和版本化 JSON; --legacy-urdf 显式选择实时模型对照.
 
 约束
-    单位为 rad 和 m，旋转矩阵表示 end_link 在 base_link 中的方向。
-    不生成或修复期望值，不搜索历史目录。 样本错误与模型缺失均失败；
-    两种误差均须严格小于 1e-12。 数值一致不构成实机运动验收。
+    单位为 rad 和 m, 旋转矩阵表示 end_link 在 base_link 中的方向.
+    不生成或修复期望值, 不搜索历史目录. 样本错误与模型缺失均失败;
+    两种误差均须严格小于 1e-12. 数值一致不构成实机运动验收.
 """
 from pathlib import Path
 import argparse
@@ -35,7 +35,7 @@ SAMPLES = ((0., 0., 0., 0., 0., 0.), (0., 0., -.017453292519943295, 0., 0., 0.),
 
 
 def load_reference(path=REFERENCE):
-    """读取并验证版本，来源及四组有限数值；损坏时拒绝，不访问历史模型补救。"""
+    """读取并验证版本, 来源及四组有限数值; 损坏时拒绝, 不访问历史模型补救."""
     value = json.loads(Path(path).read_text())
 
     def require(condition):
@@ -66,7 +66,7 @@ def load_reference(path=REFERENCE):
 
 
 def compare(legacy_urdf=None, *, reference_path=REFERENCE):
-    """比较规范 FK 与固定期望值，或与显式给定的六轴历史模型比较；不改样本。"""
+    """比较规范 FK 与固定期望值, 或与显式给定的六轴历史模型比较; 不改样本."""
     reference = load_reference(reference_path)
     canonical = ArmKinematics(load_gravity_model(
         ROOT / 'src/rebotarm_moveit_config/config/rebotarm.urdf', GravitySettings()).model)
@@ -102,7 +102,7 @@ def compare(legacy_urdf=None, *, reference_path=REFERENCE):
 
 
 def main(argv=None):
-    """打印误差及来源；输入错误返回 2，超差返回 1，数值通过返回 0。"""
+    """打印误差及来源; 输入错误返回 2, 超差返回 1, 数值通过返回 0."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--legacy-urdf', type=Path, help='显式提供历史 URDF; 默认只校验固定样本')
     args = parser.parse_args(argv)

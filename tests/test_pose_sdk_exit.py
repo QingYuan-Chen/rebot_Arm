@@ -81,7 +81,7 @@ def test_no_sdk_imports_or_path_injection_in_controller_and_motion():
 
 
 def test_active_scripts_and_manifests_have_no_implicit_legacy_resource_path():
-    # 来源文档和固定数值元数据不参与执行依赖检查；禁止名单中的纯模块名也不是资源读取。
+    # 来源文档和固定数值元数据不参与执行依赖检查; 禁止名单中的纯模块名也不是资源读取.
     paths = [p for folder in ('src', 'scripts') for p in (ROOT/folder).rglob('*')
              if p.suffix in {'.py', '.sh', '.xml', '.yaml', '.cfg', '.toml', '.repos'}]
     for path in paths:
@@ -172,7 +172,7 @@ def test_missing_owned_resource_fails_without_legacy_fallback(tmp_path, monkeypa
     from rebotarm_motion import pose_kinematics
     monkeypatch.setattr(ament_index_python.packages, 'get_package_share_directory',
                         lambda name: str(tmp_path/'install/share'/name))
-    # 同时隔离源码回退，否则当前机器的正常资源会掩盖缺失安装文件。
+    # 同时隔离源码回退, 否则当前机器的正常资源会掩盖缺失安装文件.
     monkeypatch.setattr(gravity_control, '__file__',
                         str(tmp_path/'missing/src/rebotarm_force_control/rebotarm_force_control/gravity_control.py'))
     monkeypatch.setattr(pose_kinematics, '__file__', str(tmp_path/'missing/src/pkg/module.py'))

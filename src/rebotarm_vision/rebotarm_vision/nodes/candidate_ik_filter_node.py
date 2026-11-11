@@ -1,7 +1,7 @@
 """抓取候选的 IK 与碰撞可行性过滤节点（视觉链路中候选生成之后、执行之前的一层）。
 
 职责与在系统中的位置：订阅上游视觉节点给出的抓取候选数组，为每个候选展开多组
-“接近点 + 抓取点”目标位姿，逐个调用 MoveIt 的逆解服务求关节解、再用状态有效性服务
+"接近点 + 抓取点"目标位姿，逐个调用 MoveIt 的逆解服务求关节解、再用状态有效性服务
 做碰撞检查，最后按几何闸门与可动性代价打分排序，发布过滤后的候选数组与一份抓取计划。
 本节点只做校验与排序：既不发送轨迹，也不直接驱动硬件；真正的规划、碰撞检查与执行
 门控由下游执行器负责。
@@ -22,7 +22,7 @@
 逐变体 IK + 碰撞检查 → 关节位移与 joint6 变化量评估 → 同一候选取最高分变体 → 整帧排序发布。
 
 安全约束：帧处理串行化并只保留最新一帧，避免服务调用堆积；没有有效关节状态时直接
-跳过 IK，不把空的机器人状态交给求解器；服务不可用、超时、返回空等异常一律按“不可行”
+跳过 IK，不把空的机器人状态交给求解器；服务不可用、超时、返回空等异常一律按"不可行"
 处理（保守失败），绝不因为校验环节故障而放行候选。
 """
 
@@ -83,7 +83,7 @@ class CandidateIkFilterNode(Node):
     状态，处理完一帧立即发布结果，因此随时可以重启而不遗留状态。
 
     线程模型：候选回调与关节状态回调位于同一个可重入回调组，可以被并发调用；但耗时处理
-    由“只保留最新一帧”的串行队列保护，同一时刻只有一个工作项在跑，处理期间到达的帧被
+    由"只保留最新一帧"的串行队列保护，同一时刻只有一个工作项在跑，处理期间到达的帧被
     合并丢弃，从而限制服务调用速率、保证下一帧永远基于最新输入。
     """
 
@@ -118,7 +118,7 @@ class CandidateIkFilterNode(Node):
         # ---- 候选位姿变体生成 ----
         # 正式候选过滤路线只保留 GraspNet 的完整候选姿态。
         self.declare_parameter("pose_policy", "preserve_candidate_pose")
-        # base_axis 策略使用的固定末端姿态（四元数 x，y，z，w）。当前安装把上游 +X 工作区绕基座 Z
+        # base_axis 策略使用的固定末端姿态（四元数 x,y,z,w）。当前安装把上游 +X 工作区绕基座 Z
         # 旋转了 -90°，因此默认值是绕 Z 轴 -90° 的四元数；只在 base_axis 及其回退变体中生效
         self.declare_parameter(
             "fixed_grasp_orientation_xyzw",
@@ -140,7 +140,7 @@ class CandidateIkFilterNode(Node):
         # 过滤统计日志的最小间隔，单位 s；<= 0 表示每帧都打印
         self.declare_parameter("filter_stats_log_interval_sec", 5.0)
         # TCP 相对末端连杆的偏移（末端连杆局部坐标系，单位 m）；求逆解前会先从目标点减去该
-        # 偏移，把“TCP 应到达的点”换算成“末端连杆应到达的位姿”
+        # 偏移，把"TCP 应到达的点"换算成"末端连杆应到达的位姿"
         self.declare_parameter("tcp_offset_xyz", [-0.04, 0.0, 0.0])
         # 目标点在基座系下的平移修正，单位 m；用于补偿手眼/TCP 标定残差
         self.declare_parameter("target_base_offset_xyz", [0.0, 0.0, 0.0])
@@ -299,7 +299,7 @@ class CandidateIkFilterNode(Node):
         """候选数组订阅回调：交给最新优先队列后串行处理。
 
         队列保证同一时刻只有一个工作项在跑，处理期间新到的帧只保留最新一帧，因此这里用
-        while 循环把“当前帧 + 处理期间积压的最新帧”依次处理完，直到队列空闲。
+        while 循环把"当前帧 + 处理期间积压的最新帧"依次处理完，直到队列空闲。
         单帧内部异常只记录错误日志，不打断后续帧的处理。
         """
         work = self._work_queue.submit(msg, received_at=time.monotonic())
@@ -381,7 +381,7 @@ class CandidateIkFilterNode(Node):
     def _lookup_transform(self, target_frame: str, source_frame: str, stamp=None):
         """查询候选采集时刻的 TF，超时 0.2 s。
 
-        取不到变换时本方法会抛异常，由调用方按“无法校验”处理：候选级异常会丢弃该候选，
+        取不到变换时本方法会抛异常，由调用方按"无法校验"处理：候选级异常会丢弃该候选，
         目标中心变换失败则跳过依赖该变换的距离检查。
         """
         return self._gateway.lookup_transform(target_frame, source_frame, stamp)

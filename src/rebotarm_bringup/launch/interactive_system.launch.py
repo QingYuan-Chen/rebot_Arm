@@ -7,9 +7,9 @@
 #- use_moveit_preview=true：复用 MoveIt 组合；接硬件时只使用真实反馈，无硬件时可选择假状态；
 #- use_moveit_preview=false：默认只提供状态与可选硬件；硬件 continuous 自动复用 MoveIt 场景和准备服务。
 #
-#关键话题约定：机器人模型订阅“/<arm_namespace>/visual_joint_states”（可视化用的关节状态，可能来自控制器反馈，也可能由假状态源填充）；“/<arm_namespace>/joint_states”则是控制器/仿真后端发布的执行侧关节状态。
+#关键话题约定：机器人模型订阅 "/<arm_namespace>/visual_joint_states"（可视化用的关节状态，可能来自控制器反馈，也可能由假状态源填充）；"/<arm_namespace>/joint_states"则是控制器/仿真后端发布的执行侧关节状态。
 #
-#安全默认值：“use_hardware=false”、“shutdown_safe_home=false”、“cmd_arbitration=reject”，即默认不碰真机、退出时不自动回安全位、多路命令冲突时直接拒绝。
+#安全默认值："use_hardware=false"、"shutdown_safe_home=false"、"cmd_arbitration=reject"，即默认不碰真机、退出时不自动回安全位、多路命令冲突时直接拒绝。
 #抓爪的力矩上限、速度上限与反馈新鲜度阈值都在本文件显式声明并下发，不依赖节点内默认值。
 
 import os
@@ -31,7 +31,7 @@ from moveit_configs_utils import MoveItConfigsBuilder
 def load_yaml(package_name, relative_path):
     """从已安装的某个包共享目录里读取 YAML 配置并解析为 Python 对象。
 
-    参数： package_name 为包名；relative_path 为相对该包 share 目录的路径。
+    参数： package_name 为包名; relative_path 为相对该包 share 目录的路径。
     路径不存在或 YAML 非法时直接抛异常，不做静默兜底。
     """
     package_path = get_package_share_directory(package_name)
@@ -43,7 +43,7 @@ def load_yaml(package_name, relative_path):
 def generate_launch_description():
     """构建本启动文件的 LaunchDescription（参数声明 + 互斥节点组合）。
 
-    参数按用途分三类：硬件/串口与抓爪安全阈值（仅在“use_hardware=true”时下发给控制器）、机器人模型与可视化开关、以及 MoveIt 规划所需的配置。
+    参数按用途分三类：硬件/串口与抓爪安全阈值（仅在 "use_hardware=true" 时下发给控制器）、机器人模型与可视化开关、以及 MoveIt 规划所需的配置。
     """
     arm_namespace = LaunchConfiguration("arm_namespace")
     bringup_share = FindPackageShare("rebotarm_bringup")

@@ -2,7 +2,7 @@
 
 职责与在系统中的位置
 --------------------
-本模块把“ROS 侧的彩色图 + 深度图 + CameraInfo + 2D 检测框”翻译成 GraspNet 基线推理引擎
+本模块把"ROS 侧的彩色图 + 深度图 + CameraInfo + 2D 检测框"翻译成 GraspNet 基线推理引擎
 的输入，再把推理输出翻译成下游可消费的抓取候选数组消息。它自己不订阅话题、不发布消息，
 真正的 ROS 节点（抓取候选节点）负责取帧、缓存与话题收发。
 
@@ -33,7 +33,7 @@
 安全语义
 --------
 后端不可用（模型路径或权重缺失、模块导入失败等）时，``available`` 为 False 且 ``infer``
-抛出 RuntimeError：宁可显式失败也不返回空候选去“假装正常”。本模块只产出候选位姿建议，
+抛出 RuntimeError：宁可显式失败也不返回空候选去"假装正常"。本模块只产出候选位姿建议，
 任何抓取执行都必须经过下游的 IK 可行性、碰撞检查与执行门控，不得在此处绕过。
 """
 
@@ -84,7 +84,7 @@ def closest_timestamped_frame(frames, target_timestamp_ns: int):
     """在帧缓存中返回与目标时间戳最接近的一帧，找不到时返回 None。
 
     frames 是形如 ``(timestamp_ns, 数据[, 其他字段])`` 的可迭代序列（节点侧用 maxlen=8 的
-    双端队列维护最近若干帧）。target_timestamp_ns 为 0 或负值表示“无有效目标时间戳”，
+    双端队列维护最近若干帧）。target_timestamp_ns 为 0 或负值表示"无有效目标时间戳"，
     此时不猜帧、直接返回 None；缓存为空同理。
     """
     if target_timestamp_ns <= 0 or not frames:
@@ -102,7 +102,7 @@ class GraspNetPrediction:
       转换前校验近似正交与正行列式，四元数输出再归一化。
     width_m：抓取该目标所需的夹爪开口宽度，单位 m；超出夹爪行程的候选必须被下游丢弃。
     object_length_m：目标在夹爪闭合方向之外的估计长度，单位 m；用于判断夹爪是否与目标或
-      桌面干涉。取不到该信息时保持 0.0（表示未知，而不是“长度为零”）。
+      桌面干涉。取不到该信息时保持 0.0（表示未知，而不是"长度为零"）。
     """
 
     score: float
@@ -115,7 +115,7 @@ class GraspNetPrediction:
 class GraspNetBackendProtocol(Protocol):
     """推理后端需要满足的最小接口（结构化子类型，不要求真实继承）。
 
-    ``available`` 为 False 表示后端未配置成功，调用方应走“失败关闭”分支而不是继续推理；
+    ``available`` 为 False 表示后端未配置成功，调用方应走"失败关闭"分支而不是继续推理；
     ``infer`` 接收点云与点数上限，返回按得分降序的预测列表。
     """
 
@@ -245,7 +245,7 @@ def payload_to_candidate_array(
     ``class_name``、``frame_id``、``timestamp_ns``。frame_id 缺失或为空串时退回
     fallback_frame_id；class_name 逐候选保留（缺省用 payload 顶层值）。
     max_candidates：候选列表的截断上限，同样先于解析生效。
-    时间戳（纳秒）大于 0 时才写入数组头与各候选头，避免把“无时间戳”写成 1970 年。
+    时间戳（纳秒）大于 0 时才写入数组头与各候选头，避免把"无时间戳"写成 1970 年。
     """
     predictions: list[GraspNetPrediction] = []
     class_names: list[str] = []
@@ -273,7 +273,7 @@ def payload_to_candidate_array(
         candidate.class_name = name
     timestamp_ns = int(payload.get("timestamp_ns", 0) or 0)
     if timestamp_ns > 0:
-        # 纳秒拆成“秒 + 纳秒余数”两段，符合消息头 stamp 的字段定义。
+        # 纳秒拆成"秒 + 纳秒余数"两段，符合消息头 stamp 的字段定义。
         candidates.header.stamp.sec = timestamp_ns // 1_000_000_000
         candidates.header.stamp.nanosec = timestamp_ns % 1_000_000_000
         for candidate in candidates.candidates:
@@ -334,7 +334,7 @@ class InProcessGraspNetBackend:
             )
             self.backend_error = ""
         except Exception as exc:
-            # 保留 “异常类型：消息” 形式的诊断串，节点会原样打日志。
+            # 保留 "异常类型: 消息" 形式的诊断串，节点会原样打日志。
             self.backend_error = f"{type(exc).__name__}: {exc}"
 
     @property
@@ -396,7 +396,7 @@ class InProcessGraspNetBackend:
             key: float(camera_info[key]) for key in ("fx", "fy", "cx", "cy")
         }
         # 引擎对深度缩放的默认值是 0.001（适配整型毫米图）；这里传的是浮点米制数组，
-        # 因此显式置 1.0，表示“数值已是米，无需再缩放”。
+        # 因此显式置 1.0，表示"数值已是米，无需再缩放"。
         intrinsics["depth_scale_m"] = 1.0
         intrinsics["workspace_min_depth_m"] = float(min_depth_m)
         intrinsics["workspace_max_depth_m"] = float(max_depth_m)
@@ -504,8 +504,8 @@ def _rotation_matrix_to_quaternion(matrix) -> tuple[float, float, float, float]:
 
     采用按对角线元素大小分支的标准算法（Shepperd/Bar-Itzhack 思路）：先看迹 trace；trace 过小
     甚至为负时，选绝对值最大的对角元所在分支求解。这样可避免开方内出现接近 0 或负数的量，
-    保证数值稳定。最后统一归一化以满足消息里“单位四元数”的约定；退化到无法归一化
-    （模长 <= 1e-12，例如零矩阵）时返回单位四元数 (0, 0, 0, 1)，即“不旋转”。
+    保证数值稳定。最后统一归一化以满足消息里"单位四元数"的约定；退化到无法归一化
+    （模长 <= 1e-12，例如零矩阵）时返回单位四元数 (0, 0, 0, 1)，即"不旋转"。
     姿态与位置同处相机坐标系，二者必须配套解读。
     """
     m = np.asarray(matrix, dtype=np.float64).reshape(3, 3)

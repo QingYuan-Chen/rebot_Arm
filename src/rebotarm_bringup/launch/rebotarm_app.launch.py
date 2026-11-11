@@ -4,13 +4,13 @@
 #
 #启动组合与后端选择：
 #
-#- 先包含“moveit_hardware.launch.py”（真机控制器 + MoveIt“move_group”），统一传入串口通道与抓爪安全阈值；
+#- 先包含 "moveit_hardware.launch.py"（真机控制器 + MoveIt "move_group"），统一传入串口通道与抓爪安全阈值；
 #- 启动唯一的 TeachRecorderNode，录制由 Dashboard 卡片显式开始和停止；
-#- 可选启动 RViz（“use_rviz”，使用网页遥操作专用的只读状态布局）；
-#- “panel=true”时启动网页遥操作状态面板节点，参数示例 `panel_mode="control"` 表示面板处于可下发控制命令的模式（“web_execute_enabled”再叠加一层执行许可）。
+#- 可选启动 RViz（"use_rviz"，使用网页遥操作专用的只读状态布局）；
+#- "panel=true" 时启动网页遥操作状态面板节点，参数里的 "panel_mode="control"" 表示面板处于可下发控制命令的模式（"web_execute_enabled” 再叠加一层执行许可）。
 #
-#安全语义：这是“真机全量启动”，因此“use_hardware”默认“true”且在“_launch_setup”中强制校验——传“use_hardware:=false”会直接抛错拒绝启动，避免有人误把真机入口当仿真入口用；
-#“execution_mode”默认“execute”，“web_execute_enabled”默认“true”。串口通道为空或“auto”时由控制器配置解析，不在启动入口探测设备名。
+#安全语义：这是"真机全量启动"，因此 "use_hardware" 默认 "true" 且在"_launch_setup" 中强制校验——传 "use_hardware:=false" 会直接抛错拒绝启动，避免有人误把真机入口当仿真入口用；
+#"execution_mode" 默认 "execute"，"web_execute_enabled" 默认 "true"。串口通道为空或 "auto" 时由控制器配置解析，不在启动入口探测设备名。
 
 import os
 
@@ -24,7 +24,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def _bool_text(value: str) -> str:
-    """把常见写法（1/true/yes/on，大小写与空白无关）规整为字符串“true”/“false”。
+    """把常见写法（1/true/yes/on，大小写与空白无关）规整为字符串 "true"/"false"。
 
     返回字符串而不是 bool：launch 参数与 PythonExpression 都需要文本形式的布尔值。
     """
@@ -128,7 +128,7 @@ def _launch_setup(context, *args, **kwargs):
     actions = [
         LogInfo(msg="reBotArm app: starting full MoveIt + web teleop workbench"),
         # 硬件 + MoveIt 主体：空串或 auto 原样下传，由控制器配置选择通道；
-        # RViz 由本文件统一决定是否启动，因此这里固定传“false”避免重复
+        # RViz 由本文件统一决定是否启动，因此这里固定传 "false" 避免重复
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(moveit_launch),
             launch_arguments={

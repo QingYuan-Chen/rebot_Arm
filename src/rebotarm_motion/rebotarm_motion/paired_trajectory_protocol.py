@@ -2,7 +2,7 @@
 
 职责与位置
     本模块属于运动层，是一套与 ROS 无关（只用标准库）的纯计算工具：把一条关节空间
-    运动表示成可 JSON 序列化的“命令”字典，供真机执行脚本、离线生成脚本与仿真侧分析
+    运动表示成可 JSON 序列化的"命令"字典，供真机执行脚本、离线生成脚本与仿真侧分析
     脚本读写同一份数据。真机/仿真对照实验要求两侧执行完全相同的命令，因此字段格式、
     时间栅格与内容哈希都在这里统一定义。
 
@@ -17,7 +17,7 @@
                         角，单位 rad）；
     ``source_waypoints`` / ``source_waypoint_indices``
                         仅重定时命令才有：原始规划路径点，及其在 ``points`` 中的下标，
-                        用于事后审计“规划器的几何路径是否被完整保留”；
+                        用于事后审计"规划器的几何路径是否被完整保留"；
     ``command_sha256``  对除自身外全部字段的规范化 JSON 计算的 SHA-256，任何篡改都会
                         让 :func:`validate_command` 失败。
 
@@ -26,7 +26,7 @@
        （``duration_sec`` 与 ``cadence_sec``）。构造阶段不做速度限位，越限由执行侧的
        运行守卫拦截，所以调整时长必须同时考虑守卫阈值。
     2. :func:`validate_command` 是执行前的最后一道格式闸门：调用方必须先校验再下发，
-       且不得把校验失败当成“空轨迹”继续执行。
+       且不得把校验失败当成"空轨迹"继续执行。
     3. 起止速度为零由五次多项式时间律保证，避免下发瞬间出现阶跃指令。
 """
 
@@ -66,7 +66,7 @@ def build_quintic_command(
     cadence_sec: float = 0.05,
     label: str,
 ) -> dict[str, object]:
-    """构造“起点 -> 终点”的直线关节空间命令，时间律为五次多项式。
+    """构造"起点 -> 终点"的直线关节空间命令，时间律为五次多项式。
 
     每个关节独立按 ``start + (target - start) * blend`` 插值，所以在关节空间里是一条
     直线，中途不会绕行；如果终点来自规划器且需要保留其避障路径，必须改用
@@ -138,7 +138,7 @@ def build_retimed_path_command(
     本函数原样保留规划器的几何路径——每个源路径点都按顺序插入下发命令——只把时间参数化
     换成平滑、边界速度为零的曲线。
     弧长在关节空间用无穷范数（max-norm，各关节位移绝对值的最大值）度量，五次曲线作用在
-    “沿该弧长的进度”上，因此起点与终点的速度都为零。
+    "沿该弧长的进度"上，因此起点与终点的速度都为零。
 
     参数：
     - ``waypoints``：规划器给出的关节空间路径，按执行顺序排列，每个元素是 6 个关节角
@@ -148,7 +148,7 @@ def build_retimed_path_command(
     - ``label``：命令标签，原样写入返回值。
 
     返回的命令字典额外带 ``source_waypoints`` 与 ``source_waypoint_indices`` 审计字段，
-    使 :func:`validate_command` 能验证“规划器的每个路径点都原样出现在命令中”。
+    使 :func:`validate_command` 能验证"规划器的每个路径点都原样出现在命令中"。
     """
     if len(waypoints) < 2:
         # 少于两个点无法构成路径（也没有可插值的区段）。
@@ -171,7 +171,7 @@ def build_retimed_path_command(
         # 全部路径点重合 => 没有可走的路径，重定时无从谈起（同时避免后面除零）。
         raise ValueError("waypoints must describe a non-zero path")
 
-    # 只按固定周期重采样可能“跨过”某个中间路径点，控制器会直接插值切掉拐角。因此把每个
+    # 只按固定周期重采样可能"跨过"某个中间路径点，控制器会直接插值切掉拐角。因此把每个
     # 规划器路径点的精确时刻也并入采样栅格，命令折线就不可能切掉规划器的拐角。相邻的重复
     # 路径点会共用一个命令点。
     waypoint_times = [
@@ -212,7 +212,7 @@ def build_retimed_path_command(
             ]
         points.append({"elapsed_sec": elapsed, "positions": positions})
 
-    # 审计字段：记录每个源路径点在命令中的下标，并把这些命令点的位置“钉”回路径点的精确值
+    # 审计字段：记录每个源路径点在命令中的下标，并把这些命令点的位置"钉"回路径点的精确值
     # （栅格点的位置是插值出来的，可能与路径点存在浮点级偏差）。
     source_waypoint_indices: list[int] = []
     for waypoint, waypoint_time in zip(path, waypoint_times):
@@ -281,8 +281,8 @@ def validate_command(command: Mapping[str, object]) -> None:
       一致、下标有序且在范围内，且下标指向的命令点位置与源路径点逐位相等；
     - ``command_sha256`` 必须与重新计算的内容哈希一致。
 
-    只校验、不修改入参；任何一项不通过都直接抛异常，绝不返回“部分可信”的结果，安全路径
-    上的调用方必须把异常当作“禁止下发”。
+    只校验、不修改入参；任何一项不通过都直接抛异常，绝不返回"部分可信"的结果，安全路径
+    上的调用方必须把异常当作"禁止下发"。
     """
     if int(command.get("schema_version", -1)) != SCHEMA_VERSION:
         raise ValueError("unsupported command schema_version")
@@ -329,7 +329,7 @@ def validate_command(command: Mapping[str, object]) -> None:
             if actual != expected:
                 raise ValueError("source waypoint is not present exactly in command points")
             previous_index = index
-    # 哈希覆盖上面所有字段，因此这一条同时等价于“命令内容未被篡改”。
+    # 哈希覆盖上面所有字段，因此这一条同时等价于"命令内容未被篡改"。
     if str(command.get("command_sha256", "")) != command_sha256(command):
         raise ValueError("command_sha256 mismatch")
 
@@ -369,7 +369,7 @@ def sample_command(command: Mapping[str, object], elapsed_sec: float) -> tuple[f
 
 
 def _vector6(values: Sequence[float], label: str) -> tuple[float, ...]:
-    """把输入规范化为“6 个有限浮点数”的元组，非法时抛 ``TypeError`` / ``ValueError``。
+    """把输入规范化为"6 个有限浮点数"的元组，非法时抛 ``TypeError`` / ``ValueError``。
 
     ``label`` 只用于异常文本，便于定位出错的是哪个参数。字符串与字节序列被显式拒绝：
     它们可迭代但迭代结果是字符，属于典型调用错误。
@@ -387,7 +387,7 @@ def _vector6(values: Sequence[float], label: str) -> tuple[float, ...]:
 
 
 def _positive_finite(value: float, label: str) -> float:
-    """校验“有限正数”（用于时长与采样周期，单位 s），返回规范化后的 float。"""
+    """校验"有限正数"（用于时长与采样周期，单位 s），返回规范化后的 float。"""
     result = float(value)
     if not math.isfinite(result) or result <= 0.0:
         raise ValueError(f"{label} must be finite and positive")

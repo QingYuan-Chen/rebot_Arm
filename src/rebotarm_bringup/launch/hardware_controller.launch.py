@@ -73,7 +73,7 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_position_timeout_margin_sec", default_value="1.5"),
             # gripper_feedback_stale_timeout_sec：夹爪反馈新鲜度阈值（s），超过即判反馈过期并拒绝新的夹爪命令；允许范围 [0.05, 2.0]。
             DeclareLaunchArgument("gripper_feedback_stale_timeout_sec", default_value="0.15"),
-            # cmd_arbitration：轨迹运行期间收到单关节透传指令时的仲裁策略。“reject”表示直接拒绝（默认，安全优先）；“preempt”表示先停下轨迹再执行透传指令。
+            # cmd_arbitration：轨迹运行期间收到单关节透传指令时的仲裁策略。"reject"=直接拒绝（默认，安全优先）；"preempt"=先停下轨迹再执行透传指令。
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             # arm_namespace：话题/服务/动作命名空间前缀，必须与 MoveIt 配置一致。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),

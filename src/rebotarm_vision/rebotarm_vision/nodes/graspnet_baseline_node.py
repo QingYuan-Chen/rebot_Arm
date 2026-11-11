@@ -2,7 +2,7 @@
 
 职责与位置
 ----------
-本节点是“2D 检测 + RGB-D”到“6D 抓取候选”之间的桥梁：接收彩色图、深度图、相机内参与
+本节点是"2D 检测 + RGB-D"到"6D 抓取候选"之间的桥梁：接收彩色图、深度图、相机内参与
 上游检测结果，在**本进程内**调用 GraspNet 基线推理得到抓取位姿，再以候选数组消息发布给
 下游的候选过滤/运动校验环节。
 
@@ -15,13 +15,13 @@
 - 发布 rebotarm_msgs/GraspCandidateArray 抓取候选（`output_candidates_topic`，
   `/grasp/graspnet_candidates`）
 
-数据流与“手动时间同步”
+数据流与"手动时间同步"
 ----------------------
 本节点不使用消息过滤器，而是自己用定长缓存（`color_frame_cache` / `depth_frame_cache`，
 各保留最近 8 帧）做时间戳配对：
 1. 只有携带候选的检测消息会进入 `pending_inprocess_detections`；
 2. 彩色、深度、内参以及检测回调都会调用 `_try_process_inprocess_detection` 尝试推进流程；
-3. 处理时按“时间戳最接近检测时间戳”的原则从缓存中取彩色帧与深度帧，并检查三者两两之间的
+3. 处理时按"时间戳最接近检测时间戳"的原则从缓存中取彩色帧与深度帧，并检查三者两两之间的
    时间偏差不超过 `max_input_skew_ms`（默认 100 ms，见该参数的注释）。
 
 安全与失败语义
@@ -104,7 +104,7 @@ class GraspNetBaselineNode(Node):
         self.declare_parameter("output_frame_id", "camera_depth_frame")
         # 彩色/深度/检测三者允许的最大时间偏差，单位毫秒；超出则本帧不推理，等新帧到达后重试。
         self.declare_parameter("max_input_skew_ms", 100)
-        # 深度图“1 个单位代表多少米”：16UC1 深度图 1 单位 = 1 mm，故默认 0.001；若上游已给米制浮点深度则应配 1.0。
+        # 深度图"1 个单位代表多少米"：16UC1 深度图 1 单位 = 1 mm，故默认 0.001；若上游已给米制浮点深度则应配 1.0。
         self.declare_parameter("depth_scale_m_per_unit", 0.001)
         # 以下四项为 GraspNet 后端配置；默认从同名环境变量取值，空字符串表示未配置（后端不可用）。
         self.declare_parameter("model_root", os.environ.get("GRASPNET_MODEL_ROOT", ""))
@@ -140,7 +140,7 @@ class GraspNetBaselineNode(Node):
         self.latest_color_timestamp_ns = 0
         self.latest_depth_timestamp_ns = 0
         self.latest_depth_frame_id = self.output_frame_id
-        # 定长缓存，用于“按时间戳就近配对”；8 帧约覆盖 30 FPS 下 0.27 s 的历史。
+        # 定长缓存，用于"按时间戳就近配对"；8 帧约覆盖 30 FPS 下 0.27 s 的历史。
         self.color_frame_cache = deque(maxlen=8)
         self.depth_frame_cache = deque(maxlen=8)
         self.latest_camera_info: dict[str, float] | None = None
@@ -421,9 +421,9 @@ class GraspNetBaselineNode(Node):
         timestamp_ns: int = 0,
         frame_id: str | None = None,
     ) -> None:
-        """发布空候选数组，作为“本帧没有可执行抓取”的显式信号。
+        """发布空候选数组，作为"本帧没有可执行抓取"的显式信号。
 
-        `best_index = -1` 是下游判断“无候选”的约定；`timestamp_ns` 为 0 时保持 header 默认值
+        `best_index = -1` 是下游判断"无候选"的约定；`timestamp_ns` 为 0 时保持 header 默认值
         （即未设置时间戳），表示这次空结果不对应任何确定的时间基准。
         """
         msg = GraspCandidateArray()

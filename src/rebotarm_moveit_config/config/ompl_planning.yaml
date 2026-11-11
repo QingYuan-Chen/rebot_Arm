@@ -1,8 +1,8 @@
 # OMPL 规划流水线配置（MoveIt move_group 的 planning pipeline id 为 ompl）。
 #
-# 本文件只描述“规划器插件 + 请求/响应适配器 + arm 规划组的规划器清单”。它由演示启动文件与
+# 本文件只描述"规划器插件 + 请求/响应适配器 + arm 规划组的规划器清单"。它由演示启动文件与
 # 上层启动组合包以 YAML 形式整体下发给 move_group，同时 moveit_demo.launch.py 还会把它打印到终端，
-# 便于排查“规划失败但看不出原因”的问题。任何键名拼错都会表现为规划插件为空，从而规划失败。
+# 便于排查"规划失败但看不出原因"的问题。任何键名拼错都会表现为规划插件为空，从而规划失败。
 #
 # 三段结构：
 # - planning_plugins：本条流水线真正加载的规划器插件（只保留 OMPL）；
@@ -19,7 +19,7 @@ request_adapters:
   - default_planning_request_adapters/ValidateWorkspaceBounds
   # 校验起点是否在关节限位内；越界时按限位截断而不是直接放弃规划。
   - default_planning_request_adapters/CheckStartStateBounds
-  # 校验起点是否自碰撞/与环境碰撞：在规划前就拦住，避免“起点已经撞了”还去规划。
+  # 校验起点是否自碰撞/与环境碰撞：在规划前就拦住，避免"起点已经撞了"还去规划。
   - default_planning_request_adapters/CheckStartStateCollision
 response_adapters:
   # TOTG 先为几何路径生成时间戳、速度和加速度。
@@ -30,7 +30,7 @@ response_adapters:
   - default_planning_response_adapters/ValidateSolution
   # 把成功路径发布到 /display_planned_path，供 RViz 显示（只影响可视化，不影响执行）。
   - default_planning_response_adapters/DisplayMotionPath
-# 允许规划起点关节角与“当前状态”的最大偏差，单位 rad。0.1 rad 约为 5.7 度；
+# 允许规划起点关节角与"当前状态"的最大偏差，单位 rad。0.1 rad 约为 5.7 度；
 # 设得过小会因关节状态反馈抖动而频繁拒绝规划，设得过大则可能在明显偏离的位置起规划。
 start_state_max_bounds_error: 0.1
 
@@ -66,9 +66,9 @@ arm:
   planner_configs:
     - RRTConnectkConfigDefault
     - RRTstarkConfigDefault
-  # 投影评估器：用 joint1、joint2 两个关节构成二维投影来评估“目标区域已覆盖”，
+  # 投影评估器：用 joint1、joint2 两个关节构成二维投影来评估"目标区域已覆盖"，
   # 也就是用大臂的两个主要自由度近似判断覆盖率，避免在全部六维上重复采样。
   projection_evaluator: joints(joint1,joint2)
-  # 碰撞检测的离散粒度：以“路径总长度”为基准的最长有效段比例。0.01 表示路径被切成约
+  # 碰撞检测的离散粒度：以"路径总长度"为基准的最长有效段比例。0.01 表示路径被切成约
   # 100 段逐段检查，属于偏精细的设置（越小越安全但规划越慢，越大越快但可能漏检薄壁障碍）。
   longest_valid_segment_fraction: 0.01

@@ -2,7 +2,7 @@
 
 这是面板唯一的执行模式判定点。前端请求先被包装成 WebCommandRequest，再由路由方法裁决：
 只有 execution_mode 取值恰为 "execute" 时才受理；其它取值（默认 "dry_run"）一律返回
-accepted=False、state="dry_run" 的“空跑”结果，不产生任何硬件影响。这样默认启动的面板
+accepted=False、state="dry_run" 的"空跑"结果，不产生任何硬件影响。这样默认启动的面板
 只能查看状态，必须由操作者在启动命令里显式打开执行模式才会真的动。
 
 本模块是纯逻辑，不含 ROS 调用与 IO，便于单测；被拒绝/阻断的响应统一由
@@ -54,7 +54,7 @@ class WebCommandGateway:
     """执行闸门与统一响应构造器；本身无状态，可被多个 HTTP 请求线程共用。"""
 
     def route(self, request: WebCommandRequest) -> dict[str, Any]:
-        """裁决一条请求：非 "execute" 模式返回空跑结果，否则返回“受理”结果。
+        """裁决一条请求：非 "execute" 模式返回空跑结果，否则返回"受理"结果。
 
         本方法只判断执行模式，不校验 payload 内容；state="accepted" 只代表闸门放行，
         真正的业务校验在后续的适配层完成。两种分支返回的字段名保持一致，
@@ -84,7 +84,7 @@ class WebCommandGateway:
         request_id: str = "",
         blocked_legacy_execution: bool = False,
     ) -> dict[str, Any]:
-        """构造“被阻断”的统一响应（accepted=False，state="blocked"）。
+        """构造"被阻断"的统一响应（accepted=False，state="blocked"）。
 
         用于命令因功能开关未打开、面板处于只读模式、回放进行中锁定等原因被拒绝时的回显。
         blocked_legacy_execution 标记这次拒绝来自旧协议执行路径，供前端做差异化提示；

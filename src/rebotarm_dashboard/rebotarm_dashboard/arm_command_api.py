@@ -63,7 +63,7 @@ def arm_command_timeout_sec(command: object) -> float:
     """返回等待整臂服务响应的超时秒数，按命令类型区分。
 
     safe_home 需要真正走完回原点动作，给 30 s；enable 只做上使能与反馈检查，8 s；
-    disable 需要等待受控下使能，10 s。这些值是“最长等待时间”而非动作时长，宁可给宽
+    disable 需要等待受控下使能，10 s。这些值是"最长等待时间"而非动作时长，宁可给宽
     也不要中途误判超时。非法命令走默认 2 s 的保守值（该情况下通常不会真的发起调用）。
     """
     normalized = normalize_arm_command(command)

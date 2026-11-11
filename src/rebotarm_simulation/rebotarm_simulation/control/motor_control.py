@@ -133,11 +133,11 @@ class PosVelController:
         """推进一个控制周期，返回限幅后的关节力矩指令（N·m，长度 6）。
 
         参数：
-            target：目标关节角（rad，长度 6）。
-            position：当前关节角（rad，长度 6）。
-            velocity：当前关节角速度（rad/s，长度 6）。
-            dt：控制周期（s），必须为正，否则抛 ``ValueError``。
-            feedforward：前馈力矩（N·m，长度 6），典型为重力补偿；``None`` 视为零。
+            target: 目标关节角（rad，长度 6）。
+            position: 当前关节角（rad，长度 6）。
+            velocity: 当前关节角速度（rad/s，长度 6）。
+            dt: 控制周期（s），必须为正，否则抛 ``ValueError``。
+            feedforward: 前馈力矩（N·m，长度 6），典型为重力补偿；``None`` 视为零。
 
         输入会经 :func:`_vector6` 校验形状；输出是内部状态的一份拷贝，
         调用方修改返回值不会影响控制器状态。
@@ -232,11 +232,11 @@ class GripperMitController:
         """求解一个控制周期的夹爪指令。
 
         参数（长度单位均为米）：
-            target：目标开口位移（会先被限幅到 displacement_min_m..displacement_max_m）。
-            position：当前开口位移（同样限幅）。
-            velocity：当前开口速度（m/s），正方向为开口增大。
-            mode：``move`` / ``closing`` / ``hold`` 之一，其他值抛 ``ValueError``。
-            feedforward_torque：电机侧前馈力矩（N·m），叠加在 PD 输出上。
+            target: 目标开口位移（会先被限幅到 displacement_min_m..displacement_max_m）。
+            position: 当前开口位移（同样限幅）。
+            velocity: 当前开口速度（m/s），正方向为开口增大。
+            mode: ``move`` / ``closing`` / ``hold`` 之一，其他值抛 ``ValueError``。
+            feedforward_torque: 电机侧前馈力矩（N·m），叠加在 PD 输出上。
 
         返回 :class:`GripperCommand`；其中电机力矩已按 motor_torque_limit_nm 限幅，
         指尖力由「电机力矩 × 换算比 × 传动效率」折算，是理想上界而非实测值。

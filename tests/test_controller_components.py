@@ -76,7 +76,7 @@ def test_manager_and_ros_have_no_legacy_private_access():
     (lambda a,g: a.pop('rate'),'root.rate is required'),
 ])
 def test_configuration_requires_complete_motor_and_bus_fields(mutation,field,tmp_path):
-    """缺失字段不得回退为旧型号，增益或通道默认值，错误须指出文件与字段。"""
+    """缺失字段不得回退为旧型号, 增益或通道默认值, 错误须指出文件与字段."""
     arm=yaml.safe_load(default_config('arm').read_text())
     grip=yaml.safe_load(default_config('gripper').read_text())
     mutation(arm,grip)

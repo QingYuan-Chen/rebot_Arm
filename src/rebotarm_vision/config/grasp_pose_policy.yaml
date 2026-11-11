@@ -6,7 +6,7 @@ rebotarm_grasp_candidate_ik_filter:
     # 正式候选姿态策略：完整保留 GraspNet 输出的 6D 姿态，仅按配置补充平行夹爪对称姿态。
     pose_policy: preserve_candidate_pose
     # 固定抓取姿态四元数 (x, y, z, w)：沿用旧仓库 +X 工作区的单位姿态。
-    # 这是“夹爪朝哪一边”的基准姿态，改动会让所有抓取姿态整体转向。
+    # 这是"夹爪朝哪一边"的基准姿态，改动会让所有抓取姿态整体转向。
     fixed_grasp_orientation_xyzw: [0.0, 0.0, 0.0, 1.0]
     # 在 base_link 下的接近轴方向单位向量：末端沿 +X 方向接近物体。
     # 与 fixed_grasp_orientation_xyzw 是同一安装朝向的两种表达，需保持一致。
@@ -42,7 +42,7 @@ rebotarm_grasp_candidate_ik_filter:
     # 抓取点到物体中心的最大允许距离，单位米（0.15 m = 15 cm）；
     # 防止抓取点落到物体轮廓之外（深度分割边缘的离群点）。仅在闸门启用且该值 > 0 时生效。
     candidate_max_grasp_to_object_center_m: 0.15
-    # 运动代价中“全体关节角差二范数”的权重，默认 0.15；调大更偏好动作幅度小的候选。
+    # 运动代价中"全体关节角差二范数"的权重，默认 0.15；调大更偏好动作幅度小的候选。
     candidate_score_joint_distance_weight: 0.15
     # 运动代价中 joint6（末轴）角差的额外权重，默认 0.35；调大更强烈地避免末轴旋转。
     candidate_score_joint6_weight: 0.35
@@ -73,7 +73,7 @@ rebotarm_visual_grasp_markers:
     object_min_diameter_m: 0.06
     # 物体标记的最小高度，单位米（0.12 m = 12 cm）：同理，仅用于可视化下限。
     object_min_height_m: 0.12
-    # 是否把物体标记绘制成“竖直立起”（忽略候选姿态的倾斜），便于观察物体位置；false 时按候选姿态绘制。
+    # 是否把物体标记绘制成"竖直立起"（忽略候选姿态的倾斜），便于观察物体位置；false 时按候选姿态绘制。
     upright_object_marker: true
     # 标记上叠加的 TCP 偏移，单位米；全 0 表示标记直接画在原始位姿上，不换算到抓取 TCP。
     tcp_offset_xyz: [0.0, 0.0, 0.0]

@@ -1,4 +1,4 @@
-# 构建脚本：把一个“纯数据 + 启动文件”的 ament_python 包按标准布局安装到 share/ 下。
+# 构建脚本：把一个"纯数据 + 启动文件"的 ament_python 包按标准布局安装到 share/ 下。
 #
 # 本包没有 Python 模块，因此 packages=[]；所有内容通过 data_files 原样拷贝到
 # share/<包名>/ 的对应子目录，供 MoveIt、RViz 与上层启动组合包按相对路径读取：

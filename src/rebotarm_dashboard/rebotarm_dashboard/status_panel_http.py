@@ -128,7 +128,7 @@ def create_status_panel_server(
                 return
             if route == "/api/teach_record_info":
                 query = parse_qs(url.query)
-                # 兼容 path 与 record_path 两种查询参数名，取不到时用空串表示“用默认记录”。
+                # 兼容 path 与 record_path 两种查询参数名，取不到时用空串表示"用默认记录"。
                 record_path = query.get("path", query.get("record_path", [""]))[0]
                 _write_response(
                     self,
@@ -210,7 +210,7 @@ def create_status_panel_server(
                 success = result.get("success") if self.path == "/api/calibration/command" else result.get("accepted")
                 status = 200 if success else 400
             except Exception as exc:
-                # 请求体非法、处理方法抛异常等都归为“无效请求”，不向客户端泄露内部堆栈。
+                # 请求体非法、处理方法抛异常等都归为"无效请求"，不向客户端泄露内部堆栈。
                 result = {"accepted": False, "message": f"invalid web execute request: {exc}"}
                 status = 400
             _write_response(self, status, _json_bytes(result), "application/json")

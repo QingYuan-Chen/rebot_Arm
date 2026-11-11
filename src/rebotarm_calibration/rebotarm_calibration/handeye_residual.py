@@ -1,4 +1,4 @@
-"""手眼标定残差分析：用“多姿态 + 固定标定物”数据集判定一组手眼外参是否可信。
+"""手眼标定残差分析：用"多姿态 + 固定标定物"数据集判定一组手眼外参是否可信。
 
 职责与位置
     本模块是纯离线数学工具：不依赖 ROS、不做文件读写、不接触硬件，由标定包的命令行入口
@@ -21,7 +21,7 @@
     姿态残差（度）；外参有偏时残差会随姿态变化放大。
 
     残差小并不等于外参正确：若各采样姿态几乎相同，推算结果会一起平移/旋转，误差方向
-    不可观测。因此报告额外给出“姿态多样性”门（末端平移与旋转的最大两两跨度），多样性
+    不可观测。因此报告额外给出"姿态多样性"门（末端平移与旋转的最大两两跨度），多样性
     不足时直接判不通过——即使残差为 0。
 
 判定门
@@ -60,7 +60,7 @@ def transform_matrix(transform: Mapping[str, object]) -> np.ndarray:
     if not math.isfinite(norm) or norm <= 1e-12:
         raise ValueError("rotation_xyzw norm must be positive")
     x, y, z, w = quaternion / norm
-    # 单位四元数 -> 旋转矩阵的标准展开式（已归一化，可直接代入 x，y，z，w）
+    # 单位四元数 -> 旋转矩阵的标准展开式（已归一化，可直接代入 x, y, z, w）
     rotation = np.array(
         [
             [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
@@ -115,17 +115,17 @@ def analyze_handeye_residual(
     """评估一份手眼标定数据集，返回残差报告与判定结果。
 
     参数
-        payload：数据集映射，字段见模块 docstring；``schema_version`` 不等于 1 时拒绝。
-        min_samples：最少采样姿态数，默认 5；小于 2 直接拒绝（无法构成两两统计）。
-        min_end_translation_span_m：姿态多样性门——末端位置的最大两两距离（米），
+        payload: 数据集映射，字段见模块 docstring；``schema_version`` 不等于 1 时拒绝。
+        min_samples: 最少采样姿态数，默认 5；小于 2 直接拒绝（无法构成两两统计）。
+        min_end_translation_span_m: 姿态多样性门——末端位置的最大两两距离（米），
             默认 0.05，即要求末端确实平移过至少 5 cm。
-        min_end_rotation_span_deg：姿态多样性门——末端姿态的最大两两夹角（度），
+        min_end_rotation_span_deg: 姿态多样性门——末端姿态的最大两两夹角（度），
             默认 20.0；平移与旋转两个维度都必须达标。
-        max_position_rms_m：标定物位置残差 RMS 上限（米），默认 0.005。
-        max_position_residual_m：单个姿态的位置残差上限（米），默认 0.010；比 RMS 宽松，
+        max_position_rms_m: 标定物位置残差 RMS 上限（米），默认 0.005。
+        max_position_residual_m: 单个姿态的位置残差上限（米），默认 0.010；比 RMS 宽松，
             用于放过个别偏差点，但不放过系统性偏差。
-        max_rotation_rms_deg：姿态残差 RMS 上限（度），默认 1.5。
-        max_rotation_residual_deg：单个姿态的姿态残差上限（度），默认 3.0。
+        max_rotation_rms_deg: 姿态残差 RMS 上限（度），默认 1.5。
+        max_rotation_residual_deg: 单个姿态的姿态残差上限（度），默认 3.0。
         所有门限必须是有限正数，否则抛 ValueError——配成 0 或 NaN 会让门形同虚设。
 
     返回
@@ -134,7 +134,7 @@ def analyze_handeye_residual(
         ``pose_diversity``、``acceptance``，以及带逐样本残差的 ``samples``。
         调用方必须按 fail-closed 处理：只有 ``acceptance.pass`` 为真才可部署该外参。
     """
-    # 少于 2 个样本无法计算“两两”跨度与均值残差，直接拒绝
+    # 少于 2 个样本无法计算"两两"跨度与均值残差，直接拒绝
     if int(min_samples) < 2:
         raise ValueError("min_samples must be at least 2")
     # 统一校验所有门限：有限且为正，避免 0/NaN 让判定恒真
@@ -187,7 +187,7 @@ def analyze_handeye_residual(
     rotation_residuals = np.array(
         [_rotation_angle_deg(mean_rotation.T @ rotation) for rotation in rotations]
     )
-    # 多样性只取末端实测位姿的跨度，不掺入待评估外参，避免“用被检对象证明自己”
+    # 多样性只取末端实测位姿的跨度，不掺入待评估外参，避免"用被检对象证明自己"
     end_translation_span = _max_pairwise_distance(
         np.stack([value[:3, 3] for value in base_to_end])
     )

@@ -12,8 +12,8 @@ def load_motor_control_parameters(
     """读取标定文件与 URDF 限幅，组装出完整控制参数。
 
     参数（均为仅关键字）：
-        calibration_path：电机标定 YAML 路径；默认取本包 config 目录下的标定文件。
-        urdf_path：权威 URDF 路径；默认取运动规划配置包中的 rebotarm.urdf，
+        calibration_path: 电机标定 YAML 路径；默认取本包 config 目录下的标定文件。
+        urdf_path: 权威 URDF 路径；默认取运动规划配置包中的 rebotarm.urdf，
             其 joint/limit@effort 作为各关节力矩上限。
 
     返回：组装好的 :class:`MotorControlParameters`。

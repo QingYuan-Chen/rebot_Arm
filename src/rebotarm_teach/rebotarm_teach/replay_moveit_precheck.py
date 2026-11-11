@@ -20,7 +20,7 @@ class ReplayMoveItPrecheckMixin:
     def _moveit_align_summary(
         self, info_payload: dict, samples: Sequence[object] | None = None, *, plan: bool = False
     ) -> dict:
-        """汇总“是否需要并能否完成 MoveIt 起始对齐”的判定结果。
+        """汇总"是否需要并能否完成 MoveIt 起始对齐"的判定结果。
 
         ``plan=False`` 只做可用性检查（服务是否就绪、起始误差是否已小于跳过阈值），
         用于 execute 前的轻量评估；``plan=True`` 时额外真的规划一次到记录首点的关节空间
@@ -45,7 +45,7 @@ class ReplayMoveItPrecheckMixin:
     def _collision_precheck(self, samples: Sequence[object]) -> dict:
         """对预处理后的样本序列做碰撞预检（逐采样点检查关节位置是否有效）。"""
         if not samples:
-            # 没有样本时仍走统一入口：由预检器返回 unknown，避免“空输入=无碰撞”的误判。
+            # 没有样本时仍走统一入口：由预检器返回 unknown，避免"空输入=无碰撞"的误判。
             return self._collision_precheck_positions((), [])
         first = samples[0]
         from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
@@ -103,7 +103,7 @@ class ReplayMoveItPrecheckMixin:
         """起始对齐回调：把规划出的对齐段追加到轨迹前部，返回对齐段结束时刻（秒）。
 
         起始误差小于 ``moveit_start_skip_threshold``（rad）时跳过规划，只做保持点；
-        规划失败会抛异常向上传播，由调用方按“构造失败=阻断”处理。
+        规划失败会抛异常向上传播，由调用方按"构造失败=阻断"处理。
         """
         return self._moveit_start_aligner.append(
             trajectory,

@@ -7,7 +7,7 @@
 
 为什么必须检查
     仿真里执行器的 ``ctrlrange`` 一旦宽于 URDF 的 ``<limit lower/upper>``，轨迹就会在
-    仿真中“成功”到达真机根本到不了的角度，仿真结论无法迁移到真实机械臂；反过来过窄
+    仿真中"成功"到达真机根本到不了的角度，仿真结论无法迁移到真实机械臂；反过来过窄
     则会掩盖真实可用工作空间。这里把两侧的一致性做成可断言的结果。
 
 对外接口
@@ -68,7 +68,7 @@ def load_canonical_motor_profiles(robot_xml: Path | None = None) -> list[MotorPr
 class PositionLimitMismatch:
     """单个关节在 URDF 与仿真执行器档位之间的位置限位漂移。
 
-    只有在两侧差值超出容差时才生成该记录，用来把“仿真能到、真机到不了”这类
+    只有在两侧差值超出容差时才生成该记录，用来把"仿真能到、真机到不了"这类
     不一致显式暴露给测试与人工复核。
     """
 
@@ -99,8 +99,8 @@ def motor_profile_position_limit_mismatches(
 
     参数：
         urdf_path: URDF 路径；未声明位置限位的关节会被跳过。
-        motor_profiles：仿真执行器档位，其 ``ctrlrange`` 为 MuJoCo 风格的空格分隔字符串。
-        tolerance：判定容差（rad）。默认 1e-9 表示要求两侧数值实质相等；调大可用于
+        motor_profiles: 仿真执行器档位，其 ``ctrlrange`` 为 MuJoCo 风格的空格分隔字符串。
+        tolerance: 判定容差（rad）。默认 1e-9 表示要求两侧数值实质相等；调大可用于
             容忍不同导出链路带来的浮点舍入。
 
     返回：
@@ -141,7 +141,7 @@ def load_urdf_joint_limits(urdf_path: Path) -> dict[str, UrdfJointLimit]:
     """解析 URDF 中所有带完整 ``<limit>`` 的关节。
 
     任一属性（``lower``/``upper``/``effort``/``velocity``）缺失的关节会被静默跳过，
-    以免用 0 冒充“未声明限位”，把缺失当成“限位为零”的假结论。
+    以免用 0 冒充"未声明限位"，把缺失当成"限位为零"的假结论。
     """
     root = ET.parse(urdf_path).getroot()
     limits: dict[str, UrdfJointLimit] = {}
@@ -169,7 +169,7 @@ def _parse_ctrlrange(value: str) -> tuple[float, float]:
     """把 MuJoCo 风格的 ``"lower upper"`` 字符串解析为两个浮点数。
 
     这不是自由格式解析：必须恰好两个数，否则抛 ``ValueError``——宁可报错也不要
-    拿一个错误的限位继续比对，否则会产生“检查通过”的假象。
+    拿一个错误的限位继续比对，否则会产生"检查通过"的假象。
     """
     parts = [float(part) for part in str(value).split()]
     if len(parts) != 2:

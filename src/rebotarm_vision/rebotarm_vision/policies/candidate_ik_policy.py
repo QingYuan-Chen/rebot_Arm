@@ -45,7 +45,7 @@ class CandidateIkPolicy:
 
 
     def _tuple4(self, name: str) -> tuple[float, float, float, float]:
-        """读取四元数参数并转为 float；长度不是 4 时立即抛错（四元数必须完整给出 x，y，z，w）。"""
+        """读取四元数参数并转为 float；长度不是 4 时立即抛错（四元数必须完整给出 x,y,z,w）。"""
         values = list(_parameter(self, name).value)
         if len(values) != 4:
             raise ValueError(f"{name} must contain exactly 4 values")
@@ -182,7 +182,7 @@ class CandidateIkPolicy:
         返回 (代价, 说明)；当 joint6 变化超过 candidate_max_joint6_delta_rad 时返回
         (None, 说明) 表示该解不可行——这类解虽然能到达目标位姿，但腕部需要转过很大的角度，
         通常说明还存在更省力的等效解（例如平行夹爪的 180° 对称姿态）。当前状态缺失或
-        找不到公共关节名时返回 0 代价，即“无法比较就不惩罚”，避免因为反馈缺失而否决全部候选。
+        找不到公共关节名时返回 0 代价，即"无法比较就不惩罚"，避免因为反馈缺失而否决全部候选。
         """
         current = self._joint_positions_by_name(self._latest_joint_state)
         solution_joint_state = robot_state.joint_state

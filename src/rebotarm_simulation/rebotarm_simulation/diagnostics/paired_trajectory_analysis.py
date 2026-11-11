@@ -6,7 +6,7 @@
     字典。它不采集数据、不下发指令，只做校验、对齐与统计。
 
 两份输入的结构
-    “运行记录”（run）是一个映射，至少含：
+    "运行记录"（run）是一个映射，至少含：
     - ``command``：命令字典（见运动层的成对轨迹命令协议），必须带 ``joint_names``
       （固定 joint1..joint6）、``duration_sec``、``points``（首末点的 ``positions``
       即起止角，单位 rad），对照场景还必须有 ``command_sha256``；
@@ -107,7 +107,7 @@ def compare_runs(sim_run: Mapping[str, object], real_run: Mapping[str, object]) 
     """对齐仿真与真机两次运行，输出逐轴的位置偏差与力矩趋势相关性。
 
     对齐方式：以真机的采样时刻为基准，把仿真序列按时间线性插值到同一时刻，再求
-    “真机实测角 - 仿真实测角”。只有两条命令的 ``command_sha256`` 相同（非空且完全
+    "真机实测角 - 仿真实测角"。只有两条命令的 ``command_sha256`` 相同（非空且完全
     一致）才允许对照，否则抛 :class:`ValueError`——哈希一致是"两侧确实执行了同一
     条轨迹"唯一可自动核验的证据。
 
@@ -116,7 +116,7 @@ def compare_runs(sim_run: Mapping[str, object], real_run: Mapping[str, object]) 
 
     返回字典字段：
     - ``command_sha256``：被对照命令的内容哈希；
-    - ``effort_semantics``：力矩口径说明（见模块“安全与解释边界”）；
+    - ``effort_semantics``：力矩口径说明（见模块"安全与解释边界"）；
     - ``sim`` / ``real``：两侧各自的 :func:`analyze_run` 结果；
     - ``paired``：关节名 -> ``rms_real_minus_sim_position_rad``（位置差均方根，
       rad）、``max_abs_real_minus_sim_position_rad``（位置差绝对值峰值，rad）、
@@ -236,9 +236,9 @@ def _settling_time(samples: Sequence[Mapping[str, object]], index: int, duration
 def _overshoot(observed: Sequence[float], start: float, target: float) -> float:
     """计算越冲量，单位 rad，永远非负。
 
-    方向由 ``target - start`` 决定：正向运动取“最大值超出目标”的部分，负向运动取
-    “最小值低于目标”的部分（用相反方向的最大值会得到 0，失去意义）。起止相同
-    （零位移）时没有方向可言，退化为取“离目标最远的偏差”，使静止指令下的抖动仍
+    方向由 ``target - start`` 决定：正向运动取"最大值超出目标"的部分，负向运动取
+    "最小值低于目标"的部分（用相反方向的最大值会得到 0，失去意义）。起止相同
+    （零位移）时没有方向可言，退化为取"离目标最远的偏差"，使静止指令下的抖动仍
     能被观测到。
     """
     delta = target - start
@@ -278,7 +278,7 @@ def _correlation(pairs: Sequence[tuple[float, float]]) -> float | None:
     """手写皮尔逊相关系数（不引入第三方统计库），返回 -1..1 或 None。
 
     少于 2 对样本、或任一侧方差为 0（信号恒定）时相关性没有定义，返回 None 而不是
-    抛异常或返回 0——报告里 None 表示“不可判定”，0 会被误读为“无关”。分母阈值
+    抛异常或返回 0——报告里 None 表示"不可判定"，0 会被误读为"无关"。分母阈值
     1e-15 用于拦住浮点下溢导致的除零。
     """
     if len(pairs) < 2:

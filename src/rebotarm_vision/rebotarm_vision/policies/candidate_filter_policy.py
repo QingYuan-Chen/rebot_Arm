@@ -1,6 +1,6 @@
 """抓取候选可达性过滤策略（纯函数，不接触 ROS 参数与硬件）。
 
-职责：把逆解/碰撞检查得到的“每个候选是否可达”布尔序列，应用回候选数组，
+职责：把逆解/碰撞检查得到的"每个候选是否可达"布尔序列，应用回候选数组，
 产出一份只含可达候选、且 ``best_index`` 已重新索引的新数组。本模块不做任何
 IK 求解或碰撞判断，只负责数组的挑选与下标重映射。
 """
@@ -28,16 +28,16 @@ def filter_candidate_array_by_reachability(
     返回：新的候选数组；候选对象做深拷贝，因此修改返回值不会影响入参。
 
     返回值语义（容易被下游误读，务必注意）：
-    - 输出 ``best_index`` 指向“筛选后的新数组”；原最优候选若仍可达则保持它最优
+    - 输出 ``best_index`` 指向"筛选后的新数组"；原最优候选若仍可达则保持它最优
       （通过 ``original_to_filtered`` 映射），若被筛掉则回退为 0。
-    - 输出为空数组时 ``best_index`` 保持 -1，表示“本帧没有可用候选”，
-      下游必须据此判失败而不能当作“第 0 个候选可用”。
+    - 输出为空数组时 ``best_index`` 保持 -1，表示"本帧没有可用候选"，
+      下游必须据此判失败而不能当作"第 0 个候选可用"。
     """
     filtered = GraspCandidateArray()
     filtered.header = candidates.header
     filtered.best_index = -1
     filtered.candidates = []
-    # 记录“原下标 -> 新下标”的映射，用于把 best_index 从原数组迁移到筛选后的数组
+    # 记录"原下标 -> 新下标"的映射，用于把 best_index 从原数组迁移到筛选后的数组
     original_to_filtered: dict[int, int] = {}
     for index, (candidate, ok) in enumerate(zip(candidates.candidates, reachable)):
         if bool(ok):

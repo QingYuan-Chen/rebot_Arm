@@ -21,8 +21,8 @@ def draw_detections(image_bgr, detection_msg):
     """把一条检测结果消息画到 BGR 图副本上并返回。
 
     参数：
-        image_bgr：H×W×3 的 BGR 图像（通常是相机原图）。
-        detection_msg：检测结果消息，逐项读取 ``detections``；每个检测需有
+        image_bgr: H×W×3 的 BGR 图像（通常是相机原图）。
+        detection_msg: 检测结果消息，逐项读取 ``detections``；每个检测需有
             x_min/y_min/x_max/y_max（像素）与 class_name/confidence，
             可选 has_obb + obb_points_xy（8 个数 = 4 点 × (x, y)）、
             has_mask + mask_polygon_xy。

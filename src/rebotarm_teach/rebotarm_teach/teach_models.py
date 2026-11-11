@@ -145,8 +145,8 @@ class PreparedTeachReplay:
     ``filtered_quality``   平滑 + 滤波之后、重采样/重定时之前的质量评估；
     ``retimed_quality``    重定时之后（若未重定时则为 ``samples``）的质量评估，也就是
                            真实回放实际执行的那条轨迹的"after"；
-    各步骤是否真正生效（供 UI 展示实际生效的处理链，注意 ``*_applied`` 表示“这一步跑过”，
-    不等同于“数据被改变了”）：
+    各步骤是否真正生效（供 UI 展示实际生效的处理链，注意 ``*_applied`` 表示"这一步跑过"，
+    不等同于"数据被改变了"）：
     ``smoothing_applied`` / ``filter_applied`` / ``resample_applied`` / ``retime_applied``；
     生效参数（都是被夹到安全下限之后的实际值）：
     ``smoothing_window``   平滑窗口长度（奇数，样本数）；
@@ -155,7 +155,7 @@ class PreparedTeachReplay:
     ``resample_rate_hz``   重采样目标频率（Hz）；
     ``retimed_points``     重定时轨迹点列表；为空表示未做重定时；
     大幅度运动与降速信息：
-    ``large_motion``       轨迹行程是否达到“大幅度”判据；
+    ``large_motion``       轨迹行程是否达到"大幅度"判据；
     ``max_joint_span_rad`` 单关节最大行程（rad，各关节位置极差的最大值）；
     ``total_joint_motion_rad`` 全轨迹各关节增量绝对值之和（rad），反映总运动量；
     ``requested_replay_speed`` 请求的回放倍速（已夹到 (0, 1]）；

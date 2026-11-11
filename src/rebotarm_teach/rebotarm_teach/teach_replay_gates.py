@@ -66,13 +66,13 @@ def compute_auto_align_duration(
     min_duration_sec: float = 3.0,
     max_duration_sec: float = 10.0,
 ) -> float:
-    """按“误差 / 目标速度”估算自动对齐所需时长，并夹在给定区间内（返回秒）。
+    """按"误差 / 目标速度"估算自动对齐所需时长，并夹在给定区间内（返回秒）。
 
     参数：``max_error_rad`` 起点最大关节误差（rad，None 或非数值按 0 处理）；
     ``target_speed_rad_s`` 对齐时允许的平均关节速度（rad/s，下限 0.01，防止除零）；
     ``min_duration_sec`` / ``max_duration_sec`` 时长下上限（秒）。
     误差为 0 或无法解析时直接返回下限时长；误差很大时时长被 ``max_duration_sec`` 截断，
-    即“宁可慢也绝不为了赶时间提速”。
+    即"宁可慢也绝不为了赶时间提速"。
     """
     try:
         error = abs(float(max_error_rad))
@@ -145,7 +145,7 @@ def validate_teach_replay_execute_request(
       分档非法 → 拒绝；预处理/原始等级为 ``red`` → 拒绝；预处理跳变、重定时加速度、重定时
       加加速度超限 → 拒绝；``yellow`` 且倍速超过 ``yellow_max_speed`` → 拒绝；
       未通过 dry-run → 拒绝；全部通过才返回 ``replaying``。
-    注意：所有阈值检查都是“None 即跳过”，因此调用方有责任把真实测量值传进来，否则该层保护
+    注意：所有阈值检查都是"None 即跳过"，因此调用方有责任把真实测量值传进来，否则该层保护
     不会生效。
     """
     band = str(start_band or "").strip().lower()

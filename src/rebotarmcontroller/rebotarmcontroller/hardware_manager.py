@@ -1,21 +1,21 @@
-"""Python 控制器的组件装配。
+"""Python 控制器的组件装配.
 
 职责与位置
-    控制器装配根：创建配置，模型，唯一运行时和各独立职责组件。
+    控制器装配根: 创建配置, 模型, 唯一运行时和各独立职责组件.
 
 对外接口
-    HardwareManager 构造后仅暴露 runtime，lifecycle，arm，gripper，feedback，gravity，
-    cycle，protection 引用；调用方按职责取用，不经过业务转发门面。
+    HardwareManager 构造后仅暴露 runtime, lifecycle, arm, gripper, feedback, gravity,
+    cycle, protection 引用; 调用方按职责取用, 不经过业务转发门面.
 
 主要流程
-    校验配置与模型 -> 创建状态所有者 -> 构造能力端口 -> bind -> 接入生命周期和周期回调。
+    校验配置与模型 -> 创建状态所有者 -> 构造能力端口 -> bind -> 接入生命周期和周期回调.
 
 安全与并发约束
-    构造会加载资源和数值模型，但不连接设备，不启动写入线程，不自动使能。
-    bind 只做一次；回调交接环仍存在，不代表所有组件耦合均已消除。
+    构造会加载资源和数值模型, 但不连接设备, 不启动写入线程, 不自动使能.
+    bind 只做一次; 回调交接环仍存在, 不代表所有组件耦合均已消除.
 
-文件结构（按定义顺序）
-    HardwareManager：创建唯一硬件运行时并连接组件；各组件独立拥有状态。
+文件结构(按定义顺序)
+    HardwareManager: 创建唯一硬件运行时并连接组件; 各组件独立拥有状态.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ from .controller_parameters import (
 
 
 class HardwareManager:
-    """创建唯一硬件运行时并连接组件；各组件独立拥有状态。"""
+    """创建唯一硬件运行时并连接组件; 各组件独立拥有状态."""
 
     def __init__(
         self,
@@ -63,12 +63,12 @@ class HardwareManager:
         *,
         runtime_factory=ControllerRuntime,
     ) -> None:
-        """校验资源并一次性创建，接线全部组件；不建立设备会话。
+        """校验资源并一次性创建, 接线全部组件; 不建立设备会话.
 
-        arm_cfg / gripper_cfg / gravity_config 为空时使用包内资源，channel 仅覆盖内存配置。
-        runtime_factory 供离线替身注入；真实运行时，生命周期及所有组件必须共享同一设备所有权。
-        先创建全部状态所有者，再构造冻结能力端口，最后接入生命周期与空闲采集回调。
-        调用方通过 lifecycle.connect() 显式连接，manager 不提供业务转发。
+        arm_cfg / gripper_cfg / gravity_config 为空时使用包内资源, channel 仅覆盖内存配置.
+        runtime_factory 供离线替身注入; 真实运行时, 生命周期及所有组件必须共享同一设备所有权.
+        先创建全部状态所有者, 再构造冻结能力端口, 最后接入生命周期与空闲采集回调.
+        调用方通过 lifecycle.connect() 显式连接, manager 不提供业务转发.
         """
         settings = HardwareSettings(hardware_feedback_rate_hz, gripper_position_torque_cap_nm,
             gripper_position_max_speed_rad_s, gripper_position_timeout_margin_sec,
@@ -78,7 +78,7 @@ class HardwareManager:
                         package_file('rebotarm_force_control', 'config/gravity_compensation.yaml'))
         model = load_gravity_model(package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'),
                                    GravitySettings.from_yaml(gravity_path))
-        # 先创建状态所有者，后接线；构造期间只有资源加载和数值校验，没有总线会话。
+        # 先创建状态所有者, 后接线; 构造期间只有资源加载和数值校验, 没有总线会话.
         self.runtime = runtime_factory(configuration, ArmKinematics(model.model))
         self.lifecycle = ControllerLifecycle(self.runtime)
         self.arm = ArmController(self.runtime, self.lifecycle, settings)
@@ -88,7 +88,7 @@ class HardwareManager:
         self.gravity = GravityController(self.runtime, self.lifecycle, settings, model)
         self.cycle = ControllerCycle(self.runtime, self.lifecycle, settings)
         self.protection = ControllerProtection(self.runtime, self.lifecycle, settings)
-        # 按消费者职责裁剪能力，直接绑定公开方法；不向组件传整个 manager 或完整对端组件。
+        # 按消费者职责裁剪能力, 直接绑定公开方法; 不向组件传整个 manager 或完整对端组件.
         arm_feedback_port = ArmFeedbackPort(
             arm_failure=self.feedback.arm_failure,
             get_joint_state=self.feedback.get_joint_state,
@@ -171,7 +171,7 @@ class HardwareManager:
         protection_port = ProtectionPort(
             protect=self.protection.protect,
         )
-        # 组件全部存在后才完成一次绑定，避免循环依赖要求构造中访问尚未就绪的对端。
+        # 组件全部存在后才完成一次绑定, 避免循环依赖要求构造中访问尚未就绪的对端.
         self.feedback.bind(gripper=gripper_acquisition_port)
         self.gripper.bind(feedback=gripper_feedback_port, protection=protection_port)
         # 准备所需的夹爪快照仍由夹爪组件核验；manager 只绑定方法，不保存第二份状态。
@@ -184,7 +184,7 @@ class HardwareManager:
         self.gravity.bind(arm=arm_gravity_port, cycle=cycle_port, feedback=gravity_feedback_port, protection=protection_port)
         self.cycle.bind(arm=arm_cycle_port, feedback=cycle_feedback_port, gripper=gripper_cycle_port, protection=protection_port)
         self.protection.bind(arm=arm_protection_port, gravity=gravity_protection_port, gripper=gripper_protection_port)
-        # 生命周期只接收事务所需能力；状态与锁仍留在各所有者中，不建立第二套生命周期门面。
+        # 生命周期只接收事务所需能力; 状态与锁仍留在各所有者中, 不建立第二套生命周期门面.
         self.lifecycle.ports = LifecyclePorts(
             device=self.runtime,
             joint_feedback=self.feedback.validated_joints,

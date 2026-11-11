@@ -650,7 +650,7 @@ def test_coordinated_stop_waits_for_both_sides_without_restart_or_late_cleanup(m
 
 @pytest.mark.parametrize('missing', ['capability_revision', 'gripper_collision_policy'])
 def test_missing_prepared_field_aborts_action_and_releases_reservation(missing):
-    """损坏准备结果经 Action 失败结算，不进入设备接纳。"""
+    """损坏准备结果经 Action 失败结算, 不进入设备接纳."""
     import json
     from control_msgs.action import FollowJointTrajectory
     from rebotarm_msgs.srv import PrepareArmTrajectory

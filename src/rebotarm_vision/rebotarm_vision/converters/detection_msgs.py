@@ -38,7 +38,7 @@ def _tensor_to_numpy(value: Any):
 
     顺序很重要：先 ``detach`` 断开计算图，再 ``cpu`` 搬回主机内存，最后 ``numpy``；
     缺少这些方法的对象（普通列表、标量）退回 ``np.asarray``。``None`` 原样返回，
-    由调用方按“该字段缺失”处理。
+    由调用方按"该字段缺失"处理。
     """
     if value is None:
         return None
@@ -55,7 +55,7 @@ def _safe_attr_row(container: Any, attr: str, index: int):
     """取出 ``container.attr[index]`` 并转成 numpy；缺失或越界时返回 None。
 
     旋转框属于可选输出，不同后端或不同帧不一定都有，因此这里把异常吞掉返回
-    None，让调用方降级为“无该信息”，而不是让整帧检测失败。
+    None，让调用方降级为"无该信息"，而不是让整帧检测失败。
     """
     values = getattr(container, attr, None)
     if values is None:
@@ -74,7 +74,7 @@ def _obb_metadata(result: Any, index: int):
     ``points`` 为四角点展开的 (x0,y0,...,x3,y3) 列表（像素），缺失时为空列表。
 
     角点形状在不同后端下有 (1,4,2)、(4,2)、(8,) 等差异，这里统一归一到 4x2；只要
-    角点数量对不上就退回空列表，让下游按“仅有中心与尺寸”使用。
+    角点数量对不上就退回空列表，让下游按"仅有中心与尺寸"使用。
     """
     obb = getattr(result, "obb", None)
     if obb is None:
@@ -159,7 +159,7 @@ def result_to_detection_array_msg(
       否则只保留 ``class_name`` 去空白并转小写后命中的检测。
 
     返回：一条检测数组消息。没有任何检测、或全部被白名单过滤时为空的 ``detections``
-    列表（不是 None），调用方据此发布空帧以表明“本帧已处理但无目标”。
+    列表（不是 None），调用方据此发布空帧以表明"本帧已处理但无目标"。
     任一参与转换的掩膜损坏时抛出 ``MaskPolygonError``，已积累的部分检测随本次转换丢弃。
 
     像素坐标：``center_u``/``center_v`` 由框角点取整后求中点再四舍五入；``x_min``

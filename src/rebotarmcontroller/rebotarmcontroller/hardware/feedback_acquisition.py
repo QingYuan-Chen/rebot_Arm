@@ -1,18 +1,18 @@
-"""反馈采集，已验证缓存和只读健康判断。
+"""反馈采集, 已验证缓存和只读健康判断.
 
 职责与位置
-    唯一反馈缓存所有者；处理 SDK 序号，请求基线，截止时间与逐路健康状态。
+    唯一反馈缓存所有者; 处理 SDK 序号, 请求基线, 截止时间与逐路健康状态.
 
 对外接口
-    refresh_feedback_if_due 采集，强制刷新要求新帧；缓存查询只返回已有样本身份和时间。
+    refresh_feedback_if_due 采集, 强制刷新要求新帧; 缓存查询只返回已有样本身份和时间.
 
 安全与并发约束
-    反馈锁先于夹爪锁；请求和轮询共用总线事务。 重复序号不得刷新 observed_at。
-    观测时间代表本机采集时刻，并非电机内部测量时刻；夹爪坐标规则由夹爪组件维护。
+    反馈锁先于夹爪锁; 请求和轮询共用总线事务. 重复序号不得刷新 observed_at.
+    观测时间代表本机采集时刻, 并非电机内部测量时刻; 夹爪坐标规则由夹爪组件维护.
 
-文件结构（按定义顺序）
-    _FeedbackValidationError：保留采集失败分类，供状态发布与故障判断使用。
-    FeedbackAcquisition：持有一次设备会话的反馈状态；依赖通过窄回调提供。
+文件结构(按定义顺序)
+    _FeedbackValidationError: 保留采集失败分类, 供状态发布与故障判断使用.
+    FeedbackAcquisition: 持有一次设备会话的反馈状态; 依赖通过窄回调提供.
 """
 
 from __future__ import annotations
@@ -30,29 +30,29 @@ _FEEDBACK_REFRESH_RETRIES = 3
 _FEEDBACK_RETRY_INTERVAL_SEC = 0.05
 _UINT64_MAX = (1 << 64) - 1
 _UINT64_HALF_RANGE = 1 << 63
-# 与驱动，六轴目标及重力模型共用规范 URDF；只读映射防止消费者修改安全边界。
+# 与驱动, 六轴目标及重力模型共用规范 URDF; 只读映射防止消费者修改安全边界.
 _JOINT_POSITION_LIMITS_RAD = MappingProxyType(dict(zip(JOINT_NAMES, POSITION_LIMITS)))
 
 
 class _FeedbackBatchError(RuntimeError):
-    """一次设备反馈事务失败，周期可保留逐路错误等待恢复。"""
+    """一次设备反馈事务失败, 周期可保留逐路错误等待恢复."""
 
 
 class _FeedbackValidationError(RuntimeError):
-    """保留采集失败分类，供状态发布与故障判断使用。"""
+    """保留采集失败分类, 供状态发布与故障判断使用."""
 
     def __init__(self, code: str, detail: str) -> None:
-        """保存可供健康发布分类的错误码与详细原因，不修改反馈缓存。"""
+        """保存可供健康发布分类的错误码与详细原因, 不修改反馈缓存."""
         super().__init__(detail)
         self.code = code
 
 
 class FeedbackAcquisition:
-    """持有一次设备会话的反馈状态；依赖通过窄回调提供。"""
+    """持有一次设备会话的反馈状态; 依赖通过窄回调提供."""
 
     def __init__(self, *, groups, joint_names, gripper_motor, gripper_values,
                  gripper_sample, gripper_error, period, stale_timeout, backend, loop_active):
-        """注入设备分组与夹爪回调，建立唯一反馈锁，样本缓存及待决请求状态。"""
+        """注入设备分组与夹爪回调, 建立唯一反馈锁, 样本缓存及待决请求状态."""
         self._feedback_controller_groups = groups
         self._joint_names = joint_names
         self._gripper_motor = gripper_motor
@@ -75,39 +75,39 @@ class FeedbackAcquisition:
 
     @property
     def joint_names(self):
-        """按注入配置读取六轴名称，不包含夹爪标签。"""
+        """按注入配置读取六轴名称, 不包含夹爪标签."""
         return self._joint_names()
 
     @property
     def _gripper_mot(self):
-        """读取装配后的夹爪电机引用，供采集分组和存在性判断。"""
+        """读取装配后的夹爪电机引用, 供采集分组和存在性判断."""
         return self._gripper_motor()
 
     @property
     def _hardware_feedback_period_sec(self):
-        """读取配置采集周期 s，独立于 ROS 发布周期。"""
+        """读取配置采集周期 s, 独立于 ROS 发布周期."""
         return self._period()
 
     @property
     def _gripper_feedback_stale_timeout_sec(self):
-        """读取六轴和夹爪共用的新鲜度阈值 s；历史属性名保留。"""
+        """读取六轴和夹爪共用的新鲜度阈值 s; 历史属性名保留."""
         return self._stale_timeout()
 
     @property
     def _backend(self):
-        """读取唯一运行时引用，用于设备线程所有权检查。"""
+        """读取唯一运行时引用, 用于设备线程所有权检查."""
         return self._backend_getter()
 
     @property
     def control_loop_active(self):
-        """查询周期输出是否活动；写入线程独占检查还需结合 writer_active。"""
+        """查询周期输出是否活动; 写入线程独占检查还需结合 writer_active."""
         return self._loop_active()
 
     @staticmethod
     def _feedback_state_with_sequence(label: str, motor) -> tuple[object, int]:
-        """读取 (状态, 接收序号)；依赖打过补丁的 MotorBridge 提供序号接口。
+        """读取 (状态, 接收序号); 依赖打过补丁的 MotorBridge 提供序号接口.
 
-        正式驱动接入前确认此接口；序号范围仍按每次设备观测校验。
+        正式驱动接入前确认此接口; 序号范围仍按每次设备观测校验.
         """
         state, sequence_value = motor.get_state_with_sequence()
         sequence = int(sequence_value)
@@ -117,11 +117,11 @@ class FeedbackAcquisition:
 
     @staticmethod
     def _feedback_sequence_advanced(sequence: int, baseline: int) -> bool:
-        """判断接收序号是否相对基线“向前”推进，可容忍 uint64 回绕。
+        """判断接收序号是否相对基线"向前"推进, 可容忍 uint64 回绕.
 
-        采用模 2^64 差值：差值落在 (0, 2^63) 视为推进，落在 (2^63, 2^64) 视为
-        落后（回绕的另一半）。 序号从 0 且基线非 0 时判为未推进；那是计数器
-        复位，不能当作新帧。
+        采用模 2^64 差值: 差值落在 (0, 2^63) 视为推进, 落在 (2^63, 2^64) 视为
+        落后(回绕的另一半). 序号从 0 且基线非 0 时判为未推进; 那是计数器
+        复位, 不能当作新帧.
         """
         current = int(sequence)
         previous = int(baseline)
@@ -133,10 +133,10 @@ class FeedbackAcquisition:
         return 0 < delta < _UINT64_HALF_RANGE
 
     def _verified_feedback_sample(self, label: str) -> _VerifiedFeedbackSample:
-        """返回一条不可变的，由控制循环写入的已验证反馈快照。
+        """返回一条不可变的, 由控制循环写入的已验证反馈快照.
 
-        读 MotorBridge 缓存只属于采集路径。 消费者在 ``_feedback_lock`` 下取用
-        已经验证过的样本；读取它不得改变其接收序号或观测时间。
+        读 MotorBridge 缓存只属于采集路径. 消费者在 ``_feedback_lock`` 下取用
+        已经验证过的样本; 读取它不得改变其接收序号或观测时间.
         """
         with self._feedback_lock:
             sample = self._verified_feedback_by_label.get(label)
@@ -148,9 +148,9 @@ class FeedbackAcquisition:
         self,
         labels: Sequence[str],
     ) -> tuple[_VerifiedFeedbackSample, ...]:
-        """在一次反馈锁事务中读取多个标签的已验证样本；任一缺失即失败。"""
-        # 一次性原子读取多个标签，避免同一控制周期内取到不同批次的数据；
-        # 任一标签缺失即整体失败（多关节命令不能基于部分反馈执行）。
+        """在一次反馈锁事务中读取多个标签的已验证样本; 任一缺失即失败."""
+        # 一次性原子读取多个标签, 避免同一控制周期内取到不同批次的数据;
+        # 任一标签缺失即整体失败(多关节命令不能基于部分反馈执行).
         with self._feedback_lock:
             samples = tuple(
                 self._verified_feedback_by_label.get(label) for label in labels
@@ -161,7 +161,7 @@ class FeedbackAcquisition:
         return samples  # type: ignore[return-value]
 
     def _feedback_response_window_sec(self) -> float:
-        """一次反馈请求允许的响应窗口：取两种节拍假设与重试次数的较大者。"""
+        """一次反馈请求允许的响应窗口: 取两种节拍假设与重试次数的较大者."""
         return max(
             self._hardware_feedback_period_sec * _FEEDBACK_REFRESH_RETRIES,
             _FEEDBACK_RETRY_INTERVAL_SEC * _FEEDBACK_REFRESH_RETRIES,
@@ -169,7 +169,7 @@ class FeedbackAcquisition:
 
     @staticmethod
     def _classified_feedback_error(reason: str, code: str = "READ_FAILED") -> str:
-        """补齐机器可读分类前缀；已有分类时保留原原因。"""
+        """补齐机器可读分类前缀; 已有分类时保留原原因."""
         message = str(reason)
         return message if message.startswith("[") else f"[{code}] {message}"
 
@@ -181,7 +181,7 @@ class FeedbackAcquisition:
         updated: float | None,
         now: float | None = None,
     ) -> str | None:
-        """机械臂与夹爪共用的只读可用性判定，不登记错误或刷新采样时间。"""
+        """机械臂与夹爪共用的只读可用性判定, 不登记错误或刷新采样时间."""
         if error is not None:
             return f"{label} feedback unavailable: {self._classified_feedback_error(error)}"
         if updated is None:
@@ -205,7 +205,7 @@ class FeedbackAcquisition:
         failure_reason: str | None = None,
         now: float | None = None,
     ) -> _CachedMotorFeedback:
-        """统一解析已验证缓存；调用方持有反馈锁，不访问 SDK 或修改健康状态。"""
+        """统一解析已验证缓存; 调用方持有反馈锁, 不访问 SDK 或修改健康状态."""
         sample = self._verified_feedback_by_label.get(label)
         reason = failure_reason or self._feedback_failure_reason(
             label,
@@ -219,10 +219,10 @@ class FeedbackAcquisition:
         return _CachedMotorFeedback((state.pos, state.vel, state.torq), state.status_code, reason, sample)
 
     def _validate_feedback_sample(self, label: str, state) -> None:
-        """校验单条反馈的合法性：有限数值 + 位于该关节硬件软限位内。
+        """校验单条反馈的合法性: 有限数值 + 位于该关节硬件软限位内.
 
-        关节越限或非有限值都说明编码器/通信异常，必须报错，绝不能当作有效
-        位置参与运动命令。
+        关节越限或非有限值都说明编码器/通信异常, 必须报错, 绝不能当作有效
+        位置参与运动命令.
         """
         if state is None:
             raise _FeedbackValidationError("READ_FAILED", f"{label} feedback unavailable")
@@ -248,7 +248,7 @@ class FeedbackAcquisition:
     def _record_feedback_label_error(
         self, label: str, reason: str, *, code: str = "READ_FAILED"
     ) -> None:
-        """登记指定电机当前采集错误；调用方持有反馈事务锁。"""
+        """登记指定电机当前采集错误; 调用方持有反馈事务锁."""
         self._feedback_error_by_label[label] = self._classified_feedback_error(reason, code)
 
     def _record_verified_feedback(
@@ -258,8 +258,8 @@ class FeedbackAcquisition:
         sequence: int,
         observed_at: float,
     ) -> None:
-        """校验通过后登记为“已验证反馈”，并清除该标签的错误标记。"""
-        # 先复制再校验，同一个不可变数值快照用于缓存与后续查询。
+        """校验通过后登记为"已验证反馈", 并清除该标签的错误标记."""
+        # 先复制再校验, 同一个不可变数值快照用于缓存与后续查询.
         if state is None:
             raise _FeedbackValidationError("READ_FAILED", f"{label} feedback unavailable")
         state = MotorFeedback.copy_from(state)
@@ -270,7 +270,7 @@ class FeedbackAcquisition:
             observed_at=float(observed_at),
         )
         self._verified_feedback_by_label[label] = sample
-        # 与原始字节和运动守卫源时间关联；不改变采样时间或接收序号。
+        # 与原始字节和运动守卫源时间关联; 不改变采样时间或接收序号.
         logging.getLogger('rebotarm.audit').info('verified_feedback', extra={'audit': dict(
             name=label, sequence=sample.sequence, observed_at=sample.observed_at,
             position=sample.state.pos, velocity=sample.state.vel, torque=sample.state.torq,
@@ -280,10 +280,10 @@ class FeedbackAcquisition:
             self._record_gripper_feedback(state, observed_at=observed_at)
 
     def _sync_feedback_health(self) -> None:
-        """把逐标签的反馈状态汇总为机械臂/夹爪级健康状态。
+        """把逐标签的反馈状态汇总为机械臂/夹爪级健康状态.
 
-        机械臂侧只要任一关节有错误就报错；缺少样本且不在强制刷新窗口内时标为
-        "verified feedback pending"。 夹爪只在自己的标签有错误或样本缺失时报错。
+        机械臂侧只要任一关节有错误就报错; 缺少样本且不在强制刷新窗口内时标为
+        "verified feedback pending". 夹爪只在自己的标签有错误或样本缺失时报错.
         """
         arm_labels = list(self.joint_names)
         arm_errors = [
@@ -302,7 +302,7 @@ class FeedbackAcquisition:
                     "[WAITING_FIRST_FRAME] verified feedback pending: " + ",".join(missing_arm)
                 )
         else:
-            # 机械臂新鲜度取所有关节中“最旧”的观测时刻，即短板决定整体时效。
+            # 机械臂新鲜度取所有关节中"最旧"的观测时刻, 即短板决定整体时效.
             self._record_arm_feedback_success(
                 min(
                     self._verified_feedback_by_label[label].observed_at
@@ -324,10 +324,10 @@ class FeedbackAcquisition:
         *,
         observed_at: float,
     ) -> None:
-        """结算所有未完成的反馈请求：序号前进则登记样本，超时则记录错误。
+        """结算所有未完成的反馈请求: 序号前进则登记样本, 超时则记录错误.
 
-        每个待决请求只结算一次；无论成功还是超时都会清掉 baseline/deadline，
-        避免过期的截止时间影响下一条命令。
+        每个待决请求只结算一次; 无论成功还是超时都会清掉 baseline/deadline,
+        避免过期的截止时间影响下一条命令.
         """
         for label, baseline in list(
             self._feedback_request_baseline_by_label.items()
@@ -365,7 +365,7 @@ class FeedbackAcquisition:
         self,
         groups,
     ) -> dict[str, tuple[object, int]]:
-        """读取分组电机的 SDK 缓存及接收序号，不发送请求或改写验证时间。"""
+        """读取分组电机的 SDK 缓存及接收序号, 不发送请求或改写验证时间."""
         observations: dict[str, tuple[object, int]] = {}
         for _ctrl, entries in groups:
             for label, motor in entries:
@@ -373,7 +373,7 @@ class FeedbackAcquisition:
         return observations
 
     def _record_arm_feedback_success(self, observed_at: float) -> None:
-        """用六轴最旧观测时刻更新健康聚合，清除当前采集错误并记录恢复。"""
+        """用六轴最旧观测时刻更新健康聚合, 清除当前采集错误并记录恢复."""
         recovered = self._arm_feedback_error is not None
         self._arm_feedback_updated_monotonic = float(observed_at)
         self._arm_feedback_error = None
@@ -381,8 +381,8 @@ class FeedbackAcquisition:
             _LOG.info("arm feedback recovered updated=%.6f", observed_at)
 
     def _record_arm_feedback_error(self, reason: str) -> None:
-        """保存六轴当前反馈错误，仅在内容变化时记录日志，避免周期刷屏。"""
-        # 只在错误内容变化时打日志，避免硬件回路上刷屏。
+        """保存六轴当前反馈错误, 仅在内容变化时记录日志, 避免周期刷屏."""
+        # 只在错误内容变化时打日志, 避免硬件回路上刷屏.
         message = str(reason)
         changed = message != self._arm_feedback_error
         self._arm_feedback_error = message
@@ -390,10 +390,10 @@ class FeedbackAcquisition:
             _LOG.error("arm feedback error: %s", message)
 
     def _arm_feedback_failure_reason(self, *, now: float | None = None) -> str | None:
-        """机械臂反馈的失效原因；健康时返回 None。
+        """机械臂反馈的失效原因; 健康时返回 None.
 
-        先看是否有显式错误；否则用单调时钟计算反馈年龄，超过
-        ``_gripper_feedback_stale_timeout_sec`` 即判定为过期（运动命令必须被拒绝）。
+        先看是否有显式错误; 否则用单调时钟计算反馈年龄, 超过
+        ``_gripper_feedback_stale_timeout_sec`` 即判定为过期(运动命令必须被拒绝).
         """
         with self._feedback_lock:
             return self._feedback_failure_reason(
@@ -408,14 +408,14 @@ class FeedbackAcquisition:
         inspect_after_poll: bool = False,
         request_new_feedback: bool = True,
     ) -> None:
-        """执行一轮共享总线反馈事务：先结算旧请求，再请求新帧。
+        """执行一轮共享总线反馈事务: 先结算旧请求, 再请求新帧.
 
-        流程：按控制器分组读一次缓存观测 -> 结算上一轮待决请求 -> 为尚无基线
+        流程: 按控制器分组读一次缓存观测 -> 结算上一轮待决请求 -> 为尚无基线
         的标签建立 baseline/deadline -> 持总线锁执行 request_feedback +
-        poll_feedback_once。 ``inspect_after_poll`` 为真时在轮询结束后立即再读一次
-        并结算（用于强制刷新），否则只结算轮询前的观测。 任一控制器组失败都会
-        记录该组电机错误，并在最后以异常抛出，绝不静默继续。
-        ``request_new_feedback`` 为假时仅轮询并结算已有请求，不建立新截止时间。
+        poll_feedback_once. ``inspect_after_poll`` 为真时在轮询结束后立即再读一次
+        并结算(用于强制刷新), 否则只结算轮询前的观测. 任一控制器组失败都会
+        记录该组电机错误, 并在最后以异常抛出, 绝不静默继续.
+        ``request_new_feedback`` 为假时仅轮询并结算已有请求, 不建立新截止时间.
         """
         groups = self._feedback_controller_groups()
         observations: dict[str, tuple[object, int]] = {}
@@ -450,9 +450,9 @@ class FeedbackAcquisition:
         successful_groups = []
         for ctrl, entries in readable_groups:
             def transaction() -> None:
-                """在同一总线锁事务内请求分组反馈并轮询，防止其他事务插入。"""
-                # 同一控制器上的“请求 + 轮询”必须在一次持锁事务内完成，
-                # 否则别的线程可能在两者之间插入自己的帧，导致错配。
+                """在同一总线锁事务内请求分组反馈并轮询, 防止其他事务插入."""
+                # 同一控制器上的"请求 + 轮询"必须在一次持锁事务内完成,
+                # 否则别的线程可能在两者之间插入自己的帧, 导致错配.
                 if request_new_feedback:
                     for _label, motor in entries:
                         motor.request_feedback()
@@ -498,13 +498,13 @@ class FeedbackAcquisition:
             raise _FeedbackBatchError("shared feedback batch failed: " + "; ".join(group_errors))
 
     def _force_feedback_refresh(self) -> None:
-        """同步强制刷新：必须拿到“请求之后新到”的反馈，否则报错。
+        """同步强制刷新: 必须拿到"请求之后新到"的反馈, 否则报错.
 
-        用于使能，置零，夹爪命令等需要当下真实状态的场合。 先记录每个标签的
-        基线序号与上一份样本，再最多重试 ``_FEEDBACK_REFRESH_RETRIES`` 次，
-        直到样本对象被替换且序号相对基线前进；全部失败时抛出最后一个错误或
-        汇总缺失原因。 最后一轮非阻塞轮询之后，在原有响应窗口剩余时间内
-        只轮询，不追加请求；不能把“请求已写出”当作“应答已接收”。
+        用于使能, 置零, 夹爪命令等需要当下真实状态的场合. 先记录每个标签的
+        基线序号与上一份样本, 再最多重试 ``_FEEDBACK_REFRESH_RETRIES`` 次,
+        直到样本对象被替换且序号相对基线前进; 全部失败时抛出最后一个错误或
+        汇总缺失原因. 最后一轮非阻塞轮询之后, 在原有响应窗口剩余时间内
+        只轮询, 不追加请求; 不能把"请求已写出"当作"应答已接收".
         """
         groups = self._feedback_controller_groups()
         initial: dict[str, tuple[object, int]] = {}
@@ -529,14 +529,14 @@ class FeedbackAcquisition:
             label: sequence
             for label, (_state, sequence) in initial.items()
         }
-        # 记住旧样本对象：即使序号相同，样本对象未变也说明没收到新帧。
+        # 记住旧样本对象: 即使序号相同, 样本对象未变也说明没收到新帧.
         prior_samples = {
             label: self._verified_feedback_by_label.get(label)
             for label in required_baselines
         }
 
         def forced_sample_satisfies(label: str, baseline: int) -> bool:
-            """要求样本对象已替换，序号超过请求基线且无当前错误，旧缓存不能通过。"""
+            """要求样本对象已替换, 序号超过请求基线且无当前错误, 旧缓存不能通过."""
             sample = self._verified_feedback_by_label.get(label)
             return (
                 label not in self._feedback_error_by_label
@@ -573,9 +573,9 @@ class FeedbackAcquisition:
                     return
                 if attempt + 1 < _FEEDBACK_REFRESH_RETRIES:
                     time.sleep(_FEEDBACK_RETRY_INTERVAL_SEC)
-            # 三轮请求约在 0/50/100 ms 发出，原来在第三次立即轮询后就失败。
-            # 剩余最多 50 ms 留给在途应答；总线错误沿用既有失败路径，不用迟到
-            # 缓存冲掉异常。 固定次数也约束测试时钟停滞或底层轮询异常的等待。
+            # 三轮请求约在 0/50/100 ms 发出, 原来在第三次立即轮询后就失败.
+            # 剩余最多 50 ms 留给在途应答; 总线错误沿用既有失败路径, 不用迟到
+            # 缓存冲掉异常. 固定次数也约束测试时钟停滞或底层轮询异常的等待.
             if last_error is None and not self._feedback_error_by_label:
                 for _ in range(10):
                     remaining = refresh_deadline - time.monotonic()
@@ -622,11 +622,11 @@ class FeedbackAcquisition:
         force: bool = False,
         now: float | None = None,
     ) -> bool:
-        """按配置频率最多执行一轮共享总线反馈批次。
+        """按配置频率最多执行一轮共享总线反馈批次.
 
-        本地控制循环运行时，只有该循环可以发起反馈事务。 ROS 定时器也会
-        调用本方法，但在命令循环停止前它们被降级为“只读缓存”：``force=True``
-        时直接抛出 RuntimeError，否则返回 False。
+        本地控制循环运行时, 只有该循环可以发起反馈事务. ROS 定时器也会
+        调用本方法, 但在命令循环停止前它们被降级为"只读缓存": ``force=True``
+        时直接抛出 RuntimeError, 否则返回 False.
         """
         observed_at = time.monotonic() if now is None else float(now)
         control_thread = self._backend.control_thread
@@ -642,7 +642,7 @@ class FeedbackAcquisition:
             return False
         with self._feedback_lock:
             due = self._feedback_next_refresh_monotonic
-            # 1e-12 的容差用于抵消浮点加法误差，避免恰好到期的周期被推迟。
+            # 1e-12 的容差用于抵消浮点加法误差, 避免恰好到期的周期被推迟.
             if not force and due is not None and observed_at + 1e-12 < due:
                 return False
             self._feedback_next_refresh_monotonic = (

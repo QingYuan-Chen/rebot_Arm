@@ -1,7 +1,7 @@
 """面板状态存储与 SSE 报文工具（面板包的纯数据层）。
 
 面板节点把来自 ROS 的关节反馈、整臂状态以及遥操作/示教状态写入 TeleopStatusStore；
-HTTP 的 /api/status 与 /events 再从存储取一份快照。本模块只做“聚合 + 序列化”，
+HTTP 的 /api/status 与 /events 再从存储取一份快照。本模块只做"聚合 + 序列化"，
 不订阅话题、不发起任何 ROS 调用，因此可以脱离 ROS 运行时单测。
 
 线程模型
@@ -10,7 +10,7 @@ HTTP 的 /api/status 与 /events 再从存储取一份快照。本模块只做�
     写入方和读取方均按只读数据交接，后续更新应提交新对象。
 
 数据形状（键名为对外接口，保持英文）
-    joints：{关节名：{"position"：float，"velocity"：float，"torque"：float，
+    joints：{关节名: {"position": float, "velocity": float, "torque": float,
                       "status_code": int}}
         position 单位弧度（夹爪为米），velocity 单位 rad/s（夹爪为 m/s），
         torque 沿用电机力矩反馈 N·m，status_code 为底层电机状态码。
@@ -43,7 +43,7 @@ class StatusSnapshot:
 class TeleopStatusStore:
     """进程内状态存储：ROS 回调线程写，HTTP/SSE 线程读。
 
-    初始值刻意给出“尚未连接”的确定语义：关节表为空，整臂 mode/state_machine 为空串、
+    初始值刻意给出"尚未连接"的确定语义：关节表为空，整臂 mode/state_machine 为空串、
     enabled 为 False（真实硬件默认失能），遥操作三项均为 "idle"，
     这样前端在第一条 ROS 消息到达前也能渲染出稳定的状态。
     各 update_* 方法都是覆盖写，不保留历史，也不做范围校验——校验由写入方负责。
@@ -156,7 +156,7 @@ class TeleopStatusStore:
         snapshot = self.snapshot()
         return {
             # ROS 允许用 NaN 表示未知反馈，而 JSON 不允许；因此内部仍保留原始快照，
-            # 只在序列化时把非有限浮点数（NaN/±Inf）换成 JSON null，前端据此显示“未知”。
+            # 只在序列化时把非有限浮点数（NaN/±Inf）换成 JSON null，前端据此显示"未知"。
             "joints": {
                 name: {
                     key: (

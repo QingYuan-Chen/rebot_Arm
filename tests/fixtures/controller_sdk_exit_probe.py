@@ -1,7 +1,7 @@
-"""源码或独立安装区的 SDK 退出探针；只构造组件并计算 FK/IK，不创建设备会话。
+"""源码或独立安装区的 SDK 退出探针; 只构造组件并计算 FK/IK, 不创建设备会话.
 
-REBOTARM_VERIFY_INSTALL_PREFIX 非空时，模块及配置和模型必须全部位于该安装区。
-旧 SDK 导入始终被阻断；MotorBridge 也被阻断以证明纯构造没有触及通信层。
+REBOTARM_VERIFY_INSTALL_PREFIX 非空时, 模块及配置和模型必须全部位于该安装区.
+旧 SDK 导入始终被阻断; MotorBridge 也被阻断以证明纯构造没有触及通信层.
 """
 import importlib.abc
 import json

@@ -1,6 +1,6 @@
 """示教回放轨迹构建：把预处理后的示教样本拼装成可下发的关节轨迹。
 
-本模块只做“时间轴拼接”，不访问硬件、不做碰撞检查，也不决定是否允许回放：
+本模块只做"时间轴拼接"，不访问硬件、不做碰撞检查，也不决定是否允许回放：
 
     起始保持段 -> 起始对齐段（软启动插值，或由外部规划器生成） -> 录制段 -> 末尾保持段
 
@@ -94,7 +94,7 @@ class TeachReplayTrajectoryBuilder:
         trajectory_factory: Callable[[], Any],
         trajectory_point_factory: Callable[[], Any],
     ) -> None:
-        # 两个工厂分别生产“整条轨迹”和“单个轨迹点”的空对象，构建时逐个填充字段。
+        # 两个工厂分别生产"整条轨迹"和"单个轨迹点"的空对象，构建时逐个填充字段。
         self._trajectory_factory = trajectory_factory
         self._trajectory_point_factory = trajectory_point_factory
 
@@ -145,7 +145,7 @@ class TeachReplayTrajectoryBuilder:
         if config.use_moveit_start_align:
             if moveit_start_alignment is None:
                 raise ValueError("MoveIt start alignment callback is required")
-            # 规划器负责把“当前位置 -> 记录首点”这段写进同一条轨迹，并以关键字实参
+            # 规划器负责把"当前位置 -> 记录首点"这段写进同一条轨迹，并以关键字实参
             # 接收当前位置与首点位置，返回值是对齐段占用的总时长（s）。
             elapsed = float(
                 moveit_start_alignment(
@@ -186,7 +186,7 @@ class TeachReplayTrajectoryBuilder:
         config: TeachReplayTrajectoryConfig,
         reference_grade: str,
     ) -> float:
-        """追加“起始保持 + 插值对齐 + 首点保持”，返回对齐段结束时刻（s）。
+        """追加"起始保持 + 插值对齐 + 首点保持"，返回对齐段结束时刻（s）。
 
         对齐段用静止到静止的五次曲线生成；``align`` 分级使用设置里的
         ``align_duration`` / ``align_steps``（可由起始误差自动推算），
@@ -233,7 +233,7 @@ class TeachReplayTrajectoryBuilder:
             initial_delay = max(float(config.initial_replay_delay_sec), 0.0)
             retimed_points = prepared.retimed_points
         else:
-            # 没有预处理重定点时退化为“现场重定时”，此时延迟由重定时函数写进时间轴，
+            # 没有预处理重定点时退化为"现场重定时"，此时延迟由重定时函数写进时间轴，
             # 因此这里不再重复叠加（initial_delay 保持 0）。
             initial_delay = 0.0
             retimed_points = retime_teach_samples(

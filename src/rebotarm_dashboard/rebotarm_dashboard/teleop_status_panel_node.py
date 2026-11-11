@@ -127,7 +127,7 @@ def _decision_response(decision: WebExecuteDecision) -> dict:
 def _keyboard_decision_response(decision) -> dict:
     """把键盘单步校验结果转成前端 JSON 契约。
 
-    比关节运动多带 ``key`` / ``joint_name`` / ``step_rad``，便于界面回显“哪一步落在哪个关节”。
+    比关节运动多带 ``key`` / ``joint_name`` / ``step_rad``，便于界面回显"哪一步落在哪个关节"。
     """
     return {
         "accepted": bool(decision.accepted),
@@ -231,7 +231,7 @@ class TeleopStatusPanelNode(Node):
         # large_motion_max_speed（倍率）：大范围运动的推荐速度上限，随预处理结果上报给界面，
         # 不在本节点内据此二次限速。
         self.declare_parameter("large_motion_max_speed", 1.0)
-        # start_hold_sec（s）：轨迹开头保持“当前位形”的时长，避免启动瞬间拉扯。
+        # start_hold_sec（s）：轨迹开头保持"当前位形"的时长，避免启动瞬间拉扯。
         self.declare_parameter("start_hold_sec", 0.8)
         # soft_start_duration（s）/ soft_start_steps（点数）：direct 起点软启动插值的时长与点数。
         self.declare_parameter("soft_start_duration", 1.0)
@@ -408,7 +408,7 @@ class TeleopStatusPanelNode(Node):
             Trigger,
             f"/{self._arm_namespace}/teleop/teach_record/stop",
         )
-        # trajectory_stop 是控制器级急停通道：取消动作目标失败时的兜底，也是“停止”按钮的必走路径。
+        # trajectory_stop 是控制器级急停通道：取消动作目标失败时的兜底，也是"停止"按钮的必走路径。
         self._trajectory_stop_client = self.create_client(
             Trigger,
             f"/{self._arm_namespace}/trajectory_stop",
@@ -464,7 +464,7 @@ class TeleopStatusPanelNode(Node):
             capability=self._trajectory_capability.require_snapshot,retime=self._retime_coordinated,
             joint_names=self._joint_names,joint_limits=self._joint_limits,
             trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
-        # 当前 web 执行目标句柄（供“停止”按钮取消）与其互斥锁：动作回调与 HTTP 线程并发访问。
+        # 当前 web 执行目标句柄（供"停止"按钮取消）与其互斥锁：动作回调与 HTTP 线程并发访问。
         self._calibration_client = CalibrationClient(
             self.create_client(CalibrationCommand, '/rebotarm_handeye_capture/command'),
             CalibrationCommand.Request,
@@ -564,7 +564,7 @@ class TeleopStatusPanelNode(Node):
     def _make_server(self):
         """创建本机 HTTP 服务（页面、SSE、REST、URDF/网格）。
 
-        SSE 周期由 ``sse_rate_hz`` 换算，频率下限 1.0 Hz——再低界面就会明显“卡顿”，
+        SSE 周期由 ``sse_rate_hz`` 换算，频率下限 1.0 Hz——再低界面就会明显"卡顿"，
         再高则只是徒增浏览器重绘，不会带来新的机械臂信息。
         """
         interval = 1.0 / max(float(self.get_parameter("sse_rate_hz").value), 1.0)
@@ -623,7 +623,7 @@ class TeleopStatusPanelNode(Node):
         """下发前端的初始化配置（``/api/config``）。
 
         前端据此渲染输入框的取值范围、限位滑块与只读/可写状态；因此这里回传的是
-        “面板实际生效的限位与阈值”，而不是原始参数字典——例如 ``joint_limits`` 已经
+        "面板实际生效的限位与阈值"，而不是原始参数字典——例如 ``joint_limits`` 已经
         位置限位来自 URDF，关闭的可选速度限位使用配置的 Web 速度上限。
         """
         return {
@@ -641,7 +641,7 @@ class TeleopStatusPanelNode(Node):
             },
             "gripper_limits": [float(self._gripper_limits[0]), float(self._gripper_limits[1])],
             # web_execute / web_keyboard / web_gripper：前端输入控件的取值范围与默认值；
-            # enabled 为假时页面只允许“预览”，不允许真正下发命令。
+            # enabled 为假时页面只允许"预览"，不允许真正下发命令。
             "web_execute": {
                 "enabled": bool(self.get_parameter("web_execute_enabled").value),
                 "max_delta_rad": float(self.get_parameter("web_execute_max_delta_rad").value),
@@ -759,7 +759,7 @@ class TeleopStatusPanelNode(Node):
         return None
 
     def _legacy_blocked_response(self, intent: str, message: str, payload: dict | None = None) -> dict:
-        """构造“旧执行通道被拦截”的统一响应（面板开关未打开时使用）。
+        """构造"旧执行通道被拦截"的统一响应（面板开关未打开时使用）。
 
         与网关的 dry_run 不同，这里是面板自身的功能开关拒绝：state="blocked" 且带
         ``blocked_legacy_execution=True``，界面据此提示需要重启并打开对应开关。
@@ -842,7 +842,7 @@ class TeleopStatusPanelNode(Node):
         3. 命令名非法时拒绝；
         4. 过网关（``execution_mode``）后交给整臂客户端；对需要先停下轨迹的命令
            （safe_home / disable）先清空本地目标句柄，避免停止后仍持有已失效的句柄。
-        命令受理后按操作者预期“乐观”更新本地使能状态与状态机，真实状态随后由
+        命令受理后按操作者预期"乐观"更新本地使能状态与状态机，真实状态随后由
         ``arm_status`` 反馈覆盖，界面因此不会出现按钮与状态互相矛盾的空窗期。
         """
         command = normalize_arm_command(command) or ""
@@ -996,8 +996,8 @@ class TeleopStatusPanelNode(Node):
 
         校验全部交给操作包的核心校验函数（确认串、按键映射、实时反馈、增量限位与限速），
         本方法只负责补齐会话默认值、取实时反馈并组装 JointTrajectory。
-        下发前先探测动作服务：不可用就立刻返回失败，不排队等待（0.05 s 只是“在不在”的探测）。
-        轨迹只有一个点，时间戳用 duration 表示“从当前时刻起多久走到该点”。
+        下发前先探测动作服务：不可用就立刻返回失败，不排队等待（0.05 s 只是"在不在"的探测）。
+        轨迹只有一个点，时间戳用 duration 表示"从当前时刻起多久走到该点"。
         """
         with self._web_keyboard_lock:
             enabled = self._web_keyboard_enabled
@@ -1121,7 +1121,7 @@ class TeleopStatusPanelNode(Node):
             self._store.update_teleop_status('status', dict(source='web_keyboard', state='failed', message=str(exc)))
 
     def _handle_execute_preview(self, payload: dict) -> dict:
-        """处理面板块上的“执行预览”（相对当前位形的关节目标）。
+        """处理面板块上的"执行预览"（相对当前位形的关节目标）。
 
         面板开关与网关两道检查之后，才交给 Web 点对点适配层做校验、插值与下发；返回的
         response 是前端契约（不含动作句柄），动作结果随后由回调更新到 ``web_execute`` 状态。
@@ -1218,7 +1218,7 @@ class TeleopStatusPanelNode(Node):
         """停止 Web 触发的关节运动：总是先请求控制器级急停，再取消动作目标。
 
         句柄只在锁内取出，取完立刻释放，避免等待取消回调时长时间持锁。返回值里保留
-        ``trajectory_stop_requested``，让前端能区分“已请求控制器停止”与“仅取消了目标”。
+        ``trajectory_stop_requested``，让前端能区分"已请求控制器停止"与"仅取消了目标"。
         """
         gateway_result = self._route_web_command("stop_robot", {"command": "stop_execute"})
         if gateway_result is not None:
@@ -1391,7 +1391,7 @@ class TeleopStatusPanelNode(Node):
 
         结果状态判定优先级：错误码为 SUCCESSFUL 记 ``done``；否则若动作状态码为 5
         （ROS 2 动作终态 ``CANCELED``）记 ``canceled``；其余一律记 ``failed``。
-        句柄在两条路径上都会被清空，避免下一次“停止”去取消一个已经结束的目标。
+        句柄在两条路径上都会被清空，避免下一次"停止"去取消一个已经结束的目标。
         """
         try:
             result_response = future.result()
@@ -1504,8 +1504,8 @@ class TeleopStatusPanelNode(Node):
         active 要求新鲜、已使能且无错误的 GRAVITY_COMP 反馈。
         故障优先显示 fault_hold/fault；其余状态按 active、服务可用性和反馈时效汇总。
         探测用 ``service_is_ready()`` 为主、0 超时的 ``wait_for_service`` 为辅，两者都在
-        try 里保护——探测异常只应体现为“不可用”，不能让定时器抛错。
-        ``ready_for_teach_recording`` 是界面“能否开始录制”的判据：录制流程要求重力补偿
+        try 里保护——探测异常只应体现为"不可用"，不能让定时器抛错。
+        ``ready_for_teach_recording`` 是界面"能否开始录制"的判据：录制流程要求重力补偿
         生效（``recording.require_gravity_comp``）时必须 active；若录制方声明不需要，则恒为真。
         """
         snapshot = self._store.snapshot()
@@ -1549,7 +1549,7 @@ class TeleopStatusPanelNode(Node):
             state = "unavailable"
             message = "gravity compensation services unavailable"
         recording = snapshot.teleop.get("recording")
-        # 录制状态缺失时按“需要重力补偿”处理（默认 True）：宁可多提示一步，也不要放过不安全录制。
+        # 录制状态缺失时按"需要重力补偿"处理（默认 True）：宁可多提示一步，也不要放过不安全录制。
         require_gravity = bool(recording.get("require_gravity_comp")) if isinstance(recording, dict) else True
         self._store.update_teleop_status(
             "gravity_comp",

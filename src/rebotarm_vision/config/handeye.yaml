@@ -1,6 +1,6 @@
 # 历史 Gemini2 手眼标定原始记录，保留数值供追溯；D405 入口已撤下此默认文件。
 # D405 需重新标定，并通过 handeye_config / vision_handeye_config 显式加载新文件。
-# 上游手眼标定参数 / Upstream hand-eye calibration parameters。
+# 上游手眼标定参数 / Upstream hand-eye calibration parameters.
 # 来源：/home/a/project/rebot_refer，提交号
 # 152f8f14ceec5cc8fc61664ff63915187a412800。
 #

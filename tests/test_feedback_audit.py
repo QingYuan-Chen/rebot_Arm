@@ -238,7 +238,7 @@ def test_installed_sdk_seven_motor_startup_on_virtual_serial(through_relay):
         assert all(sample.sequence > 0 and sample.state.status_code == 0
                    for sample in feedback._verified_feedback_by_label.values())
         assert not feedback._feedback_error_by_label
-        # 验证在途请求全部送达虚拟设备，再关闭代理并核对未发送审计。
+        # 验证在途请求全部送达虚拟设备, 再关闭代理并核对未发送审计.
         wait_until(lambda: len(commands) == requested[0], timeout=1.)
     finally:
         for motor in motors:

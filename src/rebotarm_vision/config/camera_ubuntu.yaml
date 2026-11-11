@@ -37,7 +37,7 @@ rebotarm_vision_node:
     camera.max_empty_frames: 30
     # Ubuntu 启动文件会用已安装模型的路径覆盖此值；这里留空，
     # 使直接 ros2 run 且未配置模型时立即报错，避免加载非预期模型。
-    # 留空表示“必须由启动文件注入”。启动文件会用 share 目录下安装好的模型路径覆盖该值；
+    # 留空表示"必须由启动文件注入"。启动文件会用 share 目录下安装好的模型路径覆盖该值；
     # 若直接 ros2 run 而未注入，节点检测到空路径会立即报错（yolo.model_path must not be empty），
     # 这样能快速失败，避免误加载到非预期模型。
     yolo.model_path: ""

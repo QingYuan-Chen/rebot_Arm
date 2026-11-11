@@ -28,7 +28,7 @@ from rebotarm_trajectory.polynomial import (
 
 
 def real_roots(coefficients):
-    """求 [0,1] 内导数根；非有限、求解失败及不可用残差均拒绝判定。"""
+    """求 [0,1] 内导数根; 非有限、求解失败及不可用残差均拒绝判定."""
     c = np.trim_zeros(np.asarray(coefficients, dtype=float), 'b')
     if not np.isfinite(c).all():
         raise ValueError('unknown polynomial roots: nonfinite coefficients')
@@ -63,10 +63,10 @@ class PolynomialTrajectory(NumericTrajectory):
     """运动层拥有连续性报告和碰撞采样安排。"""
 
     def continuity(self):
-        """报告首尾保持及内部节点左右导数差；低阶兼容不伪称 C2。"""
+        """报告首尾保持及内部节点左右导数差; 低阶兼容不伪称 C2."""
         gaps = [0.] * 3
         if self.segments:
-            # 直接比较解析左右极限，不用靠近节点的差分近似。
+            # 直接比较解析左右极限, 不用靠近节点的差分近似.
             for k in range(3):
                 pairs = [(a.at(1., k), b.at(0., k))
                          for a, b in zip(self.segments, self.segments[1:])]
@@ -80,7 +80,7 @@ class PolynomialTrajectory(NumericTrajectory):
                 'c2_with_hold': self.degree == 5 and max(gaps) <= CALC_ATOL}
 
     def collision_times(self, max_joint_step=.02, max_samples=100_000):
-        """用段内最大速度给空间步长上界，同时包含位置极值；不按端点距离漏掉回转。"""
+        """用段内最大速度给空间步长上界, 同时包含位置极值; 不按端点距离漏掉回转."""
         steps = ((float(max_joint_step),) * len(self.joint_names)
                  if isinstance(max_joint_step, (int, float)) else tuple(max_joint_step))
         if len(steps) != len(self.joint_names) or any(not math.isfinite(v) or v <= 0 for v in steps):
@@ -103,7 +103,7 @@ class PolynomialTrajectory(NumericTrajectory):
 
 
 def build_curve(joint_names, points):
-    """从全部端点约束构造 1/3/5 次多项式；不改变时间或中间点。"""
+    """从全部端点约束构造 1/3/5 次多项式; 不改变时间或中间点."""
     names = canonical_names(joint_names)
     points = ordered_points(joint_names, points)
     if points[0].time != 0:
@@ -150,7 +150,7 @@ def build_curve(joint_names, points):
 
 
 def curve_from_payload(payload):
-    """校验交换数据与端点契约；系数必须与当前版本的生成规则精确一致。"""
+    """校验交换数据与端点契约; 系数必须与当前版本的生成规则精确一致."""
     if payload['version'] not in (1, 2):
         raise ValueError('unsupported curve version')
     points = tuple(TrajectoryPoint(p['time_from_start'], p['positions'],

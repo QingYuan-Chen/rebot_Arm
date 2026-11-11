@@ -1,5 +1,5 @@
 # 仿真专用标定：把达妙固件速度环/PI 的输出换算成物理力矩。
-# 这些是“仿真标定值”，不是固件参数：固件整定增益另见 firmware_reference 段。
+# 这些是"仿真标定值"，不是固件参数：固件整定增益另见 firmware_reference 段。
 # firmware_reference 是迁移时（2026-09-06）从驱动配置中冻结下来的参考快照。
 # 硬件侧重新整定不得悄悄改变已经冻结的仿真标定，否则仿真结论与历史数据不可比。
 firmware_reference:
@@ -54,15 +54,15 @@ arm:
   joint5: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
   joint6: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
   # 位置环积分累加值限幅：防止长时间偏差把积分项灌满（抗积分饱和）。
-  # 注意键名写作 rad_s，实际量纲是 位置误差（rad） × 时间（s） 的积分结果。
+  # 注意键名写作 rad_s，实际量纲是 位置误差(rad) × 时间(s) 的积分结果。
   position_integral_limit_rad_s: 5.0
-  # 速度环积分累加值限幅（rad）：速度误差（rad/s） × 时间（s） 的积分结果。
+  # 速度环积分累加值限幅（rad）：速度误差(rad/s) × 时间(s) 的积分结果。
   velocity_integral_limit_rad: 5.0
   # 重力补偿前馈缩放系数：1.0 为全量补偿，0.0 为关闭（用于做纯反馈对照实验）。
   gravity_compensation_scale: 1.0
 
 # MuJoCo 关节级模型动力学参数（由 URDF→MJCF 转换时写入模型）。
-#   damping      关节粘性阻尼（N·m·s/rad 或 N·s/m）：越大动作越“黏”，抑制振荡也拖慢响应
+#   damping      关节粘性阻尼（N·m·s/rad 或 N·s/m）：越大动作越"黏"，抑制振荡也拖慢响应
 #   armature     关节等效转动惯量（kg·m² 或 kg）：模拟电机转子+减速器折算惯量，提升数值稳定性
 #   frictionloss 干摩擦损失（N·m 或 N）：静摩擦量级，影响低速爬行与到位精度
 model_dynamics:

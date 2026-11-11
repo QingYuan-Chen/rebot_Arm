@@ -27,13 +27,13 @@ class MetricRow:
     """一条已固化的采样记录（对应 CSV 的一行）。
 
     字段含义与单位：
-        elapsed：相对轨迹起点的仿真时刻（秒）；
-        joint：关节名（与 ``TrajectoryMetricsRecorder.joint_names`` 中的名字一致）；
-        target_position：该时刻的目标关节角（rad）；
-        actual_position：该时刻的实际关节角（rad）；
-        position_error：目标减实际（rad），保留符号，便于区分超前/滞后；
-        velocity：实际关节角速度（rad/s）；
-        actuator_force：执行器出力（关节力矩，N·m；夹爪滑轨为力 N），统计时取绝对值。
+        elapsed: 相对轨迹起点的仿真时刻（秒）；
+        joint: 关节名（与 ``TrajectoryMetricsRecorder.joint_names`` 中的名字一致）；
+        target_position: 该时刻的目标关节角（rad）；
+        actual_position: 该时刻的实际关节角（rad）；
+        position_error: 目标减实际（rad），保留符号，便于区分超前/滞后；
+        velocity: 实际关节角速度（rad/s）；
+        actuator_force: 执行器出力（关节力矩，N·m；夹爪滑轨为力 N），统计时取绝对值。
     """
 
     elapsed: float
@@ -60,9 +60,9 @@ class TrajectoryMetricsRecorder:
         """初始化记录器。
 
         参数：
-            output_dir：结果输出目录，可尚不存在（``finish()`` 时创建）；
-            joint_names：关节名列表，决定向量下标到关节名的映射与 CSV 中的 ``joint`` 值；
-            sample_stride：抽样间隔，至少为 1；小于 1 会被夹到 1，避免除零或负数取模。
+            output_dir: 结果输出目录，可尚不存在（``finish()`` 时创建）；
+            joint_names: 关节名列表，决定向量下标到关节名的映射与 CSV 中的 ``joint`` 值；
+            sample_stride: 抽样间隔，至少为 1；小于 1 会被夹到 1，避免除零或负数取模。
         """
         self.output_dir = Path(output_dir)
         self.joint_names = [str(name) for name in joint_names]
@@ -83,11 +83,11 @@ class TrajectoryMetricsRecorder:
         """记录一个控制周期的数据。
 
         参数（三个向量都按 ``joint_names`` 顺序排列，长度应与关节数一致）：
-            elapsed：该周期的仿真时刻（秒）；
-            targets：目标关节角（rad）；
-            actual：实际关节角（rad）；
-            velocities：实际关节角速度（rad/s）；短于关节数时缺失项按 0 处理；
-            actuator_forces：执行器出力（N·m 或 N）；短于关节数时缺失项按 0 处理。
+            elapsed: 该周期的仿真时刻（秒）；
+            targets: 目标关节角（rad）；
+            actual: 实际关节角（rad）；
+            velocities: 实际关节角速度（rad/s）；短于关节数时缺失项按 0 处理；
+            actuator_forces: 执行器出力（N·m 或 N）；短于关节数时缺失项按 0 处理。
 
         说明：``sample_count`` 每次调用都自增（用于统计总控制周期数），但只有满足抽样间隔的
         周期才会真正写入 ``rows``；即使不写入，目标值与实际值也会被读取一次，从而对越界下标
@@ -125,10 +125,10 @@ class TrajectoryMetricsRecorder:
         """收尾：创建输出目录、写 CSV 与摘要 JSON，并返回摘要字典。
 
         参数：
-            success：该条轨迹是否达成验收（由上层的安全/收敛判定给出，本模块只如实记录）；
-            stop_reason：停止原因字符串（如正常完成、超时、安全停止等），原样写入摘要；
-            violated_joint：若因某个关节越限/超差而停止，记录该关节名；否则为 None；
-            tolerance：触发该次判定所用的容差（rad），便于事后复核判定尺度。
+            success: 该条轨迹是否达成验收（由上层的安全/收敛判定给出，本模块只如实记录）；
+            stop_reason: 停止原因字符串（如正常完成、超时、安全停止等），原样写入摘要；
+            violated_joint: 若因某个关节越限/超差而停止，记录该关节名；否则为 None；
+            tolerance: 触发该次判定所用的容差（rad），便于事后复核判定尺度。
 
         输出目录已存在时直接复用；同名文件会被覆盖。
         """

@@ -1,24 +1,24 @@
-"""真机轨迹对照工作流的失败恢复编排。
+"""真机轨迹对照工作流的失败恢复编排.
 
 职责与位置
-    真机轨迹对照工作流的失败恢复编排，基于注入客户端调用服务及 FJT。
+    真机轨迹对照工作流的失败恢复编排, 基于注入客户端调用服务及 FJT.
 
 对外接口
-    recover_real_failure 先请求停止，按健康状态保持或受控返回；
-    verify_recovery_baseline 验证基线，返回值记录是否仍需保留使能控制。
+    recover_real_failure 先请求停止, 按健康状态保持或受控返回;
+    verify_recovery_baseline 验证基线, 返回值记录是否仍需保留使能控制.
 
 安全与并发约束
-    健康失败不能在基线外卸力；仅状态/反馈关键故障进入保护失能。 返回基线需要显式允许。
-    本工具沿用接收年龄和单帧速度稳定判据，不等同生产 150 ms 源连续性或量化窗口判据。
-    返回 True 表示应保留控制器以处理仍使能或失能不明状态，不表示恢复成功。
+    健康失败不能在基线外卸力; 仅状态/反馈关键故障进入保护失能. 返回基线需要显式允许.
+    本工具沿用接收年龄和单帧速度稳定判据, 不等同生产 150 ms 源连续性或量化窗口判据.
+    返回 True 表示应保留控制器以处理仍使能或失能不明状态, 不表示恢复成功.
 
-文件结构（按定义顺序）
-    healthy_enabled_hold：检查已有状态的使能，周期，六轴码与错误位；本函数不检查状态消息年龄。
-    _recovery_health：把已有控制器状态归类为健康保持，已失能或关键故障，不触发设备操作。
-    _recovery_feedback：按本地接收年龄和数组完整性取得有限六轴位置/速度；不改写源时间。
-    verify_recovery_baseline：在恢复预算内收集反馈，验证位置基线及连续速度稳定时间。
-    _attempt_protective_disable：请求保护失能并记录回执；失败返回 True，要求保留控制器。
-    recover_real_failure：处理已授权真机任务的失败，健康时先保持，不在基线外自动卸力。
+文件结构(按定义顺序)
+    healthy_enabled_hold: 检查已有状态的使能, 周期, 六轴码与错误位; 本函数不检查状态消息年龄.
+    _recovery_health: 把已有控制器状态归类为健康保持, 已失能或关键故障, 不触发设备操作.
+    _recovery_feedback: 按本地接收年龄和数组完整性取得有限六轴位置/速度; 不改写源时间.
+    verify_recovery_baseline: 在恢复预算内收集反馈, 验证位置基线及连续速度稳定时间.
+    _attempt_protective_disable: 请求保护失能并记录回执; 失败返回 True, 要求保留控制器.
+    recover_real_failure: 处理已授权真机任务的失败, 健康时先保持, 不在基线外自动卸力.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ RECOVERY_FEEDBACK_MAX_AGE_SEC = 0.5
 
 
 def healthy_enabled_hold(status: object | None) -> bool:
-    """检查已有状态的使能，周期，六轴码与错误位；本函数不检查状态消息年龄。"""
+    """检查已有状态的使能, 周期, 六轴码与错误位; 本函数不检查状态消息年龄."""
     return bool(
         status is not None
         and bool(getattr(status, "enabled", False))
@@ -50,7 +50,7 @@ def healthy_enabled_hold(status: object | None) -> bool:
 
 
 def _recovery_health(node: Any) -> dict[str, Any]:
-    """把已有控制器状态归类为健康保持，已失能或关键故障，不触发设备操作。"""
+    """把已有控制器状态归类为健康保持, 已失能或关键故障, 不触发设备操作."""
     status = getattr(node, "latest_status", None)
     if status is None:
         return {"healthy": False, "critical": True, "reason": "arm_status_unavailable"}
@@ -72,7 +72,7 @@ def _recovery_health(node: Any) -> dict[str, Any]:
 
 
 def _recovery_feedback(node: Any, *, now: float) -> dict[str, Any]:
-    """按本地接收年龄和数组完整性取得有限六轴位置/速度；不改写源时间。"""
+    """按本地接收年龄和数组完整性取得有限六轴位置/速度; 不改写源时间."""
     last_feedback = getattr(node, "last_joint_monotonic", None)
     if last_feedback is None:
         return {"valid": False, "critical": True, "reason": "joint_feedback_unavailable"}
@@ -128,10 +128,10 @@ def verify_recovery_baseline(
     stable_sec: float = RECOVERY_STABLE_SEC,
     timeout_sec: float = RECOVERY_TIMEOUT_SEC,
 ) -> dict[str, Any]:
-    """在恢复预算内收集反馈，验证位置基线及连续速度稳定时间。
+    """在恢复预算内收集反馈, 验证位置基线及连续速度稳定时间.
 
-    本工具沿用本地接收年龄与速度绝对值判据，不能等同于生产的去重位置窗口证据。
-    返回 verified / critical / reason 及最终观测，失败不会自行失能。
+    本工具沿用本地接收年龄与速度绝对值判据, 不能等同于生产的去重位置窗口证据.
+    返回 verified / critical / reason 及最终观测, 失败不会自行失能.
     """
     baseline_values = tuple(float(value) for value in baseline)
     if len(baseline_values) != 6 or not all(math.isfinite(value) for value in baseline_values):
@@ -209,7 +209,7 @@ def _attempt_protective_disable(
     services: list[Any],
     outcome: str,
 ) -> bool:
-    """关键状态下请求保护失能并记录回执；失败返回 True 表示必须保留未知使能的控制器。"""
+    """关键状态下请求保护失能并记录回执; 失败返回 True 表示必须保留未知使能的控制器."""
     recovery["outcome"] = outcome
     try:
         services.append(node.call_trigger(node.disable_client, "disable"))
@@ -234,12 +234,12 @@ def recover_real_failure(
     verification_stable_sec: float = RECOVERY_STABLE_SEC,
     recovery_timeout_sec: float = RECOVERY_TIMEOUT_SEC,
 ) -> bool:
-    """处理已授权真机任务的失败，健康时先保持，不在基线外自动卸力。
+    """处理已授权真机任务的失败, 健康时先保持, 不在基线外自动卸力.
 
-    先请求停止并重查状态/反馈；关键故障尝试保护失能，健康但停止未确认时交现场恢复。
-    仅 allow_controlled_return 为真才构造限速返程；返程成功后还需基线稳定验证才请求失能。
-    report 原地追加证据。 返回 True 表示需保留使能或未知状态控制器，False 表示本流程无需保留；
-    该布尔值不是恢复验收成功标志，详细结论必须读取 failure_recovery。
+    先请求停止并重查状态/反馈; 关键故障尝试保护失能, 健康但停止未确认时交现场恢复.
+    仅 allow_controlled_return 为真才构造限速返程; 返程成功后还需基线稳定验证才请求失能.
+    report 原地追加证据. 返回 True 表示需保留使能或未知状态控制器, False 表示本流程无需保留;
+    该布尔值不是恢复验收成功标志, 详细结论必须读取 failure_recovery.
     """
     recovery: dict[str, Any] = {
         "allow_controlled_return": bool(allow_controlled_return),
@@ -289,13 +289,13 @@ def recover_real_failure(
             services=services,
             outcome=f"{feedback['reason']}_protective_disable",
         )
-    # 停止回执失败但设备仍健康时保留保持和人工恢复，不把普通任务失败转成卸力。
+    # 停止回执失败但设备仍健康时保留保持和人工恢复, 不把普通任务失败转成卸力.
     if stop_failed:
         recovery["outcome"] = (
             "stop_failed_healthy_enabled_hold_requires_operator_recovery"
         )
         return True
-    # 返程会产生新的实际运动，必须由调用流程显式允许，不能仅凭失败就自动返回。
+    # 返程会产生新的实际运动, 必须由调用流程显式允许, 不能仅凭失败就自动返回.
     if not allow_controlled_return:
         recovery["outcome"] = "healthy_enabled_hold_requires_operator_recovery"
         return True
@@ -393,7 +393,7 @@ def recover_real_failure(
             )
         recovery["outcome"] = "return_not_stable_healthy_enabled_hold"
         return True
-    # 只有返程成功且基线稳定证据通过才走正常失能；关键故障使用单独的保护分支。
+    # 只有返程成功且基线稳定证据通过才走正常失能; 关键故障使用单独的保护分支.
     services.append(node.call_trigger(node.disable_client, "disable"))
     node.hold_and_collect(0.5)
     recovery["final_status"] = node._status_payload()

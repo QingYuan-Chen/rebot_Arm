@@ -1,21 +1,21 @@
-"""六轴目标准入，轨迹任务，保持与透传交接。
+"""六轴目标准入, 轨迹任务, 保持与透传交接.
 
 职责与位置
-    六轴业务组件拥有轨迹，透传租约，保持证据和停止事务；运行时拥有数值目标。
+    六轴业务组件拥有轨迹, 透传租约, 保持证据和停止事务; 运行时拥有数值目标.
 
 对外接口
-    submit_home 返回停靠任务；stop_active_motion 等待确认；
-    set_joint_target，send_joint_motor_cmd 和 safe_home 提供按职责组织的命令。
+    submit_home 返回停靠任务; stop_active_motion 等待确认;
+    set_joint_target, send_joint_motor_cmd 和 safe_home 提供按职责组织的命令.
     continuous 通过 reserve_arm_preparation 预约、decode_prepared_arm_trajectory 解码、
     admit_prepared_arm_trajectory 接纳，cancel_arm_preparation 撤销预约。
     设备线程预约和复核，调用线程等待准备与解码；周期内不等待碰撞服务。
 
 安全与并发约束
-    命令由 device_request 入队；周期发送和停止确认共享目标代次。
-    健康失败保持使能；反馈，通信或设备错误交保护组件。 safe_home 不是现场安全基线证明。
+    命令由 device_request 入队; 周期发送和停止确认共享目标代次.
+    健康失败保持使能; 反馈, 通信或设备错误交保护组件. safe_home 不是现场安全基线证明.
 
-文件结构（按定义顺序）
-    ArmController：六轴任务与停止保持的业务所有者；数值目标由运行时执行器持有，端口只交接能力。
+文件结构(按定义顺序)
+    ArmController: 六轴任务与停止保持的业务所有者; 数值目标由运行时执行器持有, 端口只交接能力.
 """
 
 from __future__ import annotations
@@ -41,10 +41,10 @@ from ..controller_parameters import (
 
 
 class ArmController:
-    """六轴任务与停止保持的业务所有者；数值目标由运行时执行器持有，端口只交接能力。"""
+    """六轴任务与停止保持的业务所有者; 数值目标由运行时执行器持有, 端口只交接能力."""
 
     def __init__(self, runtime, lifecycle, settings):
-        """创建六轴任务，透传租约和停止/保持证据，运行时目标仍由数值执行器拥有。"""
+        """创建六轴任务, 透传租约和停止/保持证据, 运行时目标仍由数值执行器拥有."""
         self._backend = runtime
         self._lifecycle = lifecycle
         self.settings = settings
@@ -74,7 +74,7 @@ class ArmController:
         return self._arm_trajectory
 
     def reset_session(self):
-        """失能/重连不能复用上一会话的静止证据或停止续体。"""
+        """失能/重连不能复用上一会话的静止证据或停止续体."""
         self._hold_evidence.reset()
         self._hold_generation = None
         self._hold_confirmed_at = None
@@ -86,7 +86,7 @@ class ArmController:
 
     def bind(self, *, cycle: CyclePort, feedback: ArmFeedbackPort, gravity: GravityArmPort,
              protection: ProtectionPort, gripper: ArmGripperPort):
-        """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
+        """装配阶段一次注入明确组件接口; 运行后不替换依赖."""
         if self._bound:
             raise RuntimeError("component already bound")
         self.cycle = cycle
@@ -97,11 +97,11 @@ class ArmController:
         self._bound = True
 
     def clear_passthrough(self):
-        """清除六轴透传租约标记；本方法不发送保持或切换模式。"""
+        """清除六轴透传租约标记; 本方法不发送保持或切换模式."""
         self._arm_passthrough_until = None
 
     def expire_passthrough(self, now):
-        """租约到期切回当前反馈保持，恢复统一周期输出。"""
+        """租约到期切回当前反馈保持, 恢复统一周期输出."""
         if self._arm_passthrough_until is not None and now >= self._arm_passthrough_until:
             self.clear_passthrough()
             self.ensure_pos_vel_control()
@@ -109,18 +109,18 @@ class ArmController:
             self._lifecycle.set_execution_state('IDLE')
 
     def abort_task(self, message):
-        """生命周期或保护终止任务，不再等待旧停止确认。"""
+        """生命周期或保护终止任务, 不再等待旧停止确认."""
         self._stop.abort(message)
         for owner in (self._arm_trajectory, self._coordinated_trajectory):
             if owner.task is not None:
                 owner.finish(owner.task, 'aborted', message)
 
     def passthrough_active(self):
-        """查询是否存在透传租约，由周期负责到期交接。"""
+        """查询是否存在透传租约, 由周期负责到期交接."""
         return self._arm_passthrough_until is not None
 
     def check_task_generation(self):
-        """空闲周期结束过期任务；停止中的任务交给停止状态机收尾。"""
+        """空闲周期结束过期任务; 停止中的任务交给停止状态机收尾."""
         owner = self._task_owner()
         task = owner.task
         if (task is not None and task.result.state != 'stopping'
@@ -154,7 +154,7 @@ class ArmController:
                 self._lifecycle.errors.append(f'PREPARED_STOP_UNCONFIRMED: {exc}')
 
     def update_task(self, sample):
-        """发送后以新鲜快照推进任务，超差保持目标仍由六轴所有者设置。"""
+        """发送后以新鲜快照推进任务, 超差保持目标仍由六轴所有者设置."""
         coordinated = self._coordinated_trajectory
         owner = self._task_owner()
         hold = None if owner is coordinated else owner.update(sample.positions, sample.observed_at)
@@ -197,10 +197,10 @@ class ArmController:
 
     @device_request
     def hold_current_position(self) -> np.ndarray:
-        """复制当前已验证六轴角度并设置新的数值保持目标，返回该角度副本。
+        """复制当前已验证六轴角度并设置新的数值保持目标, 返回该角度副本.
 
-        不在这里发送或确认停稳；调用方仍须管理使能，模式和后续静止证据。
-        需要取消与停止确认的流程应调用 stop_active_motion，避免重设已有保持目标。
+        不在这里发送或确认停稳; 调用方仍须管理使能, 模式和后续静止证据.
+        需要取消与停止确认的流程应调用 stop_active_motion, 避免重设已有保持目标.
         """
         q, _, _ = self.feedback.get_joint_state()
         current = np.array(q, dtype=np.float64, copy=True)
@@ -209,17 +209,17 @@ class ArmController:
 
     @device_request
     def stop_active_motion(self, task=None) -> None:
-        """撤销当前任务并确认保持；旧任务的取消不能停止接替任务。
+        """撤销当前任务并确认保持; 旧任务的取消不能停止接替任务.
 
-        只有保持命令成功发送且后续新帧持续静止 0.2 s 才返回成功。 超时报告
-        未确认，保留使能和保持目标；这里绝不把普通取消变成自动失能。
+        只有保持命令成功发送且后续新帧持续静止 0.2 s 才返回成功. 超时报告
+        未确认, 保留使能和保持目标; 这里绝不把普通取消变成自动失能.
         """
         owner = self._task_owner()
         active = None if owner is None else owner.task
         if task is not None and (active is not task or task.event.is_set()):
             return
         if self._stop_wait is not None and self._stop.result.state in ('stopping', 'confirmed'):
-            # 加入同一确认，不递增资源代次，不重设目标，也不共享可变的续体。
+            # 加入同一确认, 不递增资源代次, 不重设目标, 也不共享可变的续体.
             poll, _ = self._stop_wait
             return CycleResult(poll)
         # 已终止事务可由显式停止重新建立；旧续体仍绑定旧 stop，不能清理本次等待。
@@ -228,7 +228,7 @@ class ArmController:
             previous = self._backend.target()
             evidence = self._hold_evidence
             known_hold = self._hold_generation == self._backend.target_generation
-            # 孤立速度峰只使新的停止确认延后；只要上一份已确认保持仍在
+            # 孤立速度峰只使新的停止确认延后; 只要上一份已确认保持仍在
             # 150 ms 内且保持代次未变，不因残差或该峰重新锚定命令目标。
             recently_confirmed = (self._hold_confirmed_at is not None
                                   and time.monotonic()-self._hold_confirmed_at <= .15)
@@ -257,10 +257,10 @@ class ArmController:
                 if preserve:
                     current = previous
                 else:
-                    # 活动轨迹，重力和透传交接必须重新取当前值，不能保留远处目标。
+                    # 活动轨迹, 重力和透传交接必须重新取当前值, 不能保留远处目标.
                     self.ensure_pos_vel_control()
                     current = self.hold_current_position()
-                # 续体捕获本次状态机；旧会话清理不得终止后继停止事务。
+                # 续体捕获本次状态机; 旧会话清理不得终止后继停止事务.
                 stop = ArmStop()
                 self._stop = stop
                 stop.begin(current, self._backend.target_generation)
@@ -269,7 +269,7 @@ class ArmController:
                     generation=self._backend.target_generation)})
 
                 def cancel(reason):
-                    """代次失效或运行时关闭时终结本次停止，旧续体不能改变后继目标。"""
+                    """代次失效或运行时关闭时终结本次停止, 旧续体不能改变后继目标."""
                     if completed:
                         return
                     stop.abort(reason)
@@ -284,12 +284,12 @@ class ArmController:
                 completed = False
 
                 def poll():
-                    """只读已验证缓存以推进本次停止；未确认时返回未完成，不阻塞设备线程。"""
+                    """只读已验证缓存以推进本次停止; 未确认时返回未完成, 不阻塞设备线程."""
                     nonlocal completed
                     # 重复停止的等待者共享本续体；完成后的迟到轮询只返回回执，不再改资源。
                     if completed:
                         return True, None
-                    # 所有读取均来自已验证缓存；这里不发送，不睡眠，不持锁等新帧。
+                    # 所有读取均来自已验证缓存; 这里不发送, 不睡眠, 不持锁等新帧.
                     if (self._stop is not stop or not self._lifecycle.enabled
                             or self._backend.target_generation != stop.result.generation):
                         stop.abort('stop superseded by lifecycle or target generation')
@@ -337,7 +337,7 @@ class ArmController:
                 owner.finish(active, 'canceled', 'stop/hold confirmed')
 
     def require_available(self):
-        """停止确认完成前禁止接替输出；显式失能仍由独立高优先级入口处理。"""
+        """停止确认完成前禁止接替输出; 显式失能仍由独立高优先级入口处理."""
         if self._stop_wait is not None:
             raise RuntimeError('arm stop/hold confirmation pending')
 
@@ -554,7 +554,7 @@ class ArmController:
         return task
 
     def arm_execution_status(self, task):
-        """返回指定任务结果快照，状态不能与接替任务混用。"""
+        """返回指定任务结果快照, 状态不能与接替任务混用."""
         owner = self._coordinated_trajectory if task is self._coordinated_trajectory.task else self._arm_trajectory
         return owner.snapshot(task)
 
@@ -586,7 +586,7 @@ class ArmController:
 
     @device_request
     def set_joint_target(self, positions) -> None:
-        """显式使能且无停止确认占用时设置六轴 rad 目标，清除透传租约。"""
+        """显式使能且无停止确认占用时设置六轴 rad 目标, 清除透传租约."""
         self._lifecycle.require_enabled()
         self.require_available()
         if self._backend.arm_resource_reserved:
@@ -595,32 +595,32 @@ class ArmController:
         self._backend.set_target(positions)
 
     def joint_target(self):
-        """返回运行时保持或轨迹目标副本，不作为实测位置。"""
+        """返回运行时保持或轨迹目标副本, 不作为实测位置."""
         return self._backend.target()
 
     @device_request
     def cancel_arm_trajectory(self) -> None:
-        """兼容取消入口，复用带反馈确认的停止保持事务，不执行失能。"""
+        """兼容取消入口, 复用带反馈确认的停止保持事务, 不执行失能."""
         return self.stop_active_motion()
 
     @property
     def trajectory_moving(self):
-        """查询执行器是否仍有未发送轨迹点，不表示设备是否真实静止。"""
+        """查询执行器是否仍有未发送轨迹点, 不表示设备是否真实静止."""
         return self._backend.trajectory_moving
 
     @property
     def trajectory_progress(self):
-        """查询已发送轨迹点比例，成功到位需独立任务反馈确认。"""
+        """查询已发送轨迹点比例, 成功到位需独立任务反馈确认."""
         return self._backend.trajectory_progress
 
     def safe_home_target(self) -> np.ndarray:
-        """返回配置基线的停靠姿态副本，不能代替本轮现场安全确认。"""
+        """返回配置基线的停靠姿态副本, 不能代替本轮现场安全确认."""
         return np.array(_SAFE_HOME_JOINT_POSITIONS, dtype=np.float64)
 
     def _validated_safe_home_target(
         self, target: Optional[Sequence[float]] = None
     ) -> np.ndarray:
-        """校验 safe_home 目标：长度，有限性，以及逐关节是否在软限位内。"""
+        """校验 safe_home 目标: 长度, 有限性, 以及逐关节是否在软限位内."""
         if target is None:
             return self.safe_home_target()
         values = np.array([float(value) for value in target], dtype=np.float64)
@@ -641,11 +641,11 @@ class ArmController:
         return values
 
     def safe_home(self, target=None, vlim=None, timeout_sec=None) -> np.ndarray:
-        """提交带速度覆盖的专属停靠任务，阻塞调用方直至取得任务终态。
+        """提交带速度覆盖的专属停靠任务, 阻塞调用方直至取得任务终态.
 
-        target 为六轴 rad 目标，vlim 为不高于配置停靠上限的 rad/s，timeout_sec 为任务预算。
-        只校验数值和关节限位，不生成避障路径或执行碰撞检查；调用方须先确认现场路径。
-        成功返回实测角，其他终态抛错；健康任务失败由周期接管保持，不自动失能。
+        target 为六轴 rad 目标, vlim 为不高于配置停靠上限的 rad/s, timeout_sec 为任务预算.
+        只校验数值和关节限位, 不生成避障路径或执行碰撞检查; 调用方须先确认现场路径.
+        成功返回实测角, 其他终态抛错; 健康任务失败由周期接管保持, 不自动失能.
         """
         goal = self._validated_safe_home_target(target)
         speed = self._backend.home_velocity if vlim is None else float(vlim)
@@ -664,7 +664,7 @@ class ArmController:
 
     @device_request
     def ensure_pos_vel_control(self) -> None:
-        """确保处于位置-速度模式且统一控制循环在运行（否则保持当前位置）。"""
+        """确保处于位置-速度模式且统一控制循环在运行(否则保持当前位置)."""
         with self._lifecycle.lock:
             self._lifecycle.require_enabled()
             self.require_available()
@@ -676,17 +676,17 @@ class ArmController:
 
     @staticmethod
     def _validate_passthrough_values(pos, vel, kp, kd, tau, vlim, bounds, max_velocity, max_effort, mode):
-        """复用无状态准入规则检查补齐后的单电机数值；拒绝不修改原任务。"""
+        """复用无状态准入规则检查补齐后的单电机数值; 拒绝不修改原任务."""
         passthrough_decision(pos, vel, kp, kd, tau, vlim, bounds,
                              max_velocity, max_effort, mode).require_allowed()
 
     @device_request
     def send_joint_motor_cmd(self, joint_name: str, cmd, arbitration="reject") -> None:
-        """低层单关节直通命令(JointMotorCmd)。
+        """低层单关节直通命令(JointMotorCmd).
 
-        未显式给出的字段回落到当前反馈值或关节默认增益，避免用零值覆盖。 命令
-        送入后状态机切到 LOWLEVEL_STREAMING，提示上层这不是轨迹跟踪。
-        mode: 0 = MIT，1 = 位置-速度，2 = 速度（需电机支持 send_vel）。
+        未显式给出的字段回落到当前反馈值或关节默认增益, 避免用零值覆盖. 命令
+        送入后状态机切到 LOWLEVEL_STREAMING, 提示上层这不是轨迹跟踪.
+        mode: 0 = MIT, 1 = 位置-速度, 2 = 速度(需电机支持 send_vel).
         """
         with self._lifecycle.lock:
             self._lifecycle.require_enabled()
@@ -709,7 +709,7 @@ class ArmController:
             state = self.feedback.verified_sample(joint_name).state
 
             def values_from(sample):
-                """按 use_* 标记组合指令，当前反馈与配置默认值；模式交接后须重新调用。"""
+                """按 use_* 标记组合指令, 当前反馈与配置默认值; 模式交接后须重新调用."""
                 return (float(cmd.pos) if cmd.use_pos else float(sample.pos),
                         float(cmd.vel) if cmd.use_vel else float(sample.vel),
                         float(cmd.kp) if cmd.use_kp else float(jc.kp),
@@ -723,14 +723,14 @@ class ArmController:
                 self.gravity.effort_limit(joint_name),
                 int(cmd.mode), device_mode='pos_vel' if busy else self._backend.mode).require_allowed()
             if busy:
-                # 无效命令不得取消原任务；完成准入后才交接资源并确认保持。
+                # 无效命令不得取消原任务; 完成准入后才交接资源并确认保持.
                 stopping = self.stop_active_motion(task)
                 if isinstance(stopping, CycleResult):
-                    # 完成静止确认后重新走完整准入；失能/旧代次由运行时取消续体。
+                    # 完成静止确认后重新走完整准入; 失能/旧代次由运行时取消续体.
                     stopping.continuation = lambda: self.send_joint_motor_cmd(
                         joint_name, cmd, arbitration="reject")
                     return stopping
-                # 停止可能耗时且切回 POS_VEL；默认反馈值须取停止后的新快照。
+                # 停止可能耗时且切回 POS_VEL; 默认反馈值须取停止后的新快照.
                 values = values_from(self.feedback.verified_sample(joint_name).state)
                 passthrough_decision(*values,
                     _JOINT_POSITION_LIMITS_RAD[joint_name], jc.vlim,
@@ -749,20 +749,20 @@ class ArmController:
             except CommandTransportError as exc:
                 self.protection.protect(str(exc),category="COMMAND")
                 raise
-            # 一次透传租约最长 0.25 s；后续周期不覆盖它，断流后在当前位置保持。
+            # 一次透传租约最长 0.25 s; 后续周期不覆盖它, 断流后在当前位置保持.
             self._arm_passthrough_until = time.monotonic() + .25
             self._lifecycle.set_execution_state("LOWLEVEL_STREAMING")
 
     def current_pose(self):
-        """用规范模型的纯数值 FK 换算成 ROS Pose(供状态发布使用)。"""
+        """用规范模型的纯数值 FK 换算成 ROS Pose(供状态发布使用)."""
         q, _, _ = self.feedback.get_joint_state()
         position, rotation = self._backend.current_pose_values(q)
         return fk_to_pose(position, rotation)
 
     def start_position_loop(self, target: np.ndarray | None = None) -> None:
-        """启动统一硬件控制循环（位置-速度跟踪），并把控制器标记为运行中。
+        """启动统一硬件控制循环(位置-速度跟踪), 并把控制器标记为运行中.
 
-        ``target`` 为空时以当前角度为目标（保持不动）。
+        ``target`` 为空时以当前角度为目标(保持不动).
         """
         if self._backend.control_loop_active:
             return
@@ -778,15 +778,15 @@ class ArmController:
             raise
 
     def _endpos_hardware_tick(self, arm, dt: float) -> None:
-        """向周期协调器提供六轴位置发送回调，成功发送后才标记本代保持已送出。"""
+        """向周期协调器提供六轴位置发送回调, 成功发送后才标记本代保持已送出."""
         def send(runtime, period):
-            """先执行六轴发送，只有返回成功才记录保持发送时间。"""
+            """先执行六轴发送, 只有返回成功才记录保持发送时间."""
             self._backend.position_tick(runtime, period)
             self._stop.sent(self._backend.target_generation)
         self.cycle.control_tick(arm, dt, send)
 
     def stop_control_loop(self) -> None:
-        """撤下周期并作废数值运行状态，终结旧轨迹任务；不直接失能。"""
+        """撤下周期并作废数值运行状态, 终结旧轨迹任务; 不直接失能."""
         self._backend.stop_control_loop()
         self._backend.set_execution_running(False)
         self.reset_session()

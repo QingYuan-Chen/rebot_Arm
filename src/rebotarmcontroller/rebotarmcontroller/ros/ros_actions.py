@@ -1,18 +1,18 @@
-"""控制器 ROS Action 协议适配。
+"""控制器 ROS Action 协议适配.
 
 职责与位置
-    FJT 和夹爪位置 Action 的协议层；不推进设备周期或计算轨迹。
+    FJT 和夹爪位置 Action 的协议层; 不推进设备周期或计算轨迹.
 
 对外接口
-    ArmActions 注册回调，提交数值请求，发布缓存反馈并映射任务终态。
+    ArmActions 注册回调, 提交数值请求, 发布缓存反馈并映射任务终态.
     公共 FJT 异步调用内部准备服务，经原所有者复核后执行 continuous 曲线。
 
 安全与并发约束
-    准入检查不能替代设备线程中的再次检查；取消携带任务身份或代次。
+    准入检查不能替代设备线程中的再次检查; 取消携带任务身份或代次.
     六轴取消回调先撤销许可并回接纳，任务终态仍等待保持确认；不能把取消回执等同停稳。
 
-文件结构（按定义顺序）
-    ArmActions：将 ROS Action 协议映射到原组件的数值任务与查询端口，不拥有执行状态。
+文件结构(按定义顺序)
+    ArmActions: 将 ROS Action 协议映射到原组件的数值任务与查询端口, 不拥有执行状态.
 """
 
 from __future__ import annotations
@@ -28,11 +28,11 @@ from ..contracts.ros_ports import RuntimeStatePort, LifecycleStatePort, JointFee
 
 
 class ArmActions:
-    """将 ROS Action 协议映射到原组件的数值任务与查询端口，不拥有执行状态。"""
+    """将 ROS Action 协议映射到原组件的数值任务与查询端口, 不拥有执行状态."""
 
     def __init__(self, node, namespace, *, runtime: RuntimeStatePort, lifecycle: LifecycleStatePort,
                  feedback: JointFeedbackPort, arm: ArmCommandPort, gripper: GripperCommandPort):
-        """注入各职责组件并注册可重入 FJT 与夹爪 Action，设备串行化由运行时负责。"""
+        """注入各职责组件并注册可重入 FJT 与夹爪 Action, 设备串行化由运行时负责."""
         self._node = node
         self._runtime, self._lifecycle = runtime, lifecycle
         self._feedback, self._arm, self._gripper = feedback, arm, gripper
@@ -106,7 +106,7 @@ class ArmActions:
             cancel_callback=self.cancel_follow_joint_trajectory, callback_group=node.reentrant_group)
 
     def goal_callback(self, _request):
-        """只按当前 ready_for_motion 做第一层准入；实际提交仍要在设备线程重新校验。"""
+        """只按当前 ready_for_motion 做第一层准入; 实际提交仍要在设备线程重新校验."""
         return (GoalResponse.ACCEPT if self._lifecycle.ready_for_motion
                 and not self._runtime.arm_resource_reserved
                 else GoalResponse.REJECT)
@@ -194,15 +194,15 @@ class ArmActions:
         return CancelResponse.ACCEPT
 
     def cancel_gripper_command(self, _goal):
-        """接纳取消意图；执行回调随后携带本目标代次取消。"""
+        """接纳取消意图; 执行回调随后携带本目标代次取消."""
         return CancelResponse.ACCEPT
 
     def execute_follow_joint_trajectory(self, goal_handle, *, web=False):
-        """复制 ROS 轨迹为数值请求，等待专属任务并发布缓存反馈。
+        """复制 ROS 轨迹为数值请求, 等待专属任务并发布缓存反馈.
 
-        事件完成后按任务终态映射 succeeded / canceled / aborted；末点已发送不等于到位。
-        取消与异常仅撤销本句柄，不能覆盖接替目标；停止未确认时保留失败原因。
-        本回调允许等待，因此需要可重入组与仍在运行的多线程执行器。
+        事件完成后按任务终态映射 succeeded / canceled / aborted; 末点已发送不等于到位.
+        取消与异常仅撤销本句柄, 不能覆盖接替目标; 停止未确认时保留失败原因.
+        本回调允许等待, 因此需要可重入组与仍在运行的多线程执行器.
         """
         result = ExecuteTeleopMotion.Result() if web else FollowJointTrajectory.Result()
         task = None
@@ -269,7 +269,7 @@ class ArmActions:
             else:
                 goal_handle.abort()
         except Exception as exc:
-            # 观察/传输失败同样只撤销自己的目标；失败不能无条件把全局状态复位。
+            # 观察/传输失败同样只撤销自己的目标; 失败不能无条件把全局状态复位.
             if task is not None and not task.event.is_set():
                 try:
                     self._arm.stop_active_motion(task)
@@ -303,10 +303,10 @@ class ArmActions:
         return result
 
     def execute_gripper_command(self, goal_handle, *, moveit=False):
-        """把毫米制开口与力矩交给夹爪组件，以返回代次轮询本目标终态。
+        """把毫米制开口与力矩交给夹爪组件, 以返回代次轮询本目标终态.
 
-        取消携带 expected_generation，旧回调不能释放接替目标。 位置成功由执行器在中性发送后给出。
-        Action 的 stalled 固定为 False；普通位置到位不能作为堵转抓取证据。
+        取消携带 expected_generation, 旧回调不能释放接替目标. 位置成功由执行器在中性发送后给出.
+        Action 的 stalled 固定为 False; 普通位置到位不能作为堵转抓取证据.
         """
         result = GripperCommand.Result()
         generation = None
@@ -326,7 +326,7 @@ class ArmActions:
                 result.position = self._gripper.gripper_position_m() / (2. if moveit else 1.)
                 result.effort = self._gripper.get_gripper_state()[2]
                 result.reached_goal = state == 'succeeded'
-                # 堵转不代表到位；位置命令的到位/超时只由周期执行器判定。
+                # 堵转不代表到位; 位置命令的到位/超时只由周期执行器判定.
                 result.stalled = False
                 feedback = GripperCommand.Feedback()
                 feedback.position, feedback.effort = result.position, result.effort
@@ -347,7 +347,7 @@ class ArmActions:
                 try:
                     self._gripper.cancel_gripper_position_command(str(exc), expected_generation=generation)
                 except Exception as cleanup_error:
-                    # 取消失败不能覆盖原 Action 失败；两者一并上报运行边界。
+                    # 取消失败不能覆盖原 Action 失败; 两者一并上报运行边界。
                     message += f'; gripper cleanup failed: {cleanup_error}'
             self._node.get_logger().error(message)
             goal_handle.abort()

@@ -33,7 +33,7 @@ class ReplayActionLifecycleMixin:
         with self._teach_replay_lock:
             self._teach_replay_goal_handle = goal_handle
             self._active_teach_replay_trajectory = trajectory
-            # 用单调时钟记录起点，供跟踪监控计算“已回放多久”，不受系统时间调整影响。
+            # 用单调时钟记录起点，供跟踪监控计算"已回放多久"，不受系统时间调整影响。
             self._active_teach_replay_started_at = time.monotonic()
             self._replay_runtime_monitor.reset()
         self._publish_status(
@@ -59,7 +59,7 @@ class ReplayActionLifecycleMixin:
         result_future.add_done_callback(lambda fut: self._on_teach_replay_result(fut, info_payload, points))
 
     def _on_teach_replay_cancel_response(self, future: Future[Any]) -> None:
-        """取消响应回调：区分“取消已受理”与“取消前目标已结束”两种情况。"""
+        """取消响应回调：区分"取消已受理"与"取消前目标已结束"两种情况。"""
         try:
             response = future.result()
             goals_canceling = len(response.goals_canceling)
@@ -117,7 +117,7 @@ class ReplayActionLifecycleMixin:
         # 保留进行中发布的监控明细（原因/最差关节/实测误差），便于事后定位安全停止原因。
         runtime_monitor = previous_replay.get("runtime_monitor") if isinstance(previous_replay, dict) else None
         if status == 5 and monitor_stop_requested:
-            # 安全停止时用监控器留下的说明覆盖通用结果文本，明确“是监控刹停导致的取消”。
+            # 安全停止时用监控器留下的说明覆盖通用结果文本，明确"是监控刹停导致的取消"。
             previous_message = str(previous_replay.get("message", "")) if isinstance(previous_replay, dict) else ""
             message = (
                 f"action canceled after runtime monitor stop: {previous_message}"
