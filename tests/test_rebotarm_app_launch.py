@@ -38,10 +38,6 @@ def test_rebotarm_app_launch_exposes_simple_modes_and_profiles() -> None:
     assert "full MoveIt + web teleop workbench" in launch_text
     assert 'DeclareLaunchArgument("channel", default_value="auto")' in launch_text
     assert 'DeclareLaunchArgument("execution_mode", default_value="execute")' in launch_text
-    assert 'DeclareLaunchArgument("trajectory_execution_mode", default_value="continuous"' in launch_text
-    assert '"trajectory_execution_mode": trajectory_mode' in launch_text
-    assert '"trajectory_execution_mode": trajectory_execution_mode' in launch_text
-    assert 'trajectory_execution_mode=trajectory_mode' in launch_text
     assert "def _resolve_channel" not in launch_text
     assert 'for candidate in ("/dev/ttyACM0", "/dev/ttyACM1")' not in launch_text
     assert '"channel": channel' in launch_text
@@ -109,7 +105,6 @@ def test_operator_configs_are_split_by_consumer() -> None:
     for launch_path in (
         "src/rebotarm_bringup/launch/interactive_system.launch.py",
         "src/rebotarm_bringup/launch/bringup.launch.py",
-        "src/rebotarm_bringup/launch/teleop_keyboard.launch.py",
     ):
         assert "hardware_controller.launch.py" in _read(launch_path)
     moveit_hardware = _read(
@@ -117,13 +112,6 @@ def test_operator_configs_are_split_by_consumer() -> None:
     )
     assert "interactive_system.launch.py" in moveit_hardware
     assert "hardware_controller.launch.py" not in moveit_hardware
-    for launch_path in (
-        "moveit_hardware.launch.py", "interactive_system.launch.py",
-        "teleop_keyboard.launch.py", "teleop_system.launch.py", "bringup.launch.py",
-    ):
-        text = _read(f"src/rebotarm_bringup/launch/{launch_path}")
-        assert 'DeclareLaunchArgument("trajectory_execution_mode"' in text
-        assert '"trajectory_execution_mode":' in text
     interactive = _read("src/rebotarm_bringup/launch/interactive_system.launch.py")
     assert '"prepare_trajectories": prepare_trajectories' in interactive
     assert "condition=IfCondition(use_moveit_stack)" in interactive
@@ -149,16 +137,13 @@ def test_launches_reference_consumer_specific_operator_configs() -> None:
 def test_keyboard_no_hardware_mode_uses_one_simulated_trajectory_backend() -> None:
     keyboard = _read("src/rebotarm_bringup/launch/teleop_keyboard.launch.py")
 
-    assert keyboard.count('package="rebotarm_preview"') == 1
-    assert keyboard.count('executable="rebotarm_sim_trajectory_controller"') == 1
-    assert "condition=UnlessCondition(use_hardware)" in keyboard
+    assert keyboard.count('"mujoco_moveit_sim.launch.py"') == 1
+    assert "condition=UnlessCondition(hardware)" in keyboard
+    assert "condition=IfCondition(hardware)" in keyboard
+    assert "interactive_system.launch.py" in keyboard
     assert 'executable="joint_state_publisher"' not in keyboard
     assert 'executable="reBotArmController"' not in keyboard
-    assert "hardware_controller.launch.py" in keyboard
-    assert 'parameters=[{"arm_namespace": arm_namespace}]' in keyboard
-    assert "condition=IfCondition(use_prepared_hardware)" in keyboard
-    assert "interactive_system.launch.py" in keyboard
-    assert keyboard.count("condition=UnlessCondition(use_prepared_hardware)") == 2
+    assert '"use_sim_time": use_sim_time' in keyboard
     assert '"use_moveit_fake_joint_states": "false"' in keyboard
 
 
@@ -170,7 +155,6 @@ def test_teleop_system_forwards_execution_mode_to_dashboard() -> None:
     assert '"execution_mode": execution_mode' in system
     assert '"web_execute_enabled": web_execute_enabled' in system
     # 控制器所在 include 与网页参数必须收到同一模式。
-    assert system.count('"trajectory_execution_mode": trajectory_mode') == 2
 
 
 def test_dashboard_hides_and_blocks_hardware_only_commands_in_simulation() -> None:
@@ -216,28 +200,38 @@ def test_feature_commands_document_web_teleop_next_to_rviz_drag() -> None:
     assert "Preview、Execute、Stop" in operator_doc
 
 
-def test_hardware_defaults_to_continuous_and_preview_to_legacy():
+def test_launches_have_no_selectable_trajectory_mode():
+    import ast
+    launch_dir = ROOT / "src/rebotarm_bringup/launch"
+    for path in launch_dir.rglob("*.py"):
+        source = path.read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in ("DeclareLaunchArgument", "LaunchConfiguration") and node.args:
+                    assert not (isinstance(node.args[0], ast.Constant)
+                        and node.args[0].value == "trajectory_execution_mode"), path
+    demo = (launch_dir / "moveit_demo.launch.py").read_text()
+    assert "rebotarm_motion/BoundSimpleControllerManager" in demo
+    assert "rebotarm_motion/RetimeExecutionCurve" in demo
+    assert "TrajectoryRetimingNode" in demo and "TrajectoryPreparationNode" in demo
+
+
+def test_interactive_stack_condition_evaluates_hardware_and_passive_combinations():
     import importlib.util
     from launch import LaunchContext
-    from launch.actions import DeclareLaunchArgument
-
-    launch_dir = ROOT / "src/rebotarm_bringup/launch"
-    for filename in ("interactive_system.launch.py", "teleop_keyboard.launch.py", "teleop_system.launch.py"):
-        spec = importlib.util.spec_from_file_location("default_" + filename.replace(".", "_"), launch_dir / filename)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        declaration = next(entity for entity in module.generate_launch_description().entities
-            if isinstance(entity, DeclareLaunchArgument) and entity.name == "trajectory_execution_mode")
-        for hardware, expected in (("true", "continuous"), ("false", "legacy")):
+    from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+    spec = importlib.util.spec_from_file_location('interactive_contract',
+        ROOT / 'src/rebotarm_bringup/launch/interactive_system.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    entities = module.generate_launch_description().entities
+    stack = next(entity for entity in entities if isinstance(entity, IncludeLaunchDescription))
+    for hardware in ('false', 'true'):
+        for preview in ('false', 'true'):
             context = LaunchContext()
-            context.launch_configurations["use_hardware"] = hardware
-            declaration.execute(context)
-            assert context.launch_configurations["trajectory_execution_mode"] == expected
-        context = LaunchContext()
-        context.launch_configurations.update(use_hardware="true", trajectory_execution_mode="legacy")
-        declaration.execute(context)
-        assert context.launch_configurations["trajectory_execution_mode"] == "legacy"
-
-    for filename in ("moveit_hardware.launch.py", "rebotarm_app.launch.py", "bringup.launch.py", "hardware_controller.launch.py"):
-        text = (launch_dir / filename).read_text()
-        assert re.search(r"DeclareLaunchArgument\(['\"]trajectory_execution_mode['\"], default_value=['\"]continuous['\"]", text)
+            context.launch_configurations.update(use_hardware=hardware, use_moveit_preview=preview)
+            for entity in entities:
+                if isinstance(entity, DeclareLaunchArgument):
+                    entity.execute(context)
+            assert stack.condition.evaluate(context) == (hardware == 'true' or preview == 'true')

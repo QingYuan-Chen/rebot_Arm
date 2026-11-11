@@ -23,11 +23,16 @@ rebotarm_msgs/
 │   ├── SetGripper.srv                 # 设置夹爪开口
 │   ├── SetMode.srv                    # 设置控制模式
 │   ├── SetZero.srv                    # 电机/夹爪置零
-│   └── SetTeachRecordPath.srv         # 设置示教记录路径
+│   ├── SetTeachRecordPath.srv         # 设置示教记录路径
+│   ├── CalibrationCommand.srv        # 标定会话命令及版本化状态
+│   ├── GetArmPlanningState.srv        # 后端一致的规划起点快照
+│   ├── RetimeArmTrajectory.srv        # 规划阶段重定时及最终起点绑定
+│   └── PrepareArmTrajectory.srv       # 执行前曲线、能力及场景复核
 ├── action/
 │   ├── MoveToPose.action               # 长时末端位姿运动
 │   ├── MoveRelative.action             # 相对位移动作
-│   └── ExecuteGrasp.action             # 分阶段抓取动作
+│   ├── ExecuteGrasp.action             # 保留的分阶段抓取接口定义
+│   └── ExecuteTeleopMotion.action      # 六轴与可选独立夹爪的网页组合执行
 ├── CMakeLists.txt                     # rosidl_generate_interfaces
 └── package.xml                        # rosidl 构建与运行依赖
 ```
@@ -41,11 +46,14 @@ rebotarm_msgs/
 | `ExecutionState`、`TaskStatus` | 公共接口 | 预留执行阶段与任务状态 |
 | `JointMotorCmd` | controller 低层透传 | 明确表示绕过规划的底层命令，必须满足控制器安全门 |
 | `MoveToPoseIK`、`SetGripper` 等服务 | motion、controller、simulation | IK 和夹爪位置服务边界 |
-| 三个 action | motion、controller、voice/simulation | 表达需要反馈、取消和结果的长时任务 |
+| `MoveToPose` | motion 位姿兼容节点 | 规划、FJT 执行、反馈、取消和到位结果 |
+| `ExecuteTeleopMotion` | teleop、controller、simulation | continuous 网页六轴轨迹及可选独立夹爪目标，整体结果等待两侧完成 |
+| `MoveRelative`、`ExecuteGrasp`、`PlanGraspForLabel` | 保留接口定义 | 具体服务端与入口以当前各包实现为准 |
+| `GetArmPlanningState`、`RetimeArmTrajectory`、`PrepareArmTrajectory` | motion 与执行后端 | 只读起点、规划重定时、执行前准备；后端最终复核会话、代次和资源预约 |
 
 ## 构建关系
 
-`CMakeLists.txt` 用 `rosidl_generate_interfaces()` 生成 Python/C++ 绑定，依赖字段直接引用的 `builtin_interfaces`、`geometry_msgs`、`std_msgs` 和 `trajectory_msgs`。修改接口时要同步检查所有服务器、客户端、launch 和测试；构建通过不代表真实硬件执行链已验证。
+`CMakeLists.txt` 用 `rosidl_generate_interfaces()` 生成 Python/C++ 绑定，依赖字段直接引用的 `builtin_interfaces`、`geometry_msgs`、`std_msgs`、`sensor_msgs` 和 `trajectory_msgs`。修改接口时要同步检查所有服务器、客户端、launch 和测试；各项验收记录见[项目状态](../../docs/reference/project_status.md)。
 
 `CalibrationCommand.srv`：标定会话命令及状态快照（版本化 JSON），由
 rebotarm_calibration 实现、Dashboard 调用。包含请求幂等 ID 和会话 revision。

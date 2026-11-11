@@ -22,7 +22,7 @@ from rebotarm_motion.trajectory_preparation_node import scene_revision, SceneCol
 from rebotarm_trajectory.capability import make_capability, constraint_revision
 
 CONFIG = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
-CAPABILITY = make_capability('continuous',1,.5,1.,constraint_revision(
+CAPABILITY = make_capability(1,.5,1.,constraint_revision(
     *(CONFIG.joinpath(name).read_bytes() for name in ('rebotarm.urdf','joint_limits.yaml'))))
 
 

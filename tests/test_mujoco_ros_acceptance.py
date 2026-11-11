@@ -36,7 +36,9 @@ def test_ros_acceptance_source_checks_required_runtime_interfaces_without_hardwa
         "SetGripper",
         "FollowJointTrajectory",
         "JointTrajectoryPoint",
-        "create_node_class",
+        "RetimeArmTrajectory",
+        "GetArmPlanningState",
+        "unique MuJoCo FJT owner required",
         "MultiThreadedExecutor",
         "joint_schema_ok",
         "clock_progress",
@@ -46,3 +48,10 @@ def test_ros_acceptance_source_checks_required_runtime_interfaces_without_hardwa
         assert value in source
     assert "rebotarmcontroller" not in source.lower()
     assert "use_hardware" not in source
+
+
+def test_ros_acceptance_requires_isolated_domain_before_creating_nodes(monkeypatch):
+    import pytest
+    monkeypatch.delenv('ROS_DOMAIN_ID', raising=False)
+    with pytest.raises(RuntimeError, match='isolated nonzero'):
+        mujoco_ros_acceptance.run_acceptance()

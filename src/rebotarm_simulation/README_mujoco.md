@@ -1,9 +1,9 @@
 # reBotArm MuJoCo 仿真底座
 
 本包整合 [`huangbinai/robotarm_ros2`](https://github.com/huangbinai/robotarm_ros2)
-`main@8c02470f594cfa0180e2ebfb86d1e14a640b4db3` 的仿真分层与轻量 preview 拆分，并保留本地
+`main@8c02470f594cfa0180e2ebfb86d1e14a640b4db3` 的仿真分层，并保留本地
 Viewer、Reach/Pick、Sim2Real、Real2Sim、诊断与批量验收能力，同时保留上游的
-包结构、启动组合、MoveIt 权威 URDF及安全限制；虚拟 RGB-D 发布已随上游退役。
+MoveIt 权威 URDF及安全限制；当前 ROS 仿真执行统一为 MuJoCo continuous，虚拟 RGB-D 发布已退役。
 
 实机状态驱动 MuJoCo 的只读 Real2Sim Bridge、mirror/physics 模式和 Viewer 使用方法见
 [`../../docs/real2sim_bridge_zh.md`](../../docs/real2sim_bridge_zh.md)。
@@ -53,7 +53,7 @@ ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=false use_muj
 cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 python3 scripts/install_python_dependencies.py mujoco --user --break-system-packages
-/usr/bin/python3 -m colcon build --symlink-install --packages-select rebotarm_simulation
+/usr/bin/python3 -m colcon build --symlink-install --packages-up-to rebotarm_bringup
 source install/setup.bash
 ```
 
@@ -146,57 +146,21 @@ MoveIt 联动验收需要先按下文启动 MuJoCo 后端和 MoveIt，再单独�
 
 ## 当前仿真核验与已知问题
 
-2026-10-01 在 `develop@03a32a0` 完成无实机功能核验。正常功能路径可运行，
-但以下两处控制行为尚未修复，不能把完整回归通过记为全部仿真验收通过。
+仿真核验记录、当前问题和实机验收统一维护在
+[项目状态](../../docs/reference/project_status.md)。P005 的执行契约与维护验收见
+[P005 执行说明](../../docs/implemented/features/p005_prepared_trajectory.md)。
 
-| 功能 | 核验结果与范围 |
-| --- | --- |
-| 模型、物理步进与渲染 | 8 关节、8 执行器；MuJoCo 3.3.0、EGL 离屏渲染及有限数值步进通过 |
-| ROS 六轴轨迹与夹爪服务 | 轨迹返回成功，最终最大关节误差 0.015438 rad；夹爪到达 0.05 m |
-| 夹爪接触物理 | 600 个接触步中 440 步有手指接触；最大方块接触力 2.329 N |
-| MoveIt 规划并执行 | 实际生成、下发 37 个轨迹点并完成，最终最大关节误差 0.010004 rad |
-| 示教离线预演 | 合成六轴记录 201 个样本、整形后 401 个点，4 s / 2000 物理步，最大跟踪误差 0.000353 rad；重复时间戳被拒绝 |
-| Real2Sim | 合成反馈 100 Hz / 200 样本；mirror 关节误差为 0，physics 最大误差 0.067447 rad |
-| Reach / Pick | 基础运行通过；Pick 三个 seed 各 100 步安全违规为 0，随机动作抓取成功率为 0，未验证策略成功抓取 |
-| 视觉多阶段规划 | 经 FK 与碰撞有效性校验的模拟计划完成 pregrasp、approach、safe_retreat 三段规划；plan_only 没有下发 Action；缺少计划、时间戳无效、夹爪宽度超限均被拒绝 |
+2026-10-01 核验发现的两项控制问题已在 P005 修复，当前实现如下：
 
-完整回归为 `1167 passed / 14 skipped`，两条既有 Gymnasium 观测范围提示；
-分层测试 `18 passed`，必需编译检查通过。视觉测试没有覆盖真实相机、YOLO/GraspNet
-推理；示教和 Real2Sim 输入是合成数据，没有访问真实控制器或串口。
+- 轨迹接纳校验完整六轴、数值和时间；continuous 准备检查整条曲线限位，并核对准确曲线、
+  能力、场景与规划起点绑定。底层位置命令在修改目标前逐轴检查模型范围，越界时抛错。
+- `position -> hold` 复用位置控制器的积分和上一拍支撑力矩，保持切换延续已有控制状态。
+  重复进入 hold 保持幂等；continuous 的停止和取消继续等待实际仿真反馈确认。
+- 六轴执行和独立夹爪执行分别由 `execution/trajectory_execution.py`、
+  `execution/gripper_execution.py` 持有，ROS 节点负责协议与调度。
 
-### 越界轨迹可能返回成功
-
-独立仿真中，J3 的模型上限为 `+0.02 rad`，提交 `+0.03 rad` 轨迹终点仍被
-Action 接受并返回 `SUCCEEDED / SUCCESSFUL`。最后 desired 为 `+0.03 rad`，
-actual 为 `+0.020412 rad`，误差约 `0.009588 rad`。
-
-`mujoco_ros_node._goal_callback` 未在接纳前校验轨迹点的位置范围；底层
-`command_joint_positions` 裁剪目标后，执行层仍按原始目标和 `0.02 rad`
-完成容差判断，掩盖了这次越界请求。应在 Action 接纳前依据模型逐轴检查全部
-轨迹点并拒绝越界；保持合法轨迹的现有完成容差，不能扩大 J3 限位来处理。
-
-### 切换保持模式存在支撑力矩断续
-
-小幅预弯和 HOME 两个独立取消测试均返回 CANCELED，并在随后 5 s 观察中进入
-稳定 hold；但取消后 J3 峰值偏移分别为 `0.047163 / 0.044613 rad`，峰值速度为
-`0.594690 / 0.582318 rad/s`。最后 1 s 最大速度低于 `0.000137 rad/s`，说明
-最终保持稳定，不能据此忽略切换过程中的抖动。
-
-静止姿态、零运动命令的模式切换也复现了扰动：J3 支撑力矩从 `-8.536169 N·m`
-降到 `-0.630000 N·m`，随后偏移 `0.039644 rad`。`set_mode('hold')` 捕获姿态
-后重置控制器，将 applied_torque 清零，再通过变化率与低通限制重新爬升。
-后续应实现连续的支撑力矩切换，并保留取消时的姿态锚点与稳定验收；不改成直接
-失能。该结论只针对仿真实现，未证明真实控制器有相同行为。
-
-上述两处实现文件在 `dc7e067..03a32a0` 没有代码变化，属于本次核验发现的已有
-问题。另观察到一次 MoveGroup 在规划结束后未于默认 5 s 内响应 SIGINT，
-被 launch 升级 SIGTERM 后退出；退出原因尚未定位，运行阶段没有因此失败。
-
-原始报告、JSON、逐步反馈和测试日志保留在本机
-`log/functional_sim_20261001/`，不随文档提交。测试使用预先检查为空闲的 ROS 域
-119/176、localhost 通信及唯一 MuJoCo Action/反馈源检查；收尾未发现测试进程或
-DDS 端口残留，51 份运行/模型配置摘要一致。再次测试时需重新检查空闲域。
-当前问题状态见[项目状态](../../docs/reference/project_status.md)。
+原 2026-10-01 原始报告保留在本机 `log/functional_sim_20261001/`。
+后续验收记录和当前待办以项目状态为准。
 
 ## 桌面 Viewer
 
@@ -295,15 +259,10 @@ contacts
 
 ## ROS 2 适配层
 
-工作区提供两种独立包拥有的后端，验证含义不同：
-
-- `rebotarm_mujoco_node`：加载 MJCF 并推进 MuJoCo 物理，可用于物理状态、执行器力、
-  接触和桌面/瓶子场景验证；
-- `rebotarm_preview/rebotarm_sim_trajectory_controller`：不加载 MuJoCo，只做轨迹插值和 RViz 姿态预演；该轻量后端已从 `rebotarm_simulation` 拆出。
-
-RViz 预演的 Action 成功、姿态变化或视觉流程完成，不能作为 MuJoCo 物理、动力学、
-接触、碰撞或抓取成功证据。需要这些证据时必须启动 MuJoCo 组合入口，并确认只有一个
-轨迹 Action 服务端。
+`rebotarm_mujoco_node` 是无硬件 ROS 执行的唯一后端，加载 MJCF、推进物理并发布
+关节状态、执行器力及接触诊断。网页、键盘和 RViz 执行统一使用 continuous：motion
+完成重定时、规划起点绑定和全曲线碰撞准备，仿真组件负责预约、物理采样和停止确认。
+窗口显示由启动参数控制，同一命名空间只运行一个轨迹 Action 服务端。
 
 只启动 MuJoCo 后端：
 
@@ -311,9 +270,15 @@ RViz 预演的 Action 成功、姿态变化或视觉流程完成，不能作为 
 ros2 launch rebotarm_simulation mujoco_sim.launch.py
 ```
 
-节点默认从 Home+Hold 启动，提供标准控制接口、仿真模式服务、诊断和仿真时钟：
+节点先复位到 Home+Hold，再应用入口的 `initial_joint_positions`。底层
+`mujoco_sim.launch.py` 提供物理与状态；六轴执行需要同域的重定时、准备和 MoveIt 服务。
+日常操作使用下方完整 `mujoco_moveit_sim.launch.py` 组合。公共接口包括：
 
 - Action：`/rebotarm/follow_joint_trajectory`
+- Action：`/rebotarm/gripper/command`、`/rebotarm/gripper/moveit_command`
+- Action：`/rebotarm/execute_teleop_motion`（continuous 六轴与可选独立夹爪）
+- Service：`/rebotarm/get_arm_planning_state`
+- Topic：`/rebotarm/trajectory_execution_mode`、`/rebotarm/trajectory_capabilities`
 - Topic：`/rebotarm/joint_states`
 - Service：`/rebotarm/gripper/set`
 - Topic：`/rebotarm/gripper/state`
@@ -326,12 +291,13 @@ MuJoCo 物理步进定时器固定使用 steady clock，不依赖节点的 ROS �
 MoveIt、RViz 和状态发布节点使用 `use_sim_time:=true` 跟随 `/clock`。这样 `/clock` 的
 发布者不会反过来等待自己尚未发布的仿真时间。
 
-另开已 source 的终端发送一个六关节目标：
+六轴请求由 MoveIt、网页或诊断工具生成并绑定最终轨迹，操作契约见
+[P005 执行说明](../../docs/implemented/features/p005_prepared_trajectory.md)。
+先在已核对空闲的非零 ROS 域中启动下方完整组合；各终端使用相同 `ROS_DOMAIN_ID`
+及 localhost 隔离设置。另开已 source 的终端执行：
 
 ```bash
-ros2 action send_goal /rebotarm/follow_joint_trajectory \
-  control_msgs/action/FollowJointTrajectory \
-  "{trajectory: {joint_names: [joint1, joint2, joint3, joint4, joint5, joint6], points: [{positions: [0.1, -0.2, -0.2, 0.2, 0.0, 0.0], time_from_start: {sec: 3}}]}}" --feedback
+rebotarm_mujoco_ros_acceptance --timeout 15
 
 ros2 service call /rebotarm/gripper/set rebotarm_msgs/srv/SetGripper \
   "{position: 0.05, max_effort: 10.0}"
@@ -339,16 +305,11 @@ ros2 service call /rebotarm/gripper/set rebotarm_msgs/srv/SetGripper \
 ros2 service call /rebotarm/trajectory_stop std_srvs/srv/Trigger "{}"
 ```
 
-也可以在 Ubuntu VM 中直接跑一次无实机 ROS 2 接口验收。它在同一进程里启动
-MuJoCo ROS 2 节点和探针节点，检查 `/rebotarm/joint_states`、`/clock`、
-`/rebotarm/gripper/set` 和 `/rebotarm/follow_joint_trajectory`：
-
-```bash
-rebotarm_mujoco_ros_acceptance --timeout 15
-```
-
-输出 JSON 中 `ok=true` 才表示 topic、service 和 action 均通过；该命令不启动
-`rebotarmcontroller`，也不使用 `use_hardware:=true`。
+ROS 接口验收连接已启动的 MuJoCo/MoveIt 图，先核对唯一 MuJoCo FJT 服务端及关节反馈源，
+检查 `/rebotarm/joint_states`、`/clock` 和夹爪服务，再获取规划快照，经
+`/rebotarm/retime_arm_trajectory` 生成有起点绑定的轨迹并发送 FJT。
+输出 JSON 中 `ok=true` 表示本轮 topic、service、action 及终点误差检查通过。
+工具只拥有探针节点，启动组合拥有仿真与 MoveIt 生命周期。
 
 MoveIt 的控制器映射保持为 `/rebotarm/follow_joint_trajectory`。联调时所有
 bringup 必须显式使用 `use_hardware:=false`，且只保留一个该 Action 的服务端。
@@ -469,11 +430,13 @@ MuJoCo 的质量、阻尼、摩擦和 arm torque scale。日志格式不依赖 R
 `compare_trajectories()` 可用于仿真回放和误差报告；当前阶段不宣称已经完成真实系统辨识
 或 sim-to-real 精度标定。
 
-后续架构是云服务器运行无界面 MuJoCo 并行训练，本地 Ubuntu VM 做模型验证、
-ROS 2 联调和策略推理。现已提供本地 GPU Reach 训练基线；云端并行训练尚未验证。
+主工程保留 CPU Reach 与可选 SB3/PPO 工具；MJLab 的并行训练、导出和策略评测归
+独立工程 `/home/a/project/rebot_Arm_rl/MJLab/`。部署命令见
+[MJLab 命令参考](../../docs/reference/commands/mjlab_rl.md)，训练与评测结果见项目状态。
 
 模型在 `end_link` 下提供命名坐标系 `wrist_camera_mount`，作为后续手眼/末端 RGB-D
-相机的稳定安装基准。上游新增 Gemini 2/支架仿真负载（含质量、惯量与网格），不表示实机内参或手眼标定已验证。
+相机的安装基准。当前规范模型已接入 D405 与支架，几何、仿真负载和物理标定范围见
+[D405 腕部模型](../../docs/implemented/features/d405_wrist_model.md)。
 
 ## 排障
 
@@ -522,11 +485,7 @@ rebotarm_urdf_to_mjcf --repo-root . --check
 双指联动、传感器、末端 site 和接触过滤由确定性后处理补入。不要手工修改
 `robot.xml`；应修改 URDF、碰撞配置或生成器后重新生成。
 
-Windows 与 Ubuntu VM 同步后，可分别检查受控文件哈希：
-
-```powershell
-Get-FileHash src/rebotarm_simulation/models/rebotarm/robot.xml -Algorithm SHA256
-```
+生成或同步模型后，可检查受控文件哈希：
 
 ```bash
 sha256sum src/rebotarm_simulation/models/rebotarm/robot.xml
@@ -539,7 +498,7 @@ sha256sum src/rebotarm_simulation/models/rebotarm/robot.xml
 
 默认 `scene.xml` 保留 cube 接触/Pick 与 Viewer 拖拽目标；瓶体随机化使用
 `scene_bottle.xml`，上游 Gymnasium CPU Reach 使用独立无碰撞 `reach_scene.xml`。
-三类场景共享本轮更新的 `robot.xml` 和 Gemini 2 仿真负载。旧虚拟 RGB-D
+三类场景共享 `robot.xml` 和 D405 腕部装配。旧虚拟 RGB-D
 发布流程已退役。MoveIt 仿真验收统一由 `rebotarm_motion` 实现。
 
 本地软件回归不代表 GPU PPO 训练质量或实机验收。

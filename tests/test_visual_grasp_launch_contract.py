@@ -96,16 +96,22 @@ def test_marker_consumes_filtered_plan():
     assert 'grasp_preview_sender' not in text
 
 
-def test_moveit_execution_default_remains_enabled():
-    text = (LAUNCH / 'moveit_demo.launch.py').read_text()
-    tree = ast.parse(text)
-    declarations = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
-                    and isinstance(n.func, ast.Name) and n.func.id == 'DeclareLaunchArgument'
-                    and n.args and isinstance(n.args[0], ast.Constant)
-                    and n.args[0].value == 'allow_trajectory_execution']
-    assert len(declarations) == 1
-    assert any(k.arg == 'default_value' and ast.literal_eval(k.value) == 'true'
-               for k in declarations[0].keywords)
+def test_moveit_passive_state_disables_execution_but_backend_state_enables_it():
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('moveit_demo_contract', LAUNCH / 'moveit_demo.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    declarations = [entity for entity in module.generate_launch_description().entities
+                    if isinstance(entity, DeclareLaunchArgument)]
+    for passive, expected in [('true', 'false'), ('false', 'true')]:
+        context = LaunchContext()
+        context.launch_configurations['use_fake_joint_states'] = passive
+        for declaration in declarations:
+            declaration.execute(context)
+        assert context.launch_configurations['allow_trajectory_execution'] == expected
+        assert context.launch_configurations['prepare_trajectories'] == expected
 
 
 def test_visual_backend_has_no_execution_nodes():

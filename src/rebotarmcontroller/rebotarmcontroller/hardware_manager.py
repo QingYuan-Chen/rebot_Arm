@@ -206,6 +206,7 @@ class HardwareManager:
             confirm_disabled=self.protection.confirm_disabled,
             protect=self.protection.protect,
         )
+        # 全部端口绑定完成后才挂运行时回调，确保首次设备请求触发采集时各所有者均已就绪。
         self.runtime.idle_callback = self.cycle.feedback_tick
         self.runtime.on_error = lambda exc: self.protection.protect(
             str(exc), category="CONTROLLER")

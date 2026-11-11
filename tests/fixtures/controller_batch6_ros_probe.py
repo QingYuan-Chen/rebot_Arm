@@ -79,7 +79,7 @@ worker = threading.Thread(target=executor.spin, daemon=True)
 worker.start()
 report = dict(domain=os.environ['ROS_DOMAIN_ID'], backend='in-memory fake motor handles', sdk_blocked=True)
 try:
-    report['trajectory_mode'] = controller.get_parameter('trajectory_execution_mode').value
+    report['trajectory_mode'] = controller.hardware.arm.trajectory_capability()['mode']
     def trigger(name):
         connection = client.create_client(Trigger, '/rebotarm/'+name)
         assert connection.wait_for_service(timeout_sec=5.)
@@ -87,8 +87,6 @@ try:
         assert result.success, result.message
         return result.message
     def ready():
-        if controller.get_parameter('trajectory_execution_mode').value != 'continuous':
-            return
         deadline = time.monotonic()+5.
         while not controller.hardware.arm.admission_snapshot()['ready'] and time.monotonic()<deadline:
             time.sleep(.02)
@@ -113,28 +111,26 @@ try:
         return value
     assert not wait(fjt.send_goal_async(goal(start))).accepted
     report['default_disabled_reject'] = True
-    if controller.get_parameter('trajectory_execution_mode').value == 'continuous':
-        from rebotarm_msgs.srv import PrepareArmTrajectory,GetArmPlanningState,RetimeArmTrajectory
-        preparation = client.create_client(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory')
-        assert preparation.wait_for_service(timeout_sec=20.)
-        state_client=client.create_client(GetArmPlanningState,'/rebotarm/get_arm_planning_state')
-        assert state_client.wait_for_service(timeout_sec=5.)
-        snapshot=wait(state_client.call_async(GetArmPlanningState.Request()))
-        assert snapshot.success,snapshot.message
-        state=json.loads(snapshot.state_json)
-        assert not state['executable'] and state['reason']=='disabled'
-        service=client.create_client(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory')
-        assert service.wait_for_service(timeout_sec=5.)
-        query=RetimeArmTrajectory.Request(trajectory=goal(start).trajectory,
-            velocity_scaling=1.,acceleration_scaling=1.)
-        preview=wait(service.call_async(query))
-        assert preview.success and not preview.executable,preview.message
-        report['disabled_preview']=True
+    from rebotarm_msgs.srv import PrepareArmTrajectory,GetArmPlanningState,RetimeArmTrajectory
+    preparation = client.create_client(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory')
+    assert preparation.wait_for_service(timeout_sec=20.)
+    state_client=client.create_client(GetArmPlanningState,'/rebotarm/get_arm_planning_state')
+    assert state_client.wait_for_service(timeout_sec=5.)
+    snapshot=wait(state_client.call_async(GetArmPlanningState.Request()))
+    assert snapshot.success,snapshot.message
+    state=json.loads(snapshot.state_json)
+    assert not state['executable'] and state['reason']=='disabled'
+    service=client.create_client(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory')
+    assert service.wait_for_service(timeout_sec=5.)
+    query=RetimeArmTrajectory.Request(trajectory=goal(start).trajectory,
+        velocity_scaling=1.,acceleration_scaling=1.)
+    preview=wait(service.call_async(query))
+    assert preview.success and not preview.executable,preview.message
+    report['disabled_preview']=True
     report['enable'] = trigger('enable')
     ready()
-    if controller.get_parameter('trajectory_execution_mode').value == 'continuous':
-        assert not wait(fjt.send_goal_async(FollowJointTrajectory.Goal(trajectory=preview.trajectory))).accepted
-        report['preview_rejected_after_enable']=True
+    assert not wait(fjt.send_goal_async(FollowJointTrajectory.Goal(trajectory=preview.trajectory))).accepted
+    report['preview_rejected_after_enable']=True
     target = start.copy(); target[0] += .03
     handle = wait(fjt.send_goal_async(goal(target)))
     assert handle.accepted
@@ -174,77 +170,76 @@ try:
     report['moveit_execute'] = [completed.status, completed.result.error_code.val]
     report['planned_points'] = len(value.trajectory.joint_trajectory.points)
     ready()
-    if controller.get_parameter('trajectory_execution_mode').value == 'continuous':
-        from rebotarm_msgs.srv import RetimeArmTrajectory
-        from rebotarm_motion.coordinated_trajectory import generate_schedule, curve_message
-        from trajectory_msgs.msg import JointTrajectory
-        time.sleep(.5)
-        current = tuple(controller.hardware.feedback.get_joint_state()[0])
-        width = controller.hardware.gripper.gripper_position_m()
-        curve = generate_schedule(current,(current[0]+.01,*current[1:]),1.)
-        service = client.create_client(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory')
-        assert service.wait_for_service(timeout_sec=3.)
-        query = RetimeArmTrajectory.Request(trajectory=curve_message(curve,
-            trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint),
-            velocity_scaling=1.,acceleration_scaling=1.,
-            capability_revision=controller.hardware.arm.trajectory_capability('continuous')['revision'])
-        plan = wait(service.call_async(query)); assert plan.success, plan.message
-        teleop = ActionClient(client,ExecuteTeleopMotion,'/rebotarm/execute_teleop_motion')
-        assert teleop.wait_for_server(timeout_sec=5.)
-        coordinated = ExecuteTeleopMotion.Goal(trajectory=plan.trajectory,move_gripper=True,
-            gripper_position=width+.001,gripper_max_effort=1.)
-        handle = wait(teleop.send_goal_async(coordinated)); assert handle.accepted
-        assert not wait(teleop.send_goal_async(coordinated)).accepted, 'busy goal queued'
-        done = wait(handle.get_result_async())
-        assert done.status == 4 and done.result.error_code == 0, done
-        assert done.result.arm_state == done.result.gripper_state == 'succeeded', done
-        assert controller.hardware.lifecycle.enabled
-        report['coordinated_execute'] = [done.status,done.result.error_code]
-        # 真实 ROS Action 链覆盖残差取消与组合→六轴交接；只改内存假电机反馈。
-        motor = buses[0].motors[0]
-        original_send = motor.send_pos_vel
-        residuals = []
-        try:
-            for residual in (.003, .01):
-                def offset_send(position, velocity):
-                    original_send(position, velocity)
-                    motor.state.pos = position+residual
-                motor.send_pos_vel = offset_send
-                time.sleep(.3)
-                ready()
-                current = tuple(controller.hardware.feedback.get_joint_state()[0])
-                width = controller.hardware.gripper.gripper_position_m()
-                curve = generate_schedule(current,(current[0]+.01,*current[1:]),1.)
-                query.trajectory = curve_message(curve,trajectory_factory=JointTrajectory,
-                    point_factory=JointTrajectoryPoint)
-                plan = wait(service.call_async(query)); assert plan.success, plan.message
-                handle = wait(teleop.send_goal_async(ExecuteTeleopMotion.Goal(trajectory=plan.trajectory,move_gripper=True,gripper_position=width+.0002,gripper_max_effort=1.)))
-                assert handle.accepted
-                deadline = time.monotonic()+2.
-                while controller.hardware.lifecycle.execution != 'TRAJ_RUNNING' and time.monotonic()<deadline:
-                    time.sleep(.005)
-                assert controller.hardware.lifecycle.execution == 'TRAJ_RUNNING'
-                cancel_response = wait(handle.cancel_goal_async())
-                done = wait(handle.get_result_async())
-                assert cancel_response.goals_canceling, (residual, cancel_response, done)
-                assert done.status == 5, done
-                # 小开口可能在取消前已经独立到位；已完成侧保留成功，整体仍为取消。
-                assert done.result.arm_state == 'canceled' and done.result.gripper_state in ('failed','succeeded'), done
-                assert not controller.hardware.runtime.arm_resource_reserved
-                assert controller.hardware.arm._stop_wait is None
-                ready()
-                start = controller.hardware.feedback.get_joint_state()[0]
-                target = start.copy();target[0] += .01
-                handle = wait(fjt.send_goal_async(goal(target,1.)))
-                assert handle.accepted
-                done = wait(handle.get_result_async())
-                assert done.status == 4 and done.result.error_code == 0, done
-                ready()
-                assert not controller.hardware.runtime.arm_resource_reserved
-                residuals.append(dict(residual=residual, coordinated_cancel=5, next_arm_execution=4))
-        finally:
-            motor.send_pos_vel = original_send
-        report['residual_cancel_and_next_goal'] = residuals
+    from rebotarm_msgs.srv import RetimeArmTrajectory
+    from rebotarm_motion.coordinated_trajectory import generate_schedule, curve_message
+    from trajectory_msgs.msg import JointTrajectory
+    time.sleep(.5)
+    current = tuple(controller.hardware.feedback.get_joint_state()[0])
+    width = controller.hardware.gripper.gripper_position_m()
+    curve = generate_schedule(current,(current[0]+.01,*current[1:]),1.)
+    service = client.create_client(RetimeArmTrajectory,'/rebotarm/retime_arm_trajectory')
+    assert service.wait_for_service(timeout_sec=3.)
+    query = RetimeArmTrajectory.Request(trajectory=curve_message(curve,
+        trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint),
+        velocity_scaling=1.,acceleration_scaling=1.,
+        capability_revision=controller.hardware.arm.trajectory_capability()['revision'])
+    plan = wait(service.call_async(query)); assert plan.success, plan.message
+    teleop = ActionClient(client,ExecuteTeleopMotion,'/rebotarm/execute_teleop_motion')
+    assert teleop.wait_for_server(timeout_sec=5.)
+    coordinated = ExecuteTeleopMotion.Goal(trajectory=plan.trajectory,move_gripper=True,
+        gripper_position=width+.001,gripper_max_effort=1.)
+    handle = wait(teleop.send_goal_async(coordinated)); assert handle.accepted
+    assert not wait(teleop.send_goal_async(coordinated)).accepted, 'busy goal queued'
+    done = wait(handle.get_result_async())
+    assert done.status == 4 and done.result.error_code == 0, done
+    assert done.result.arm_state == done.result.gripper_state == 'succeeded', done
+    assert controller.hardware.lifecycle.enabled
+    report['coordinated_execute'] = [done.status,done.result.error_code]
+    # 真实 ROS Action 链覆盖残差取消与组合→六轴交接；只改内存假电机反馈。
+    motor = buses[0].motors[0]
+    original_send = motor.send_pos_vel
+    residuals = []
+    try:
+        for residual in (.003, .01):
+            def offset_send(position, velocity):
+                original_send(position, velocity)
+                motor.state.pos = position+residual
+            motor.send_pos_vel = offset_send
+            time.sleep(.3)
+            ready()
+            current = tuple(controller.hardware.feedback.get_joint_state()[0])
+            width = controller.hardware.gripper.gripper_position_m()
+            curve = generate_schedule(current,(current[0]+.01,*current[1:]),1.)
+            query.trajectory = curve_message(curve,trajectory_factory=JointTrajectory,
+                point_factory=JointTrajectoryPoint)
+            plan = wait(service.call_async(query)); assert plan.success, plan.message
+            handle = wait(teleop.send_goal_async(ExecuteTeleopMotion.Goal(trajectory=plan.trajectory,move_gripper=True,gripper_position=width+.0002,gripper_max_effort=1.)))
+            assert handle.accepted
+            deadline = time.monotonic()+2.
+            while controller.hardware.lifecycle.execution != 'TRAJ_RUNNING' and time.monotonic()<deadline:
+                time.sleep(.005)
+            assert controller.hardware.lifecycle.execution == 'TRAJ_RUNNING'
+            cancel_response = wait(handle.cancel_goal_async())
+            done = wait(handle.get_result_async())
+            assert cancel_response.goals_canceling, (residual, cancel_response, done)
+            assert done.status == 5, done
+            # 小开口可能在取消前已经独立到位；已完成侧保留成功，整体仍为取消。
+            assert done.result.arm_state == 'canceled' and done.result.gripper_state in ('failed','succeeded'), done
+            assert not controller.hardware.runtime.arm_resource_reserved
+            assert controller.hardware.arm._stop_wait is None
+            ready()
+            start = controller.hardware.feedback.get_joint_state()[0]
+            target = start.copy();target[0] += .01
+            handle = wait(fjt.send_goal_async(goal(target,1.)))
+            assert handle.accepted
+            done = wait(handle.get_result_async())
+            assert done.status == 4 and done.result.error_code == 0, done
+            ready()
+            assert not controller.hardware.runtime.arm_resource_reserved
+            residuals.append(dict(residual=residual, coordinated_cancel=5, next_arm_execution=4))
+    finally:
+        motor.send_pos_vel = original_send
+    report['residual_cancel_and_next_goal'] = residuals
     time.sleep(.5)
     ready()
     ik = client.create_client(MoveToPoseIK, '/rebotarm/move_to_pose_ik')

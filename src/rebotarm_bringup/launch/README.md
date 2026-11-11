@@ -61,13 +61,17 @@ execute 包装入口已删除。新接口参数先加到 `visual_grasp_interface
 
 ```text
 hardware_controller.launch.py                  唯一真实硬件控制器定义
-├── bringup.launch.py                          + 状态发布 + 基础 RViz
+├── bringup.launch.py                          + MoveIt + 准备服务 + 状态发布 + RViz
 ├── interactive_system.launch.py               状态源/MoveIt/RViz 的共享实现
 │   ├── moveit_hardware.launch.py              固定真机后端的薄入口
 │   │   └── rebotarm_app.launch.py             + 示教录制 + Dashboard + 状态 RViz（不含键盘）
-│   ├── rviz_ee_drag_sim.launch.py             仿真 MotionPlanning 入口
-├── teleop_keyboard.launch.py                  键盘 + 状态发布 + 基础 RViz（控制器点动适配）
-│   └── teleop_system.launch.py                + 示教录制 + Dashboard（控制器点动适配）
+└── teleop_keyboard.launch.py                  真机键盘分支 + MoveIt + RViz
+    └── teleop_system.launch.py                + 示教录制 + Dashboard
+
+mujoco_moveit_sim.launch.py                    MuJoCo + MoveIt + 准备服务
+├── rviz_ee_drag_sim.launch.py                  仿真 MotionPlanning 入口
+└── teleop_keyboard.launch.py                  无硬件键盘分支 + RViz
+    └── teleop_system.launch.py                + 示教录制 + Dashboard
 ```
 
 `interactive_system.launch.py` 只有在 `use_hardware=true` 时才包含硬件片段；纯预览和仿真
@@ -78,33 +82,30 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 | 文件 | 类型 | 功能和边界 |
 |---|---|---|
 | `hardware_controller.launch.py` | 底层片段 | 唯一直接启动 `reBotArmController` 的文件；统一串口、反馈频率、夹爪保护、仲裁、命名空间和坐标系参数 |
-| `bringup.launch.py` | 基础真机入口 | 硬件、夹爪可视化状态桥、TF 和可选基础 RViz；不启动 MoveIt |
+| `bringup.launch.py` | 基础真机入口 | 硬件、MoveIt、轨迹准备服务、夹爪可视化状态桥、TF 和可选 RViz |
 | `moveit_hardware.launch.py` | 唯一真机 MoveIt 用户入口 | 薄包装 `interactive_system.launch.py`，固定真机、MoveIt、真实关节状态和唯一状态源；启动后仍需显式 Enable |
 | `moveit_demo.launch.py` | 离线 MoveIt 演示入口 | 使用 `rebotarm_moveit_config` 的模型与规划参数，启动 MoveIt、RViz 和夹爪可视化桥；不接真机 |
-| `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 唯一 MuJoCo 后端、MoveIt 与轨迹准备服务；默认 continuous，可选 Dashboard |
+| `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 唯一 MuJoCo 后端、MoveIt 与轨迹准备服务；使用 continuous，可选 Dashboard |
 | `interactive_system.launch.py` | 共享实现 | 统一拥有状态发布、MoveIt、RViz 以及真机/无硬件状态源的互斥选择；不建议用户手写其内部组合参数启动真机 |
 | `rebotarm_app.launch.py` | 完整真机入口 | 包含真机 MoveIt 组合，再增加示教录制、Dashboard 和状态 RViz；不启动键盘节点 |
-| `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认不接真机。无硬件模式使用 RViz 轨迹插值预演控制器，按键可以改变 RViz 姿态，但不代表物理仿真 |
-| `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；默认不接真机。真机 continuous 复用 MoveIt 场景/准备服务；legacy 与无硬件轻量预演沿用原状态链 |
-| `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 使用 RViz 轨迹插值预演控制器提供 Plan/Execute，无物理引擎 |
+| `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认使用 MuJoCo。两类后端均提供 MoveIt 场景与准备服务 |
+| `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；默认使用 MuJoCo |
+| `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 复用 MuJoCo、MoveIt 与准备服务，在 RViz 中提供 Plan/Execute |
 | `visual_grasp_system.launch.py` | 唯一视觉入口 | 感知、筛选及显示；默认 `robot_context=offline`，也可接入外部环境 |
 
-这里的 RViz 轨迹插值预演只验证 ROS/MoveIt 流程和姿态显示，**不代表 MuJoCo
-物理验证**。它不计算动力学、执行器力、接触、碰撞或抓取结果；这些内容必须使用
-`mujoco_moveit_sim.launch.py` 验证；无窗口时设置
+无硬件执行统一由 MuJoCo 推进物理时间和轨迹，RViz 负责显示模型、规划及反馈。
+直接运行 `mujoco_moveit_sim.launch.py` 可选择 Dashboard 与 MuJoCo Viewer；无窗口时设置
 `use_rviz:=false use_mujoco_viewer:=false`。
 
-MuJoCo 组合和真实硬件的 `trajectory_execution_mode` 均默认为 `continuous`。可选 `use_dashboard:=true` 使用相同轨迹模式；另起终端键盘时也须选择
-`trajectory_execution_mode:=continuous`，默认单步为 0.02 rad / 0.4 s。
-前后端能力不匹配或未知时拒绝，不自动回退；契约与验收见
+轨迹执行方式统一为 `continuous`，`trajectory_execution_mode` 启动/节点参数已删除；
+同名话题保留为后端只读能力声明。网页和终端键盘自动核对能力，默认单步为 0.02 rad / 0.4 s。
+能力不匹配或未知时拒绝；契约与验收见
 [P005 执行接入](../../../docs/implemented/features/p005_prepared_trajectory.md)。
 
-三类日常操作入口均显式转发模式：`moveit_hardware`、`rebotarm_app`、
-`teleop_keyboard`（及 `teleop_system`）。
-真机入口默认使用 `continuous`；`legacy` 可显式选择作为过渡。独立
-`hardware_controller`/`bringup` 不提供准备服务，执行时须另行启动匹配的准备服务。
+`bringup`、`moveit_hardware`、`rebotarm_app`、`teleop_keyboard`（及 `teleop_system`）自动提供准备服务。
+底层 `hardware_controller` 和 `mujoco_sim` 片段的准备服务由上层组合提供。
 所有真机入口继续默认失能。
-随包 YAML 不覆盖键盘时长：continuous 默认 0.02 rad / 0.4 s，legacy 保留 0.2 s；
+随包 YAML 不覆盖键盘时长：默认 0.02 rad / 0.4 s；
 自定义 YAML 可显式覆盖，超限直接拒绝。
 
 ### Jazzy MoveIt 退出兼容
@@ -125,8 +126,8 @@ MoveIt 对象仍执行正常清理，不捕获段错误或改写退出码。
 |---|---|---|
 | 只需真机 MoveIt 规划/执行 | `moveit_hardware.launch.py` | Dashboard、键盘遥操、示教录制 |
 | 需要真机 MoveIt + 示教录制 + Dashboard 完整工作台 | `rebotarm_app.launch.py` | 键盘遥操 |
-| 只需键盘点动和基础 RViz | `teleop_keyboard.launch.py` | Dashboard、示教录制；仅真机 continuous 补齐 MoveIt 场景与准备服务 |
-| 需要键盘 + 示教录制 + Dashboard | `teleop_system.launch.py` | legacy 不含 MoveIt；真机 continuous 由键盘组合补齐场景与准备服务 |
+| 只需键盘点动和 RViz | `teleop_keyboard.launch.py` | Dashboard、示教录制 |
+| 需要键盘 + 示教录制 + Dashboard | `teleop_system.launch.py` | 默认关闭网页执行，需显式设置 `web_execute_enabled:=true` |
 
 因此它们共享部分界面，但不是重复实现。`moveit_hardware.launch.py` 和
 `teleop_keyboard.launch.py` 是可独立使用的基础组合；各自的上层入口只叠加自己的功能。

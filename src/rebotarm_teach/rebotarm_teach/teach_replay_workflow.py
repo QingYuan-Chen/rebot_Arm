@@ -132,7 +132,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         publish_status: Callable[[str, dict], None],
         collision_defaults: Callable[[tuple[str, ...]], tuple[tuple[str, float], ...]],
         action_client, trajectory_stop_client, request_stop: Callable[..., bool],
-        trajectory_capability=None, retime_trajectory=None,
+        trajectory_capability, retime_trajectory,
     ):
         self.get_parameter = node.get_parameter
         self.create_client = node.create_client
@@ -153,8 +153,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             ee_frame_id="end_link",
             frame_id="base_link",
             planning_service=str(self.get_parameter("moveit_planning_service").value),
-            planning_pipeline=('ompl_reference' if str(self.get_parameter('trajectory_execution_mode').value)
-                == 'continuous' else str(self.get_parameter("moveit_planning_pipeline").value)),
+            planning_pipeline='ompl_reference',
             planner_id=str(self.get_parameter("moveit_planner_id").value),
             planning_time=float(self.get_parameter("moveit_planning_time").value),
             num_attempts=int(self.get_parameter("moveit_num_planning_attempts").value),
@@ -521,7 +520,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         try:
             source_samples = load_teach_samples(str(info_payload.get("path", "")))
             if source_samples and any(s.format_version >= 2 for s in source_samples):
-                if (self._trajectory_capability is None or self._last_teach_dry_run is None
+                if (self._last_teach_dry_run is None
                         or self._last_teach_dry_run.get('capability_revision') != self._trajectory_capability()['revision']):
                     raise ValueError('teach planning capability changed; dry-run again')
             prepared = self._prepare_teach_replay_samples(source_samples, settings)
@@ -726,7 +725,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             ),
             moveit_start_alignment=self._append_moveit_start_alignment,
         )
-        # 两种后端都预检同一条分级参考；完整拼接后再核验模型限位及示教动态限值。
+        # 完整拼接后核验模型限位及示教动态限值，再绑定后端规划起点。
         from ament_index_python.packages import get_package_share_directory
         from pathlib import Path
         from rebotarm_motion.coordinated_trajectory import curve_message
@@ -745,11 +744,9 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             speeds,float(self.get_parameter('max_replay_acceleration_rad_s2').value),
             float(self.get_parameter('max_replay_jerk_rad_s3').value))
         final = curve_message(curve,trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
-        if self._trajectory_capability is not None and self._retime_trajectory is not None:
-            capability = self._trajectory_capability()
-            if capability['mode'] == 'continuous':
-                final = self._retime_trajectory(final,capability,False,
-                    float(self.get_parameter('max_replay_velocity_rad_s').value))
+        capability = self._trajectory_capability()
+        final = self._retime_trajectory(final,capability,False,
+            float(self.get_parameter('max_replay_velocity_rad_s').value))
         duration = final.points[-1].time_from_start.sec + final.points[-1].time_from_start.nanosec*1e-9
         # 服务返回后仅复核、不改时间；纳秒编码后的整条实际曲线也必须满足示教限值。
         final_curve, _ = finalize_teach_curve(final.joint_names,tuple(TrajectoryPoint(

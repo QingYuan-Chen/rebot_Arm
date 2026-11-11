@@ -58,6 +58,8 @@ def workflow_fixture(tmp_path):
         publish_status=lambda channel, value: events.update({channel: value}),
         collision_defaults=lambda names: (), action_client=object(),
         trajectory_stop_client=client, request_stop=lambda **kwargs: True,
+        trajectory_capability=lambda: {"mode": "continuous", "revision": "test"},
+        retime_trajectory=lambda trajectory, *_args: trajectory,
     )
     return workflow, events, calls
 

@@ -12,18 +12,17 @@
 |---|---|---|---|---|
 | 真实硬件通信 | MotorBridge/串口连接、六轴与夹爪反馈、状态发布、失能启动、显式 enable/disable、停止和 safe home | `rebotarmcontroller` | 需要设备、串口唯一占用、现场安全检查；软件测试不等于硬件验收 | [系统运行命令](../../reference/commands/system_runtime.md) |
 | 关节轨迹执行 | `FollowJointTrajectory`、轨迹停止、反馈跟踪、超时/通信异常保护 | `rebotarmcontroller` + `rebotarm_motion` | Execute 必须有真实或仿真控制器；Plan 成功不等于 Execute | [功能命令](../../reference/commands/rebotarm_feature_commands.md) |
-| 夹爪控制 | 位置控制、夹持服务、反馈新鲜度、超时和有界保持；网页与示教流程可调用 | `rebotarmcontroller`、`rebotarm_teleop` | 接触/夹持成功需要独立物理验证；不能由软件状态单独宣称抓取成功 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
+| 夹爪控制 | 独立位置开合、MoveIt GripperCommand 适配、反馈新鲜度、到位/超时和中性释放；网页可与六轴组成任务 | `rebotarmcontroller`、`rebotarm_teleop` | 示教回放仅执行六轴；夹持效果及开口/TCP 需物理标定 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | MoveIt 规划 | URDF/SRDF、规划组、IK、状态有效性/碰撞检查、RViz MotionPlanning Plan/Execute | `rebotarm_moveit_config`、`rebotarm_motion` | 真机 Execute 需要显式授权和 `moveit_simple_controller_manager` | [功能命令](../../reference/commands/rebotarm_feature_commands.md) |
 | 网页 Dashboard | 状态面板、SSE、关节 Preview/Execute/Stop、夹爪、Safe Home、Enable/Disable、示教与标定页面 | `rebotarm_dashboard` | Dashboard 是本地 UI/API，不是视觉传输层；不直接访问电机 SDK | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 键盘/RViz 操作 | 键盘小步调姿、夹爪可视关节状态、RViz 原生 MotionPlanning 拖动 | `rebotarm_teleop` | 不得与另一个真机控制器并行占用串口 | [功能命令](../../reference/commands/rebotarm_feature_commands.md) |
 | 示教录制 | 重力补偿录制、原子反馈批次、JSONL 文件、文件列表和记录状态 | `rebotarm_teach` | 录制不自动代表轨迹可执行；真机重力补偿需现场授权 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 示教检查与回放 | 滤波、重采样、重定时、速度/加速度/jerk 检查、MoveIt 起点对齐、碰撞预检、dry-run/execute、运行时跟踪门 | `rebotarm_teach` + `rebotarm_motion` | 原始记录不能直接下发；回放通过不等于真实运动安全 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
-| 网页手眼/TCP 标定 | 会话保存恢复、同步采样、五方法求解、独立验证、质量门、导出和审计 | `rebotarm_calibration` + `rebotarm_dashboard` | 当前是软件/合成数据闭环；真实相机和物理精度需独立验收 | [网页标定命令](../../reference/commands/calibration_web.md) |
+| 网页手眼/TCP 标定 | 会话保存恢复、同步采样、五方法求解、独立验证、质量门、导出和审计 | `rebotarm_calibration` + `rebotarm_dashboard` | 外参须显式部署；真实设备与物理精度的验证进展见项目状态 | [网页标定命令](../../reference/commands/calibration_web.md) |
 | Ubuntu 原生视觉 | D405 RGB-D、CameraInfo、YOLO 检测、深度融合、本机 GraspNet 候选、Marker/Open3D 可视化 | `rebotarm_vision` + `rebotarm_bringup` | 候选筛选与显示由视觉总入口组合；需 D405 手眼标定 | [视觉只读命令](../../reference/commands/ubuntu_vision_readonly_test_zh.md) |
 | 视觉抓取规划 | 候选过滤、IK、工作空间/姿态/夹爪约束、MoveIt 碰撞门 | `rebotarm_vision` + MoveIt 查询 | 输出筛选结果及 Marker | [视觉抓取命令](../../reference/commands/visual_grasp_commands.md) |
 | MuJoCo 仿真 | URDF→MJCF、headless/viewer、仿真关节状态、仿真轨迹控制器、MoveIt Plan/Execute 仿真后端、物理指标 | `rebotarm_simulation` | 不访问真实电机；仿真接触不替代现场碰撞/抓取验收 | [仿真命令](../../reference/commands/system_runtime.md) |
 | MuJoCo 示教预演 | 读取示教 JSONL，复用准备/重定时，在独立仿真中报告跟踪、接触和位移 | `rebotarm_teach` + `rebotarm_simulation` | 只覆盖仿真预演，不授权真机回放 | [示教预演命令](../../reference/commands/mujoco_teach_preview.md) |
-| 轻量 RViz 预演 | 无物理引擎的轨迹插值、关节/夹爪状态和停止接口 | `rebotarm_preview` | 不验证动力学、碰撞、接触或真实硬件 | [架构说明](../architecture.md) |
 | CPU Reach/RL | Gymnasium 无接触 Reach 与可选 SB3/PPO 工具 | `rebotarm_simulation` | 软件基准不代表学习策略收敛或实机适用 | [CPU 命令](../../reference/commands/mujoco_rl.md) |
 | 独立 MJLab Reach-and-Hold | 独立环境中的任务、导出、回放和评测工具 | `/home/a/project/rebot_Arm_rl/MJLab/` | 训练与 ROS 分离，当前结果见唯一项目状态文档；本次整合不继续训练 | [MJLab 入口](../../reference/commands/mjlab_rl.md) |
 

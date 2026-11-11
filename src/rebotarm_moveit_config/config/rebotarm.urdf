@@ -19,7 +19,7 @@
           -joint5-> link5 -joint6-> link6 -end_joint(固定)-> end_link（末端法兰/夹爪基座）
           end_link -left_finger_joint/right_finger_joint-> 两个手指 link（平移关节）。
   注意：link 编号按“距基座由近到远”排列，不按装配位置命名；例如 link2 是上臂、link5 是腕部，
-  零位时 link2 与 link5 的质心仅相距约 0.19 m，所以 rebotarm.srdf 里禁用了这一对的自碰撞检查。
+  link2 与 link5 的自碰撞检查由 rebotarm.srdf 保留，实际碰撞结果取决于关节姿态和碰撞几何。
 
   robot name 与 rebotarm.srdf 保持一致，MoveIt 与仿真侧会按同名模型装配。
 -->
@@ -239,9 +239,8 @@
   </link>
 <!-- joint3：肘部俯仰轴。原点 = link2 坐标系下沿 -X 平移 0.264 m（上臂长度），无旋转；
      axis = +Z（在 link3 坐标系中），折算回 link2 坐标系为 -Y，与 joint2 同向转动（俯仰）。
-     limit3 的 [-3.14, 0.02] 为电机侧/机械侧允许范围，但本文件的几何原点（joint3 的 -0.264 m 与
-     joint4 的 +0.2426 m）使前臂可以折回贴上臂：零位附近会自碰撞，
-     所以命名状态里没有全零姿态（见 rebotarm.srdf 注释）。 -->
+     limit3 的 [-3.14, 0.02] 是当前规范模型的软件位置范围；几何原点使前臂可折回上臂旁。
+     零位附近的碰撞需按完整关节姿态查询，命名状态及其值见 rebotarm.srdf。 -->
   <joint
     name="joint3"
     type="revolute">

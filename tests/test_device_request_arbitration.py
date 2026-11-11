@@ -3,6 +3,7 @@ import threading
 import time
 from types import SimpleNamespace
 import pytest
+from controller_trajectory_helpers import curve, submit_curve
 from rebotarmcontroller.runtime.device_requests import DeviceRequests, RequestRejected
 from test_controller_local_runtime import make_local_manager, wait_until
 
@@ -86,14 +87,16 @@ def test_trajectory_is_local_and_gripper_does_not_preempt_arm(monkeypatch):
     manager, _ = make_local_manager(monkeypatch)
     manager.lifecycle.connect(); manager.lifecycle.enable()
     try:
-        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., .1])
-        generation = manager.gripper.set_gripper_target(.02)
+        task = submit_curve(manager, (.1,-.1,-.1,0.,0.,0.), .1)
+        generation = manager.gripper._gripper_execution._generation
+        with pytest.raises(RuntimeError, match='reserved'):
+            manager.gripper.set_gripper_target(.02)
         with pytest.raises(RuntimeError, match='busy'):
-            manager.arm.submit_arm_trajectory(manager.runtime.joint_names, [(0.,)*6], [0.])
+            submit_curve(manager, (0.,)*6, .01)
         assert task.event.wait(1.)
         assert manager.arm.arm_execution_status(task).state == 'succeeded'
         assert generation == manager.gripper._gripper_execution._generation
+        assert manager.gripper.set_gripper_target(.02) > generation
     finally:
         manager.lifecycle.disable(); manager.lifecycle.shutdown()
 
@@ -102,13 +105,11 @@ def test_cancel_waits_for_hold_and_old_cancel_cannot_stop_successor(monkeypatch)
     manager, _ = make_local_manager(monkeypatch)
     manager.lifecycle.connect(); manager.lifecycle.enable()
     try:
-        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., 1.])
+        task = submit_curve(manager, (.1,-.1,-.1,0.,0.,0.), 1.)
         manager.arm.stop_active_motion(task)
         assert task.event.is_set()
         assert manager.arm.arm_execution_status(task).state == 'canceled'
-        successor = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [(0.,)*6, (.05,-.05,-.05,0.,0.,0.)], [0., .1])
+        successor = submit_curve(manager, (.05,-.05,-.05,0.,0.,0.), .1)
         manager.arm.stop_active_motion(task)
         assert successor.event.wait(1.)
         assert manager.arm.arm_execution_status(successor).state == 'succeeded'
@@ -123,8 +124,7 @@ def test_goal_tolerance_timeout_holds_without_disable(monkeypatch):
     try:
         motor = opened[0].motors[0]
         monkeypatch.setattr(motor, 'send_pos_vel', lambda *_: None)
-        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [(0.,)*6, (.2,0.,0.,0.,0.,0.)], [0., .02], timeout=.03)
+        task = submit_curve(manager, (.2,0.,0.,0.,0.,0.), .02, settle=.03)
         assert task.event.wait(1.)
         wait_until(lambda: manager.lifecycle.execution == 'IDLE')
         assert manager.arm.arm_execution_status(task).state == 'tolerance'
@@ -143,11 +143,12 @@ def test_passthrough_reject_preempt_and_lease_expiry(monkeypatch):
     manager, _ = make_local_manager(monkeypatch)
     manager.lifecycle.connect(); manager.lifecycle.enable()
     try:
-        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [(0.,)*6, (.1,0.,0.,0.,0.,0.)], [0., 1.])
-        with pytest.raises(RuntimeError, match='busy'):
-            manager.arm.send_joint_motor_cmd('joint1', motor_command())
-        manager.arm.send_joint_motor_cmd('joint1', motor_command(), arbitration='preempt')
+        task = submit_curve(manager, (.1,0.,0.,0.,0.,0.), 1.)
+        for arbitration in ('reject', 'preempt'):
+            with pytest.raises(RuntimeError, match='reserved'):
+                manager.arm.send_joint_motor_cmd('joint1', motor_command(), arbitration=arbitration)
+        manager.arm.stop_active_motion(task)
+        manager.arm.send_joint_motor_cmd('joint1', motor_command())
         assert manager.arm.arm_execution_status(task).state == 'canceled'
         assert manager.lifecycle.execution == 'LOWLEVEL_STREAMING'
         wait_until(lambda: manager.lifecycle.execution == 'IDLE')
@@ -159,8 +160,7 @@ def test_passthrough_reject_preempt_and_lease_expiry(monkeypatch):
 def test_disable_ends_waiting_trajectory_instead_of_hanging(monkeypatch):
     manager, _ = make_local_manager(monkeypatch)
     manager.lifecycle.connect(); manager.lifecycle.enable()
-    task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-        [(0.,)*6, (.1,0.,0.,0.,0.,0.)], [0., 10.])
+    task = submit_curve(manager, (.1,0.,0.,0.,0.,0.), 10.)
     manager.lifecycle.disable()
     assert task.event.wait(.1)
     assert manager.arm.arm_execution_status(task).state == 'aborted'
@@ -173,8 +173,10 @@ def test_wrong_point_dimension_rejected_without_replacing_hold(monkeypatch, poin
     manager.lifecycle.connect(); manager.lifecycle.enable()
     try:
         generation = manager.runtime.target_generation
-        with pytest.raises(ValueError, match='six positions'):
-            manager.arm.submit_arm_trajectory(manager.runtime.joint_names, [point], [0.])
+        payload = curve((0.,)*6, (0.,)*6).to_payload()
+        payload['points'][0]['positions'] = list(point)
+        with pytest.raises(ValueError, match='joint values|dimension'):
+            manager.arm.decode_prepared_arm_trajectory({'curve': payload})
         assert manager.runtime.target_generation == generation
         assert manager.lifecycle.enabled
     finally:
@@ -205,8 +207,7 @@ def test_disable_clears_stream_lease_before_new_session(monkeypatch):
     manager.lifecycle.enable()
     try:
         assert manager.arm._arm_passthrough_until is None
-        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [(0.01,0.,0.,0.,0.,0.)], [0.])
+        task = submit_curve(manager, (0.01,0.,0.,0.,0.,0.), .01)
         assert task.event.wait(1.)
         assert manager.arm.arm_execution_status(task).state == 'succeeded'
     finally:

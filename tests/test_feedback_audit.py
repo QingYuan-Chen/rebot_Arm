@@ -11,6 +11,7 @@ import tty
 from types import SimpleNamespace
 
 import pytest
+from controller_trajectory_helpers import submit_curve
 
 from test_controller_local_runtime import make_local_manager, wait_until
 
@@ -292,8 +293,7 @@ def test_duplicate_stop_joins_one_transaction_and_moving_cancel_retargets(monkey
     workers = [threading.Thread(target=stop) for _ in range(2)]
     try:
         # 正在运动的轨迹不能保留远处目标。
-        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [(0.,)*6, (.1, -.1, -.1, 0., 0., 0.)], [0., 10.])
+        task = submit_curve(manager, (.1, -.1, -.1, 0., 0., 0.), 10.)
         for motor in opened[0].motors[:6]:
             motor.state.vel = .2
         workers[0].start()

@@ -35,8 +35,8 @@
   <exec_depend>pinocchio</exec_depend>
   <exec_depend>rebotarm_moveit_config</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
-  <!-- ruckig：加加速度（jerk）受限的在线轨迹生成库，用作可选的重定时后端。运行时探测能否
-       导入该模块，不可用时自动回落到内置重定时实现，因此缺失它不会让功能失败。 -->
+  <!-- ruckig：保留的依赖声明。当前示教重定时使用 motion 的分级 waypoint 算法；
+       请求 ruckig 方法名时报告适配器尚未实现，并返回实际使用的方法名。 -->
   <exec_depend>ruckig</exec_depend>
   <!-- control_msgs：控制器动作接口定义（关节轨迹跟随动作的 Goal/Result/Feedback）。 -->
   <exec_depend>control_msgs</exec_depend>

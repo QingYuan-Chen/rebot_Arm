@@ -1,4 +1,4 @@
-"""Web 遥操作「关节目标 / 夹爪目标」请求的纯校验与轨迹插值。
+"""Web 遥操作「关节目标 / 夹爪目标」请求的纯校验。
 
 本模块是 Web 面板下发点对点运动前的第一道安全门，把校验逻辑集中在此处，
 不导入任何 ROS 运行时，因此可以在没有 ROS 的环境下做完整单元测试。
@@ -6,7 +6,6 @@
 对外接口（全部为纯函数或不可变数据类）：
 - ``validate_web_execute_request``：校验关节目标并产出 ``WebExecuteDecision``；
 - ``validate_web_gripper_request``：校验夹爪目标并产出 ``WebGripperDecision``；
-- ``interpolate_joint_points``：把起止关节角插值成控制器的多点轨迹点。
 
 校验顺序（任一步失败立即返回 accepted=False，不产生任何下发副作用）：
 1. 确认串：关节运动必须携带 ``confirm="EXECUTE"``，夹爪必须携带
@@ -49,47 +48,6 @@ class WebGripperDecision:
     message: str
     position: float = 0.0
     max_effort: float = 0.0
-
-
-def smoothstep(ratio: float) -> float:
-    """三次平滑插值曲线 ``3r²-2r³``，输入进度比 r∈[0,1]，返回混合系数∈[0,1]。
-
-    相比线性插值，两端一阶导为 0（起停速度为 0），可避免轨迹起停处的加速度冲击；
-    输入先被夹紧到 [0,1]，因此越界调用不会产生外推。
-    """
-    value = min(max(float(ratio), 0.0), 1.0)
-    return value * value * (3.0 - 2.0 * value)
-
-
-def interpolate_joint_points(
-    *,
-    current: tuple[float, ...],
-    target: tuple[float, ...],
-    duration: float,
-    step_period: float = 0.05,
-) -> list[tuple[float, tuple[float, ...]]]:
-    """按固定步长把关节从 ``current`` 平滑过渡到 ``target``。
-
-    返回 ``[(相对起点的时间秒, 各关节位置 rad), ...]``，首点严格等于 current、
-    末点严格等于 target（首尾用原值直接输出，不做浮点混合），供上层逐点填进轨迹消息。
-
-    ``step_period`` 为期望的相邻点时间间隔（默认 0.05 s），实际步数取
-    ``max(2, int(duration / step_period))``：至少 2 段以保证有中间点，同时避免
-    step_period 为 0 时除零；``current`` 与 ``target`` 长度不一致时抛 ``ValueError``。
-    """
-    if len(current) != len(target):
-        raise ValueError("current and target lengths must match")
-    steps = max(2, int(float(duration) / max(float(step_period), 1e-3)))
-    points: list[tuple[float, tuple[float, ...]]] = []
-    for step in range(steps + 1):
-        ratio = step / float(steps)
-        blend = smoothstep(ratio)
-        positions = tuple(
-            float(start) + (float(end) - float(start)) * blend
-            for start, end in zip(current, target)
-        )
-        points.append((float(duration) * ratio, positions))
-    return points
 
 
 def validate_web_execute_request(
@@ -181,7 +139,7 @@ def validate_web_execute_request(
             f"target delta too large: {max_delta:.4f} rad > {max_delta_limit:.4f} rad",
         )
 
-    # 时长缺失时用服务端最短时长（最保守）作为默认，并夹紧到合法区间。
+    # 时长缺失时采用配置下限；后面的速度门继续检查该时长是否足够。
     try:
         duration = float(payload.get("duration", min_duration))
     except (TypeError, ValueError):

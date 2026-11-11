@@ -54,13 +54,10 @@ def generate_launch_description():
     use_local_rviz = LaunchConfiguration("use_local_rviz")
     use_moveit_preview = LaunchConfiguration("use_moveit_preview")
     use_hardware = LaunchConfiguration("use_hardware")
-    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
     # 新模式必须有完整规划场景；复用同一 MoveIt 组合，状态发布器随组合互斥。
-    prepare_trajectories = PythonExpression([
-        "'", use_hardware, "'.lower() == 'true' and '", trajectory_mode, "' == 'continuous'",
-    ])
+    prepare_trajectories = use_hardware
     use_moveit_stack = PythonExpression([
-        "'", use_moveit_preview, "'.lower() == 'true' or (", prepare_trajectories, ")",
+        "'", use_moveit_preview, "'.lower() == 'true' or '", use_hardware, "'.lower() == 'true'",
     ])
     joint_state_rate = LaunchConfiguration("joint_state_rate")
     hardware_feedback_rate_hz = LaunchConfiguration("hardware_feedback_rate_hz")
@@ -139,9 +136,6 @@ def generate_launch_description():
             DeclareLaunchArgument("use_moveit_preview", default_value="false"),
             # 是否打开真实硬件通道：默认 false，必须显式开启
             DeclareLaunchArgument("use_hardware", default_value="false"),
-            DeclareLaunchArgument("trajectory_execution_mode", default_value=PythonExpression(
-                ["'continuous' if '", use_hardware, "'.lower() == 'true' else 'legacy'"]),
-                choices=["legacy", "continuous"]),
             # 规划与执行使用的基座坐标系
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             # 末端（法兰）坐标系名
@@ -165,7 +159,6 @@ def generate_launch_description():
                     "use_rviz": "false",
                     "arm_namespace": arm_namespace,
                     "prepare_trajectories": prepare_trajectories,
-                    "trajectory_execution_mode": trajectory_mode,
                     "use_fake_joint_states": PythonExpression(
                         [
                             "'false' if '",
@@ -198,7 +191,6 @@ def generate_launch_description():
                     "gripper_feedback_stale_timeout_sec": gripper_feedback_stale_timeout_sec,
                     "cmd_arbitration": cmd_arbitration,
                     "arm_namespace": arm_namespace,
-                    "trajectory_execution_mode": trajectory_mode,
                     "frame_id": frame_id,
                     "ee_frame_id": ee_frame_id,
                 }.items(),

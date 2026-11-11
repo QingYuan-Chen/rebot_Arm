@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import ast
 import pytest
-from rebotarm_simulation.ros.message_codec import trajectory_to_sampler
+from rebotarm_simulation.ros.message_codec import trajectory_points
 from rebotarm_simulation.apps import viewer_lifecycle
 
 ROOT=Path(__file__).resolve().parents[1]/'src/rebotarm_simulation/rebotarm_simulation'
@@ -18,15 +18,18 @@ def test_execution_has_no_ros_message_conversion_or_old_runtime():
         assert 'nanosec' not in source or path.name == 'offline_trajectory.py'
 
 
-def test_ros_codec_preserves_partial_joint_initial_values_and_rejects_limits():
-    p=SimpleNamespace(positions=[.4],time_from_start=SimpleNamespace(sec=1,nanosec=0))
-    message=SimpleNamespace(joint_names=['joint2'],points=[p])
-    sampler=trajectory_to_sampler(message,initial_positions=[.1]*6)
-    assert sampler.sample(.5)==pytest.approx((.1,.25,.1,.1,.1,.1))
+def test_ros_codec_requires_complete_six_axes_and_rejects_limits():
+    p=SimpleNamespace(positions=[.4]*6, velocities=[], accelerations=[],
+        time_from_start=SimpleNamespace(sec=1,nanosec=0))
+    message=SimpleNamespace(joint_names=[f'joint{i}' for i in range(1,7)],points=[p])
+    names, points = trajectory_points(message)
+    assert names == tuple(message.joint_names) and points[0].positions == (.4,)*6
+    with pytest.raises(ValueError,match='exactly'):
+        trajectory_points(SimpleNamespace(joint_names=['joint2'],points=[p]))
     with pytest.raises(ValueError,match='duration'):
-        trajectory_to_sampler(message,initial_positions=[.1]*6,max_duration_sec=.5)
+        trajectory_points(message,max_duration_sec=.5)
     with pytest.raises(ValueError,match='too many'):
-        trajectory_to_sampler(SimpleNamespace(joint_names=['joint2'],points=[p,p]),initial_positions=[.1]*6,max_points=1)
+        trajectory_points(SimpleNamespace(joint_names=message.joint_names,points=[p,p]),max_points=1)
 
 
 def test_viewer_close_failure_retains_ownership_until_native_release():

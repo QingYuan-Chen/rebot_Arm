@@ -141,7 +141,7 @@ class GripperVisualJointStateNode(Node):
         msg = JointState()
         msg.header = header
         msg.name,msg.position,msg.velocity,msg.effort = self._filtered_state_parts(self._latest_arm_state)
-        # 仿真/轻量预演可直接提供完整源帧；只转发该帧真实携带的手指，绝不补旧值。
+        # 仿真可直接提供完整源帧；只转发该帧真实携带的手指，绝不补旧值。
         source = self._latest_arm_state
         if self._left_joint in source.name and self._right_joint in source.name:
             for name in (self._left_joint,self._right_joint):

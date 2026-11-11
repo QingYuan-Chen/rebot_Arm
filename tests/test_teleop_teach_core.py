@@ -73,7 +73,6 @@ from rebotarm_dashboard.web_robot_assets import (
     safe_mesh_path,
 )
 from rebotarm_teleop.web_execute import (
-    interpolate_joint_points,
     validate_web_gripper_request,
     validate_web_execute_request,
 )
@@ -1269,7 +1268,7 @@ class WebRobotAssetTests(unittest.TestCase):
                 f"{path} end_link collision should not use old end_link.STL",
             )
 
-    def test_status_panel_simulates_gripper_state_without_hardware(self) -> None:
+    def test_status_panel_uses_backend_gripper_action_and_feedback(self) -> None:
         source = (
             ROOT
             / "src"
@@ -1286,10 +1285,10 @@ class WebRobotAssetTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('self._use_hardware = bool(self.get_parameter("use_hardware").value)', source)
-        self.assertIn("use_hardware=self._use_hardware", source)
         self.assertIn('f"/{self._arm_namespace}/gripper/state"', source)
-        self.assertIn("self._publish_simulated_gripper_state", source)
-        self.assertIn('"simulated": True', client_source)
+        self.assertNotIn("_publish_simulated_gripper_state", source)
+        self.assertIn('f"/{self._arm_namespace}/gripper/command"', source)
+        self.assertNotIn("simulated_position", client_source)
 
     def test_teach_recorder_retries_auto_gravity_comp_start(self) -> None:
         source = (
@@ -1397,17 +1396,19 @@ class WebExecuteCoreTests(unittest.TestCase):
         self.assertEqual(decision.max_delta_limit, 0.8)
         self.assertEqual(decision.duration, 6.0)
 
-    def test_interpolated_web_execute_starts_at_current_position(self) -> None:
-        points = interpolate_joint_points(
-            current=(0.0, 1.0),
-            target=(0.2, 0.8),
-            duration=1.0,
-            step_period=0.5,
-        )
-
-        self.assertEqual(points[0], (0.0, (0.0, 1.0)))
-        self.assertEqual(points[-1], (1.0, (0.2, 0.8)))
-        self.assertGreater(len(points), 2)
+    def test_web_motion_constraints_include_start_and_complete_endpoint_derivatives(self) -> None:
+        from rebotarm_motion.trajectory_messages import point_to_point_message
+        from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+        names = tuple(f"joint{i}" for i in range(1, 7))
+        start, target = (0.,) * 6, (.02,) * 6
+        trajectory = point_to_point_message(names, start, target, 1.,
+            trajectory_factory=JointTrajectory, point_factory=JointTrajectoryPoint)
+        self.assertEqual(len(trajectory.points), 2)
+        self.assertEqual(tuple(trajectory.points[0].positions), start)
+        self.assertEqual(tuple(trajectory.points[-1].positions), target)
+        for point in trajectory.points:
+            self.assertEqual(tuple(point.velocities), (0.,) * 6)
+            self.assertEqual(tuple(point.accelerations), (0.,) * 6)
 
     def test_web_execute_rejects_duration_that_exceeds_speed_limit(self) -> None:
         decision = validate_web_execute_request(

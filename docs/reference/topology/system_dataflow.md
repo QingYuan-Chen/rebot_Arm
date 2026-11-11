@@ -44,4 +44,4 @@ MoveIt / RViz
   -> simulated joint states / metrics
 ```
 
-无硬件键盘和 RViz 拖动使用 `rebotarm_preview` 提供轻量轨迹插值及关节状态；MuJoCo 独立入口提供物理仿真。视觉离线入口使用被动关节状态和 MoveIt 查询，外部入口复用已有环境。各机器人环境应保持唯一关节状态、TF 和时钟来源。
+无硬件键盘、RViz 拖动及网页执行统一使用 MuJoCo continuous 后端，并复用同一 MoveIt 场景与仿真时钟。视觉离线入口使用被动关节状态和 MoveIt 查询，外部入口复用已有环境。各机器人环境应保持唯一关节状态、TF 和时钟来源。

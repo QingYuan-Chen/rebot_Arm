@@ -322,12 +322,9 @@ def test_captured_moveit_curve_preserves_derivatives_and_rejects_jerk():
     assert {issue['kind'] for issue in report['limits']['issues']} == {'jerk'}
 
 
-def test_existing_web_points_and_keyboard_are_graded_without_inventing_derivatives():
-    from rebotarm_teleop.web_execute import interpolate_joint_points
-    old_web = tuple(Point(t, q) for t, q in interpolate_joint_points(
-        current=START, target=TARGET, duration=.4))
-    old_keyboard = (Point(.2, TARGET),)
-    for source in (old_web, old_keyboard):
+def test_position_only_fjt_inputs_are_graded_without_inventing_derivatives():
+    # 公共 FJT 的 q-only 输入契约保留，执行方式统一交由 continuous 准备。
+    for source in ((Point(0., START), Point(.4, TARGET)), (Point(.2, TARGET),)):
         candidate, report = analyze(source)
         assert candidate is not None and report['degree'] == 1
         assert not report['limits']['continuity']['c2_with_hold']

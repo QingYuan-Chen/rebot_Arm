@@ -14,7 +14,7 @@
 
 `rebotarm_trajectory` 是 `ament_python` 纯数值库，无节点、ROS、NumPy、SDK、
 物理引擎、线程和时钟依赖，模块平铺包根目录。它拥有不可变轨迹点和分段系数、
-结构/维度/有限性/时间校验、已检查系数解码、旧阶梯索引、线性采样和 q/v/a/jerk 求值。
+结构/维度/有限性/时间校验、已检查系数解码、离线位置记录线性采样和 q/v/a/jerk 求值。
 motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查；控制器保留发送回执、
 执行代次、任务与资源占用；仿真保留物理时间、模式与生命周期。
 三者单向依赖共享包，控制器及仿真不导入 motion 实现。
@@ -32,7 +32,7 @@ motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查
 `GetArmPlanningState` 由后端所有者只读复制会话、六轴代次和已发送保持目标；
 共享内核 `planning.py` 编码快照、最终纳秒曲线摘要及执行/参考/失能预览用途，不读取时钟。
 最终计划先规范化起点再统一重定时；执行预约与准备复核绑定，不能再改节点或时间。
-普通 OMPL 生成最终计划，`ompl_reference` 保留虚拟起点，示教拼接和视觉实际阶段再最终绑定。
+普通 OMPL 生成最终计划，`ompl_reference` 保留虚拟起点，示教拼接后再最终绑定。
 motion 在规划阶段重定时，
 C++ MoveIt 响应插件调用独立 Python 纯计算服务；执行准备不改时间。MoveIt 保留 `arm`
 和 `gripper` 两个独立组；后者通过薄 GripperCommand 适配将左指 m 转换为双指总开口 m。
@@ -45,8 +45,8 @@ C++ MoveIt 响应插件调用独立 Python 纯计算服务；执行准备不改�
 冻结新鲜真实开度；策略和真实快照分别绑定，不修改公共场景或实际反馈。关节状态桥按机械臂
 和夹爪各自源时间发布，旧夹爪不能因新机械臂帧变为新鲜。
 场景摘要仍按原频率观察，仅变化时发布持久化版本，避免重复值占用设备请求队列。
-示教仅回放六轴，夹爪记录保留查看。视觉先独立预张爪完成，再用实际开度规划和执行
-接触前六轴运动；不将位置跟踪异常解释为接触或抓取成功。
+示教仅回放六轴，夹爪记录保留查看。视觉使用关节状态、TF 和 MoveIt 查询筛选候选，
+输出筛选结果及标记；运动和夹爪执行由操作者通过各自的通用入口发起。
 
 ### 硬件职责（Hardware ownership）
 
@@ -269,21 +269,12 @@ P005 准备预约、规划代次、上下文复核、六轴采样、组合终态
 执行状态只有一个写入所有者，诊断与记录读取快照。维护整理的验证结果见
 [P005 代码和文档审查](features/p005_prepared_trajectory.md#代码和文档审查2026-11-04)。
 
-### 轻量预演职责
+### 无硬件执行与 RViz
 
-`rebotarm_preview` 负责不加载物理引擎的 ROS/RViz 流程预演后端。
-
-负责：
-
-- 轻量 `FollowJointTrajectory` 插值执行
-- RViz 关节状态发布
-- 预演用停止、safe home 和夹爪状态接口
-
-它不负责 MuJoCo 物理、动力学、接触、碰撞或真实硬件。`rebotarm_bringup` 根据
-`use_hardware` 和入口类型选择 `rebotarm_preview` 或 `rebotarm_simulation`，同一命名空间
-只能启动一个轨迹执行 Action server。
-
-不得导入或调用真实电机 SDK。仿真 launch 不得启动 `rebotarmcontroller`、打开硬件通道，或以相同名称暴露第二个活动 `FollowJointTrajectory` server。
+无硬件键盘、RViz 拖动和网页执行统一由 `rebotarm_simulation` 的 MuJoCo 后端提供
+continuous 执行，复用完整 MoveIt 场景、准备服务和同一仿真时钟。
+同一命名空间保持唯一轨迹 Action server、关节状态源与时钟源。
+只查看模型或进行视觉候选查询时，可使用被动状态与禁用执行的 MoveIt 组合。
 
 ### 独立强化学习工作区
 
@@ -346,11 +337,10 @@ rebotarm_dashboard
 
 rebotarm_teach -> rebotarm_motion
 rebotarm_motion / rebotarmcontroller / rebotarm_simulation -> rebotarm_trajectory
-rebotarm_teleop -> 使用旧 interactive preview 辅助工具时依赖 rebotarm_motion
-rebotarm_vision -> 为验证和执行依赖 rebotarm_motion / MoveIt 接口
+rebotarm_teleop -> rebotarm_motion（点到点轨迹与网页组合曲线生成）
+rebotarm_vision -> MoveIt 查询接口（候选 IK 与碰撞筛选）
 rebotarm_bringup -> 仅依赖各包的 launch 入口和配置
 rebotarm_simulation -> rebotarm_teach（仅复用示教记录读取与轨迹准备）、ROS 消息和仿真执行库
-rebotarm_bringup -> rebotarm_preview（仅启动轻量预演后端）
 ```
 
 已退役的 MuJoCo ROS adapter 不再随活动包发布；`rebotarm_simulation` 不得导入或声明对 `rebotarm_motion` 的依赖。Launch 解释器必须通过 launch 参数或环境变量按进程显式选择，不能探测工作区虚拟环境目录，也不能把视觉 site-packages 注入整个 launch group。参见 [launch Python 配置](../setup/launch_python_configuration.md)。
@@ -382,9 +372,8 @@ rebotarm_bringup -> 各包的实现内部
 | `rebotarm_teleop` | 否 | 是 | 仅通过运动辅助工具 | 否 | 是 |
 | `rebotarm_dashboard` | 否 | 是 | 无直接规划逻辑 | 仅 Dashboard 资源 | 通过 teleop 适配器 |
 | `rebotarm_moveit_config` | 否 | 否 | 仅配置 | 仅模型/配置文件 | 否 |
-| `rebotarm_vision` | 否 | 仅通过规划执行接口 | 是，用于验证/执行门控 | 仅感知资源/模型 | 否 |
+| `rebotarm_vision` | 否 | 否 | 是，用于候选 IK 与碰撞查询 | 仅感知资源/模型 | 否 |
 | `rebotarm_simulation` | MuJoCo 仿真后端 | 拥有物理仿真等价接口 | 无直接规划策略 | 仅生成的仿真产物 | 否 |
-| `rebotarm_preview` | 轻量 RViz/ROS 预演后端 | 拥有非物理预演接口 | 无直接规划策略 | 无 | 否 |
 | `rebotarm_bringup` | 否 | 无业务逻辑 | 无业务逻辑 | 仅 launch/配置 | 否 |
 | `rebotarm_calibration` | 否 | 否，显式验证工具除外 | 否，验证工具除外 | 仅标定输出 | 否 |
 
@@ -454,7 +443,6 @@ RViz 拖动控制现在采用原生 MoveIt MotionPlanning 工作流。不再使�
 | New URDF/SRDF/collision/planning group config | `rebotarm_moveit_config` |
 | New detection/depth/grasp candidate logic | `rebotarm_vision` |
 | New MuJoCo model, simulated controller, physics metric, or contact feedback | `rebotarm_simulation` |
-| New lightweight RViz/ROS preview backend | `rebotarm_preview` |
 | New launch composition or mutually exclusive backend selection | `rebotarm_bringup` |
 | New hand-eye/TCP/TF check tool | `rebotarm_calibration` |
 

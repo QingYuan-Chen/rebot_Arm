@@ -1,9 +1,9 @@
 """网页和键盘入口共用的轨迹执行能力核对。
 
 文件职责
-    对照前端配置与后端发布的 legacy/continuous，防止生成规则与执行规则错配。
+    核对后端发布的 continuous 能力，防止生成规则与执行规则错配。
 对外接口
-    TrajectoryCapability(expected) 保存期望模式；update 接收 String 消息；
+    TrajectoryCapability() 保存能力观察；update 接收 String 消息；
     require 在未观察到能力或模式不一致时抛出 ValueError，由入口报告拒绝原因。
 安全约束
     仅核对协议能力，不证明后端健康、使能或资源空闲；这些条件仍由正式准入检查。
@@ -19,10 +19,7 @@ from rebotarm_trajectory.capability import decode_capability
 
 class TrajectoryCapability:
     """由入口节点持有的能力快照；初始 observed=None 表示尚无后端声明。"""
-    def __init__(self, expected):
-        if expected not in ('legacy', 'continuous'):
-            raise ValueError('trajectory_execution_mode must be legacy or continuous')
-        self.expected = expected
+    def __init__(self):
         self.observed = None
         self.snapshot = None
         self.observed_at = 0.
@@ -42,7 +39,7 @@ class TrajectoryCapability:
         self.require()
         if self.snapshot is None or time.monotonic()-self.observed_at > 1.:
             raise ValueError('fresh versioned trajectory capability unavailable')
-        if self.snapshot['mode'] != self.expected:
+        if self.snapshot['mode'] != 'continuous':
             raise ValueError('versioned trajectory capability mode mismatch')
         return dict(self.snapshot)
 
@@ -51,6 +48,6 @@ class TrajectoryCapability:
         self.observed = message.data
 
     def require(self):
-        """只允许已观察值与配置精确相等；不会把 legacy 当成通用降级选项。"""
-        if self.observed != self.expected:
-            raise ValueError(f'trajectory mode mismatch: expected {self.expected}, observed {self.observed}')
+        """后端必须明确声明 continuous；未知能力由调用入口报告。"""
+        if self.observed != 'continuous':
+            raise ValueError(f'trajectory mode mismatch: expected continuous, observed {self.observed}')
