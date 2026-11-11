@@ -736,7 +736,7 @@ def test_ros_goal_transport_binding_prevents_late_cancel_from_stopping_next_goal
     assert len(sim.events) == before
 
 
-def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failure):
+def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failure, web=False):
     """使用真实执行组件和 ROS 消息，仅替换物理故障及 Action 传输句柄。"""
     import rclpy
     from action_msgs.msg import GoalStatus
@@ -758,6 +758,7 @@ def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failu
 
     class Goal:
         goal_id = SimpleNamespace(uuid=bytes(range(16)))
+        request = SimpleNamespace(move_gripper=False)
         is_cancel_requested = False
         status = GoalStatus.STATUS_EXECUTING
         abort_calls = 0
@@ -779,6 +780,9 @@ def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failu
         def destroy(self):
             self.status = GoalStatus.STATUS_UNKNOWN
 
+        def publish_feedback(self, feedback):
+            pass
+
     logger = SimpleNamespace(**{level: (lambda message, level=level: logs.append((level, message)))
                                for level in ('error', 'warning', 'debug')})
     goal = Goal()
@@ -794,7 +798,7 @@ def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failu
     monkeypatch.setattr(execution.control, 'hold_current_position', hold)
     monkeypatch.setattr(execution, 'observe', observe)
     monkeypatch.setattr(rclpy, 'ok', lambda: True)
-    callback = lambda handle: create_node_class()._execute_goal(owner, handle)
+    callback = lambda handle: create_node_class()._execute_goal(owner, handle, web=web)
     return callback, owner, goal, calls, logs, logger
 
 
@@ -802,12 +806,13 @@ def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failu
     (False, None), (True, None), (False, 'before_always'), (True, 'before_always'),
     (False, 'after'),
 ])
+@pytest.mark.parametrize('web', [False, True])
 def test_continuous_ros_callback_reports_execution_and_cleanup_failure(
-        monkeypatch, hold_fails, abort_failure):
+        monkeypatch, hold_fails, abort_failure, web):
     from control_msgs.action import FollowJointTrajectory
 
     callback, owner, goal, calls, logs, _ = _continuous_failure_callback_fixture(
-        monkeypatch, hold_fails=hold_fails, abort_failure=abort_failure)
+        monkeypatch, hold_fails=hold_fails, abort_failure=abort_failure, web=web)
     result = callback(goal)
     assert result.error_code == FollowJointTrajectory.Result.INVALID_GOAL
     assert 'injected execution failure' in result.error_string
@@ -822,6 +827,22 @@ def test_continuous_ros_callback_reports_execution_and_cleanup_failure(
     assert calls == ['hold', 'abort']
     assert owner._execution.active.busy == hold_fails and owner._goal_tokens == {}
     assert goal.is_active == (abort_failure == 'before_always')
+
+
+@pytest.mark.parametrize('web', [False, True])
+def test_continuous_stop_timeout_retains_reservation_and_original_error(monkeypatch, web):
+    callback, owner, goal, calls, logs, _ = _continuous_failure_callback_fixture(
+        monkeypatch, hold_fails=False, abort_failure=None, web=web)
+    def timeout(token):
+        owner._execution.stop_unconfirmed = True
+        raise RuntimeError('simulation stop/hold unconfirmed')
+    owner._wait_prepared_stop = timeout
+    result = callback(goal)
+    assert 'injected execution failure' in result.error_string
+    assert 'stop/hold unconfirmed' in result.error_string
+    assert owner._execution.active.busy and owner._execution.stop_unconfirmed
+    assert calls == ['hold', 'abort'] and owner._goal_tokens == {}
+    assert any('stop/hold unconfirmed' in message for _, message in logs)
 
 
 def test_continuous_ros_callback_keeps_existing_action_terminal_state(monkeypatch):
