@@ -72,6 +72,7 @@ def create_node_class():
     class RebotArmMujocoNode(Node):
         def __init__(self) -> None:
             super().__init__("rebotarm_mujoco_node")
+            self._closing = threading.Event()
             self.declare_parameter("backend", "mujoco")
             self.declare_parameter("headless", True)
             self.declare_parameter("show_viewer", False)
@@ -345,7 +346,7 @@ def create_node_class():
             self.get_logger().info(f'trajectory preparation dispatch age={time.monotonic()-pending.feedback_observed_at:.4f}s')
             future = self._prepare_client.call_async(request)
             while not future.done():
-                if (goal_handle.is_cancel_requested or self._execution.active.cancel_requested
+                if (self._closing.is_set() or goal_handle.is_cancel_requested or self._execution.active.cancel_requested
                         or time.monotonic() >= pending.deadline_monotonic):
                     future.cancel()
                     raise RuntimeError('trajectory preparation canceled or timed out')
@@ -359,6 +360,9 @@ def create_node_class():
             return sampler
 
         def _wait_prepared_stop(self, token):
+            if self._closing.is_set():
+                self._execution.stop_unconfirmed = True
+                raise RuntimeError('simulation shutting down before stop confirmation')
             wait = self._execution.begin_stop_wait(token)
             while not self._execution.poll_stop(wait):
                 time.sleep(.01)
@@ -445,7 +449,7 @@ def create_node_class():
                     if self._execution.status_snapshot().stop_unconfirmed:
                         raise RuntimeError('simulation stop/hold unconfirmed')
                     task = self._sim_access.run(lambda sim: self._execution.gripper.start(owner, width, effort))
-                while rclpy.ok():
+                while rclpy.ok() and not self._closing.is_set():
                     with self._execution.lock:
                         if goal.is_cancel_requested:
                             self._sim_access.run(lambda sim: self._execution.gripper.cancel(task, 'gripper action canceled'))
@@ -482,7 +486,7 @@ def create_node_class():
                             or self._execution.status_snapshot().stop_unconfirmed):
                         raise RuntimeError('gripper resources reserved or stop unconfirmed')
                     task = self._sim_access.run(lambda sim: self._execution.gripper.start(object(), width, effort))
-                while rclpy.ok():
+                while rclpy.ok() and not self._closing.is_set():
                     with self._execution.lock:
                         if task.state not in ('active', 'releasing'):
                             response.success = task.state == 'succeeded'
@@ -550,7 +554,7 @@ def create_node_class():
                 sampler = self._prepare_sampler(goal_handle, token)
                 start_time, grip = execution.accepted_context(token)
                 feedback_limiter = FeedbackRateLimiter(self._feedback_rate_hz)
-                while rclpy.ok():
+                while rclpy.ok() and not self._closing.is_set():
                     outcome, observation = execution.observe(token, sampler, start_time,
                         lambda: goal_handle.is_cancel_requested)
                     if outcome is not GateOutcome.APPLIED:
@@ -596,6 +600,8 @@ def create_node_class():
                         return result
                     time.sleep(self._execute_wait_sec)
                 execution.stop(token)
+                # 进程正在结束物理步进，保留未确认预约，随仿真所有者一并释放。
+                execution.stop_unconfirmed = True
                 goal_handle.abort()
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
                 result.error_string = "simulation shutting down"
@@ -686,13 +692,20 @@ def create_node_class():
 
 def main(args=None) -> None:
     import importlib
+    import signal
     import rclpy
+    from rclpy.signals import SignalHandlerOptions
     from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
     from rebotarm_simulation.apps.viewer_lifecycle import (
         close_passive_viewer_safely, retain_unsafe_resources, stop_executor,
     )
 
-    rclpy.init(args=args)
+    def interrupt(*_):
+        raise KeyboardInterrupt
+
+    # 信号终止调度，ROS context 保留至工作线程和发布回调退出之后。
+    previous_signals = {sig:signal.signal(sig, interrupt) for sig in (signal.SIGINT,signal.SIGTERM)}
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = create_node_class()()
     executor = MultiThreadedExecutor(num_threads=3)
     executor.add_node(node)
@@ -727,6 +740,9 @@ def main(args=None) -> None:
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        node._closing.set()
+        for sig, handler in previous_signals.items():
+            signal.signal(sig, handler)
         try:
             stop_executor(executor, executor_thread, multi_threaded=True)
         except BaseException:

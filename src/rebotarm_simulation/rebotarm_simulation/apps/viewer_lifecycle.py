@@ -21,7 +21,21 @@ def stop_executor(executor, thread, *, multi_threaded: bool = False) -> None:
         return
     deadline = time.monotonic() + 2.0
     if multi_threaded:
-        stopped = executor.shutdown(timeout_sec=2.0, wait_for_threads=False)
+        # Jazzy shutdown 会先销毁 guard。先停止派发、唤醒并结束自旋，再排空工作线程。
+        with executor._shutdown_lock:
+            executor._is_shutdown = True
+        executor.wake()
+        if thread is not None:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if thread.is_alive():
+                raise TimeoutError("ROS executor did not finish closing")
+        executor._executor.shutdown(wait=False)
+        workers = tuple(executor._executor._threads)
+        for worker in workers:
+            worker.join(timeout=max(0.0, deadline - time.monotonic()))
+        if any(worker.is_alive() for worker in workers):
+            raise TimeoutError("ROS executor workers did not finish closing")
+        stopped = executor.shutdown(timeout_sec=max(0.0, deadline-time.monotonic()), wait_for_threads=False)
     else:
         stopped = executor.shutdown(timeout_sec=2.0)
     if thread is not None:
@@ -29,12 +43,10 @@ def stop_executor(executor, thread, *, multi_threaded: bool = False) -> None:
     if not stopped or (thread is not None and thread.is_alive()):
         raise TimeoutError("ROS executor did not finish closing")
     if multi_threaded:
-        # Jazzy 的 shutdown 返回值不足以证明线程池中的回调结束；逐个有界等待。
-        workers = tuple(executor._executor._threads)
-        for worker in workers:
-            worker.join(timeout=max(0.0, deadline - time.monotonic()))
-        if any(worker.is_alive() for worker in workers):
-            raise TimeoutError("ROS executor workers did not finish closing")
+        errors = [future.exception() for future in executor._futures if future.done()]
+        errors = [error for error in errors if error is not None]
+        if errors:
+            raise ExceptionGroup('ROS executor callbacks failed during shutdown', errors)
 
 
 def _close_viewer_then_sim(

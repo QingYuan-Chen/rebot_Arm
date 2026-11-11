@@ -682,7 +682,7 @@ def test_unconfirmed_idle_stop_rejects_every_gripper_entry(entry):
     execution.stop_unconfirmed = True
     errors = []
     owner = SimpleNamespace(_execution=execution, _sim_access=execution.access,
-        get_logger=lambda:SimpleNamespace(error=errors.append))
+        get_logger=lambda:SimpleNamespace(error=errors.append), _closing=threading.Event())
     node_class = create_node_class()
     before = list(sim.events)
     if entry == 'goal':
@@ -814,6 +814,7 @@ def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failu
                                for level in ('error', 'warning', 'debug')})
     goal = Goal()
     owner = SimpleNamespace(_execution=execution,
+        _closing=threading.Event(),
         _goal_tokens={bytes(goal.goal_id.uuid): token}, _sim_access=execution.access,
         _feedback_rate_hz=20., get_logger=lambda: logger,
         _prepare_sampler=lambda handle, token:sampler)

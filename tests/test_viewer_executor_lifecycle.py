@@ -16,7 +16,12 @@ class _Executor:
     def __init__(self, *, shutdown_result=True):
         self.finished = threading.Event()
         self.shutdown_result = shutdown_result
-        self._executor = SimpleNamespace(_threads=set())
+        self._executor = SimpleNamespace(_threads=set(), shutdown=lambda **kwargs:None)
+        self._shutdown_lock = threading.Lock()
+        self._futures = []
+
+    def wake(self):
+        pass
 
     def add_node(self, node):
         pass
@@ -63,7 +68,7 @@ def test_mujoco_executor_failure_is_reported_after_safe_cleanup(monkeypatch):
     events = []
     executor = _Executor()
     viewer = _Viewer(executor, events)
-    node = SimpleNamespace(show_viewer=True, _retain_simulation=False,
+    node = SimpleNamespace(show_viewer=True, _retain_simulation=False, _closing=threading.Event(),
         viewer_handles=lambda: (object(), object()),
         sync_viewer=lambda _viewer: None,
         close=lambda: events.append("sim.close"),

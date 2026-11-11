@@ -18,7 +18,8 @@ from std_msgs.msg import String
 from rebotarm_motion import trajectory_retiming_node
 
 
-def test_shutdown_drains_queued_callback_before_destroying_guard(monkeypatch):
+@pytest.mark.parametrize('owner', ['retiming', 'simulation'])
+def test_shutdown_drains_queued_callback_before_destroying_guard(monkeypatch, owner):
     context = Context()
     context.init(args=[], domain_id=226)
     node = Node('retiming_shutdown_test', context=context)
@@ -46,7 +47,11 @@ def test_shutdown_drains_queued_callback_before_destroying_guard(monkeypatch):
             return pool_shutdown(*args, **kwargs)
 
         monkeypatch.setattr(executor._executor, 'shutdown', drain)
-        trajectory_retiming_node._shutdown_executor(executor)
+        if owner == 'retiming':
+            trajectory_retiming_node._shutdown_executor(executor)
+        else:
+            from rebotarm_simulation.apps.viewer_lifecycle import stop_executor
+            stop_executor(executor, None, multi_threaded=True)
         assert task.done() and task.exception() is None
     finally:
         release.set()

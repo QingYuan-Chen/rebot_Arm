@@ -352,6 +352,9 @@ MoveIt、RViz 和状态发布节点使用 `use_sim_time:=true` 跟随 `/clock`�
 停止及终态错误；迟到回调只处理原目标身份。持续 abort 失败时返回
 `status=UNKNOWN`、`error_code=INVALID_GOAL`，故障服务端拒绝新目标并保留结果供迟到查询。
 看到 `trajectory Action requires restart` 后重启 MuJoCo 节点，取得新鲜反馈并重新规划。
+MuJoCo 节点收到 SIGINT/SIGTERM 后先通知业务回调结束，再停止派发并排空工作线程，
+最后释放执行器句柄、模型和 ROS context。关闭期间的未确认停止预约随仿真所有者释放；
+回调内部错误仍可见传播，发布处理中也保持 context 有效。
 先在已核对空闲的非零 ROS 域中启动下方完整组合；各终端使用相同 `ROS_DOMAIN_ID`
 及 localhost 隔离设置。另开已 source 的终端执行：
 
