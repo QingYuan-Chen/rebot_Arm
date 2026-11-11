@@ -1,3 +1,10 @@
+"""对已运行的 MoveIt 与无界面 MuJoCo 执行规划、Action 和反馈验收。
+
+入口 run_acceptance/main 先核对唯一 Action 所有者及后端参数，再提交固定六轴目标。
+服务等待使用单调时间；反馈与 /clock 用于核对仿真时间推进。调用方负责隔离 ROS 域
+及启动环境，本工具会实际推进被核验的仿真机械臂。
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -14,9 +21,9 @@ MOVEIT_ACCEPTANCE_TARGET = (0.04, -0.12, -0.12, 0.06, 0.0, 0.0)
 
 
 def require_simulation_server(node, executor, action_name, timeout):
-    """Fail closed unless the unique action owner identifies as MuJoCo.
+    """核对唯一 Action 所有者的节点名及 MuJoCo/headless 参数，再允许发仿真目标。
 
-    The probe must never infer simulation from an action name shared with hardware.
+    真机与仿真复用 Action 名称，因此后端身份必须向所有者的参数服务确认。
     """
     from rclpy.action import get_action_server_names_and_types_by_node
     from rcl_interfaces.srv import GetParameters

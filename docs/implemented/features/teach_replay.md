@@ -113,7 +113,8 @@ ROS_DOMAIN_ID=74 python3 scripts/validate_p005_simulation.py --ros \
 `isolated_imports.json`、`acceptance_delivery/teach_web_preview.json`、
 对应 dry-run/execute/终态和反馈报告、`simulation_delivery.log`。
 未运行完整 pytest、重认 P005 单步物理指标或进行实机操作；未扩展处理已有退出协程警告。
-此前 C2/v4 仅保留历史证据。实机默认 legacy、默认失能不变，网页需重新加载并重新检查。
+此前 C2/v4 仅保留历史证据。当时实机默认 legacy、默认失能，网页需重新加载并重新检查。
+当前入口默认模式见 [P005 执行接入](p005_prepared_trajectory.md)。
 
 ### 缺少加速度记录修复验收（2026-11-04）
 

@@ -18,7 +18,7 @@
 
 ## 工程结构
 
-- `src/`：12 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属。
+- `src/`：13 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属；共享轨迹数值契约归 `rebotarm_trajectory`。
 - `docs/setup/dependencies/`：分环境的 Markdown 依赖版本清单与安装说明。
 - `scripts/`：环境安装、验证和离线工具。
 - `tests/`：软件回归与架构检查。
@@ -54,12 +54,14 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests -q
 或 GraspNet 权重；视觉依赖安装脚本不再重建工作区。检测启动时才检查模型，
 可用现有 `.pt` 或显式指定本机推理引擎，见 [视觉安装与模型准备](docs/setup/ubuntu_vision_setup_zh.md)。
 运行时按节点设置 [解释器参数](docs/setup/launch_python_configuration.md)，不要全局注入视觉依赖。
-完整回归还需要已构建的 ROS 消息及固定厂商 SDK；纯源码构建通过不代表真机验收。
+完整回归需要已构建的 ROS 消息及对应测试依赖；生产控制器直接使用 MotorBridge，
+厂商 Python SDK 保留为历史参考。验收结果统一见[项目状态](docs/reference/project_status.md)。
 
 视觉只支持 Ubuntu 原生 D405 -> YOLO -> ROS RGB-D/CameraInfo/检测结果 -> 本机
 GraspNet。Windows、HTTP、MJPEG、远端 JSON 和独立 GraspNet 服务已删除。
 MoveIt 执行还需要 `ros-jazzy-moveit-simple-controller-manager`；规划成功不等于
-执行成功。真机启动默认失能，必须在新鲜反馈和现场安全检查后显式使能。
+执行成功。真机默认轨迹模式为 `continuous`，启动默认失能；运动前须取得新鲜反馈、
+完成现场安全检查并显式使能。`legacy` 保留显式选择，轻量 RViz 预演默认使用 `legacy`。
 
 ## 真机边界
 

@@ -35,6 +35,7 @@ std::deque<BoundPlan> plans;
 
 bool same_values(const std::vector<double>& a, const std::vector<double>& b)
 {
+  // 1e-12 只容纳消息往返的浮点误差；实际发送值仍取服务保存的权威轨迹。
   if (a.size() != b.size()) return false;
   for (size_t i = 0; i < a.size(); ++i)
     if (!std::isfinite(a[i]) || !std::isfinite(b[i]) || std::abs(a[i]-b[i]) > 1e-12) return false;
@@ -49,6 +50,7 @@ bool same_plan(const Trajectory& a, const Trajectory& b)
     const auto& x = a.points[i]; const auto& y = b.points[i];
     const int64_t tx = int64_t(x.time_from_start.sec)*1000000000+x.time_from_start.nanosec;
     const int64_t ty = int64_t(y.time_from_start.sec)*1000000000+y.time_from_start.nanosec;
+    // MoveIt 的秒/纳秒重编码允许 1 ns 差异；该容差仅用于找回绑定，不放宽执行限值。
     if (std::abs(tx-ty) > 1 || !same_values(x.positions,y.positions) ||
         !same_values(x.velocities,y.velocities) || !same_values(x.accelerations,y.accelerations) ||
         !x.effort.empty() || !y.effort.empty()) return false;
@@ -111,6 +113,7 @@ public:
       res.trajectory->getRobotTrajectoryMsg(message);
       std::lock_guard<std::mutex> lock(binding_mutex);
       plans.push_back({message.joint_trajectory, response->trajectory, response->executable});
+      // 有界缓存淘汰最早计划；执行端查无绑定时要求重新规划，重新取得当前起点身份。
       if (plans.size() > 128) plans.pop_front();
       RCLCPP_INFO(parent_->get_logger(), "execution curve planned: scale=%.6f final_time=%.6f s",
                   response->time_scale,res.trajectory->getDuration());
@@ -137,6 +140,8 @@ public:
     rejected_ = true;
     {
       std::lock_guard<std::mutex> lock(binding_mutex);
+      // 同一数值曲线取最近一次规划身份；最新项为参考/失能预览时也立即结束匹配。
+      // 这样旧的可执行项不会重新放行当前只供预览的计划。
       for (auto p = plans.rbegin(); p != plans.rend(); ++p)
         if (same_plan(p->comparison,trajectory.joint_trajectory))
         {

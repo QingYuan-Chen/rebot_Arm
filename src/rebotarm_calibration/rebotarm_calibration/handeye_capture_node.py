@@ -34,7 +34,7 @@ def stamp_ns(stamp):
 
 
 class WaitingObservation(Exception):
-    """No new observation yet; bounded by capture deadline and gap gate."""
+    """本次尚无新观测，交由采集循环在总期限和帧间隔门内继续等待。"""
 
 
 class HandeyeCaptureNode(Node):

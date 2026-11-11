@@ -55,6 +55,7 @@ def create_node_class():
     from rebotarm_msgs.action import ExecuteTeleopMotion
     from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
     from rclpy.action import ActionServer, CancelResponse, GoalResponse
+    from rebotarm_simulation.ros.trajectory_action_server import TrajectoryActionServer
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
     from rclpy.clock import Clock as RclpyClock
     from rclpy.clock import ClockType
@@ -206,7 +207,7 @@ def create_node_class():
             self._diagnostic_last_wall = time.monotonic()
             self._diagnostic_last_sim = 0.0
             # 与真实控制器同名的轨迹动作接口：上层运动/示教代码无需区分真机与仿真。
-            self._action_server = ActionServer(
+            self._action_server = TrajectoryActionServer(
                 self,
                 FollowJointTrajectory,
                 f"/{self._arm_namespace}/follow_joint_trajectory",
@@ -225,7 +226,7 @@ def create_node_class():
                     execute_callback=lambda goal,m=moveit:self._execute_gripper(goal,moveit=m),
                     callback_group=self._callback_group))
             if self._trajectory_mode == 'continuous':
-                self._teleop_server = ActionServer(self,ExecuteTeleopMotion,
+                self._teleop_server = TrajectoryActionServer(self,ExecuteTeleopMotion,
                     f'/{namespace}/execute_teleop_motion',
                     goal_callback=lambda goal:self._goal_callback(goal,web=True),
                     handle_accepted_callback=self._handle_accepted,
@@ -629,8 +630,17 @@ def create_node_class():
                     else:
                         goal_handle.abort()
                 else:
-                    execution.fail_legacy(token,
-                        lambda: goal_handle.abort() if getattr(goal_handle, "is_active", True) else None)
+                    try:
+                        execution.fail_legacy(token,
+                            lambda: goal_handle.abort() if goal_handle.is_active else None)
+                    except Exception as cleanup_error:
+                        # 回调返回值保留执行和清理原因；abort 抛错时按真实 goal 状态报告。
+                        exc = RuntimeError(f'{type(exc).__name__}: {exc}; '
+                            f'{type(cleanup_error).__name__}: {cleanup_error}')
+                        self.get_logger().error(
+                            f'trajectory execution and cleanup failed: {exc}; '
+                            f'Action state after cleanup: status={goal_handle.status}, '
+                            f'is_active={goal_handle.is_active}')
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
                 result.error_string = f"simulation trajectory execution failed: {exc}"
                 return result

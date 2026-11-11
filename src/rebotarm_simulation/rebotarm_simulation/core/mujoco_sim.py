@@ -1,3 +1,10 @@
+"""拥有 MuJoCo 模型与物理状态，为 ROS、Viewer 和离线应用提供统一仿真接口。
+
+接口按构造、状态/模式、目标写入、物理步进、快照与场景操作、关闭组织。
+控制记忆归 SimControlRuntime；多线程调用方负责统一加锁，快照返回复制后的数值。
+Viewer 借用原生句柄期间，所有者需先结束借用再关闭实例。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -82,7 +89,7 @@ class RebotArmMujoco:
                 "in the active Python environment."
             ) from exc
         self.model_path = str(model_resource(explicit=model_path))
-        # MjModel 是不可变的模型定义；MjData 保存逐次步进的运行时状态。
+        # MjModel 保存模型参数（本实例可显式随机化）；MjData 保存逐次步进的物理状态。
         self._model = self._mj.MjModel.from_xml_path(self.model_path)
         if collisionless:
             # Reach-only opt-in: visual meshes and inertial properties remain;
@@ -128,14 +135,11 @@ class RebotArmMujoco:
 
 
     def borrow_viewer_handles(self):
-        """Borrow mutable native model/data exclusively for a passive Viewer.
+        """为被动 Viewer 借出可变原生 model/data，所有权仍归本实例。
 
-        This does not transfer ownership or acquire a lock. The caller must
-        serialize physics access and viewer.sync() using its existing simulation
-        access gate. Native handles may be retained for the Viewer lifetime;
-        stop rendering and finish native Viewer shutdown before sim.close().
-        Do not use this interface for business logic or release the model/data.
-        Already borrowed handles cannot be revoked by Python after close().
+        调用方通过现有仿真锁串行协调物理访问与 viewer.sync()，并在 sim.close()
+        前确认 Viewer 已完成关闭。借用只服务显示；业务查询使用值快照接口。
+        已借出的 Python 引用会继续存活，关闭顺序由持有这些引用的应用保证。
         """
         self._ensure_open()
         return self._model, self._data
@@ -333,7 +337,7 @@ class RebotArmMujoco:
         return self._control.command_gripper_width(self._model, self._data, width_m, max_force_n)
 
     def command_gripper_position(self, width, torque_cap):
-        """米制左指参考与启动限矩；不重新生成曲线。"""
+        """提交双指总开口 m 与电机限矩 N·m；单指位移换算由控制组件完成。"""
         return self._control.command_gripper_position(self._model,self._data,width,torque_cap)
 
     def release_gripper_position(self):
@@ -529,6 +533,7 @@ class RebotArmMujoco:
 
 
     def close(self) -> None:
+        """释放本实例持有的原生引用；调用方应已结束执行线程与 Viewer 借用。"""
         if self._closed:
             return
         self._closed = True

@@ -312,6 +312,7 @@ class ArmController:
                     if result.state != 'confirmed':
                         raise RuntimeError(result.message)
                     if reserved_stop:
+                        # 联合预约还保护夹爪几何；六轴停稳后继续确认夹爪，随后统一释放预约。
                         try:
                             self.gripper.snapshot()
                         except RuntimeError:
@@ -674,6 +675,7 @@ class ArmController:
         current, _, _ = self.feedback.get_joint_state()
         task = self.submit_arm_trajectory(self._backend.joint_names, [current, goal], [0., .001],
             home=True, velocity=[speed]*6, timeout=timeout)
+        # 此处在调用线程等待；唯一设备线程继续发送、采集并确认到位后唤醒本任务。
         task.event.wait()
         status = self.arm_execution_status(task)
         if status.state != 'succeeded':

@@ -265,15 +265,15 @@ class WebTeleopClient:
     def stop(self, goal_handle: Any | None, *, trajectory_stop_client: Any) -> dict:
         """停止 Web 触发的运动：先请求控制器级停止，再取消动作目标。
 
-        两条路径并行，因为控制器级的 trajectory_stop 是最后一道保险：
-        即使动作层取消抛异常（已被捕获），只要控制器停止成功仍返回 ``accepted=True``。
+        先有界等待 trajectory_stop 服务，再提交异步取消；取消响应由调用方继续跟踪。
+        即使动作层取消抛异常，只要停止服务成功仍返回 ``accepted=True``。
 
         参数：
         - ``goal_handle``：当前活动的动作目标句柄，None 表示没有 Web 运动在跑；
         - ``trajectory_stop_client``：控制器触发器服务客户端。
 
         返回值约定：
-        - ``accepted``：是否至少有一路停止生效；
+        - ``accepted``：停止服务成功或取消请求已提交；目标终态由后续回调确认；
         - ``status.state``：``cancel_requested`` / ``idle`` / ``failed``；
         - ``cancel_future``：取消请求的 future，供调用方注册回调；
         - ``clear_goal_handle``：True 表示调用方应清空保存的目标句柄。
@@ -306,7 +306,7 @@ class WebTeleopClient:
         try:
             future = goal_handle.cancel_goal_async()
         except Exception as exc:
-            # 取消请求本身失败不算致命：控制器级停止若已生效，仍视为停止成功
+            # 保存取消异常，同时返回已确认的停止服务结果，供调用方继续核对目标状态。
             message = f"failed to request trajectory cancel: {exc}"
             if stop_requested:
                 message = f"{message}; controller trajectory_stop requested"

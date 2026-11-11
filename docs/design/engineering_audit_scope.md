@@ -1,6 +1,6 @@
 # 工程规范审核与防御性代码精简范围
 
-> 类型：功能审核范围与消融方案；源码核对：2026-11-06。审核进展与验证结果统一记录在[项目状态](../reference/project_status.md)。
+> 类型：功能审核范围、消融与整改方案；首次源码核对：2026-11-06；后续整改规划：2026-11-11。审核进展与验证结果统一记录在[项目状态](../reference/project_status.md)。
 
 ## 目标与依据
 
@@ -14,7 +14,7 @@
 实施各批时重新记录提交与未提交差异，使实际对照输入可复现。
 
 批次 01–13 和独立清理子批 3R 已按本方案实施；具体候选、对照与接口变化见本文末尾。
-后续维护沿用下列功能范围。
+后续维护沿用下列功能范围；本轮方案见[三项问题整改与注释完善](#audit-fixes-20261111)。
 
 ## 判定规则
 
@@ -560,3 +560,143 @@ IK、位姿 Action 和显式失能均通过，探针 `ok=true`；两个后台进
 IK、位姿 Action 和显式失能均通过，探针 `ok=true`；两个后台进程退出码均为 **0**。
 用户指示非必要不重复完整回归，也未重跑全工作区隔离构建；最近全量基线为批次 11A 的
 **1857 passed / 2 skipped**。
+
+<a id="audit-fixes-20261111"></a>
+
+## 三项问题整改与注释完善（2026-11-11）
+
+本节定义三个已确认问题的整改契约、修改范围和验收方法，以及第一方代码的中文注释方案。
+规划依据为 `develop@a86ed92` 加当前工作区已有差异；README、文档和注释核对成果继续保留。
+实施前保存当时的差异与目标文件快照，分别形成三项修复和各组纯注释差异，方便核对行为变化。
+本节保留实施采用的契约与验收依据；完成结果、实测证据和剩余观测统一见
+[项目状态](../reference/project_status.md#当前基线)，功能行为同步至视觉与 MuJoCo README。
+
+### 实施顺序与交付
+
+| 顺序 | 工作项 | 交付与完成条件 |
+| --- | --- | --- |
+| 1 | 离线 YOLO 入口与标注 | 修正两处导入，恢复默认标注路径，内部绘图错误可见传播；节点构造和图像回调用例通过 |
+| 2 | 分割掩膜输入契约 | 共享转换器拒绝损坏掩膜，在线和离线节点按当前帧发布空检测并给出诊断；合法框检测与有效掩膜保持 |
+| 3 | MuJoCo legacy 异常清理 | 原执行、hold、abort 失败信息完整保留；匹配 token 清理及迟到回调隔离通过 |
+| 4 | 按调用链补充中文注释 | 完成下表各组真实缺口，纠正过时说明，纯注释差异通过行为一致性检查 |
+| 5 | 集成验收与文档收尾 | 完成视觉回调、隔离 MuJoCo、规定检查及一次完整回归；按实际结果更新状态和相关手册 |
+
+第 1、2 项共享离线节点，顺序实施便于复用节点测试；第 3 项可独立推进。
+每项逻辑修复同时更新相邻注释；其余注释按组处理。沿用现有包、入口和测试文件，
+使用合成图像、假检测器与故障注入建立反例，保留现有模型、控制参数和功能分层。
+
+### 1. 离线 YOLO 入口与标注
+
+主要文件：[offline_yolo_node.py](../../src/rebotarm_vision/rebotarm_vision/nodes/offline_yolo_node.py)、
+[test_offline_yolo.py](../../tests/test_offline_yolo.py)。
+
+- 将检测器相对导入修为 `..detector.yolo_detector`，保留构造期延迟导入，便于纯图像工具测试与模型加载分离。
+- 将绘图函数改为模块级 `..utils.visualization` 导入，与在线节点一致，使内部路径错误在模块加载时暴露。
+- 删除标注分支仅 warning 后继续的宽泛捕获；绘图、图像转换和发布错误向执行器传播。保持 raw → filtered → annotated 的发布顺序，已发布的检测消息保留该帧原语义。
+- `_failure_latched` 继续用于解码、推理和检测转换失败；修正“借用闩锁避免标注警告刷屏”的错误说明。
+- 文件头与参数注释说明外部/回放 RGB 输入，清理已退役的 MuJoCo 虚拟 RGB 假设。空检测说明改为“该帧没有可供下游使用的检测”，处理故障由错误日志说明。
+
+新增用例覆盖：假检测器节点构造、模型加载异常、默认开启标注、显式关闭标注、
+原始/过滤/标注消息的时间戳和坐标系、绘图异常传播及此前两路检测的发布顺序。
+构造测试应让 Python 实际解析修复后的包路径，替身只替换模型依赖。
+
+### 2. 损坏分割掩膜的拒绝与节点承接
+
+主要文件：[detection_msgs.py](../../src/rebotarm_vision/rebotarm_vision/converters/detection_msgs.py)、
+[vision_node.py](../../src/rebotarm_vision/rebotarm_vision/nodes/vision_node.py)、
+[offline_yolo_node.py](../../src/rebotarm_vision/rebotarm_vision/nodes/offline_yolo_node.py)。
+核对消费链：[graspnet_baseline_node.py](../../src/rebotarm_vision/rebotarm_vision/nodes/graspnet_baseline_node.py)
+→ [graspnet_baseline_inference.py](../../src/rebotarm_vision/rebotarm_vision/backends/graspnet_baseline_inference.py)。
+
+Ultralytics 原始掩膜的校验由共享转换器统一负责，GraspNet 消费消息时的既有检查保留：
+
+| 输入 | 预期结果 |
+| --- | --- |
+| 检测模型未提供掩膜，或 `masks=None` | 保留 `has_mask=False` 的合法框检测与现有 bbox 点云路径 |
+| 已提供 masks，且对应多边形为至少三个有限顶点的 `(N, 2)` 数组 | 保留像素坐标与有效掩膜 |
+| 已提供 masks，但缺少 xy、`xy=None`、索引越界、polygon 为 None、非数值元素、形状错误、顶点不足或包含 NaN/Inf | 抛出包含目标索引与具体原因的 `MaskPolygonError(ValueError)`，该次转换整体失败 |
+
+在线节点沿用 `allowed_classes` 先筛选再转换的顺序；离线节点保持完整 raw 转换后再调用
+`filter_detection_array`，保留原始诊断数据。进入转换的任一候选掩膜损坏时，该次转换整体失败；
+离线的白名单外候选损坏同样使 raw/filtered 两路清空。仅将已识别的数据校验错误归入
+`MaskPolygonError`，张量搬运和其他内部异常保留原传播路径。
+
+在线节点仅在检测消息转换调用周围捕获 `MaskPolygonError`，发布该帧同时间戳、同坐标系的空检测，
+并记录错误；使用独立的检测失败闩锁，后续转换成功时恢复。相机失败闩锁继续表达相机状态，
+推理阶段维持原有异常传播。离线节点复用现有解码/推理/转换异常出口，两路检测同时清空。
+正常无目标与处理失败都可产生空数组，诊断日志须准确表达故障与恢复。
+
+测试范围：
+
+- [test_detection_msgs.py](../../tests/test_detection_msgs.py)：将损坏掩膜回落框检测的旧断言改为拒绝，参数化上述异常；覆盖合法无掩膜、有效掩膜、类别筛选，以及多个候选中间损坏时整体失败；张量搬运异常保留原类型。
+- [test_vision_input_policy.py](../../tests/test_vision_input_policy.py)：合成完整 RGB-D/内参与假检测器，验证损坏帧清空、连续故障日志锁存、有效帧恢复；验证其他内部异常继续传播。
+- [test_offline_yolo.py](../../tests/test_offline_yolo.py)：验证损坏帧 raw/filtered 均为空、时间戳保持及后续有效帧恢复；包含白名单外候选掩膜损坏的场景。
+- 通过现有 GraspNet 输入适配确认空检测清除本帧候选；有效框和有效掩膜保留各自采样路径。
+
+### 3. MuJoCo legacy 异常清理与诊断
+
+调用链：[mujoco_ros_node.py](../../src/rebotarm_simulation/rebotarm_simulation/ros/mujoco_ros_node.py)
+`_execute_goal()` → [trajectory_execution.py](../../src/rebotarm_simulation/rebotarm_simulation/execution/trajectory_execution.py)
+`fail_legacy()` → [trajectory_state.py](../../src/rebotarm_simulation/rebotarm_simulation/execution/trajectory_state.py)
+`ExecutionLifecycle.fail()`。
+
+- `fail()` 依次尝试 hold 与 abort，分别保留步骤名、异常类型和原因；`finally` 释放匹配 token，随后以一个带原因链的 `RuntimeError` 向调用方报告清理失败。
+- `fail_legacy()` 保留目标锁与 token 身份检查。迟到异常只结算原 Action；当前目标的保持、执行权及采样器继续由当前 token 管理。
+- ROS legacy 异常出口承接清理错误，与最初执行错误一起写入日志及 `result.error_string`，保留失败码和现有 `finally` 清理。
+- abort 自身失败时明确报告 Action 终态处理错误；日志分别表达“已尝试终态迁移”和实际成功状态。legacy 延续原有资源释放契约，continuous 延续停止确认与资源保留机制。
+- 中文注释紧邻持锁、hold → abort → finish、错误汇总以及旧 token 隔离位置，说明调用顺序与所有权。
+
+在 [test_simulation_execution_runtime.py](../../tests/test_simulation_execution_runtime.py) 补充正常清理、
+仅 hold 失败、仅 abort 失败、双失败用例，检查调用顺序、token 释放及两项原因保留。
+在 [test_mujoco_ros_adapter.py](../../tests/test_mujoco_ros_adapter.py) 补充原执行错误与清理错误同时可见、
+Action 终态迁移失败、迟到旧 token 回调及新目标继续执行；回归 continuous 停止未确认的资源保护。
+ROS 结果映射通过实际回调执行验收。abort 失败专项还需覆盖本机 Jazzy ActionServer 外层：
+区分“状态迁移前失败”和“已进入终态、后续通知失败”，分别检查日志、实际终态、客户端结果送达与 token 释放。
+rclpy 会对返回后仍活动的 goal 再次 abort；持续失败可能留下未结算的结果 Future，测试须有明确期限，
+如实记录未送达结果。项目日志应始终保存原执行与清理原因，ROS 中间层故障按实际观测单独报告。
+
+### 4. 工程中文注释范围
+
+第一方范围为 `src/` 与 `scripts/`，包含 Python、C++ 执行插件、网页自有 JS、launch 和 shell；
+厂商 SDK、第三方源码、生成文件及安装产物保持原样。先纠正与当前代码冲突的说明，再补真实阅读缺口。
+本轮静态核对中，控制器 39 个主要 Python 文件已具备职责、接口、安全约束和文件结构说明，
+后续以交接点补充和准确性复核为主。
+
+| 注释组 | 阅读入口与重点位置 | 重点解释 |
+| --- | --- | --- |
+| C1 控制器 | `hardware_manager.py` → `runtime/controller_runtime.py`、`device_requests.py`、`controller_cycle.py`、`lifecycle.py`、`controller_protection.py` → `arm/`、`gripper/`、`ros/` | 单设备线程与总线所有权、锁序、请求代次/期限、反馈身份、停止/关闭回执、保护性失能条件；保留上一轮 7 个文件已有补充 |
+| C2 轨迹与运动 | `rebotarm_trajectory`、motion 的规划/重定时/碰撞/执行守卫与 `cpp/execution_adapters.cpp` | q/qv/qva 导数契约、单位与坐标系、轨迹时间与物理时间、计划/场景/起点绑定、缓存匹配容差与淘汰、迟到响应和完成条件 |
+| C3 视觉与仿真 | vision 的节点/转换/后端；simulation 的 `core/control/execution/ros/apps` | 帧与深度单位、有效检测契约、错误出口、目标锁/仿真锁顺序、状态快照所有权、Viewer 借用与关闭 |
+| C4 应用与工具 | teach、calibration、teleop、Dashboard 的 Python 与 `status_panel_assets/*.html`、bringup launch、`scripts/` | 会话与请求身份、异步回复/超时状态、反馈新鲜度、质量门、原子落盘、执行前提、环境和资源来源 |
+
+每组先沿实际入口、构造和调用方确认职责，再补充必要中文 docstring 与分段注释。
+关键说明回答：谁持有数据、单位与时钟是什么、为何加锁或等待、失败交给谁、何时完成。
+准确的已有注释保留，协议名与技术术语保留原文并按需加中文解释。测试替身与正式运行入口明确标注。
+注释数量与翻译比例仅可辅助定位；验收围绕说明准确、关键关系清楚和行为保持。
+
+### 5. 验收与文档同步
+
+每批先运行对应定向用例，检查合法输入输出与新增错误路径。规定检查保留：
+
+```bash
+python3 -m pytest tests/test_package_layering.py -q
+python3 -m compileall src/rebotarm_dashboard/rebotarm_dashboard src/rebotarm_teleop/rebotarm_teleop src/rebotarm_teach/rebotarm_teach src/rebotarm_motion/rebotarm_motion -q
+python3 -m compileall src/rebotarm_bringup/launch -q
+```
+
+另对实际修改的控制器、视觉、仿真及其他 Python 包执行 compileall。
+纯注释批次以该批开始前快照进行去 docstring 的 AST 对比；C++/JS 使用语法感知检查并人工核对有效代码差异，
+改到 C++ 时构建对应包，shell 执行 `bash -n`，XML/配置核对解析后语义。语言行为有变化的差异归入功能修复验收。
+
+最终集成使用核验空闲的 localhost ROS 域及隔离安装：视觉运行合成输入和假检测器的正常、损坏、恢复序列；
+MuJoCo 验证 legacy 正常执行、取消/后继目标与故障结果，同时回归 continuous 执行、取消和停止确认。
+核对安装代码与本轮源码一致，结束后确认进程和端口释放。三项修复涉及停止故障与视觉候选输入，
+完成后集中执行一次完整回归；各注释批次以定向和行为一致性检查为主：
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests -q
+```
+
+功能文档按实际实现同步到 vision/simulation README 及已有操作页；根 README 按入口或能力变化更新。
+项目状态仅登记实施阶段、实际检查结果和剩余问题，并链接本节。
+真机验证按后续明确授权与现场条件另行安排；本轮规划的验收环境为软件和隔离仿真。

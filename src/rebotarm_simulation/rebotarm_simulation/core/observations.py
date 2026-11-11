@@ -1,7 +1,7 @@
-"""Read-only extraction of immutable simulation observations.
+"""从原生状态提取不可变观测，供 ROS 发布、Viewer 和诊断使用。
 
-The owner must hold its simulation lock while calling these functions. No step,
-reset or control mutation is performed here; model/data ownership stays in the runtime.
+调用方持仿真锁完成复制；本模块只读 model/data，所有权与物理步进归仿真核心。
+先定义关节/末端/物体快照，再定义接触快照，输出坐标与单位由值对象约定。
 """
 from types import MappingProxyType
 import numpy as np

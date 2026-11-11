@@ -194,6 +194,7 @@ def _launch_setup(context, *args, **kwargs):
 
     actions.append(LogInfo(msg="teach recording/check/replay are controlled from the web Teach Trajectory card"))
 
+    # 标定节点消费已有图像/TF；此开关只组合采集服务，相机启动和电机使能各由独立入口负责。
     actions.append(Node(
         package="rebotarm_calibration", executable="rebotarm_handeye_capture",
         output="screen", condition=IfCondition(LaunchConfiguration("calibration")),

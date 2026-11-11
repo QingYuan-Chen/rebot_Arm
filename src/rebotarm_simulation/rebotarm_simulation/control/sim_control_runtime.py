@@ -1,7 +1,7 @@
-"""Own simulated control targets, torque watchdog, controller memory and cadence.
+"""管理仿真目标、力矩看门狗、控制器积分与更新节拍。
 
-The caller lends model/data for each operation; this module never loads,
-steps, resets, or closes a MuJoCo instance.
+调用方逐次借入 model/data，并负责物理步进和资源生命周期。模块依次定义状态复制、
+模式交接、目标命令和控制力计算；力矩期限采用 data.time 的物理秒。
 """
 from __future__ import annotations
 import math
@@ -46,6 +46,7 @@ class SimControlRuntime:
         return self._control_mode
 
     def before_step(self, model, data):
+        """物理步开始前检查期限，在控制相位起点更新输出，其余步保持上一拍控制量。"""
         if self._raw_torque_watchdog_expired(model, data):
             self._expire_raw_torque(model, data)
             self._control_phase = 0
@@ -53,6 +54,7 @@ class SimControlRuntime:
             self._apply_motor_control(model, data)
 
     def after_step(self, model, data):
+        """物理时间推进后再次核对期限，保证跨过截止点的一步立即切回保持。"""
         self._control_phase = (self._control_phase + 1) % self._control_steps_per_update
         if self._raw_torque_watchdog_expired(model, data):
             self._expire_raw_torque(model, data)
@@ -104,7 +106,7 @@ class SimControlRuntime:
         )
 
     def get_control_status(self, state) -> ControlStatus:
-        """Return an immutable diagnostic snapshot without changing control state."""
+        """复制不可变诊断快照；看门狗剩余量与传入物理状态使用同一时间基准。"""
         remaining = None
         if self._control_mode == "raw_torque" and self._raw_torque_deadline is not None:
             remaining = max(0.0, self._raw_torque_deadline - state.simulation_time)
@@ -127,11 +129,7 @@ class SimControlRuntime:
         mode = _CONTROL_MODE_ALIASES.get(str(mode), str(mode))
         if mode not in CONTROL_MODES:
             raise ValueError(f"control mode must be one of {CONTROL_MODES}")
-        # Re-entering Hold must be a true no-op. Re-capturing the measured
-        # position and resetting the simulated firmware controller on every
-        # keyboard-repeat event creates a small target/torque discontinuity
-        # that is visible as a shake even though the requested mode did not
-        # change.
+        # 键盘重复 hold 时沿用原目标与积分，反复捕获当前位置会引入目标和支撑力矩跳变。
         if mode == "hold" and self._control_mode == "hold":
             return self._control_mode
         if mode == "hold":
@@ -154,11 +152,7 @@ class SimControlRuntime:
 
 
     def set_control_mode(self, model, data, mode: str) -> str:
-        """Compatibility alias for :meth:`set_mode`.
-
-        ``pos_vel`` is accepted as a legacy spelling and normalized to
-        ``position``.
-        """
+        """保留 set_mode 的兼容入口，历史拼写 pos_vel 规范化为 position。"""
         return self.set_mode(model, data, mode)
 
 
@@ -268,9 +262,7 @@ class SimControlRuntime:
             arm_torque = requested_torque.copy()
             self._arm_controller.applied_torque[:] = arm_torque
         elif self._control_mode == "hold":
-            # Hold is position regulation around the pose captured on entry.
-            # It deliberately shares the simulated firmware loop with
-            # position mode; the semantic difference is who owns the target.
+            # hold 固定进入模式时捕获的位置，复用 position 的控制器和积分状态。
             arm_torque = self._arm_controller.compute(
                 target=self._position_targets[:6],
                 position=position,
@@ -361,9 +353,7 @@ class SimControlRuntime:
             and abs(velocity) < gripper.sim_velocity_deadband_m_s
         ):
             return 0.0
-        # MuJoCo force actuators act directly on the sliding finger joints in N.
-        # The real MIT command still defines the motor-side torque limit, while
-        # this linear-space PD keeps the simulated prismatic joints stable.
+        # MuJoCo 手指执行器直接施加 N；电机限矩先换算为线性力上限，滑动关节以米制 PD 稳定。
         return (
             gripper.sim_force_kp_n_per_m * error
             - gripper.sim_force_kd_n_s_per_m * velocity

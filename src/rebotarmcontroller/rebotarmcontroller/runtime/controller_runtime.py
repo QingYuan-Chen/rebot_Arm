@@ -342,6 +342,7 @@ class ControllerRuntime:
                     else:
                         if isinstance(value, CycleResult):
                             # 事务已接纳, 等待者仍等自己的事件; 写入线程继续服务周期和紧急请求.
+                            # 操作本身可能已作废旧代次；续体绑定操作完成后的代次，后续交接再使其失效。
                             with self.requests.lock:
                                 generations = tuple((name, self.requests.generations[name])
                                                     for name, _ in request.generations)
@@ -392,6 +393,7 @@ class ControllerRuntime:
                                    for name, generation in generations)
                 if closing or obsolete:
                     raise RequestRejected('deferred execution superseded or runtime closed')
+                # 在队列锁外推进续体，其他线程可继续提交停止或失能请求。
                 done, result = value.advance()
                 if not done:
                     continue

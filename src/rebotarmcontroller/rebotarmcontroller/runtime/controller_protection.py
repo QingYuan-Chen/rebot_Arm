@@ -89,6 +89,7 @@ class ControllerProtection:
         controllers: list[object] = []
         disable_errors: list[str] = []
         try:
+            # 六轴与夹爪可引用同一总线对象，按身份去重使一次保护只向该总线请求一次失能。
             for controller in self._backend.controllers():
                 if all(controller is not existing for existing in controllers):
                     controllers.append(controller)

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 安装专用视觉环境并检查导入/CUDA；相机、ROS 工作区构建及节点启动由后续步骤执行。
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

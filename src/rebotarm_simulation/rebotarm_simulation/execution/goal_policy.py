@@ -1,4 +1,4 @@
-"""execution goal_policy components; preserve existing execution contracts."""
+"""六轴轨迹末点的位置、速度与等待期限判定；纯数值策略由执行组件调用。"""
 from __future__ import annotations
 import math
 from dataclasses import dataclass
@@ -21,8 +21,7 @@ class GoalSettlingPolicy:
     time_tolerance_sec: float = 5.0
 
     def __post_init__(self) -> None:
-        # 阈值必须为正的有限值：0 或负数会让"到位"判定永不可能满足，使目标
-        # 只能等到超时，等于人为制造执行失败。
+        # 正有限容差为物理积分误差和稳定等待留出预算；配置错误在接纳目标前暴露。
         values = (self.position_tolerance, self.velocity_tolerance, self.time_tolerance_sec)
         if any(not math.isfinite(float(value)) or float(value) <= 0.0 for value in values):
             raise ValueError("goal tolerances must be positive finite values")
@@ -39,7 +38,7 @@ class GoalSettlingPolicy:
         返回三态字符串（调用方据此决定继续等待/成功/超时）：
             "succeeded" —— 最大位置误差与最大速度都在阈值内；
             "timed_out" —— 等待时间已达 time_tolerance_sec 仍未满足阈值；
-            "settling"  —— 仍在容差内等待。
+            "settling"  —— 仍在期限内等待位置与速度达标。
         """
         vectors = (tuple(desired), tuple(actual), tuple(velocities))
         if any(len(vector) != len(ARM_JOINT_NAMES) for vector in vectors):

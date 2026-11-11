@@ -1,4 +1,8 @@
-"""viewer lifecycle; ownership and behavior unchanged."""
+"""协调 ROS 执行器与原生 Viewer 关闭，确认借用结束后释放仿真资源。
+
+关闭超时或生命周期信号读取失败时，保留完整所有权图并向调用者抛错。
+接口按资源保留、执行器关闭、Viewer 关闭顺序组织；等待预算使用单调时钟。
+"""
 from __future__ import annotations
 import time
 import math
@@ -99,11 +103,7 @@ def close_passive_viewer_safely(
     sleep: Callable[[float], None] = time.sleep,
     timeout: float = 5.0,
 ) -> None:
-    """Close a passive viewer before releasing its MuJoCo resources.
-
-    This public wrapper keeps ownership-retention details inside the simulation
-    package so callers do not depend on ``_RETAINED_UNSAFE_VIEWERS``.
-    """
+    """先确认被动 Viewer 释放模型，再关闭仿真；资源保留细节由本包统一维护。"""
     _close_viewer_then_sim(
         viewer,
         sim,

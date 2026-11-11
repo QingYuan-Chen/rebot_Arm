@@ -1,4 +1,4 @@
-"""Operator-only gravity-mode gate. Never enables or disables an arm."""
+"""操作员重力模式切换门控：核对明确确认、当前使能状态和新鲜反馈，再交控制器服务。"""
 import math
 
 
@@ -23,7 +23,7 @@ def gravity_rejection(command, confirmed, *, hardware, web_enabled, execution_mo
 
 
 class GravityRequestTracker:
-    """Retain timed-out futures: timeout is not proof that a mode change stopped."""
+    """超时后保留模式切换 Future，等待服务结果及其后的新反馈共同确认状态。"""
     def __init__(self):
         self.future = None
         self.command = None
@@ -61,6 +61,7 @@ class GravityRequestTracker:
         return bool(self.response.success), str(self.response.message)
 
     def idle_confirmed(self, *, now, received_at, arm):
+        """用单调接收时刻确认 IDLE；请求完成前收到的旧反馈继续等待更新。"""
         if self.refresh(now) or received_at is None:
             return False
         return (0 <= now - received_at <= .5 and

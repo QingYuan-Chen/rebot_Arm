@@ -6,12 +6,13 @@
 
 状态机（受同一把锁保护，可跨线程安全调用）：
     idle --submit(item)--> busy（立即返回该 item，调用方需同步执行）
-    busy --submit(item)--> busy（覆盖 pending，返回 None，调用方丢弃本次输入）
+    busy --submit(item)--> busy（覆盖 pending，返回 None，由当前工作者稍后取出）
     busy --complete()--> busy（返回并清空 pending，调用方继续处理新 item）
     busy --complete()（无 pending）--> idle（返回 None）
     idle --complete()--> 抛 RuntimeError（禁止在空闲态报告完成，属于调用方逻辑错误）
 
-线程模型：所有公开方法内部加锁，返回值是值快照；调用方在锁外执行真正的耗时工作。
+线程模型：所有公开方法内部加锁，调用方在锁外执行耗时工作。工作项保留传入对象的引用，
+提交后由工作者消费，提交方应停止修改该对象；统计查询返回不可变值快照。
 """
 
 from __future__ import annotations

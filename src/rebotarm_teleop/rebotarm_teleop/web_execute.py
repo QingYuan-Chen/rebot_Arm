@@ -54,7 +54,7 @@ class WebGripperDecision:
 def smoothstep(ratio: float) -> float:
     """三次平滑插值曲线 ``3r²-2r³``，输入进度比 r∈[0,1]，返回混合系数∈[0,1]。
 
-    相比线性插值，两端一阶导为 0（起停速度为 0），可避免轨迹起停处的加速度冲击；
+    两端一阶导为 0，二阶导分别为 +6 和 -6；与静止段拼接时仍存在加速度跳变。
     输入先被夹紧到 [0,1]，因此越界调用不会产生外推。
     """
     value = min(max(float(ratio), 0.0), 1.0)
@@ -70,12 +70,12 @@ def interpolate_joint_points(
 ) -> list[tuple[float, tuple[float, ...]]]:
     """按固定步长把关节从 ``current`` 平滑过渡到 ``target``。
 
-    返回 ``[(相对起点的时间秒, 各关节位置 rad), ...]``，首点严格等于 current、
-    末点严格等于 target（首尾用原值直接输出，不做浮点混合），供上层逐点填进轨迹消息。
+    返回 ``[(相对起点的时间秒, 各关节位置 rad), ...]``，覆盖起点和终点，
+    供 legacy 路径填进轨迹消息；每个点均由浮点混合公式计算。
 
     ``step_period`` 为期望的相邻点时间间隔（默认 0.05 s），实际步数取
-    ``max(2, int(duration / step_period))``：至少 2 段以保证有中间点，同时避免
-    step_period 为 0 时除零；``current`` 与 ``target`` 长度不一致时抛 ``ValueError``。
+    ``max(2, int(duration / max(step_period, 1e-3)))``：步长下限为 1 ms，
+    至少分成 2 段；``current`` 与 ``target`` 长度不一致时抛 ``ValueError``。
     """
     if len(current) != len(target):
         raise ValueError("current and target lengths must match")
@@ -181,7 +181,7 @@ def validate_web_execute_request(
             f"target delta too large: {max_delta:.4f} rad > {max_delta_limit:.4f} rad",
         )
 
-    # 时长缺失时用服务端最短时长（最保守）作为默认，并夹紧到合法区间。
+    # 时长缺失时采用配置下限；后面的速度门继续检查该时长是否足够。
     try:
         duration = float(payload.get("duration", min_duration))
     except (TypeError, ValueError):

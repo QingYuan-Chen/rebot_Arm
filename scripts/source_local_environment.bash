@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local deployment environment only; never starts nodes or accesses hardware.
+# 在当前 shell 加载 ROS 与本地安装覆盖层，仅设置环境；节点由后续命令显式启动。
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     printf 'Use: source scripts/source_local_environment.bash\n' >&2
     exit 1
@@ -17,6 +17,7 @@ fi
 if [[ -f "${_rebotarm_local_root}/install/local_setup.bash" ]]; then
     source "${_rebotarm_local_root}/install/local_setup.bash"
 fi
+# 各视觉进程通过 launch prefix 选择解释器；此处保留终端当前 Python，供 ROS 构建使用。
 export REBOTARM_VISION_PYTHON="${_rebotarm_local_root}/.venv-vision/bin/python"
 export GRASPNET_PYTHON="${_rebotarm_local_root}/.venv-graspnet/bin/python"
 export GRASPNET_MODEL_ROOT="${GRASPNET_MODEL_ROOT:-${_rebotarm_local_root}/third_party/graspnet-baseline}"

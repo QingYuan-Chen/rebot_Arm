@@ -37,13 +37,43 @@ def test_gate_serializes_cancel_and_completion():
     assert terminal_disposition(GateOutcome.SERVICE_STOP, True) == 'aborted'
 
 
-def test_lifecycle_releases_token_even_if_hold_or_abort_fails():
-    active = ActiveTrajectory(); gate = TrajectoryCommandGate(active); token=object(); assert active.try_start(token)
-    calls=[]
-    def hold(): calls.append('hold'); raise RuntimeError
-    def abort(): calls.append('abort'); raise RuntimeError
-    with pytest.raises(RuntimeError): ExecutionLifecycle(active, gate).fail(token, hold, abort)
-    assert not active.busy and calls == ['hold','abort']
+@pytest.mark.parametrize('hold_fails,abort_fails', [(False, False), (True, False),
+                                                  (False, True), (True, True)])
+def test_lifecycle_attempts_both_steps_and_preserves_cleanup_causes(hold_fails, abort_fails):
+    active = ActiveTrajectory()
+    gate = TrajectoryCommandGate(active)
+    token = object()
+    assert active.try_start(token)
+    calls = []
+    causes = []
+
+    def hold():
+        calls.append('hold')
+        if hold_fails:
+            error = ValueError('hold command failed')
+            causes.append(error)
+            raise error
+
+    def abort():
+        calls.append('abort')
+        if abort_fails:
+            error = OSError('abort transport failed')
+            causes.append(error)
+            raise error
+
+    lifecycle = ExecutionLifecycle(active, gate)
+    if hold_fails or abort_fails:
+        with pytest.raises(RuntimeError, match='legacy trajectory cleanup failed') as raised:
+            lifecycle.fail(token, hold, abort)
+        for step, cause in zip([name for name, failed in
+                                [('hold', hold_fails), ('abort', abort_fails)] if failed], causes):
+            assert f'{step}: {type(cause).__name__}: {cause}' in str(raised.value)
+        assert isinstance(raised.value.__cause__, ExceptionGroup)
+        assert raised.value.__cause__.exceptions == tuple(causes)
+    else:
+        lifecycle.fail(token, hold, abort)
+    assert calls == ['hold', 'abort']
+    assert not active.busy
 
 
 def test_stamp_and_feedback_are_monotonic_and_final_forced():

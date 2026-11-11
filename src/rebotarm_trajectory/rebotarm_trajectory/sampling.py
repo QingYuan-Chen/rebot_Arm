@@ -32,6 +32,7 @@ def validate_samples(points, times):
 
 def step_index(times, elapsed, cursor=0):
     """返回当前已到期点的右边界；发送确认游标仍由后端拥有。"""
+    # bisect_right 包含恰好到期的节点，返回半开区间终点，便于调用方处理所有漏过的点。
     return bisect_right(times, elapsed, lo=cursor)
 
 

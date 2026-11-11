@@ -1,4 +1,4 @@
-"""execution feedback_timing components; preserve existing execution contracts."""
+"""按墙上单调时间限制 Action 反馈频率；终态可立即发布，轨迹仍按物理时间执行。"""
 from __future__ import annotations
 import math
 from typing import Any
@@ -27,8 +27,8 @@ class FeedbackRateLimiter:
         """判断此刻是否应发布反馈。
 
         final=True 用于终态反馈（成功/超时），无论是否已到周期都强制放行，
-        确保订阅端一定收到最后一条状态；首次调用（_last_publish 为 None）
-        也一定放行。
+        让调用方有机会立即发布最终状态；实际接收取决于 ROS 通信。
+        首次调用（_last_publish 为 None）也直接放行。
         """
         now = float(monotonic_time)
         if not math.isfinite(now):

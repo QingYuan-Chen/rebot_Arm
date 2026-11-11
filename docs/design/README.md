@@ -6,7 +6,7 @@
 
 当前设计路线：
 
-- [`engineering_audit_scope.md`](engineering_audit_scope.md)：按功能划分工程规范审核范围，逐批精简冗余防御性代码，并以固定输入开展分类消融对照。
+- [`engineering_audit_scope.md`](engineering_audit_scope.md)：工程规范审核与分类消融范围；附三项错误契约整改及工程中文注释完善方案。
 - [`visual_grasp_cleanup_scope.md`](visual_grasp_cleanup_scope.md)：视觉执行与通用夹爪力夹取/握持剔除范围，区分整文件删除、共享定义迁移和保留项。
 - [`controller_refactor_plan.md`](controller_refactor_plan.md)：Python 控制器结构整理记录；原 C++ 迁移计划已废弃，后续迁移由另一个仓库承担。
 - [`calibration_web_plan.md`](calibration_web_plan.md)：网页手眼标定的完整路线。软件链路已实现，但真实相机、真实机械臂和物理精度验收仍是后续工作。

@@ -1,4 +1,4 @@
-"""Dataset coverage and training-only resampling diagnostics."""
+"""标定样本覆盖度、训练集重采样与残差异常诊断；阈值和样本保留策略由工作流执行。"""
 import numpy as np
 import cv2
 from .handeye_residual import transform_matrix, rotation_observability
@@ -22,9 +22,9 @@ def sample_coverage(samples, *, mode='handeye'):
 
 
 def bootstrap_diagnostic(samples, method, reference, *, iterations=64, seed=0):
-    """Empirical resampling spread, not an absolute accuracy confidence claim.
+    """只对训练集重采样，报告求解离散度及退化抽样次数。
 
-    Degenerate draws are counted explicitly. Holdout data is never resampled.
+    固定 seed 便于复算；统计描述采样波动，系统测量偏差需结合独立标定证据评估。
     """
     rng = np.random.default_rng(seed)
     translations, rotations = [], []
@@ -48,10 +48,10 @@ def bootstrap_diagnostic(samples, method, reference, *, iterations=64, seed=0):
 
 
 def residual_diagnostics(samples):
-    """Flag suspicious residuals without deleting samples or changing gates.
+    """标记可疑残差供人工查看，保留原样本和质量门。
 
-    Robust cutoff uses median + 3 scaled MAD with a resolution floor; absolute
-    limits still identify a uniformly biased validation set when MAD is zero.
+    相对阈值采用中位数加三倍尺度化 MAD，并保留分辨率下限；绝对门限用于识别
+    整组共同偏移，避免 MAD 为零时遗漏系统性残差。
     """
     metrics = {'position_residual_m': (.010, .0001),
                'rotation_residual_deg': (3., .01)}

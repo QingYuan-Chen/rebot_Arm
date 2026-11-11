@@ -21,8 +21,8 @@
 每次 ``_on_timer`` 依次执行：取帧 -> 判断本帧是否"完整" -> 生成时间戳 -> 发布图像与内参
 -> （可选）YOLO 推理并发布检测结果 -> （可选）刷新本地预览窗口。
 
-检测结果话题**每个周期都会发布**：没有完整帧或未启用检测时发布空数组，这样下游的
-"消息新鲜度"判断不会因为订阅端长时间收不到消息而误判数据源已死。
+正常检测周期发布本帧结果；缺帧、内参缺失和损坏掩膜发布空数组，清除下游的陈旧检测。
+其他推理或内部异常向执行器传播，错误日志与消息新鲜度供下游判断输入状态。
 
 安全约束
 --------
@@ -56,7 +56,7 @@ from rebotarm_msgs.msg import Detection2DArray
 
 from ..camera.d405_driver import D405Config, D405Driver
 from ..policies.camera_info_policy import calibrated_intrinsics
-from ..converters.detection_msgs import result_to_detection_array_msg
+from ..converters.detection_msgs import MaskPolygonError, result_to_detection_array_msg
 from ..converters.image_msgs import camera_info_to_msg, color_to_msg, depth_to_msg
 from ..detector.yolo_detector import YoloDetector
 from ..policies.timestamp_policy import select_frame_timestamp_ns
@@ -74,6 +74,7 @@ class RebotArmVisionNode(Node):
     内部状态（都不参与运动控制，只影响日志与可视化）：
     - ``empty_frame_count``：连续异常帧计数，完整帧到达时清零；
     - ``_vision_failure_latched``：视觉输入失败的诊断锁存位，恢复后由回调清除；
+    - ``_detection_failure_latched``：掩膜数据失败的诊断锁存位，检测转换成功后清除；
     - ``_detection_log_countdown``：检测结果日志的降频计数器。
     """
 
@@ -155,9 +156,10 @@ class RebotArmVisionNode(Node):
         if not ready:
             self.get_logger().warn("camera warmup incomplete, continuing with frame retries")
 
-        # 下面三个计数器/锁存位只服务于日志与状态展示，不影响帧的发布与检测结果内容。
+        # 相机与检测各自锁存诊断，完整 RGB-D 帧仅解除相机故障。
         self.empty_frame_count = 0
         self._vision_failure_latched = False
+        self._detection_failure_latched = False
         self._detection_log_countdown = 0
         # 预览窗口是无头服务器上最容易失败的一环：没有 DISPLAY 或 OpenCV 建窗失败都只降级为
         # "不预览"，不影响任何话题发布。
@@ -267,7 +269,7 @@ class RebotArmVisionNode(Node):
         # 图像类话题的 QoS 可靠性取值：best_effort 或 reliable。640x480 大帧在本机 Fast DDS
         # 上用 best_effort 容易分片丢失，故 Ubuntu 原生配置覆盖为 reliable。
         self.declare_parameter("ros.image_reliability", "best_effort")
-        # 是否启用 YOLO 检测；关闭时只发布图像与内参，检测话题固定发布空数组。
+        # 是否启用 YOLO 检测；关闭时完整帧只发布图像与内参。
         self.declare_parameter("ros.enable_detection", False)
 
     def _load_parameters(self) -> None:
@@ -346,9 +348,8 @@ class RebotArmVisionNode(Node):
     def _on_timer(self) -> None:
         """定时器回调：完成"取帧 -> 发布 -> 检测 -> 预览"的一个完整周期。
 
-        缺帧、残帧等失败情形都走提前 return 的分支，不会继续用不可靠数据往下算；无论走哪条
-        分支，检测话题都会收到一条消息（正常结果或空数组），使下游能够区分"没有目标"与
-        "视觉链路已死"。
+        缺帧、残帧或损坏掩膜发布本帧空检测后返回；只有转换完整成功才发布检测数组。
+        捕获仅负责已识别的输入故障，推理和其他内部异常继续向执行器传播。
         """
         # 正式视觉链路只接受本次采集的帧，不用驱动的历史缓存补齐缺失的流。
         color_bgr, depth_mm = self.camera.get_frame(allow_partial=True)
@@ -424,18 +425,28 @@ class RebotArmVisionNode(Node):
 
         if self.detector is not None and color_bgr is not None:
             results = self.detector.infer(color_bgr)
-            detection_msg = result_to_detection_array_msg(
-                results,
-                color_stamp,
-                self.frame_id_color,
-                # 类别白名单按"去空白 + 转小写"归一化，与转换器内部的比较方式一致；
-                # 空字符串项被过滤掉；注意空集合表示过滤掉全部检测，而非不限制类别。
-                allowed_classes={
-                    str(class_name).strip().lower()
-                    for class_name in self.custom_classes
-                    if str(class_name).strip()
-                },
-            )
+            try:
+                detection_msg = result_to_detection_array_msg(
+                    results,
+                    color_stamp,
+                    self.frame_id_color,
+                    # 类别白名单按去空白和小写比较；空集合表示过滤掉全部检测。
+                    allowed_classes={
+                        str(class_name).strip().lower()
+                        for class_name in self.custom_classes
+                        if str(class_name).strip()
+                    },
+                )
+            except MaskPolygonError as exc:
+                # 保留本帧时间身份并清空候选输入；其他推理/内部错误继续向执行器传播。
+                self._publish_empty_detection(color_stamp)
+                if not self._detection_failure_latched:
+                    self._detection_failure_latched = True
+                    self.get_logger().error(f"YOLO mask conversion failed: {exc}")
+                return
+            if self._detection_failure_latched:
+                self._detection_failure_latched = False
+                self.get_logger().info("YOLO detections recovered; mask failure latch cleared")
             self.detection_pub.publish(detection_msg)
             # 检测日志降频：每 20 个检测周期打印一条（10 Hz 循环下约 2 秒一条），
             # 只抽样打印前 5 个类别名。
@@ -493,9 +504,8 @@ class RebotArmVisionNode(Node):
     def _publish_empty_detection(self, stamp=None) -> None:
         """发布一条不含任何检测的检测数组消息。
 
-        空消息同样带合法的时间戳与 ``frame_id``，下游的"消息新鲜度"判断才有意义：
-        收到空数组 = 本轮没有目标，收不到消息 = 视觉链路异常。``stamp`` 为 None 时取当前
-        节点时钟，供没有可用帧时间戳的早退路径使用。
+        空消息带时间戳与 ``frame_id``，表示该帧没有可用检测；输入故障的具体原因由日志说明。
+        ``stamp`` 为 None 时取当前节点时钟，供没有可用帧时间戳的早退路径使用。
         """
         detection_msg = Detection2DArray()
         detection_msg.header.stamp = stamp or self.get_clock().now().to_msg()

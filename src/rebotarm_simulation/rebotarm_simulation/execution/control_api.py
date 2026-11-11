@@ -1,9 +1,12 @@
-"""Finite, non-torque simulation control surface shared by ROS execution."""
+"""ROS 执行层使用的仿真控制端口；原始力矩接口保留在本地诊断层。
+
+调用方通过 SerializedSimulationAccess 串行调用，仿真核心校验目标并拥有模式状态。
+"""
 from typing import Any, Sequence
 ROS_CONTROL_MODES = ("position", "hold", "gravity_comp")
 
 def normalize_ros_control_mode(mode: Any) -> str:
-    """Validate the deliberately small, non-torque ROS control surface."""
+    """仅接受 ROS 公共接口声明的位置、保持和重力补偿模式。"""
     value = str(mode).strip().lower()
     if value not in ROS_CONTROL_MODES:
         raise ValueError(
@@ -14,7 +17,7 @@ def normalize_ros_control_mode(mode: Any) -> str:
 
 
 class SimulationControlApi:
-    """ROS-facing operations on the simulation core."""
+    """将 ROS 执行意图交给仿真核心，返回实际接纳的数值。"""
 
     def __init__(self, simulation: Any) -> None:
         self.simulation = simulation

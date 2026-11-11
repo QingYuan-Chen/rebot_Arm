@@ -209,6 +209,7 @@ def device_request(method):
         runtime = self._backend
         if runtime.in_writer:
             return method(self, *args, **kwargs)
+        # 请求可能延后执行，冻结调用时的输入可防止调用方随后修改列表或消息而改变待发命令。
         values, options = copy.deepcopy(args), copy.deepcopy(kwargs)
         result = runtime.call(lambda: method(self, *values, **options),
             resource=policy.resource, priority=policy.priority, ttl=policy.ttl, invalidate=policy.invalidate)

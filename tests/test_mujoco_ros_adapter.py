@@ -680,3 +680,209 @@ def test_ros_goal_transport_binding_prevents_late_cancel_from_stopping_next_goal
     assert node_class._cancel_callback(owner,goal) is CancelResponse.REJECT
     assert execution.active.token is current and not execution.active.cancel_requested
     assert len(sim.events) == before
+
+
+@pytest.mark.parametrize('notify_fails', [False, True])
+def test_late_legacy_failure_preserves_successor_sampler_and_execution(notify_fails):
+    execution, sim, _ = _execution_fixture()
+    execution.mode = 'legacy'
+    old = object()
+    sampler = trajectory_to_sampler(_trajectory(tuple(f'joint{i}' for i in range(1, 7)),
+        ((0., (0.,)*6), (.4, (.02,)*6))), initial_positions=(0.,)*6)
+    execution.admit_legacy(old, sampler)
+    execution.cleanup(old)
+    current = object()
+    execution.admit_legacy(current, sampler)
+    before = list(sim.events)
+    generation = execution.planning_generation
+    notifications = []
+
+    def notify():
+        notifications.append('old abort')
+        if notify_fails:
+            raise OSError('old abort failed')
+
+    if notify_fails:
+        with pytest.raises(OSError, match='old abort failed'):
+            execution.fail_legacy(old, notify)
+    else:
+        execution.fail_legacy(old, notify)
+    execution.cleanup(old)  # ROS finally 的迟到清理也须保持后继所有权。
+    assert notifications == ['old abort']
+    assert execution.active.token is current and not execution.active.cancel_requested
+    assert execution.planning_generation == generation and sim.events == before
+    assert execution.take_sampler() is sampler
+    start = sim.time
+    execution.step(10, lambda *args: None)
+    outcome, _ = execution.observe(current, sampler, start, lambda: False)
+    assert outcome is GateOutcome.APPLIED
+    assert sim.target == pytest.approx((.001,)*6)
+
+
+def _legacy_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failure):
+    """使用真实执行组件和 ROS 消息，仅替换物理故障及 Action 传输句柄。"""
+    import rclpy
+    from action_msgs.msg import GoalStatus
+    from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
+
+    execution, sim, _ = _execution_fixture()
+    execution.mode = 'legacy'
+    token = object()
+    sampler = trajectory_to_sampler(_trajectory(tuple(f'joint{i}' for i in range(1, 7)),
+        ((0., (0.,)*6), (.4, (.02,)*6))), initial_positions=(0.,)*6)
+    execution.admit_legacy(token, sampler)
+    calls = []
+    logs = []
+
+    def hold():
+        calls.append('hold')
+        if hold_fails:
+            raise ValueError('injected hold failure')
+
+    def observe(*args):
+        raise RuntimeError('injected execution failure')
+
+    class Goal:
+        goal_id = SimpleNamespace(uuid=bytes(range(16)))
+        is_cancel_requested = False
+        status = GoalStatus.STATUS_EXECUTING
+        abort_calls = 0
+
+        @property
+        def is_active(self):
+            return self.status == GoalStatus.STATUS_EXECUTING
+
+        def abort(self):
+            self.abort_calls += 1
+            calls.append('abort')
+            if abort_failure == 'before_always' or (
+                    abort_failure == 'before_once' and self.abort_calls == 1):
+                raise OSError('injected abort before state transition')
+            self.status = GoalStatus.STATUS_ABORTED
+            if abort_failure == 'after':
+                raise OSError('injected abort after state transition')
+
+        def destroy(self):
+            self.status = GoalStatus.STATUS_UNKNOWN
+
+    logger = SimpleNamespace(**{level: (lambda message, level=level: logs.append((level, message)))
+                               for level in ('error', 'warning', 'debug')})
+    goal = Goal()
+    owner = SimpleNamespace(_execution=execution, _trajectory_mode='legacy',
+        _goal_tokens={bytes(goal.goal_id.uuid): token}, _sim_access=execution.access,
+        _feedback_rate_hz=20., get_logger=lambda: logger)
+    monkeypatch.setattr(execution.control, 'hold_current_position', hold)
+    monkeypatch.setattr(execution, 'observe', observe)
+    monkeypatch.setattr(rclpy, 'ok', lambda: True)
+    callback = lambda handle: create_node_class()._execute_goal(owner, handle)
+    return callback, owner, goal, calls, logs, logger
+
+
+@pytest.mark.parametrize('hold_fails,abort_failure', [
+    (False, None), (True, None), (False, 'before_always'), (True, 'before_always'),
+    (False, 'after'),
+])
+def test_legacy_ros_callback_reports_execution_and_cleanup_failure(
+        monkeypatch, hold_fails, abort_failure):
+    from control_msgs.action import FollowJointTrajectory
+
+    callback, owner, goal, calls, logs, _ = _legacy_failure_callback_fixture(
+        monkeypatch, hold_fails=hold_fails, abort_failure=abort_failure)
+    result = callback(goal)
+    assert result.error_code == FollowJointTrajectory.Result.INVALID_GOAL
+    assert 'injected execution failure' in result.error_string
+    expected = []
+    if hold_fails:
+        expected.append('hold: ValueError: injected hold failure')
+    if abort_failure:
+        expected.append('abort: OSError: injected abort')
+    for reason in expected:
+        assert reason in result.error_string
+        assert any(reason in message for _, message in logs)
+    assert calls == ['hold', 'abort']
+    assert not owner._execution.active.busy and owner._goal_tokens == {}
+    assert goal.is_active == (abort_failure == 'before_always')
+    if expected:
+        assert any(f'status={goal.status}, is_active={goal.is_active}' in message
+                   for _, message in logs)
+
+
+def test_legacy_ros_callback_keeps_existing_action_terminal_state(monkeypatch):
+    from action_msgs.msg import GoalStatus
+
+    callback, owner, goal, calls, logs, _ = _legacy_failure_callback_fixture(
+        monkeypatch, hold_fails=True, abort_failure=None)
+    goal.status = GoalStatus.STATUS_ABORTED
+    result = callback(goal)
+    assert calls == ['hold'] and goal.abort_calls == 0
+    assert goal.status == GoalStatus.STATUS_ABORTED
+    assert 'injected hold failure' in result.error_string
+    assert not owner._execution.active.busy
+    assert any(f'status={goal.status}, is_active=False' in message for _, message in logs)
+
+
+def test_legacy_ros_failure_finally_keeps_new_goal_ownership(monkeypatch):
+    callback, owner, goal, calls, _, _ = _legacy_failure_callback_fixture(
+        monkeypatch, hold_fails=False, abort_failure=None)
+    execution = owner._execution
+    old = execution.active.token
+    successor = object()
+    sampler = trajectory_to_sampler(_trajectory(tuple(f'joint{i}' for i in range(1, 7)),
+        ((0., (0.,)*6), (.4, (.03,)*6))), initial_positions=(0.,)*6)
+
+    def late_failure(*args):
+        execution.cleanup(old)
+        execution.admit_legacy(successor, sampler)
+        raise RuntimeError('old callback failed after successor admission')
+
+    monkeypatch.setattr(execution, 'observe', late_failure)
+    result = callback(goal)
+    assert 'old callback failed after successor admission' in result.error_string
+    assert calls == ['abort'] and owner._goal_tokens == {}
+    assert execution.active.token is successor and not execution.active.cancel_requested
+    assert execution.take_sampler() is sampler
+
+
+@pytest.mark.parametrize('abort_failure', [None, 'before_once', 'before_always', 'after'])
+def test_trajectory_action_server_delivers_failure_even_if_abort_keeps_failing(monkeypatch, abort_failure):
+    """运行安装版 ActionServer 外层；结果 Future 代表传输层待发送结果，无 DDS 节点。"""
+    import asyncio
+    from action_msgs.msg import GoalStatus
+    from control_msgs.action import FollowJointTrajectory
+    from rebotarm_simulation.ros.trajectory_action_server import TrajectoryActionServer
+    from rclpy.task import Future
+
+    callback, owner, goal, calls, logs, logger = _legacy_failure_callback_fixture(
+        monkeypatch, hold_fails=True, abort_failure=abort_failure)
+    future = Future()
+    key = bytes(goal.goal_id.uuid)
+    server = object.__new__(TrajectoryActionServer)
+    server._logger, server._action_type = logger, FollowJointTrajectory
+    server._result_futures, server._goal_handles = {key: future}, {key: goal}
+    server._terminal_fault = None
+
+    async def run():
+        await asyncio.wait_for(server._execute_goal(callback, goal), timeout=.5)
+        assert future.done()
+        response = future.result()
+        expected = GoalStatus.STATUS_UNKNOWN if abort_failure == 'before_always' else GoalStatus.STATUS_ABORTED
+        assert response.status == expected
+        assert goal.is_active == (abort_failure == 'before_always')
+        assert response.result.error_code == FollowJointTrajectory.Result.INVALID_GOAL
+        assert 'injected execution failure' in response.result.error_string
+        assert 'injected hold failure' in response.result.error_string
+        if abort_failure:
+            assert 'injected abort' in response.result.error_string
+        if abort_failure == 'before_always':
+            assert 'previous status=2' in response.result.error_string
+            assert server._goal_handles[key] is goal and server._result_futures[key].done()
+            assert server._terminal_fault == response.result.error_string
+
+    asyncio.run(run())
+    assert goal.abort_calls == (2 if abort_failure in ('before_once', 'before_always') else 1)
+    assert calls[0] == 'hold'
+    assert not owner._execution.active.busy and owner._goal_tokens == {}
+    diagnostic = '\n'.join(message for level, message in logs if level == 'error')
+    assert 'injected execution failure' in diagnostic and 'injected hold failure' in diagnostic
+    if abort_failure:
+        assert 'injected abort' in diagnostic

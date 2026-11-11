@@ -99,7 +99,7 @@ class GraspNetPrediction:
     score：抓取得分，无量纲，越大越好；已由后端按分数降序排列。
     translation_xyz：末端夹爪中心在相机坐标系下的位置，单位 m。
     rotation_matrix：3x3 旋转矩阵（行优先），描述末端抓取姿态；正交化由后端保证，
-      转四元数时才会再次归一化。
+      转换前校验近似正交与正行列式，四元数输出再归一化。
     width_m：抓取该目标所需的夹爪开口宽度，单位 m；超出夹爪行程的候选必须被下游丢弃。
     object_length_m：目标在夹爪闭合方向之外的估计长度，单位 m；用于判断夹爪是否与目标或
       桌面干涉。取不到该信息时保持 0.0（表示未知，而不是"长度为零"）。
@@ -494,7 +494,7 @@ def _tuple3(values) -> tuple[float, float, float]:
 
 
 def _matrix3(values) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]:
-    """按行优先把输入整形成 3x3 嵌套元组；元素个数不是 9 的倍数时 reshape 会抛 ValueError。"""
+    """按行优先整形成 3x3 嵌套元组；元素个数须恰好为 9。"""
     arr = np.asarray(values, dtype=np.float64).reshape(3, 3)
     return tuple(tuple(float(v) for v in row) for row in arr)  # type: ignore[return-value]
 

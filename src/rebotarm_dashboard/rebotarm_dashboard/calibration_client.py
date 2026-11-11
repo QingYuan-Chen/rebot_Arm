@@ -1,4 +1,8 @@
-"""HTTP-thread to ROS adapter; calibration implementation remains in its owner."""
+"""标定 HTTP 工作线程到 ROS 服务的适配；会话文件与求解归标定包所有。
+
+锁串行化请求，超时保留 Future 以阻止重复提交；ROS 执行器独立推进服务响应，
+页面通过状态刷新核对最终会话。SSE 仅发布会话进展摘要。
+"""
 import json
 import threading
 
@@ -70,6 +74,7 @@ class CalibrationClient:
             return {'success': False, 'reason_code': 'BUSY', 'message': '标定请求正在处理'}
         try:
             if self.pending is not None:
+                # HTTP 等待结束后 ROS 请求仍可完成；保持同一 Future，直到确认上一请求结束。
                 if not self.pending.done():
                     return {'success': False, 'reason_code': 'PENDING',
                             'message': '上次请求尚未完成，请稍后刷新会话'}
@@ -103,7 +108,7 @@ class CalibrationClient:
                               'message': response.message, 'session': session}
                 if result['success']:
                     result = self._success_response(payload, result)
-            # Broadcast compact session-scoped progress, never datasets or images.
+            # SSE 只广播当前会话的精简进展，数据集与图像仍通过专用响应读取。
             session = result.get('session')
             session = session if isinstance(session, dict) else {}
             self.publish({'busy': self.pending is not None, 'command': request.command,

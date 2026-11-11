@@ -1,4 +1,8 @@
-"""Validate and transfer physical and controller state without owning the runtime."""
+"""校验并复制物理与控制器检查点；调用方负责仿真锁和原生资源生命周期。
+
+save_state 导出不可变数值，restore_state 在修改活动状态前检查模型身份与全部字段。
+模型指纹、保存、恢复依次定义于本模块，所有操作借用调用方传入的 model/data。
+"""
 from dataclasses import replace
 import hashlib
 import numpy as np
@@ -75,7 +79,7 @@ class StateSnapshot:
         """
         if not isinstance(state, SavedSimulationState):
             raise TypeError("state must be returned by save_state()")
-        # Normalize and validate every numeric field before touching live state.
+        # 重建冻结值对象以重新校验所有数值，校验完成后才修改活动仿真。
         state = replace(state)
         compatible = (
             state.model_identity == id(model)
@@ -97,10 +101,8 @@ class StateSnapshot:
             model, data, np.asarray(state.state, dtype=float), self._state_spec
         )
         control.restore(state, model, data)
-        # Forward refreshes derived kinematics but may round the solver warm
-        # start even when qpos/qvel are unchanged (notably on MuJoCo 3.3).
-        # Preserve the saved integration state so a resumed step starts with
-        # exactly the same solver seed as the uninterrupted simulation.
+        # mj_forward 更新派生运动学时可能舍入求解器热启动值（MuJoCo 3.3 尤其明显）。
+        # 恢复原积分种子，使下一物理步与连续运行时采用相同的初始求解状态。
         warmstart = data.qacc_warmstart.copy()
         mj.mj_forward(model, data)
         data.qacc_warmstart[:] = warmstart

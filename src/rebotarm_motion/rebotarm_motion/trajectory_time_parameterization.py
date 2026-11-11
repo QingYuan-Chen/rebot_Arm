@@ -71,6 +71,7 @@ def prepare_teach_reference(points, *, derive_velocity=False, zero_endpoints=Tru
     def differentiate(values):
         result = [zeros]*len(points)
         for i in range(1, len(points)-1):
+            # 左右采样间隔可能不同；用各自间隔加权，保留原录制时间轴的导数尺度。
             left, right = points[i].time-points[i-1].time, points[i+1].time-points[i].time
             result[i] = tuple((right*(b-a)/left + left*(c-b)/right)/(left+right)
                 for a,b,c in zip(values[i-1], values[i], values[i+1]))
@@ -110,6 +111,7 @@ def parameterize_teach_waypoints(names, points, velocity_limits, acceleration_li
                 if not math.isfinite(bound) or bound <= 0:
                     raise ValueError('positive finite teach dynamic limits required')
                 peak = max(abs(segment.at(u,order)[j]) for u in segment.candidates(j,order))
+                # 全曲线共用时间倍率；一/二/三阶导数分别按倍率的一/二/三次方下降。
                 scale = max(scale,(peak/bound)**(1/order))
     scale *= 1.+1e-6
     return tuple(TrajectoryPoint(initial_delay+p.time*scale, p.positions,

@@ -36,6 +36,7 @@ def _build(context):
             executable="rebotarm_graspnet_baseline_node",
             name="rebotarm_graspnet_baseline_node",
             output="screen",
+            # 仅该节点使用 GraspNet 解释器，避免其依赖覆盖同一 launch 中的 ROS/MoveIt 环境。
             prefix=graspnet_python_executable,
             condition=IfCondition(start_graspnet_baseline),
             parameters=[merged_parameters(context, 'rebotarm_graspnet_baseline_node', [graspnet_config, visual_interfaces_config], {**{'output_candidates_topic': graspnet_candidates_topic, 'output_frame_id': graspnet_output_frame_id, 'max_input_skew_ms': graspnet_max_input_skew_ms, 'model_root': graspnet_model_root, 'checkpoint_path': graspnet_checkpoint_path, 'device': graspnet_device, 'backend_module': graspnet_backend_module, 'max_grasps': graspnet_max_grasps, 'max_jaw_width_m': candidate_max_jaw_width_m, 'max_points': graspnet_max_points}})],

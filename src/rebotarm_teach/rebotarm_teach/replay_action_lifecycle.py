@@ -1,4 +1,8 @@
-"""FollowJointTrajectory callback lifecycle for teach replay."""
+"""示教回放的 FollowJointTrajectory 回调与界面状态映射。
+
+由 TeachReplayWorkflow 混入使用，共享其回放锁和活动目标；目标接纳登记跟踪起点，
+结果回调结合 Action 状态与 FJT 错误码结算，并保留运行期监控的停止原因。
+"""
 
 from __future__ import annotations
 
@@ -70,7 +74,7 @@ class ReplayActionLifecycleMixin:
         )
         self._publish_status("replay", {"state": state, "message": message})
         if not goals_canceling:
-            # 没有目标被取消说明回放已自然结束：结果回调可能不会再来，这里兜底清理状态。
+            # 当前分支把空取消列表映射为 done 并清除本地登记；具体执行结果由结果回调报告。
             with self._teach_replay_lock:
                 self._teach_replay_goal_handle = None
                 self._active_teach_replay_trajectory = None

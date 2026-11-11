@@ -7,6 +7,8 @@
 P005 网页组合路径由 `runtime/coordinated_trajectory.py` 持有整体任务，同一设备周期
 登记六轴曲线和独立夹爪目标，复用原六轴采样及夹爪限速、到位、超时和中性释放。
 FJT 只接受完整六轴；网页 continuous 使用 `/rebotarm/execute_teleop_motion`。
+真机节点默认使用 `continuous`；`legacy` 可显式选择。完整真机组合提供 motion 准备服务，
+单独运行底层控制器时须另外提供该服务。启动和运动准入见下文。
 整体成功等待两侧完成与清理，不保证同时到达；部分发送失败保留真实回执，停止确认前不释放两侧资源。
 机械臂保持命令终点；健康任务失败不自动失能。接口见
 [P005 协同位置](../../docs/implemented/features/p005_prepared_trajectory.md#修订协同接口)。
@@ -156,14 +158,19 @@ FK 检查的位置及旋转误差均须严格小于 `1e-12`; 超差退出 1, 输
 | 类型 | 名称与用途 |
 | --- | --- |
 | 状态话题 | `joint_states`, `joints/<joint>/state`, `gripper/state`, `arm_status` |
+| 轨迹能力话题 | `trajectory_execution_mode`, `trajectory_capabilities` |
 | 生命周期服务 | `enable`, `disable`, `set_mode`, `set_zero` |
 | 执行服务 | `trajectory_stop`, `safe_home`, `gripper/set` |
+| 规划快照服务 | `get_arm_planning_state`（只读后端起点及执行用途） |
 | 重力补偿服务 | `gravity_compensation/start`, `gravity_compensation/stop` |
-| Action | `follow_joint_trajectory` (`FollowJointTrajectory`), `gripper/command` (`GripperCommand`) |
+| Action | `follow_joint_trajectory` (`FollowJointTrajectory`), `gripper/command` 和 `gripper/moveit_command` (`GripperCommand`), continuous 的 `execute_teleop_motion` (`ExecuteTeleopMotion`) |
 | 低层命令话题 | `joints/<joint>/cmd`, `gripper/cmd`, 仍受模式、范围、仲裁和断流租约约束 |
 
 `move_to_pose` Action 和 `move_to_pose_ik` Service 由 motion 的 `PoseCompatNode` 唯一提供,
 通过规划/校验后转 FJT. IK 服务成功只表示 FJT 接纳; 位姿 Action 等待执行到位.
+`gripper/command` 使用双指总开口（m）；MoveIt 的 `gripper/moveit_command` 使用左指位移（m），
+适配器将其乘二后交给同一夹爪执行器。`prepare_arm_trajectory` 和 `retime_arm_trajectory`
+服务由 motion 拥有，控制器调用准备服务并在设备线程完成最终接纳。
 MoveIt 执行需要 `moveit_simple_controller_manager`; 规划成功不代表执行成功.
 完整参数、消息与命令见[接口参考](../../docs/reference/ros_sdk.md).
 
@@ -190,4 +197,4 @@ MoveIt 执行需要 `moveit_simple_controller_manager`; 规划成功不代表执
 
 停止窗口、反馈量化和导数诊断见[量化反馈判定](../../docs/implemented/features/quantized_feedback_safety.md).
 结构及跨语言样本见[控制器对照样本](../../docs/implemented/features/controller_reference_samples.md).
-软件、PTY 和内存假设备验证不替代实机验收; 各项验收及批次 7 的边界仅在项目状态中记录.
+软件、PTY、内存假设备和实机各项验收统一在[项目状态](../../docs/reference/project_status.md)中记录。

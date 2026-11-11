@@ -340,6 +340,7 @@ class ControllerLifecycle:
         """
         with self.lock:
             self.require_connected()
+            # 先关闭运动准入，再进入含握手等待的失能事务；等待期间发布端仍可观察过渡状态。
             self.set_state("DISABLING")
             was_enabled = self.enabled
             self.enabled = False
@@ -440,6 +441,7 @@ class ControllerLifecycle:
             except Exception as exc:
                 self.errors.append(f"SHUTDOWN_RELEASE_FAILED: {exc}")
                 raise RuntimeError(f"shutdown release: {exc}") from exc
+            # 只有设备释放返回成功才撤销连接身份，释放失败时保留后续处置所需的会话。
             self.connected = False
             self.set_state("DISCONNECTED")
 

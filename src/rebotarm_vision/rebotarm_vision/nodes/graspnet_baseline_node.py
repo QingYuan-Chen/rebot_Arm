@@ -267,7 +267,7 @@ class GraspNetBaselineNode(Node):
         self._on_inprocess_detections(msg)
 
     def _on_inprocess_detections(self, msg: Detection2DArray) -> None:
-        # 只缓存不立即处理：等 _try_process 在数据齐备时统一推进，保证"每帧最多一次推理"。
+        # 覆盖尚未处理的检测并立即尝试配帧；缺少图像时由后续回调继续推进最新一帧。
         self.pending_inprocess_detections = msg
         self._try_process_inprocess_detection()
 
@@ -324,7 +324,7 @@ class GraspNetBaselineNode(Node):
             return
         self.pending_inprocess_detections = None
         self.last_inprocess_detection_timestamp_ns = detection_timestamp_ns
-        # 单帧只处理置信度最高的一个目标，其余检测丢弃（多目标抓取由上游分帧驱动）。
+        # 单帧只为置信度最高的一个目标生成候选，当前节点没有多目标轮询状态。
         detection = max(msg.detections, key=lambda item: float(item.confidence))
         if not self.backend.available:
             self._publish_empty(timestamp_ns=depth_timestamp_ns, frame_id=depth_frame_id)

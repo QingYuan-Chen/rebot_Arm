@@ -489,7 +489,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             target_runtime=self._target_runtime(),
             compact_payload=self._compact_replay_payload,
         )
-        # 令牌只在成功时生效，并被清空于失败；这是 execute 的唯一凭据。
+        # 服务端保存成功检查的凭据；execute 还会用当前反馈重新生成曲线并核对质量与碰撞。
         if result['accepted'] and samples_for_precheck and any(s.format_version >= 2 for s in samples_for_precheck):
             result['capability_revision'] = self._trajectory_capability()['revision']
         self._last_teach_dry_run = result if result["accepted"] else None

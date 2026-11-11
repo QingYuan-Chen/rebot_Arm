@@ -104,6 +104,7 @@ label{color:#475467}.notice{border-color:#c9d9ea;border-radius:6px;background:#f
 <script>
 const $=id=>document.getElementById(id);let session=null,busy=false,activeStep='session';
 const previewOnly=typeof location!=='undefined'&&location.protocol==='file:';
+// armBusy 跟踪当前网页请求；通信结果未知时 armUnknown 持续锁定，待操作者结合新反馈核对。
 let armBusy=false,streamFresh=false,lastStatusAt=0,armStatus={},feedbackFresh=false,armUnknown=false;
 const defaults={image_topic:'/camera/color/image_raw',camera_info_topic:'/camera/color/camera_info',base_frame:'base_link',end_link_frame:'end_link',camera_frame:'camera_color_frame',marker_frame:'aruco_0',marker_length_m:0.075,marker_id:0,dictionary:'DICT_4X4_50'};
 const visibleFields=Object.keys(defaults);
@@ -198,6 +199,7 @@ const originalCommand=command;command=async(name,payload={})=>{
 const blocked=name==='capture'?captureBlockedReason():previewOnly?'请打开运行中的标定工作台。':armBusy?'机械臂请求处理中，请等待反馈确认。':armUnknown?'请先核对机械臂未知动作状态。':busy?'标定请求正在处理，请等待本次结果。':'';
 if(blocked){$('message').textContent=blocked;if(name==='capture')$('capture-result').textContent=blocked;return;}
 if(name==='capture')$('capture-result').textContent='采集中：正在等待新鲜图像、标记、同期 TF 和稳定姿态…';if(name==='preflight'){checklist(Object.fromEntries(['image','camera_info','tf','aruco','stability'].map(key=>[key,{state:'waiting',detail:'本次试采进行中，完成后更新'}])));$('preflight-result').textContent='正在等待新鲜观测和稳定姿态，最长约 5 秒…';}await originalCommand(name,payload);$('message').textContent=readable($('message').textContent);if(name==='capture')$('capture-result').textContent=$('message').textContent;if(name==='preflight'&&$('preflight-result').textContent.startsWith('正在'))$('preflight-result').textContent='试采未完成：'+$('message').textContent+'\n未取得完整检查结果，不代表其它项目已通过。';updateControls();};
+// 停止请求可与原请求重叠；只有取得 armBusy 所有权的调用负责释放，避免提前解锁采样。
 const originalArmCommand=armCommand;armCommand=async(path,payload,message)=>{const stopping=payload.command==='stop'||path==='/api/arm_disable';if(previewOnly||!streamFresh||(!stopping&&(armBusy||armUnknown||busy||!feedbackFresh||armStatus.error_codes?.length||/MOVING|EXECUT|HOMING|TRAJECTORY/i.test(armStatus.state_machine||''))))return;const owned=!armBusy;if(owned)armBusy=true;updateControls();$('arm-action').textContent=path==='/api/arm_safe_home'?'回位请求处理中；不要调整姿态或采样。':'机械臂请求处理中…';try{await originalArmCommand(path,payload,message);$('arm-action').textContent='请核对控制器反馈和现场位置。'+$('message').textContent;}finally{if(owned)armBusy=false;updateControls();}};
 $('copy-session').onclick=()=>{clearDistance('等待新建手眼会话');session=null;$('sid').value='';$('server-download').hidden=true;renderReport(null);$('result-details').textContent='已复制配置，等待新会话求解。';$('sample-table').replaceChildren();$('exclusion-panel').hidden=true;$('count').textContent='尚未载入会话';configState();updateControls();activateStep('session',true);};$('mode').onchange=configState;
 const preflightBox=document.createElement('pre');preflightBox.id='preflight-result';preflightBox.className='notice';preflightBox.textContent='检查当前观测，不保存样本；正式采样会重新检查，无需每次提前试采。';$('preflight-card').append(preflightBox);
@@ -210,6 +212,7 @@ function clearDistance(reason){distanceExpiresAt=0;$('marker-distance').textCont
 async function refreshDistance(){
 if(previewOnly||!session||session.metadata.mode==='tcp'||activeStep!=='capture-panel'||document.hidden){clearDistance(session?.metadata.mode==='tcp'?'TCP 模式无需相机距离':'打开手眼会话的预检与采样页后显示');return;}
 if(distanceBusy)return;
+// 固定请求所属会话；响应返回时再次比较 sid，迟到结果只影响原会话。
 const sid=session.session_id,started=Date.now();distanceBusy=true;
 try{
 const response=await fetch('/api/calibration/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'observe',session_id:sid,payload:{}})});
@@ -217,6 +220,7 @@ const data=await response.json();if(session?.session_id!==sid||activeStep!=='cap
 const p=data.session?.observation;
 if(!data.success){clearDistance('距离暂不可用：'+readable(data.message||data.reason_code));return;}
 if(data.session_id!==sid||!p||!Number.isFinite(p.distance_m)||p.distance_m<=0||!Array.isArray(p.translation_m)||p.translation_m.length!==3||!p.translation_m.every(Number.isFinite)||!Number.isFinite(p.age_sec)||!Number.isFinite(p.maximum_age_sec)||p.maximum_age_sec<=0||!Number.isFinite(p.marker_length_m)||p.marker_length_m<=0||!Number.isFinite(p.reprojection_rmse_px))throw Error('观测响应无效');
+// 从发出请求时扣除帧龄，保守计入网络耗时；同一图像重复返回也只缩短剩余有效期。
 const frame=sid+':'+p.image_stamp_ns,expires=started+(p.maximum_age_sec-Math.max(0,p.age_sec))*1000;
 distanceExpiresAt=frame===distanceFrame?Math.min(distanceExpiresAt,expires):expires;distanceFrame=frame;
 if(Date.now()>=distanceExpiresAt){clearDistance('观测已过期，等待新鲜图像');return;}

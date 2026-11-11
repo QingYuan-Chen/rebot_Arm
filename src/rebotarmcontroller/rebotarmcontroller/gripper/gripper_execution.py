@@ -316,7 +316,7 @@ class GripperExecution:
                         f"gripper target timeout: goal={goal:.6f}rad feedback={self._gripper_pos:.6f}rad"
                     )
                 elif abs(self._gripper_pos - goal) < _G_ARRIVE_TOL:
-                    # 无同步等待者时到达, 或在等待者返回之后到达.
+                    # 几何到位转入释放流程，完成事件由中性命令的实际发送结果结算。
                     self._release_gripper_position_target_locked(goal)
                     command = None
                 else:

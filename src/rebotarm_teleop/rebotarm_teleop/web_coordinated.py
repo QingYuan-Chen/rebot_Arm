@@ -82,6 +82,7 @@ class CoordinatedWebPlans:
         """单次交接原计划；准备只复核，不能修改已绑定的节点与时间。"""
         capability = self.capability()
         with self._lock:
+            # 先消费令牌再复核：并发提交只交接一次，复核失败后须重新预览取得新令牌。
             plan = self._plans.pop(str(token),None)
         if plan is None:
             raise ValueError('coordinated preview missing; preview again')

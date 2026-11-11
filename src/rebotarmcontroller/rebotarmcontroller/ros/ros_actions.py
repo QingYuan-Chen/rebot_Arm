@@ -273,6 +273,7 @@ class ArmActions:
                 goal_handle.publish_feedback(feedback)
                 task.event.wait(.05)
             status = self._arm.arm_execution_status(task)
+            # 停止服务返回后仍读取该句柄的最终结果，保留停止超时或清理失败的原因。
             if web:
                 result.arm_state, result.gripper_state = self._arm.teleop_execution_status(task)
             result.error_string = status.message

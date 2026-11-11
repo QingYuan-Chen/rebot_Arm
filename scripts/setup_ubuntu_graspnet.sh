@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 安装本地 GraspNet 环境并修补已存在的第三方检出；模型源码及权重由使用者显式准备。
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

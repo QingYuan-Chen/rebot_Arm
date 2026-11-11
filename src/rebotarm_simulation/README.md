@@ -15,7 +15,7 @@ rebotarm_simulation/
 ├── rebotarm_simulation/
 │   ├── core/          # MuJoCo入口、状态类型、模型命名契约、资源定位
 │   ├── control/       # 纯控制算法、控制参数加载、夹爪映射
-│   ├── execution/     # 轨迹采样、离线执行、ROS执行状态与并发闸门
+│   ├── execution/     # 轨迹准备/执行、独立夹爪、离线执行与并发闸门
 │   ├── ros/           # ROS节点、消息转换与诊断
 │   ├── model_tools/   # URDF→MJCF与相机载荷生成
 │   ├── diagnostics/   # 模型健康、限位、响应/抓取试验和指标
@@ -34,9 +34,9 @@ MuJoCo + MoveIt、无头和桌面组合入口位于 `rebotarm_bringup/launch`。
 |---|---|---|---|
 | 模型与场景 | URDF→MJCF 生成、模型一致性检查、机器人本体、空桌面场景、Reach 场景 | `model_tools/urdf_to_mjcf.py`、`model_tools/d405_payload.py`、`models/rebotarm/` | 已接入软指与 D405 腕部装配；`robot.xml` 是机器人本体，`scene.xml` 是桌面物理场景，`reach_scene.xml` 是 Reach 训练场景 |
 | CPU MuJoCo 物理核心 | 物理步进、关节/夹爪控制、状态、接触、保存恢复、瓶子位姿 | `core/mujoco_sim.py`、`control/motor_control.py`、`core/mujoco_types.py`、`control/sim_gripper.py` | 当前 CPU 正确性和轨迹基准 |
-| ROS / MoveIt 执行 | FollowJointTrajectory、关节/夹爪状态、仿真时钟、停止、容差和诊断 | `ros/mujoco_ros_node.py`、`execution/trajectory_sampler.py`、`ros_diagnostics.py` | 已接入 MuJoCo 组合 launch |
+| ROS / MoveIt 执行 | 六轴 FJT、网页组合 Action、独立夹爪、规划快照、仿真时钟、停止和诊断 | `ros/mujoco_ros_node.py`、`execution/trajectory_execution.py`、`execution/gripper_execution.py`、`ros/ros_diagnostics.py` | 已接入 MuJoCo 组合 launch |
 | CLI / Viewer 交互 | 无头 CLI、桌面 MuJoCo Viewer、键盘关节和夹爪操作 | `apps/mujoco_cli.py`、`apps/mujoco_viewer.py` | 已接入，属于人工调试/观察入口 |
-| 示教轨迹预演 | 示教记录质量检查、准备、MuJoCo 轨迹执行和接触统计 | `apps/teach_preview.py`、`offline_trajectory.py` | 已接入，属于离线软件仿真 |
+| 示教轨迹预演 | 示教记录质量检查、准备、MuJoCo 轨迹执行和接触统计 | `apps/teach_preview.py`、`execution/offline_trajectory.py` | 已接入，属于离线软件仿真 |
 | 健康检查与离线评估 | 模型健康、限位、阶跃响应、抓取质量、成对轨迹统计 | `diagnostics/mujoco_health.py`、`diagnostics/mujoco_limit_checks.py`、`diagnostics/mujoco_runner.py`、`diagnostics/mujoco_grasp_quality.py`、`diagnostics/paired_trajectory_analysis.py` | 维护/测试/评估工具；不自动连接硬件 |
 
 MJLab 训练任务和策略配对评估位于独立工程 `/home/a/project/rebot_Arm_rl/MJLab/`，见[本地 MJLab 命令说明](../../docs/reference/commands/mjlab_rl.md)。本包保留共享模型、CPU 物理后端及已有 Reach/Pick 离线验证能力。
@@ -61,8 +61,9 @@ MJLab 训练任务和策略配对评估位于独立工程 `/home/a/project/rebot
 | `rebotarm_sim_trajectory_controller`（`rebotarm_preview`） | 无硬件键盘、`rviz_ee_drag_sim` | 在内存中插值轨迹，用于 ROS 接口和 RViz 流程预演 |
 
 RViz 预演使用轻量关节插值；物理验证使用 MuJoCo 组合入口。视觉筛选可通过 `robot_context:=external use_sim_time:=true` 接入 MuJoCo 环境。
-两种后端提供相同的控制器话题、服务和 Action，同一命名空间只运行一个。
-该入口名称保持兼容；它只用于轻量 RViz 轨迹预演，不代表 MuJoCo 物理仿真。
+两种后端共享基础 FJT、停止和状态接口，同一命名空间只运行一个。
+轻量预演默认 `legacy`；MuJoCo + MoveIt 组合默认 `continuous`，额外提供版本化能力、
+规划起点绑定及网页组合执行。独立 `mujoco_sim.launch.py` 沿用节点默认 `legacy`。
 
 ## 对外入口
 
@@ -118,6 +119,10 @@ RL 仅共享版本化 MJCF 资源，不导入 simulation Python 实现。
 `goal_policy.py`（收敛判定）、`feedback_timing.py`（反馈节拍）、
 `simulation_access.py`（仿真串行访问）。原 `execution/runtime.py` 已移除。
 ROS 消息形态转换、时间戳和输入规模检查归 `ros/message_codec.py`。
+continuous 的准备预约、代次与场景复核、六轴采样、组合终态和停止确认归
+`execution/trajectory_execution.py`；夹爪限速、到位、超时和中性释放归
+`execution/gripper_execution.py`。节点负责 ROS 消息转换、等待和物理调度，
+锁序固定为目标锁→仿真锁。
 Viewer 的按键与交互状态归 `apps/viewer_interaction.py`，原生资源关闭保护归
 `apps/viewer_lifecycle.py`；`apps/mujoco_viewer.py` 保留命令行与事件循环。
 
@@ -130,3 +135,5 @@ Viewer 的按键与交互状态归 `apps/viewer_interaction.py`，原生资源�
 `RebotArmMujoco` 保留原有控制、step、reset、save/restore 入口，并唯一管理模型生命周期。
 Viewer 通过 `borrow_viewer_handles()` 借用可变原生句柄，不转移所有权也不隐式加锁；
 调用方负责串行同步，并在释放仿真之前完成原生 Viewer 关闭。
+
+软件、仿真和硬件验收及当前待办统一见[项目状态](../../docs/reference/project_status.md)。

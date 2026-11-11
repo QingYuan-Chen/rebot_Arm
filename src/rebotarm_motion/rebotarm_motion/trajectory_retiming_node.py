@@ -87,8 +87,22 @@ def retime_message(request, capability, config_directory, planning_state=None):
     return result, scale
 
 
+def _shutdown_executor(executor):
+    """自旋结束后先排空工作线程，再释放仍被排队回调引用的唤醒句柄。"""
+    # Jazzy shutdown 先销毁 guard 再 join 线程池；这里提前 join，避免排队回调触碰已销毁句柄。
+    executor._executor.shutdown(wait=True)
+    executor.shutdown()
+    failures = [future.exception() for future in executor._futures if future.done()]
+    failures = [error for error in failures if error is not None]
+    if failures:
+        raise ExceptionGroup('retiming executor callbacks failed during shutdown', failures)
+
+
 def main(args=None):
+    import signal
+    import threading
     import rclpy
+    from rclpy.signals import SignalHandlerOptions
     from rclpy.node import Node
     from rclpy.qos import QoSProfile, DurabilityPolicy
     from rclpy.executors import ExternalShutdownException
@@ -97,7 +111,11 @@ def main(args=None):
     from rclpy.callback_groups import ReentrantCallbackGroup
     from rclpy.executors import MultiThreadedExecutor
     from std_msgs.msg import String
-    rclpy.init(args=args)
+    # 信号只请求停止自旋；排空回调和发送服务回复期间保持 ROS context 有效。
+    stopping = threading.Event()
+    previous_signals = {sig: signal.signal(sig, lambda *_: stopping.set())
+                        for sig in (signal.SIGINT, signal.SIGTERM)}
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = Node('trajectory_retiming')
     namespace = node.declare_parameter('arm_namespace','rebotarm').value.strip('/')
     # 默认关闭；仿真验收显式指定，用于对照原输入、后端快照与准确输出，页面不刷数值日志。
@@ -166,11 +184,16 @@ def main(args=None):
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
     try:
-        executor.spin()
+        while rclpy.ok() and not stopping.is_set():
+            executor.spin_once(timeout_sec=.1)
     except (KeyboardInterrupt,ExternalShutdownException):
         pass
     finally:
-        executor.shutdown()
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        try:
+            _shutdown_executor(executor)
+        finally:
+            node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+            for sig, handler in previous_signals.items():
+                signal.signal(sig, handler)

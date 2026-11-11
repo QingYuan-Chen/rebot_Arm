@@ -1,4 +1,4 @@
-"""Request-local diagnostics; never persist or relax capture gates."""
+"""仅保存本次试采各阶段的诊断，正式采样重新执行原质量门，会话落盘归 SessionStore。"""
 
 class PreflightChecks:
     def __init__(self, tcp=False):

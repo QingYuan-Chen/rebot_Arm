@@ -1,7 +1,7 @@
-"""Durable hand-eye sessions; adapters supply already gated observations.
+"""手眼/TCP 会话的持久化所有者；采集适配器先完成观测质量门，再提交样本。
 
-No HTTP, ROS, or motor dependencies. Every mutation has an idempotency key and
-an expected revision; commit uses atomic persistence before replacing memory.
+create 以会话身份重试，mutate 以请求身份和预期 revision 串行提交；每次变更在锁内
+读取文件、核对身份、原子落盘后返回副本。HTTP、ROS 及设备调用由外层适配器负责。
 """
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -80,7 +80,7 @@ class SessionStore:
         return data
 
     def create(self, metadata, *, session_id=None):
-        """Caller-generated ID makes retrying creation safe after HTTP timeout."""
+        """复用调用方生成的会话 ID，使响应超时后的同内容重试返回已有会话。"""
         session_id = session_id or uuid4().hex
         path = self._path(session_id)
         metadata = self.normalize_metadata(metadata)
@@ -109,6 +109,7 @@ class SessionStore:
         with self.lock:
             data = self.read(session_id)
             previous = data['requests'].get(request_id)
+            # 重试先认请求摘要再检查 revision：首次提交已经推进版本，重复提交仍应幂等返回。
             if previous:
                 if previous != digest:
                     raise ValueError('request_id reused with different content')
@@ -127,9 +128,8 @@ class SessionStore:
                 fields = ('base_to_end',) if data['metadata']['mode'] == 'tcp' else ('base_to_end', 'camera_to_marker')
                 for field in fields:
                     sample[field] = matrix_transform(transform_matrix(sample[field]))
-                # Freeze acquisition conditions across both splits and restarts.
-                # Legacy offline datasets may omit provenance, but cannot be mixed
-                # with live observations inside an existing session.
+                # 首个样本冻结采集条件，训练/验证组及进程重启后都沿用同一来源和内参。
+                # 旧离线样本可整体缺少 provenance；同一会话中仍要求后续样本条件一致。
                 conditions = {key: sample.get(key) for key in ('camera_info', 'provenance')}
                 existing = data['training_samples'] + data['validation_samples']
                 if existing:
@@ -199,6 +199,7 @@ class SessionStore:
                 if (set(ids) ^ old) & validation_ids and not str(payload.get('evidence', '')).strip():
                     raise ValueError('validation exclusion requires acquisition evidence')
                 data['final_validation_after_index'] = max(
+                    # 人工调整样本后，以已有最大索引划线，最终验证只使用此后新采的姿态。
                     (sample['sample_index'] for split in ('training', 'validation') for sample in data[split + '_samples']), default=-1)
                 data['excluded_sample_ids'] = sorted(ids)
                 if data.get('report'):

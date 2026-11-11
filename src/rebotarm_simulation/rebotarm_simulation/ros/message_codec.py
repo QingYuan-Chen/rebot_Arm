@@ -1,4 +1,8 @@
-"""ros message_codec components; preserve existing execution contracts."""
+"""ROS 载荷与纯数值执行对象之间的转换和入口校验。
+
+依次提供时长/轨迹转换、夹爪参数检查和单调仿真时间戳；字段通过属性读取，
+消息结构错误交由 ROS 调用方映射成失败结果，本层不操作仿真实例。
+"""
 from __future__ import annotations
 import math
 import threading
@@ -114,9 +118,8 @@ def seconds_to_stamp_parts(simulation_time: Any) -> tuple[int, int]:
 class MonotonicStamp:
     """单调时间戳生成器：保证对外发布的仿真时间只增不减。
 
-    物理步进与虚拟相机线程可能并发取时间戳，若直接透传仿真时间，时钟会在
-    重启/回退时倒退，使依赖时间戳的 TF、消息缓存与上层校验失效。这里用锁
-    维护已发布的最大值，任何更小的候选都被夹到该值。
+    仿真重置可能使物理时间回退；本对象在当前生命周期内维护已发布的最大值，
+    使 TF、消息缓存继续看到非递减时间。锁保护并发取值，较小候选沿用已有最大值。
     """
 
     def __init__(self) -> None:

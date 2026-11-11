@@ -87,6 +87,10 @@ MoveIt 保留 `arm` FJT 和 `gripper` 独立 GripperCommand 两组，移除 `arm
 
 ### 规划起点绑定
 
+规划重定时节点收到 SIGINT/SIGTERM 后先停止自旋，保留有效 ROS context 并排空
+工作线程中的回调与服务回复，再销毁执行器句柄和节点。该顺序避开 Jazzy 多线程
+执行器先销毁唤醒句柄、后等待排队回调的关闭竞争；回调内部异常仍向调用方报告。
+
 内部 `/rebotarm/get_arm_planning_state` 不预约或发送命令；控制器在现有设备队列复制
 一致快照，MuJoCo 按活动锁→物理锁复制，并维护跨任务的执行代次。
 服务失败、忙、断流或超时不能降级为预览。明确失能才返回仅预览；独立夹爪与 Safe Home 不改语义。

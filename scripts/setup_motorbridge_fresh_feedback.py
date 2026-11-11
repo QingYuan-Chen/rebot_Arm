@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build and validate the pinned MotorBridge feedback and zeroing safety patch.
+"""构建并核验固定提交及补丁摘要的 MotorBridge 反馈与置零保护版本。
 
-This tool never constructs a MotorBridge Controller or Motor. Installation is
-available only through the explicit ``--install-user`` mode.
+本工具只做构建、导入和 ABI 契约检查；用户安装需显式选择 --install-user。
+Controller/Motor 设备句柄由实际控制入口创建。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ WHEEL_DIR = BUILD_ROOT / "wheel"
 
 
 def validate_runtime_contract(module: ModuleType | object) -> None:
-    """Reject a MotorBridge module that cannot prove feedback receive identity."""
+    """同时核对反馈序号 API、ABI 能力位和固定版本，保证运行时具备接收帧身份契约。"""
 
     motor_type = getattr(module, "Motor", None)
     sequence_method = getattr(motor_type, "get_state_with_sequence", None)

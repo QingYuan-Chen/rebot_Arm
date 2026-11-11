@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Probe the installed MotorBridge C ABI without constructing device handles.
+"""通过独立 C++ 客户端核对已安装 MotorBridge 的 ABI 布局、符号及反馈序号能力。
 
-The small C++ client independently declares the value layout used by this project;
-it validates C++/ctypes agreement, required symbols and feedback-sequence support.
-Transport and handle operations are covered separately by virtual-serial tests.
+本探针只加载动态库和查询元数据，保持设备句柄数量为零；传输及句柄操作由虚拟串口
+测试另行覆盖。C++ 与 ctypes 独立声明布局，便于发现跨语言字段偏移不一致。
 """
 from __future__ import annotations
 
@@ -31,7 +30,7 @@ def probe() -> dict:
     import motorbridge
 
     library = Path(get_abi().lib._name).resolve()
-    # These are ABI field declarations, not a second MotorBridge implementation.
+    # 独立声明 ABI 字段以比较 sizeof/offsetof，设备实现仍由已安装动态库提供。
     source = r'''#include <cstddef>
 #include <cstdint>
 #include <dlfcn.h>

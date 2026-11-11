@@ -193,11 +193,21 @@ class ExecutionLifecycle:
         self._gate = gate
 
     def fail(self, token, hold, abort) -> None:
+        """尝试全部清理步骤，释放匹配身份后汇总异常，保留每步的原始原因。"""
+        errors = []
         try:
-            self._gate.stop_and_hold(hold)
-        except Exception:
-            pass
-        try:
-            abort()
+            try:
+                self._gate.stop_and_hold(hold)
+            except Exception as exc:
+                errors.append(('hold', exc))
+            # 保持失败仍需尝试 Action 终态迁移，两项结果由 ROS 边界一起报告。
+            try:
+                abort()
+            except Exception as exc:
+                errors.append(('abort', exc))
         finally:
             self._active.finish(token)
+        if errors:
+            details = '; '.join(f'{step}: {type(exc).__name__}: {exc}' for step, exc in errors)
+            raise RuntimeError(f'legacy trajectory cleanup failed: {details}') from ExceptionGroup(
+                'legacy trajectory cleanup errors', [exc for _, exc in errors])

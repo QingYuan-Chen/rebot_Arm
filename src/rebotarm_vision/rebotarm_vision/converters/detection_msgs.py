@@ -29,6 +29,10 @@ import numpy as np
 from rebotarm_msgs.msg import Detection2D, Detection2DArray
 
 
+class MaskPolygonError(ValueError):
+    """模型已提供实例掩膜，但其数据无法作为该目标的像素采样区域。"""
+
+
 def _tensor_to_numpy(value: Any):
     """把推理后端的张量/数组/标量统一转成 numpy 数组。
 
@@ -50,7 +54,7 @@ def _tensor_to_numpy(value: Any):
 def _safe_attr_row(container: Any, attr: str, index: int):
     """取出 ``container.attr[index]`` 并转成 numpy；缺失或越界时返回 None。
 
-    旋转框/掩膜属于可选输出，不同后端或不同帧不一定都有，因此这里把异常吞掉返回
+    旋转框属于可选输出，不同后端或不同帧不一定都有，因此这里把异常吞掉返回
     None，让调用方降级为"无该信息"，而不是让整帧检测失败。
     """
     values = getattr(container, attr, None)
@@ -105,20 +109,34 @@ def _obb_metadata(result: Any, index: int):
 def _mask_polygon(result: Any, index: int) -> list[float]:
     """提取第 ``index`` 个目标的实例掩膜多边形，返回展开的 (x0,y0,x1,y1,...) 像素列表。
 
-    没有掩膜输出、形状无法整理成 (N,2)、顶点少于 3 个或含非有限值时返回空列表——
-    下游用"长度 >= 6"（即至少 3 个点）判断 ``has_mask``，退化成空掩膜时会自动改用
-    检测框作为深度采样区域。
+    模型未提供掩膜时返回空列表，保留合法的框检测。已提供的掩膜须为至少三个有限顶点
+    的 (N,2) 数组；损坏时拒绝整帧转换，避免下游扩大到整个检测框采样深度。
     """
     masks = getattr(result, "masks", None)
-    polygons = getattr(masks, "xy", None) if masks is not None else None
+    if masks is None:
+        return []
+    polygons = getattr(masks, "xy", None)
     if polygons is None:
-        return []
+        raise MaskPolygonError(f"mask[{index}]: xy is missing")
     try:
-        polygon = np.asarray(_tensor_to_numpy(polygons[index]), dtype=np.float32).reshape(-1, 2)
-    except Exception:
-        return []
-    if polygon.shape[0] < 3 or not np.isfinite(polygon).all():
-        return []
+        polygon = polygons[index]
+    except (IndexError, KeyError, TypeError) as exc:
+        raise MaskPolygonError(f"mask[{index}]: polygon is missing") from exc
+    if polygon is None:
+        raise MaskPolygonError(f"mask[{index}]: polygon is None")
+    # 张量搬运故障保留原异常；普通数组的数值/形状问题才属于可拒绝的模型数据。
+    if any(hasattr(polygon, attr) for attr in ("detach", "cpu", "numpy")):
+        polygon = _tensor_to_numpy(polygon)
+    try:
+        polygon = np.asarray(polygon, dtype=np.float32)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MaskPolygonError(f"mask[{index}]: polygon must contain numeric coordinates") from exc
+    if polygon.ndim != 2 or polygon.shape[1] != 2:
+        raise MaskPolygonError(f"mask[{index}]: expected shape (N, 2), got {polygon.shape}")
+    if polygon.shape[0] < 3:
+        raise MaskPolygonError(f"mask[{index}]: at least 3 vertices are required")
+    if not np.isfinite(polygon).all():
+        raise MaskPolygonError(f"mask[{index}]: coordinates must be finite")
     return [float(value) for value in polygon.reshape(-1)]
 
 
@@ -142,6 +160,7 @@ def result_to_detection_array_msg(
 
     返回：一条检测数组消息。没有任何检测、或全部被白名单过滤时为空的 ``detections``
     列表（不是 None），调用方据此发布空帧以表明"本帧已处理但无目标"。
+    任一参与转换的掩膜损坏时抛出 ``MaskPolygonError``，已积累的部分检测随本次转换丢弃。
 
     像素坐标：``center_u``/``center_v`` 由框角点取整后求中点再四舍五入；``x_min``
     等直接取截断后的整数，因此保留检测框原始的像素边界约定。置信度原样透传，不做

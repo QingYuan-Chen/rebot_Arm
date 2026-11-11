@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build metre-based gripper meshes from the checked CAD sources, without ROS.
+"""从摘要固定的 CAD 源生成米制夹爪网格，保留经核对的齿条与滑块几何。
 
-Requires the optional CAD dependencies in docs/setup/dependencies/cad.md.
-Transforms and calibration boundaries: docs/implemented/features/soft_gripper_model.md.
+依赖见 docs/setup/dependencies/cad.md；坐标变换与物理标定范围见
+docs/implemented/features/soft_gripper_model.md。运行会写入指定网格目录。
 """
 from __future__ import annotations
 
@@ -22,17 +22,17 @@ SOURCE_HASHES = {
     "original_right_finger.stl": "e4b5ebef66e0b2b3e5d6e0ab59342716cca585db94c5bd4fc95b79f21c6657ef",
 }
 STL_RECORD = np.dtype([("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attribute", "<u2")])
-# CAD millimetres. Finger's three hole axes match the mount after Rx(pi).
+# CAD 以毫米计；软指绕 X 轴转 pi 后，三个孔轴与支架对应。
 FINGER_TO_MOUNT_ROTATION = np.diag([1.0, -1.0, -1.0])
 FINGER_TO_MOUNT_TRANSLATION_MM = np.array([-94.209253443758, 141.125760638401, 0.0])
-# Mount back face Y=-15 -> original slider front X=-70.60932368 mm.
-# Mount hole X=-5.15/+4.85 -> slider Y=24.8/14.8 mm; Z=+/-7.5 mm.
+# 支架背面 Y=-15 对应原滑块前面 X=-70.60932368 mm。
+# 支架孔 X=-5.15/+4.85 对应滑块 Y=24.8/14.8 mm，Z=+/-7.5 mm。
 MOUNT_TO_LEFT_ROTATION = np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
 MOUNT_TO_LEFT_TRANSLATION_MM = np.array([-55.60932368, 19.65, 0.0])
 
 
 def retained_drive_triangles(path: Path) -> np.ndarray:
-    """Keep the rack and slider, preserving their original float32 vertices."""
+    """依据已核对的连通拓扑保留齿条和滑块，沿用原始 float32 顶点。"""
     content = path.read_bytes()
     count = struct.unpack_from("<I", content, 80)[0]
     if len(content) != 84 + 50 * count:
@@ -54,7 +54,7 @@ def retained_drive_triangles(path: Path) -> np.ndarray:
     components = [triangles[labels == label] for label in np.unique(labels)]
     if sorted(len(component) for component in components) != [1080, 1542, 2148]:
         raise ValueError(f"unexpected original rack/slider/finger topology: {path}")
-    # Identified by the checked source topology; 1542 triangles form the old finger.
+    # 固定源模型中 1542 个三角形的连通分量为旧手指；上方拓扑检查防止源变化后误删。
     return np.concatenate([component for component in components if len(component) != 1542])
 
 

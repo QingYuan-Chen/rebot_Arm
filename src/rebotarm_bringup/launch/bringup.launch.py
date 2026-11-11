@@ -61,7 +61,7 @@ def generate_launch_description():
             ),
             # channel：电机总线通道覆盖值（如 /dev/ttyACM0 或 can0）；空串表示用配置文件里的 channel，不在此硬编码设备名。
             DeclareLaunchArgument("channel", default_value=""),
-            # joint_state_rate（Hz）：/joint_states 发布频率，默认 100 Hz；调高更实时，同时增加总线与 CPU 负载。
+            # joint_state_rate（Hz）：状态发布频率，默认 100 Hz；设备采集周期由控制器配置独立管理。
             DeclareLaunchArgument("joint_state_rate", default_value="100.0"),
             # cmd_arbitration：轨迹运行期间收到单关节透传指令时的仲裁策略。默认 "reject"直接拒绝（安全优先）；"preempt" 会先停下轨迹再执行透传指令。
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),

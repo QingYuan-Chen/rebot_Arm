@@ -1,4 +1,4 @@
-"""execution simulation_access components; preserve existing execution contracts."""
+"""通过同一仿真锁串行访问 MuJoCo；run 回调借用实例，结果由调用者持有。"""
 from __future__ import annotations
 import threading
 from typing import Any
@@ -7,9 +7,9 @@ from typing import Any
 class SerializedSimulationAccess:
     """串行化所有触碰同一仿真实例的操作。
 
-    物理步进（定时器线程）、轨迹目标下发（动作执行线程）和虚拟相机渲染
-    （相机工作线程）都会访问同一个 MuJoCo data，必须通过这把锁互斥；否则
-    会出现读写竞态导致的非物理跳变。
+    物理定时器、动作执行与状态查询共享同一 MuJoCo data；目标写入、步进和
+    快照提取均在锁内完成。涉及目标身份时，执行组件先持目标锁再进入本层，
+    回调须保持该锁序，返回快照供锁外发布。
     """
 
     def __init__(self, simulation: Any, lock: threading.RLock | None = None) -> None:

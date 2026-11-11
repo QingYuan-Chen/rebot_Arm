@@ -206,11 +206,13 @@ class TrajectoryExecution:
             return self.active.prepared.start, self.active.prepared.gripper
 
     def fail_legacy(self, token, notify):
-        """保留旧异常清理的通知顺序；迟到异常仅通知原 Action。"""
+        """持目标锁执行旧路径清理；清理异常交由 ROS 汇总进失败诊断。"""
         with self.lock:
+            # 身份检查与 hold 必须处于同一临界区，防止迟到回调保持或释放后继目标。
             if self.active.token is token:
                 self.lifecycle.fail(token, self.hold, notify)
             else:
+                # 旧 Action 的通知保留原句柄，当前采样器和执行权由后继 token 持有。
                 notify()
 
     def preparation_for(self, token):

@@ -1558,10 +1558,8 @@ class TeleopStatusPanelNode(Node):
         source_age = (self.get_clock().now().nanoseconds - source_ns) / 1e9
         self._arm_status_received_at = (now - max(0., source_age)
             if source_ns > 0 and -.05 <= source_age <= .5 else None)
-        # GRAVITY_COMP is also the normal teach-recording mode.  It does not by
-        # itself prove that calibration requested ownership; ownership is set
-        # only by _handle_calibration_gravity(start).  Otherwise teach recording
-        # would permanently block its own stop and dry-run HTTP routes.
+        # 示教录制也使用 GRAVITY_COMP；标定占用只由显式 start 请求登记。
+        # 这样普通示教进入重力补偿后，仍可使用自己的停止和 dry-run 路由。
         self._store.update_arm_status(
             mode=str(msg.mode),
             enabled=bool(msg.enabled),

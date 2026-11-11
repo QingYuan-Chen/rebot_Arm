@@ -77,7 +77,7 @@ class CoordinatedTrajectory:
             return self._arm.snapshot(task.arm_task).state, task.gripper_state
 
     def fail(self, task, decision):
-        """失败原因先于停止事务保存，迟到失败只更新自身未完成句柄。"""
+        """在停止事务前保存当前未完成任务的原因；接替后的旧句柄保持原结果。"""
         with self._lock:
             if task is self.task and not task.event.is_set():
                 task.result = replace(task.result, decision=decision)
@@ -100,6 +100,7 @@ class CoordinatedTrajectory:
                 if task.gripper_state not in ('active', 'releasing', 'succeeded'):
                     raise RuntimeError(reason or 'independent gripper execution failed')
             if arm.state == 'succeeded' and task.gripper_state in ('succeeded', 'not_requested'):
+                # 夹爪 releasing 仍在等待中性发送；两侧终态齐备后才唤醒组合 Action。
                 self.finish(task, 'succeeded', 'arm and independent gripper completed')
 
     def cancel_gripper(self, gripper):
