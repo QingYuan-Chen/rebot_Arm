@@ -5,7 +5,7 @@
 安全约束：connect/enable 只作用于内存假设备，不打开真实串口；不把任务成功当作实机物理证据。
     用例中的少量 Action 替身只隔离协议竞态，周期与发送用例仍运行正式所有者。
 文件结构：就绪与交接夹具 → 正式周期/上下文/夹爪测试 → 发送失败与延迟
-    → Goal 身份及迟到响应 → legacy 接替、场景变化和取消回执顺序。
+    → Goal 身份及迟到响应 → 停靠接替、场景变化和取消回执顺序。
 历史参数 dimensions=7 现在表示六轴加独立夹爪组合，不表示七轴 FJT。
 """
 from dataclasses import replace
@@ -56,7 +56,7 @@ def test_readonly_planning_snapshot_and_stale_plan_admission(monkeypatch,change)
     from rebotarm_trajectory.planning import plan_binding,decode_plan
     manager,bus=enabled_manager(monkeypatch)
     try:
-        state=manager.arm.planning_snapshot('continuous')
+        state=manager.arm.planning_snapshot()
         assert manager.runtime.execution.reservation is None
         assert state['hold']==list(manager.runtime.execution.last_sent_target)
         points=point_to_point(state['hold'],(state['hold'][0]+.01,*state['hold'][1:]),1.)
@@ -68,7 +68,7 @@ def test_readonly_planning_snapshot_and_stale_plan_admission(monkeypatch,change)
             assert task.event.wait(2.)
         elif change in ('disable','reconnect'):
             manager.lifecycle.disable()
-            preview=manager.arm.planning_snapshot('continuous')
+            preview=manager.arm.planning_snapshot()
             assert not preview['executable'] and preview['reason']=='disabled'
             if change=='reconnect':
                 manager.lifecycle.shutdown();manager.lifecycle.connect()
@@ -280,13 +280,12 @@ def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
     actions = ArmActions.__new__(ArmActions)
     tokens = iter((object(), object()))
     canceled, seen = [], []
-    actions._trajectory_mode = 'continuous'
     actions._pending_preparations = {}
     actions._lifecycle = SimpleNamespace(ready_for_motion=True)
     actions._runtime = SimpleNamespace(joint_names=JOINT_NAMES)
     actions._prepare_client = SimpleNamespace(service_is_ready=lambda: True)
     actions._arm = SimpleNamespace(reserve_arm_preparation=lambda deadline,**kwargs: next(tokens),
-        cancel_arm_preparation=canceled.append,trajectory_capability=lambda mode:dict(revision='0'*64))
+        cancel_arm_preparation=canceled.append,trajectory_capability=lambda:dict(revision='0'*64))
     actions._node = SimpleNamespace(publish_arm_status=lambda: None)
     def prepare(handle, token):
         seen.append(token)
@@ -319,8 +318,7 @@ def test_action_wait_cancels_late_service_without_decoding_or_admitting(reason):
     actions._prepare_type = PrepareArmTrajectory
     actions._prepare_client = SimpleNamespace(call_async=lambda request: SimpleNamespace(
         done=lambda: False, cancel=lambda: canceled.append(True)))
-    actions._trajectory_mode = 'continuous'
-    actions._arm = SimpleNamespace(trajectory_capability=lambda mode: {})
+    actions._arm = SimpleNamespace(trajectory_capability=lambda: {})
     token = SimpleNamespace(session=1, generation=2, hold=(0.,)*6, feedback=(0.,)*6,
         observed_at=time.monotonic(), gripper_positions=(0.,0.), gripper_generation=0, collision_policy=0,
         scene_revision='a', deadline=time.monotonic()+(-1. if reason=='deadline' else 1.))
@@ -331,16 +329,17 @@ def test_action_wait_cancels_late_service_without_decoding_or_admitting(reason):
     assert canceled == [True]
 
 
-def test_legacy_special_path_replaces_completed_prepared_curve():
+def test_scoped_home_target_replaces_completed_prepared_curve():
     from rebotarmcontroller.arm.arm_execution import ArmExecution
     execution = ArmExecution();execution.running = True
     curve = build_curve(JOINT_NAMES, point_to_point((0.,)*6,(.02,)*6))
     assert execution.submit_prepared(curve, execution.generation, now=10.)
     execution.acknowledge(execution.sample(11.))
     assert not execution.moving
-    first, last = (.03,0.,0.,0.,0.,0.), (.04,0.,0.,0.,0.,0.)
-    assert execution.submit((first,last),(.2,.4),execution.generation,now=20.)
-    assert execution.sample(20.25).positions == first
+    target = (.04,0.,0.,0.,0.,0.)
+    execution.begin_scoped_target(target, (.3,)*6)
+    assert execution.sample(20.25).positions == target
+    assert execution.sample(20.25).velocity_override == (.3,)*6
 
 
 def test_observed_scene_change_stops_active_curve_and_keeps_enabled(monkeypatch):
@@ -364,7 +363,6 @@ def test_action_cancel_invalidates_owner_before_returning_acceptance():
     actions = ArmActions.__new__(ArmActions)
     request,token = object(),object()
     canceled=[]
-    actions._trajectory_mode='continuous'
     actions._pending_preparations={id(request):(request,token)}
     actions._arm=SimpleNamespace(cancel_arm_preparation=lambda token, *, wait_for_stop:
         canceled.append((token, wait_for_stop)))
@@ -672,11 +670,11 @@ def test_missing_prepared_field_aborts_action_and_releases_reservation(missing):
     request = FollowJointTrajectory.Goal()
     request.trajectory.joint_names = list(JOINT_NAMES)
     actions = ArmActions.__new__(ArmActions)
-    actions._trajectory_mode, actions._prepare_type = 'continuous', PrepareArmTrajectory
+    actions._prepare_type = PrepareArmTrajectory
     actions._pending_preparations = {id(request): (request, token)}
     actions._prepare_client = SimpleNamespace(call_async=lambda _: future)
     canceled, terminal = [], []
-    actions._arm = SimpleNamespace(trajectory_capability=lambda _: {'revision': 'a'*64},
+    actions._arm = SimpleNamespace(trajectory_capability=lambda: {'revision': 'a'*64},
         decode_prepared_arm_trajectory=ArmController.decode_prepared_arm_trajectory,
         cancel_arm_preparation=canceled.append)
     actions._node = SimpleNamespace(publish_arm_status=lambda: None)

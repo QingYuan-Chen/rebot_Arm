@@ -25,7 +25,7 @@ def test_moveit_sim_wrapper_is_upstream_only():
     launch_text = (ROOT / "src/rebotarm_bringup/launch/mujoco_moveit_sim.launch.py").read_text(encoding="utf-8")
 
     assert 'executable="rebotarm_mujoco_node"' in launch_text
-    assert "'simulation_backend': 'mujoco'" in launch_text
+    assert 'simulation_backend' not in launch_text
     assert 'DeclareLaunchArgument("simulation_backend"' not in launch_text
     assert "rebotarm_mujoco_adapter" not in launch_text
     assert "current_condition" not in launch_text

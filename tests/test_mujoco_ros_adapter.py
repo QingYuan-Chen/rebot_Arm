@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from rebotarm_simulation.execution.trajectory_state import (
-    ActiveTrajectory, ExecutionLifecycle, GateOutcome, TrajectoryCommandGate, terminal_disposition,
+    ActiveTrajectory, GateOutcome, TrajectoryCommandGate, terminal_disposition,
 )
 from rebotarm_simulation.execution.trajectory_execution import TrajectoryExecution
 from rebotarm_simulation.execution.gripper_execution import GripperExecution, GripperTask
@@ -20,7 +20,7 @@ from rebotarm_simulation.execution.control_api import SimulationControlApi, norm
 from rebotarm_simulation.ros.message_codec import (
     MonotonicStamp,
     seconds_to_stamp_parts,
-    trajectory_to_sampler,
+    trajectory_points,
     validate_gripper_width,
     validate_gripper_force,
 )
@@ -155,19 +155,25 @@ def _duration(seconds: float):
     return SimpleNamespace(sec=whole, nanosec=round((seconds - whole) * 1e9))
 
 
-def _trajectory(names=("joint1", "joint2"), points=((1.0, (0.1, 0.2)),)):
+def _trajectory(names=tuple(f"joint{i}" for i in range(1, 7)), points=((1.0, (0.1,) * 6),)):
     return SimpleNamespace(
         joint_names=list(names),
-        points=[SimpleNamespace(time_from_start=_duration(t), positions=list(p)) for t, p in points],
+        points=[SimpleNamespace(time_from_start=_duration(t), positions=list(p), velocities=[], accelerations=[]) for t, p in points],
     )
 
 
-def test_trajectory_conversion_uses_canonical_order_and_simulation_time():
-    sampler = trajectory_to_sampler(
-        _trajectory(("joint2", "joint1"), ((1.0, (0.2, 0.1)),)),
-        initial_positions=(0.0,) * 6,
-    )
-    assert sampler.sample(0.5) == pytest.approx((0.05, 0.1, 0, 0, 0, 0))
+def test_trajectory_conversion_preserves_derivatives_and_canonical_order():
+    value = _trajectory(tuple(f'joint{i}' for i in range(6, 0, -1)),
+        ((0., (.6,.5,.4,.3,.2,.1)), (1., (.7,.6,.5,.4,.3,.2))))
+    for point in value.points:
+        point.velocities = [6.,5.,4.,3.,2.,1.]
+        point.accelerations = [12.,10.,8.,6.,4.,2.]
+    names, points = trajectory_points(value)
+    assert names == tuple(f'joint{i}' for i in range(1,7))
+    assert points[0].positions == pytest.approx((.1,.2,.3,.4,.5,.6))
+    assert points[1].velocities == (1.,2.,3.,4.,5.,6.)
+    assert points[1].accelerations == (2.,4.,6.,8.,10.,12.)
+    assert points[1].time == 1.
 
 
 def test_simulation_stamp_normalizes_nanosecond_rounding():
@@ -209,32 +215,25 @@ def test_goal_settling_policy_rejects_unsafe_parameters(values):
         GoalSettlingPolicy(*values)
 
 
-@pytest.mark.parametrize(
-    "trajectory, message",
-    [
-        (_trajectory((), ()), "joint names"),
-        (_trajectory(("joint1", "joint1")), "duplicate"),
-        (_trajectory(("joint1", "evil_joint")), "unknown"),
-        (_trajectory(points=((1.0, (0.1,)),)), "position count"),
-        (_trajectory(points=((1.0, (math.nan, 0.2)),)), "finite"),
-        (_trajectory(points=((1.0, (0.1, 0.2)), (1.0, (0.2, 0.3)))), "strictly"),
-    ],
-)
+@pytest.mark.parametrize('trajectory, message', [
+    (_trajectory((), ()), 'exactly'),
+    (_trajectory(('joint1',)*6), 'exactly'),
+    (_trajectory(('joint1','joint2','joint3','joint4','joint5','evil_joint')), 'exactly'),
+    (_trajectory(('joint1',)), 'exactly'),
+    (_trajectory(points=((1., (.1,)),)), 'dimension'),
+    (_trajectory(points=((1., (float('nan'),)*6),)), 'finite'),
+    (_trajectory(points=((1., (.1,)*6),(1., (.2,)*6))), 'increas'),
+])
 def test_trajectory_validation_rejects_untrusted_content(trajectory, message):
     with pytest.raises(ValueError, match=message):
-        trajectory_to_sampler(trajectory, initial_positions=(0.0,) * 6)
+        trajectory_points(trajectory)
 
 
 def test_trajectory_validation_caps_points_and_duration():
-    too_many = _trajectory(points=((1.0, (0.1, 0.2)),) * 3)
-    with pytest.raises(ValueError, match="too many"):
-        trajectory_to_sampler(too_many, initial_positions=(0.0,) * 6, max_points=2)
-    with pytest.raises(ValueError, match="duration"):
-        trajectory_to_sampler(
-            _trajectory(points=((301.0, (0.1, 0.2)),)),
-            initial_positions=(0.0,) * 6,
-            max_duration_sec=300.0,
-        )
+    with pytest.raises(ValueError, match='too many'):
+        trajectory_points(_trajectory(points=((1.,(.1,)*6),)*3), max_points=2)
+    with pytest.raises(ValueError, match='duration'):
+        trajectory_points(_trajectory(points=((301.,(.1,)*6),)), max_duration_sec=300.)
 
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, "bad"])
@@ -336,17 +335,6 @@ def test_terminal_success_linearizes_before_later_stop():
     assert not gate.stop_and_hold(lambda: events.append("late hold"))
     assert events == ["success"]
 
-
-def test_execution_failure_holds_aborts_and_always_clears_active_token():
-    active = ActiveTrajectory()
-    gate = TrajectoryCommandGate(active)
-    lifecycle = ExecutionLifecycle(active, gate)
-    token = object()
-    events = []
-    assert active.try_start(token)
-    lifecycle.fail(token, lambda: events.append("hold"), lambda: events.append("abort"))
-    assert events == ["hold", "abort"]
-    assert not active.busy
 
 
 def test_execute_callback_is_synchronous_and_does_not_use_asyncio():
@@ -517,7 +505,7 @@ def _execution_fixture():
         hold_current_position=lambda:sim.events.append(('hold',sim.time)),
         set_mode=lambda mode:setattr(sim,'control_mode',mode) or mode)
     execution = TrajectoryExecution(SerializedSimulationAccess(sim),control,
-        make_capability('continuous',11,.5,1.,'1'*64),'continuous',GoalSettlingPolicy(),clock=lambda:10.)
+        make_capability(11,.5,1.,'1'*64),GoalSettlingPolicy(),clock=lambda:10.)
     execution.scene_changed('scene-a')
     execution.step(120,lambda *args:None)
     curve = build_curve(JOINT_NAMES,point_to_point((0.,)*6,(.02,)*6,.4))
@@ -644,23 +632,89 @@ def test_unconfirmed_stop_retains_resources_and_old_wait_cannot_release_new_goal
     assert execution.active.token is other
 
 
-def test_component_legacy_target_and_mode_contracts_are_preserved():
-    execution,sim,curve = _execution_fixture()
-    execution.mode = 'legacy'
-    token = object()
-    sampler = trajectory_to_sampler(_trajectory(tuple(f'joint{i}' for i in range(1,7)),
-        ((0.,(0.,)*6),(.4,(.02,)*6))),initial_positions=(0.,)*6)
-    execution.admit_legacy(token,sampler)
-    assert execution.take_sampler() is sampler
-    assert execution.take_sampler() is None
-    start = sim.time
-    execution.step(10,lambda *args:None)
-    _,observation = execution.observe(token,sampler,start,lambda:False)
-    assert sim.target == pytest.approx((.001,)*6)
-    events = []
-    execution.fail_legacy(token,lambda:events.append('abort'))
-    assert events == ['abort'] and not execution.active.busy
+def test_hold_failure_remains_visible_and_keeps_resources_until_confirmed_stop():
+    execution, sim, curve = _execution_fixture()
+    token, payload = _reserve_simulation(execution, curve)
+    execution.admit(token, payload, 'scene-a', lambda:False)
+    hold = execution.control.hold_current_position
+    def fail_hold():
+        raise RuntimeError('hold transport failed')
+    execution.control.hold_current_position = fail_hold
+    with pytest.raises(RuntimeError, match='hold transport failed'):
+        execution.stop(token)
+    execution.cleanup(token)
+    assert execution.active.token is token and execution.stop_unconfirmed
+    with pytest.raises(RuntimeError, match='reserved'):
+        _reserve_simulation(execution, curve)
+    execution.control.hold_current_position = hold
+    assert execution.stop(token)
+    wait = execution.begin_stop_wait(token)
+    assert not execution.poll_stop(wait)
+    execution.step(120, lambda *args:None)
+    assert execution.poll_stop(wait)
+    assert not execution.active.busy and not execution.stop_unconfirmed
+
+
+def test_idle_hold_failure_blocks_admission_until_explicit_stop_confirmation():
+    execution, sim, curve = _execution_fixture()
+    hold = execution.control.hold_current_position
+    def fail_hold():
+        raise RuntimeError('idle hold failed')
+    execution.control.hold_current_position = fail_hold
+    with pytest.raises(RuntimeError, match='idle hold failed'):
+        execution.stop()
+    with pytest.raises(RuntimeError, match='stop unconfirmed'):
+        _reserve_simulation(execution, curve)
+    execution.control.hold_current_position = hold
+    assert not execution.stop()
+    wait = execution.begin_stop_wait(None)
+    execution.step(120, lambda *args:None)
+    assert execution.poll_stop(wait) and not execution.stop_unconfirmed
+    token, _ = _reserve_simulation(execution, curve)
+    assert execution.active.token is token
+
+
+def test_component_observation_is_read_only_and_mode_change_requires_idle():
+    execution, sim, curve = _execution_fixture()
+    token, payload = _reserve_simulation(execution, curve)
+    sampler = execution.admit(token, payload, 'scene-a', lambda:False)
+    start, _ = execution.accepted_context(token)
+    with pytest.raises(RuntimeError, match='trajectory active'):
+        execution.change_mode('gravity_comp')
+    execution.step(10, lambda *args:None)
+    before = list(sim.events)
+    outcome, observation = execution.observe(token, sampler, start, lambda:False)
+    assert outcome is GateOutcome.APPLIED and observation.settling == 'tracking'
+    assert sim.events == before
+    execution.stop(token)
+    wait = execution.begin_stop_wait(token)
+    execution.step(120, lambda *args:None)
+    assert execution.poll_stop(wait)
+    execution.cleanup(token)
     assert execution.change_mode('gravity_comp') == 'gravity_comp'
+
+
+def test_ros_preparation_failure_reports_hold_failure_and_retains_reservation():
+    from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
+    node_class = create_node_class()
+    execution, sim, curve = _execution_fixture()
+    token, _ = _reserve_simulation(execution, curve)
+    def fail_prepare(*args):
+        raise RuntimeError('preparation failed')
+    def fail_hold():
+        raise RuntimeError('hold transport failed')
+    execution.control.hold_current_position = fail_hold
+    key = bytes(range(16))
+    terminal = []
+    owner = SimpleNamespace(_execution=execution, _goal_tokens={key:token},
+        _prepare_sampler=fail_prepare, get_logger=lambda:SimpleNamespace(error=lambda text:None))
+    goal = SimpleNamespace(goal_id=SimpleNamespace(uuid=key), is_cancel_requested=False, is_active=True,
+        abort=lambda:terminal.append('aborted'))
+    result = node_class._execute_goal(owner, goal)
+    assert terminal == ['aborted'] and result.error_code != 0
+    assert 'preparation failed' in result.error_string and 'hold transport failed' in result.error_string
+    assert execution.active.token is token and execution.stop_unconfirmed
+    assert key not in owner._goal_tokens
 
 
 def test_ros_goal_transport_binding_prevents_late_cancel_from_stopping_next_goal():
@@ -682,55 +736,15 @@ def test_ros_goal_transport_binding_prevents_late_cancel_from_stopping_next_goal
     assert len(sim.events) == before
 
 
-@pytest.mark.parametrize('notify_fails', [False, True])
-def test_late_legacy_failure_preserves_successor_sampler_and_execution(notify_fails):
-    execution, sim, _ = _execution_fixture()
-    execution.mode = 'legacy'
-    old = object()
-    sampler = trajectory_to_sampler(_trajectory(tuple(f'joint{i}' for i in range(1, 7)),
-        ((0., (0.,)*6), (.4, (.02,)*6))), initial_positions=(0.,)*6)
-    execution.admit_legacy(old, sampler)
-    execution.cleanup(old)
-    current = object()
-    execution.admit_legacy(current, sampler)
-    before = list(sim.events)
-    generation = execution.planning_generation
-    notifications = []
-
-    def notify():
-        notifications.append('old abort')
-        if notify_fails:
-            raise OSError('old abort failed')
-
-    if notify_fails:
-        with pytest.raises(OSError, match='old abort failed'):
-            execution.fail_legacy(old, notify)
-    else:
-        execution.fail_legacy(old, notify)
-    execution.cleanup(old)  # ROS finally 的迟到清理也须保持后继所有权。
-    assert notifications == ['old abort']
-    assert execution.active.token is current and not execution.active.cancel_requested
-    assert execution.planning_generation == generation and sim.events == before
-    assert execution.take_sampler() is sampler
-    start = sim.time
-    execution.step(10, lambda *args: None)
-    outcome, _ = execution.observe(current, sampler, start, lambda: False)
-    assert outcome is GateOutcome.APPLIED
-    assert sim.target == pytest.approx((.001,)*6)
-
-
-def _legacy_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failure):
+def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failure):
     """使用真实执行组件和 ROS 消息，仅替换物理故障及 Action 传输句柄。"""
     import rclpy
     from action_msgs.msg import GoalStatus
     from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
 
-    execution, sim, _ = _execution_fixture()
-    execution.mode = 'legacy'
-    token = object()
-    sampler = trajectory_to_sampler(_trajectory(tuple(f'joint{i}' for i in range(1, 7)),
-        ((0., (0.,)*6), (.4, (.02,)*6))), initial_positions=(0.,)*6)
-    execution.admit_legacy(token, sampler)
+    execution, sim, curve = _execution_fixture()
+    token, payload = _reserve_simulation(execution, curve)
+    sampler = execution.admit(token, payload, 'scene-a', lambda:False)
     calls = []
     logs = []
 
@@ -768,9 +782,15 @@ def _legacy_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failure):
     logger = SimpleNamespace(**{level: (lambda message, level=level: logs.append((level, message)))
                                for level in ('error', 'warning', 'debug')})
     goal = Goal()
-    owner = SimpleNamespace(_execution=execution, _trajectory_mode='legacy',
+    owner = SimpleNamespace(_execution=execution,
         _goal_tokens={bytes(goal.goal_id.uuid): token}, _sim_access=execution.access,
-        _feedback_rate_hz=20., get_logger=lambda: logger)
+        _feedback_rate_hz=20., get_logger=lambda: logger,
+        _prepare_sampler=lambda handle, token:sampler)
+    def wait_stop(token):
+        wait = execution.begin_stop_wait(token)
+        execution.step(120, lambda *args:None)
+        assert execution.poll_stop(wait)
+    owner._wait_prepared_stop = wait_stop
     monkeypatch.setattr(execution.control, 'hold_current_position', hold)
     monkeypatch.setattr(execution, 'observe', observe)
     monkeypatch.setattr(rclpy, 'ok', lambda: True)
@@ -782,65 +802,62 @@ def _legacy_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failure):
     (False, None), (True, None), (False, 'before_always'), (True, 'before_always'),
     (False, 'after'),
 ])
-def test_legacy_ros_callback_reports_execution_and_cleanup_failure(
+def test_continuous_ros_callback_reports_execution_and_cleanup_failure(
         monkeypatch, hold_fails, abort_failure):
     from control_msgs.action import FollowJointTrajectory
 
-    callback, owner, goal, calls, logs, _ = _legacy_failure_callback_fixture(
+    callback, owner, goal, calls, logs, _ = _continuous_failure_callback_fixture(
         monkeypatch, hold_fails=hold_fails, abort_failure=abort_failure)
     result = callback(goal)
     assert result.error_code == FollowJointTrajectory.Result.INVALID_GOAL
     assert 'injected execution failure' in result.error_string
     expected = []
     if hold_fails:
-        expected.append('hold: ValueError: injected hold failure')
+        expected.append('stop: ValueError: injected hold failure')
     if abort_failure:
         expected.append('abort: OSError: injected abort')
     for reason in expected:
         assert reason in result.error_string
         assert any(reason in message for _, message in logs)
     assert calls == ['hold', 'abort']
-    assert not owner._execution.active.busy and owner._goal_tokens == {}
+    assert owner._execution.active.busy == hold_fails and owner._goal_tokens == {}
     assert goal.is_active == (abort_failure == 'before_always')
-    if expected:
-        assert any(f'status={goal.status}, is_active={goal.is_active}' in message
-                   for _, message in logs)
 
 
-def test_legacy_ros_callback_keeps_existing_action_terminal_state(monkeypatch):
+def test_continuous_ros_callback_keeps_existing_action_terminal_state(monkeypatch):
     from action_msgs.msg import GoalStatus
 
-    callback, owner, goal, calls, logs, _ = _legacy_failure_callback_fixture(
+    callback, owner, goal, calls, logs, _ = _continuous_failure_callback_fixture(
         monkeypatch, hold_fails=True, abort_failure=None)
     goal.status = GoalStatus.STATUS_ABORTED
     result = callback(goal)
     assert calls == ['hold'] and goal.abort_calls == 0
     assert goal.status == GoalStatus.STATUS_ABORTED
     assert 'injected hold failure' in result.error_string
-    assert not owner._execution.active.busy
-    assert any(f'status={goal.status}, is_active=False' in message for _, message in logs)
+    assert owner._execution.active.busy and owner._execution.stop_unconfirmed
 
 
-def test_legacy_ros_failure_finally_keeps_new_goal_ownership(monkeypatch):
-    callback, owner, goal, calls, _, _ = _legacy_failure_callback_fixture(
+def test_continuous_ros_failure_finally_keeps_new_goal_ownership(monkeypatch):
+    callback, owner, goal, calls, _, _ = _continuous_failure_callback_fixture(
         monkeypatch, hold_fails=False, abort_failure=None)
     execution = owner._execution
     old = execution.active.token
-    successor = object()
-    sampler = trajectory_to_sampler(_trajectory(tuple(f'joint{i}' for i in range(1, 7)),
-        ((0., (0.,)*6), (.4, (.03,)*6))), initial_positions=(0.,)*6)
+    sampler = execution.active.prepared.curve
+    successor = [None]
 
     def late_failure(*args):
         execution.cleanup(old)
-        execution.admit_legacy(successor, sampler)
+        current, payload = _reserve_simulation(execution, sampler)
+        successor[0] = current
+        execution.admit(current, payload, 'scene-a', lambda:False)
         raise RuntimeError('old callback failed after successor admission')
 
     monkeypatch.setattr(execution, 'observe', late_failure)
     result = callback(goal)
     assert 'old callback failed after successor admission' in result.error_string
     assert calls == ['abort'] and owner._goal_tokens == {}
-    assert execution.active.token is successor and not execution.active.cancel_requested
-    assert execution.take_sampler() is sampler
+    assert execution.active.token is successor[0] and not execution.active.cancel_requested
+    assert execution.active.prepared.curve == sampler
 
 
 @pytest.mark.parametrize('abort_failure', [None, 'before_once', 'before_always', 'after'])
@@ -852,7 +869,7 @@ def test_trajectory_action_server_delivers_failure_even_if_abort_keeps_failing(m
     from rebotarm_simulation.ros.trajectory_action_server import TrajectoryActionServer
     from rclpy.task import Future
 
-    callback, owner, goal, calls, logs, logger = _legacy_failure_callback_fixture(
+    callback, owner, goal, calls, logs, logger = _continuous_failure_callback_fixture(
         monkeypatch, hold_fails=True, abort_failure=abort_failure)
     future = Future()
     key = bytes(goal.goal_id.uuid)
@@ -881,7 +898,8 @@ def test_trajectory_action_server_delivers_failure_even_if_abort_keeps_failing(m
     asyncio.run(run())
     assert goal.abort_calls == (2 if abort_failure in ('before_once', 'before_always') else 1)
     assert calls[0] == 'hold'
-    assert not owner._execution.active.busy and owner._goal_tokens == {}
+    assert owner._execution.active.busy and owner._execution.stop_unconfirmed
+    assert owner._goal_tokens == {}
     diagnostic = '\n'.join(message for level, message in logs if level == 'error')
     assert 'injected execution failure' in diagnostic and 'injected hold failure' in diagnostic
     if abort_failure:

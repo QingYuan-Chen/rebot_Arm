@@ -9,6 +9,7 @@ from xml.etree import ElementTree
 
 import numpy as np
 import pytest
+from controller_trajectory_helpers import curve
 
 from controller_fake_backend import FakeBackend, inject_feedback_refresh
 from rebotarmcontroller.configuration import load_configuration
@@ -802,7 +803,7 @@ def test_outer_hardware_tick_protects_on_arm_feedback_loss(
     manager.lifecycle.state = "ENABLED_HOLD"
     manager.test_arm._running = True
     manager.runtime.execution.running = True
-    manager.runtime.execution.submit([(0.,)*6, (.1, -.1, -.1, .1, .1, .1)], [0., 10.],
+    manager.runtime.execution.submit_prepared(curve((0.,)*6, (.1, -.1, -.1, .1, .1, .1), 10.),
                                       manager.runtime.execution.generation, now=time.monotonic())
     old_generation = manager.runtime.execution.generation
     disable_calls: list[str] = []
@@ -1150,7 +1151,7 @@ def test_joint_state_read_waits_for_disable_transition() -> None:
 def test_action_goal_callback_rejects_motion_until_explicit_enable() -> None:
     from rebotarmcontroller.ros.ros_actions import ArmActions, GoalResponse
     actions = ArmActions.__new__(ArmActions)
-    actions._trajectory_mode = 'legacy'
+    actions._runtime = SimpleNamespace(arm_resource_reserved=False)
     actions._lifecycle = SimpleNamespace(ready_for_motion=False)
     assert actions.goal_callback(None) == GoalResponse.REJECT
     actions._lifecycle.ready_for_motion = True

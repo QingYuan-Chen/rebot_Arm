@@ -5,7 +5,7 @@
 
 对外接口
     ArmExecution 接纳数值轨迹; sample 返回 ArmTarget 候选, acknowledge 在发送成功后提交游标.
-    submit 保留旧阶梯行为，submit_prepared 接纳已检查的多项式；last_sent_target
+    submit_prepared 接纳已检查的多项式；last_sent_target
     记录最后成功发送的位置，供准备事务绑定保持目标。
 
 安全与并发约束
@@ -22,12 +22,10 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
-import math
+from bisect import bisect_right
 import threading
-import time
 import numpy as np
 from ..gravity.gravity_control import vector, POSITION_LIMITS
-from rebotarm_trajectory.sampling import step_index, validate_samples
 
 
 @dataclass(frozen=True)
@@ -49,8 +47,6 @@ class ArmExecution:
         self._target = (0.,) * 6
         self._override = None
         self._generation = 0
-        self._points = ()
-        self._times = ()
         self._cursor = 0
         self._started = 0.
         self._curve = None
@@ -100,6 +96,8 @@ class ArmExecution:
         with self.lock:
             self.cancel()
             self._target, self._override = target, override
+            # 专属停靠同样等待一次完整发送回执，再由任务检查后续新反馈。
+            self.moving = True
             return self._generation
 
     def finish_scoped_target(self, generation, hold):
@@ -117,32 +115,12 @@ class ArmExecution:
         with self.lock:
             # 代次变化使取消前产生的轨迹和待发送快照失效.
             self._generation += 1
-            self._points = self._times = ()
             # 这里只使曲线失效；停止确认前仍保留 reservation，避免夹爪提前改变几何。
             self._curve = None
             self._override = None
             self._cursor = 0
             self.moving = False
             return self._generation
-
-    def submit(self, points, times, generation, *, now=None, velocity=None):
-        """先校验轨迹及速度覆盖, 再在同一事务内接纳; 代次失效或未运行时返回 False."""
-        values, stamps = validate_samples(points, times)
-        values = tuple(self.validate_target(q) for q in values)
-        override = None if velocity is None else tuple(vector(velocity, 6, 'velocity override'))
-        if override is not None and min(override) <= 0:
-            raise ValueError('velocity override must be positive')
-        with self.lock:
-            if generation!=self._generation or not self.running: return False
-            # 校验失败不能留下无任务轨迹; 目标, 速度覆盖及代次在同一锁内一起接替.
-            self._generation += 1
-            self._override = override
-            self._curve = None
-            self._points,self._times = values,stamps
-            self._cursor = 0
-            self._started = time.monotonic() if now is None else float(now)
-            self.moving = True
-            return True
 
     def submit_prepared(self, curve, generation, *, now):
         """接纳原样系数；调用方须先完成限位/碰撞及上下文的原子复核。
@@ -157,27 +135,20 @@ class ArmExecution:
                 return False
             self._generation += 1
             self._curve = curve
-            self._points, self._times = curve.positions, curve.times
             self._cursor, self._started, self._override = 0, float(now), None
             self.moving = True
             return True
 
     def sample(self, now):
-        """按当前单调时刻取候选目标；曲线直接求值，旧轨迹取最新到期点，均不确认发送。"""
+        """按当前单调时刻求值已检查曲线；采样只生成候选，发送成功后才确认进度。"""
         with self.lock:
-            index = self._cursor
             if self._curve is not None and self.moving:
                 # 周期延迟时跳到当前参考，不追赶补发中间点；末点只有发送成功才转保持。
                 elapsed = now-self._started
                 q = self._curve.sample(elapsed)[0]
                 return ArmTarget(q, self._override, self._generation,
-                                 step_index(self._times, elapsed))
-            # 一个周期内若多个点已到期, 只输出其中最新目标; 不在此处确认发送.
-            if self.moving:
-                index = step_index(self._times, now-self._started, index)
-                if index:
-                    self._target = self._points[index-1]
-            return ArmTarget(self._target,self._override,self._generation,index)
+                                 bisect_right(self._curve.times, elapsed))
+            return ArmTarget(self._target,self._override,self._generation,self._cursor)
 
     def acknowledge(self, target):
         """确认已发送快照对应的游标; 过期代次不会改变当前轨迹."""
@@ -189,9 +160,13 @@ class ArmExecution:
                 # 正常完成继续保持最终命令，不能把瞬时反馈误差写成新的终点。
                 self._target = self.last_sent_target
             self._cursor = target.cursor
-            if self._points and self._cursor==len(self._points): self.moving = False
+            if self._curve is not None and self._cursor == len(self._curve.points):
+                self.moving = False
+            elif self._curve is None:
+                self.moving = False
 
     @property
     def progress(self):
         """返回已成功发送的点比例; 空轨迹为 1, 不代表物理到位."""
-        with self.lock: return self._cursor/len(self._points) if self._points else 1.
+        with self.lock:
+            return self._cursor/len(self._curve.points) if self._curve is not None else float(not self.moving)

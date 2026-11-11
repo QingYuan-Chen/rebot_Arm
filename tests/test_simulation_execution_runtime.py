@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 
 from rebotarm_simulation.execution.trajectory_state import ActiveTrajectory
-from rebotarm_simulation.execution.trajectory_state import ExecutionLifecycle
 from rebotarm_simulation.execution.feedback_timing import FeedbackRateLimiter
 from rebotarm_simulation.execution.trajectory_state import GateOutcome
 from rebotarm_simulation.execution.goal_policy import GoalSettlingPolicy
@@ -37,43 +36,14 @@ def test_gate_serializes_cancel_and_completion():
     assert terminal_disposition(GateOutcome.SERVICE_STOP, True) == 'aborted'
 
 
-@pytest.mark.parametrize('hold_fails,abort_fails', [(False, False), (True, False),
-                                                  (False, True), (True, True)])
-def test_lifecycle_attempts_both_steps_and_preserves_cleanup_causes(hold_fails, abort_fails):
-    active = ActiveTrajectory()
-    gate = TrajectoryCommandGate(active)
-    token = object()
+def test_hold_failure_propagates_and_keeps_active_token_reserved():
+    active = ActiveTrajectory(); gate = TrajectoryCommandGate(active); token=object()
     assert active.try_start(token)
-    calls = []
-    causes = []
-
     def hold():
-        calls.append('hold')
-        if hold_fails:
-            error = ValueError('hold command failed')
-            causes.append(error)
-            raise error
-
-    def abort():
-        calls.append('abort')
-        if abort_fails:
-            error = OSError('abort transport failed')
-            causes.append(error)
-            raise error
-
-    lifecycle = ExecutionLifecycle(active, gate)
-    if hold_fails or abort_fails:
-        with pytest.raises(RuntimeError, match='legacy trajectory cleanup failed') as raised:
-            lifecycle.fail(token, hold, abort)
-        for step, cause in zip([name for name, failed in
-                                [('hold', hold_fails), ('abort', abort_fails)] if failed], causes):
-            assert f'{step}: {type(cause).__name__}: {cause}' in str(raised.value)
-        assert isinstance(raised.value.__cause__, ExceptionGroup)
-        assert raised.value.__cause__.exceptions == tuple(causes)
-    else:
-        lifecycle.fail(token, hold, abort)
-    assert calls == ['hold', 'abort']
-    assert not active.busy
+        raise RuntimeError('hold failed')
+    with pytest.raises(RuntimeError, match='hold failed'):
+        gate.stop_and_hold(hold)
+    assert active.token is token and active.cancel_requested
 
 
 def test_stamp_and_feedback_are_monotonic_and_final_forced():

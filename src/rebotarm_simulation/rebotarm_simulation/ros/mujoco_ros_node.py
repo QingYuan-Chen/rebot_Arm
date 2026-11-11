@@ -4,7 +4,7 @@
     提供仿真 FJT、夹爪和控制模式服务，驱动物理定时器，并发布实际状态与可选验收记录。
 对外接口
     create_node_class 延迟加载 ROS 并返回节点类；main 创建执行器。
-    trajectory_execution_mode 选择 legacy 或 continuous；准备服务只返回检查结果，
+    continuous 准备服务只返回检查结果，
     execution 组件拥有目标令牌、资源占用及原子接纳；节点驱动物理时钟。
 安全约束
     不导入真实硬件后端或运动层实现；参考求值来自共享数值包。
@@ -31,13 +31,10 @@ from rebotarm_simulation.execution.trajectory_state import GateOutcome
 from rebotarm_simulation.execution.goal_policy import GoalSettlingPolicy
 from rebotarm_simulation.ros.message_codec import MonotonicStamp
 from rebotarm_simulation.execution.simulation_access import SerializedSimulationAccess
-from rebotarm_simulation.ros.message_codec import duration_to_seconds
+from rebotarm_simulation.ros.message_codec import trajectory_points
 from rebotarm_simulation.execution.trajectory_state import terminal_disposition
-from rebotarm_simulation.ros.message_codec import trajectory_to_sampler
 from rebotarm_simulation.ros.message_codec import validate_gripper_width
 from rebotarm_simulation.execution.trajectory_sampler import ARM_JOINT_NAMES
-from rebotarm_trajectory.polynomial import TrajectoryPoint
-from rebotarm_trajectory.joint_contract import canonical_input
 from rebotarm_trajectory.capability import make_capability, constraint_revision
 from rebotarm_simulation.execution.trajectory_execution import TrajectoryExecution
 from pathlib import Path
@@ -80,13 +77,9 @@ def create_node_class():
             self.declare_parameter("show_viewer", False)
             self.declare_parameter("model_path", "")
             self.declare_parameter("arm_namespace", "rebotarm")
-            self.declare_parameter("trajectory_execution_mode", "legacy")
             self.declare_parameter('trajectory_trace_path', '')
             from rebotarm_simulation.diagnostics.trajectory_trace import TrajectoryTrace
             self._trace = TrajectoryTrace(self.get_parameter('trajectory_trace_path').value)
-            self._trajectory_mode = self.get_parameter("trajectory_execution_mode").value
-            if self._trajectory_mode not in ('legacy', 'continuous'):
-                raise ValueError('trajectory_execution_mode must be legacy or continuous')
             self.declare_parameter("publish_rate_hz", 30.0)
             self.declare_parameter("max_trajectory_points", DEFAULT_MAX_TRAJECTORY_POINTS)
             self.declare_parameter("max_trajectory_duration_sec", DEFAULT_MAX_TRAJECTORY_DURATION_SEC)
@@ -163,7 +156,7 @@ def create_node_class():
             qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
             self._capability_publisher = self.create_publisher(String,
                 f'/{namespace}/trajectory_execution_mode', qos)
-            self._capability_publisher.publish(String(data=self._trajectory_mode))
+            self._capability_publisher.publish(String(data='continuous'))
             self.declare_parameter('gripper_position_max_speed_rad_s', .5)
             self.declare_parameter('gripper_position_torque_cap_nm', 1.)
             import secrets
@@ -171,11 +164,11 @@ def create_node_class():
             directory = Path(get_package_share_directory('rebotarm_moveit_config'))/'config'
             revision = constraint_revision(*(directory.joinpath(name).read_bytes()
                 for name in ('rebotarm.urdf','joint_limits.yaml')))
-            capability = make_capability(self._trajectory_mode, secrets.randbits(63),
+            capability = make_capability(secrets.randbits(63),
                 float(self.get_parameter('gripper_position_max_speed_rad_s').value),
                 float(self.get_parameter('gripper_position_torque_cap_nm').value), revision)
             self._execution = TrajectoryExecution(self._sim_access, self._control,
-                capability, self._trajectory_mode, settling_policy)
+                capability, settling_policy)
             # 仅保存 ROS Goal UUID 与执行令牌的传输关联；任务状态仍全部归 execution。
             self._goal_tokens = {}
             self._versioned_capabilities = self.create_publisher(String,
@@ -184,13 +177,12 @@ def create_node_class():
                 self._planning_state_service, callback_group=self._callback_group)
             self._physics_clock = RclpyClock(clock_type=ClockType.STEADY_TIME)
             self._capability_timer = self.create_timer(.1, self._publish_admission, clock=self._physics_clock)
-            if self._trajectory_mode == 'continuous':
-                from rebotarm_msgs.srv import PrepareArmTrajectory
-                self._prepare_type = PrepareArmTrajectory
-                self._prepare_client = self.create_client(PrepareArmTrajectory,
-                    f'/{namespace}/prepare_arm_trajectory', callback_group=self._callback_group)
-                self.create_subscription(String, f'/{namespace}/trajectory_scene_revision',
-                    self._scene_changed, qos, callback_group=self._callback_group)
+            from rebotarm_msgs.srv import PrepareArmTrajectory
+            self._prepare_type = PrepareArmTrajectory
+            self._prepare_client = self.create_client(PrepareArmTrajectory,
+                f'/{namespace}/prepare_arm_trajectory', callback_group=self._callback_group)
+            self.create_subscription(String, f'/{namespace}/trajectory_scene_revision',
+                self._scene_changed, qos, callback_group=self._callback_group)
             self._timer_callback_group = MutuallyExclusiveCallbackGroup()
             self._stamp = MonotonicStamp()
             # 只读反馈话题：关节状态、夹爪状态与仿真时钟。队列深度 10 足以吸收
@@ -225,14 +217,13 @@ def create_node_class():
                     cancel_callback=lambda goal: CancelResponse.ACCEPT,
                     execute_callback=lambda goal,m=moveit:self._execute_gripper(goal,moveit=m),
                     callback_group=self._callback_group))
-            if self._trajectory_mode == 'continuous':
-                self._teleop_server = TrajectoryActionServer(self,ExecuteTeleopMotion,
-                    f'/{namespace}/execute_teleop_motion',
-                    goal_callback=lambda goal:self._goal_callback(goal,web=True),
-                    handle_accepted_callback=self._handle_accepted,
-                    cancel_callback=self._cancel_callback,
-                    execute_callback=lambda goal:self._execute_goal(goal,web=True),
-                    callback_group=self._callback_group)
+            self._teleop_server = TrajectoryActionServer(self,ExecuteTeleopMotion,
+                f'/{namespace}/execute_teleop_motion',
+                goal_callback=lambda goal:self._goal_callback(goal,web=True),
+                handle_accepted_callback=self._handle_accepted,
+                cancel_callback=self._cancel_callback,
+                execute_callback=lambda goal:self._execute_goal(goal,web=True),
+                callback_group=self._callback_group)
             self.create_service(
                 Trigger,
                 f"/{self._arm_namespace}/trajectory_stop",
@@ -268,11 +259,6 @@ def create_node_class():
                 clock=self._physics_clock,
             )
 
-        def _current_arm_positions(self) -> tuple[float, ...]:
-            return self._sim_access.run(
-                lambda sim: tuple(sim.get_state().joint_positions[:6])
-            )
-
         @property
         def show_viewer(self) -> bool:
             return bool(self.get_parameter("show_viewer").value)
@@ -295,26 +281,17 @@ def create_node_class():
                 names = tuple(goal_request.trajectory.joint_names)
                 if len(names) != 6 or set(names) != set(ARM_JOINT_NAMES):
                     raise ValueError('FJT requires exactly six arm joints; use independent gripper command')
-                if self._trajectory_mode == 'continuous':
-                    if not self._prepare_client.service_is_ready():
-                        raise RuntimeError('preparation service unavailable')
-                    command = None
-                    if web and goal_request.move_gripper:
-                        command = (validate_gripper_width(goal_request.gripper_position),
-                            float(goal_request.gripper_max_effort))
-                        validate_gripper_force(command[1])
-                    points = tuple(TrajectoryPoint(duration_to_seconds(p.time_from_start),
-                        p.positions, p.velocities, p.accelerations) for p in goal_request.trajectory.points)
-                    canonical_input(names, points)
-                    if not 0 < len(points) <= self._max_points or points[-1].time > self._max_duration:
-                        raise ValueError('trajectory point or duration budget exceeded')
-                    self._execution.reserve(token, names, points, goal_request.trajectory.header.frame_id,
-                        web=web, gripper_command=command, received=received)
-                else:
-                    sampler = trajectory_to_sampler(goal_request.trajectory,
-                        initial_positions=self._current_arm_positions(),
-                        max_points=self._max_points, max_duration_sec=self._max_duration)
-                    self._execution.admit_legacy(token, sampler)
+                if not self._prepare_client.service_is_ready():
+                    raise RuntimeError('preparation service unavailable')
+                command = None
+                if web and goal_request.move_gripper:
+                    command = (validate_gripper_width(goal_request.gripper_position),
+                        float(goal_request.gripper_max_effort))
+                    validate_gripper_force(command[1])
+                names, points = trajectory_points(goal_request.trajectory,
+                    max_points=self._max_points, max_duration_sec=self._max_duration)
+                self._execution.reserve(token, names, points, goal_request.trajectory.header.frame_id,
+                    web=web, gripper_command=command, received=received)
                 return GoalResponse.ACCEPT
             except (TypeError, ValueError, RuntimeError) as exc:
                 self.get_logger().warning(f"FJT goal rejected: {exc}")
@@ -332,11 +309,10 @@ def create_node_class():
             self._versioned_capabilities.publish(String(data=json.dumps(self._execution.capability, allow_nan=False)))
             reasons = self._execution.admission_reasons()
             status = self._execution.status_snapshot()
-            if self._trajectory_mode == 'continuous':
-                if not status.scene_revision:
-                    reasons.append('scene revision unavailable')
-                if not self._prepare_client.service_is_ready():
-                    reasons.append('preparation service unavailable')
+            if not status.scene_revision:
+                reasons.append('scene revision unavailable')
+            if not self._prepare_client.service_is_ready():
+                reasons.append('preparation service unavailable')
             message = DiagnosticArray()
             message.header.stamp = self.get_clock().now().to_msg()
             message.status = [DiagnosticStatus(name=f'{self._arm_namespace}/trajectory_admission',hardware_id='simulation',
@@ -399,7 +375,7 @@ def create_node_class():
             with self._execution.lock:
                 token = self._execution.active.token
                 stopped = self._execution.stop()
-            if self._trajectory_mode == 'continuous' and stopped:
+            if stopped or self._execution.status_snapshot().stop_unconfirmed:
                 try:
                     self._wait_prepared_stop(token)
                 except RuntimeError as exc:
@@ -544,32 +520,19 @@ def create_node_class():
             result = ExecuteTeleopMotion.Result() if web else FollowJointTrajectory.Result()
             grip = None
             completed = False
-            sampler = execution.take_sampler()
-            if sampler is None and self._trajectory_mode == 'legacy':
-                result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
-                result.error_string = "trajectory was not admitted"
-                goal_handle.abort()
-                execution.cleanup(token)
-                with execution.lock:
-                    del self._goal_tokens[goal_key]
-                return result
             try:
-                if self._trajectory_mode == 'continuous':
-                    if web:
-                        goal_handle.publish_feedback(ExecuteTeleopMotion.Feedback(stage='preparing',
-                            gripper_state='not_started', gripper_position=self._sim_access.run(
-                                lambda sim: sim.get_state().gripper_width)))
-                    sampler = self._prepare_sampler(goal_handle, token)
-                    start_time, grip = execution.accepted_context(token)
-                else:
-                    start_time = self._sim_access.run(lambda sim: sim.get_state().simulation_time)
+                if web:
+                    goal_handle.publish_feedback(ExecuteTeleopMotion.Feedback(stage='preparing',
+                        gripper_state='not_started', gripper_position=self._sim_access.run(
+                            lambda sim: sim.get_state().gripper_width)))
+                sampler = self._prepare_sampler(goal_handle, token)
+                start_time, grip = execution.accepted_context(token)
                 feedback_limiter = FeedbackRateLimiter(self._feedback_rate_hz)
                 while rclpy.ok():
                     outcome, observation = execution.observe(token, sampler, start_time,
                         lambda: goal_handle.is_cancel_requested)
                     if outcome is not GateOutcome.APPLIED:
-                        if self._trajectory_mode == 'continuous':
-                            self._wait_prepared_stop(token)
+                        self._wait_prepared_stop(token)
                         return self._terminate_goal(goal_handle, result, outcome)
                     state, elapsed, desired = observation.state, observation.elapsed, observation.desired
                     settling = observation.settling
@@ -596,8 +559,7 @@ def create_node_class():
                         completion = execution.complete(token, sampler,
                             lambda: goal_handle.is_cancel_requested, goal_handle.succeed)
                         if completion is not GateOutcome.SUCCEEDED:
-                            if self._trajectory_mode == 'continuous':
-                                self._wait_prepared_stop(token)
+                            self._wait_prepared_stop(token)
                             return self._terminate_goal(goal_handle, result, completion)
                         result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
                         result.error_string = "simulation trajectory finished"
@@ -605,8 +567,7 @@ def create_node_class():
                         return result
                     if settling == 'timed_out':
                         execution.stop(token)
-                        if self._trajectory_mode == 'continuous':
-                            self._wait_prepared_stop(token)
+                        self._wait_prepared_stop(token)
                         goal_handle.abort()
                         result.error_code = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
                         result.error_string = "simulation goal did not settle within configured tolerance"
@@ -619,30 +580,24 @@ def create_node_class():
                 return result
             except Exception as exc:
                 self.get_logger().error(f"trajectory execution exception: {type(exc).__name__}: {exc}")
-                if self._trajectory_mode == 'continuous':
+                try:
                     execution.stop(token)
-                    try:
-                        self._wait_prepared_stop(token)
-                    except RuntimeError as stop_error:
-                        exc = RuntimeError(f'{exc}; {stop_error}')
-                    if goal_handle.is_cancel_requested and not execution.status_snapshot().stop_unconfirmed:
-                        goal_handle.canceled()
-                    else:
-                        goal_handle.abort()
-                else:
-                    try:
-                        execution.fail_legacy(token,
-                            lambda: goal_handle.abort() if goal_handle.is_active else None)
-                    except Exception as cleanup_error:
-                        # 回调返回值保留执行和清理原因；abort 抛错时按真实 goal 状态报告。
-                        exc = RuntimeError(f'{type(exc).__name__}: {exc}; '
-                            f'{type(cleanup_error).__name__}: {cleanup_error}')
-                        self.get_logger().error(
-                            f'trajectory execution and cleanup failed: {exc}; '
-                            f'Action state after cleanup: status={goal_handle.status}, '
-                            f'is_active={goal_handle.is_active}')
+                    self._wait_prepared_stop(token)
+                except Exception as stop_error:
+                    exc = RuntimeError(f'{type(exc).__name__}: {exc}; '
+                        f'stop: {type(stop_error).__name__}: {stop_error}')
+                try:
+                    if goal_handle.is_active:
+                        if goal_handle.is_cancel_requested and not execution.status_snapshot().stop_unconfirmed:
+                            goal_handle.canceled()
+                        else:
+                            goal_handle.abort()
+                except Exception as terminal_error:
+                    # 原执行及停止原因随结果返回；外层 ActionServer 负责终态故障的协议收尾。
+                    exc = RuntimeError(f'{exc}; abort: {type(terminal_error).__name__}: {terminal_error}')
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
                 result.error_string = f"simulation trajectory execution failed: {exc}"
+                self.get_logger().error(result.error_string)
                 return result
             finally:
                 if web:

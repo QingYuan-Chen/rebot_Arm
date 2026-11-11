@@ -4,7 +4,7 @@
     六轴业务组件拥有轨迹, 透传租约, 保持证据和停止事务; 运行时拥有数值目标.
 
 对外接口
-    submit_arm_trajectory 返回独立任务; stop_active_motion 等待确认;
+    submit_home 返回停靠任务; stop_active_motion 等待确认;
     set_joint_target, send_joint_motor_cmd 和 safe_home 提供按职责组织的命令.
     continuous 通过 reserve_arm_preparation 预约、decode_prepared_arm_trajectory 解码、
     admit_prepared_arm_trajectory 接纳，cancel_arm_preparation 撤销预约。
@@ -391,15 +391,15 @@ class ArmController:
         except RuntimeError as exc:
             return dict(ready=False, reasons=[str(exc)], observed_at=0., generation=self._backend.target_generation)
 
-    def trajectory_capability(self, mode):
+    def trajectory_capability(self):
         """发布当前配置与设备会话；失能不改配置，重连必须改变能力绑定。"""
         from rebotarm_trajectory.capability import make_capability
-        return make_capability(mode, self._capability_session+self._backend.requests.generations['device'],
+        return make_capability(self._capability_session+self._backend.requests.generations['device'],
             self.settings.gripper_position_max_speed_rad_s, self.settings.gripper_position_torque_cap_nm,
             self._limits_revision)
 
     @device_request
-    def planning_snapshot(self, mode):
+    def planning_snapshot(self):
         """在设备周期之间复制保持值和代次，不预约资源、不采集或发送额外设备命令。
 
         只有明确失能允许仅预览；断流、故障、运动或停止未确认不能冒充失能预览。
@@ -414,14 +414,14 @@ class ArmController:
         if not self._lifecycle.enabled:
             if any(status not in (0, 1) for status in sample.statuses):
                 raise RuntimeError('healthy feedback required for disabled preview')
-            return planning_state(self.trajectory_capability(mode)['revision'],
+            return planning_state(self.trajectory_capability()['revision'],
                 self._backend.requests.generations['device'], execution.generation,
                 execution.last_sent_target, executable=False, reason='disabled')
         if (execution.reservation is not None or execution.moving
                 or (self._task_owner().task is not None and not self._task_owner().task.event.is_set())):
             raise RuntimeError('arm resource busy; planning start unavailable')
         sample, hold, _ = self._prepared_snapshot()
-        return planning_state(self.trajectory_capability(mode)['revision'],
+        return planning_state(self.trajectory_capability()['revision'],
             self._backend.requests.generations['device'], execution.generation, hold, executable=True)
 
     @device_request
@@ -447,7 +447,7 @@ class ArmController:
         token = ArmPreparation(self._backend.requests.generations['device'], execution.generation,
             hold, sample.positions, sample.observed_at, tuple(gripper['positions']),
             gripper['generation'], gripper['raw_position'], self._scene_revision, deadline,
-            self.trajectory_capability('continuous')['revision'], 1 if web else 0, command)
+            self.trajectory_capability()['revision'], 1 if web else 0, command)
         # 规划快照失效时在建立预约之前拒绝；没有新运动，也无须自动 Stop 解锁。
         from rebotarm_trajectory.planning import require_plan_context
         require_plan_context(planning, capability_revision=token.capability,
@@ -497,7 +497,7 @@ class ArmController:
             raise RuntimeError('prepared trajectory context changed')
         curve = handoff.curve
         if (handoff.capability != token.capability
-                or token.capability != self.trajectory_capability('continuous')['revision']):
+                or token.capability != self.trajectory_capability()['revision']):
             raise RuntimeError('trajectory capability changed')
         if curve.points[0].positions != token.hold:
             raise ValueError('prepared initial hold mismatch')
@@ -528,46 +528,28 @@ class ArmController:
             return self.stop_active_motion()
 
     @device_request
-    def submit_arm_trajectory(self, joint_names, points, times, *, home=False,
-                              velocity=None, timeout=2.):
-        """原子检查六轴资源并提交轨迹; 返回只属于本请求的任务句柄."""
+    def submit_home(self, target, velocity, timeout):
+        """在设备线程原子接纳已校验的限速停靠，保留资源和生命周期检查。"""
+        target = self._validated_safe_home_target(target)
+        velocity = tuple(float(value) for value in velocity)
+        if (len(velocity) != 6 or not all(np.isfinite(value) and
+                0 < value <= self._backend.home_velocity for value in velocity)):
+            raise ValueError('home velocity override exceeds reviewed limit')
+        if not np.isfinite(timeout) or timeout <= 0:
+            raise ValueError('safe_home timeout must be positive and finite')
         self._lifecycle.require_enabled()
         self.require_available()
         if self._backend.arm_resource_reserved:
             raise RuntimeError('arm resource reserved by trajectory preparation')
-        if len(joint_names) != 6 or set(joint_names) != set(self._backend.joint_names):
-            raise ValueError('trajectory joints must match hardware exactly')
-        if not points or len(points) != len(times):
-            raise ValueError('trajectory must contain matching points and times')
-        if any(len(point) != 6 for point in points):
-            raise ValueError('each trajectory point must contain six positions')
-        if not np.isfinite(timeout) or timeout <= 0:
-            raise ValueError('trajectory settling timeout must be positive and finite')
-        order = [joint_names.index(name) for name in self._backend.joint_names]
-        ordered = [self._backend.execution.validate_target([point[i] for i in order])
-                   for point in points]
-        stamps = [float(value) for value in times]
-        if (not np.isfinite(stamps).all() or min(stamps) < 0
-                or any(b < a for a, b in zip(stamps, stamps[1:]))):
-            raise ValueError('trajectory times must be finite, nonnegative and nondecreasing')
         active = self._arm_trajectory.task
         if active is not None and not active.event.is_set():
             raise RuntimeError('arm resource busy')
         if self._arm_passthrough_until is not None:
             raise RuntimeError('arm resource owned by passthrough')
-        current, _, _ = self.feedback.get_joint_state()
-        if np.max(np.abs(np.asarray(ordered[0])-current)) > .10:
-            raise ValueError('first trajectory point is too far from current joint state')
+        # 停靠沿用正式反馈准入；校验失败时保持目标代次和任务状态不变。
+        self.feedback.get_joint_state()
         self.ensure_pos_vel_control()
-        # 同时刻的点合并为最后一个; t=0 首点按既有接口仅作为对齐占位.
-        samples = {0.: tuple(current)}
-        for index, (stamp, point) in enumerate(zip(stamps, ordered)):
-            if index == 0 and stamp <= 1e-9:
-                continue
-            samples[stamp] = point
-        task = self._arm_trajectory.submit(list(samples.values()), list(samples), current,
-            tolerance=.02 if home else .03, settle=timeout,
-            velocity=velocity, hold_on_success=home)
+        task = self._arm_trajectory.submit_home(target, velocity, timeout)
         self._lifecycle.set_execution_state('TRAJ_RUNNING')
         return task
 
@@ -659,7 +641,7 @@ class ArmController:
         return values
 
     def safe_home(self, target=None, vlim=None, timeout_sec=None) -> np.ndarray:
-        """提交带速度覆盖的两点停靠任务, 阻塞调用方直至取得任务终态.
+        """提交带速度覆盖的专属停靠任务, 阻塞调用方直至取得任务终态.
 
         target 为六轴 rad 目标, vlim 为不高于配置停靠上限的 rad/s, timeout_sec 为任务预算.
         只校验数值和关节限位, 不生成避障路径或执行碰撞检查; 调用方须先确认现场路径.
@@ -672,9 +654,7 @@ class ArmController:
             raise ValueError('safe_home timeout must be positive and finite')
         if not 0 < speed <= self._backend.home_velocity:
             raise ValueError('safe_home velocity exceeds reviewed limit')
-        current, _, _ = self.feedback.get_joint_state()
-        task = self.submit_arm_trajectory(self._backend.joint_names, [current, goal], [0., .001],
-            home=True, velocity=[speed]*6, timeout=timeout)
+        task = self.submit_home(goal, [speed]*6, timeout)
         # 此处在调用线程等待；唯一设备线程继续发送、采集并确认到位后唤醒本任务。
         task.event.wait()
         status = self.arm_execution_status(task)

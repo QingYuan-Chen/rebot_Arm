@@ -23,7 +23,6 @@
 | 视觉抓取规划 | 候选过滤、IK、工作空间/姿态/夹爪约束、MoveIt 碰撞门 | `rebotarm_vision` + MoveIt 查询 | 输出筛选结果及 Marker | [视觉抓取命令](../../reference/commands/visual_grasp_commands.md) |
 | MuJoCo 仿真 | URDF→MJCF、headless/viewer、仿真关节状态、仿真轨迹控制器、MoveIt Plan/Execute 仿真后端、物理指标 | `rebotarm_simulation` | 不访问真实电机；仿真接触不替代现场碰撞/抓取验收 | [仿真命令](../../reference/commands/system_runtime.md) |
 | MuJoCo 示教预演 | 读取示教 JSONL，复用准备/重定时，在独立仿真中报告跟踪、接触和位移 | `rebotarm_teach` + `rebotarm_simulation` | 只覆盖仿真预演，不授权真机回放 | [示教预演命令](../../reference/commands/mujoco_teach_preview.md) |
-| 轻量 RViz 预演 | 无物理引擎的轨迹插值、关节/夹爪状态和停止接口 | `rebotarm_preview` | 不验证动力学、碰撞、接触或真实硬件 | [架构说明](../architecture.md) |
 | CPU Reach/RL | Gymnasium 无接触 Reach 与可选 SB3/PPO 工具 | `rebotarm_simulation` | 软件基准不代表学习策略收敛或实机适用 | [CPU 命令](../../reference/commands/mujoco_rl.md) |
 | 独立 MJLab Reach-and-Hold | 独立环境中的任务、导出、回放和评测工具 | `/home/a/project/rebot_Arm_rl/MJLab/` | 训练与 ROS 分离，当前结果见唯一项目状态文档；本次整合不继续训练 | [MJLab 入口](../../reference/commands/mjlab_rl.md) |
 

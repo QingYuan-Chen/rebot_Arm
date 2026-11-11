@@ -21,16 +21,16 @@ def constraint_revision(*documents):
     return digest.hexdigest()
 
 
-def make_capability(mode, session, speed, torque, limits_revision):
+def make_capability(session, speed, torque, limits_revision):
     """速度为夹爪电机 rad/s，力矩为 N·m；与开口单位的转换必须显式。"""
-    if mode not in ('legacy', 'continuous') or type(session) is not int or session < 0:
+    if type(session) is not int or session < 0:
         raise ValueError('invalid capability identity')
     if not all(math.isfinite(v) and v > 0 for v in (speed, torque)):
         raise ValueError('positive finite gripper capabilities required')
     if (not isinstance(limits_revision,str) or len(limits_revision) != 64
             or any(c not in '0123456789abcdef' for c in limits_revision)):
         raise ValueError('sha256 limits revision required')
-    data = dict(version=3, mode=mode, session=session, coefficient_versions=[1, 2],
+    data = dict(version=3, mode='continuous', session=session, coefficient_versions=[1, 2],
         planning_binding_version=1,
         joint_sets=[list(JOINT_NAMES)], teleop_action_version=1,
         gripper_execution='independent_position',
@@ -43,7 +43,7 @@ def make_capability(mode, session, speed, torque, limits_revision):
 def decode_capability(value):
     """重新构造并比对全部字段，拒绝未知版本、漏字段和伪造的摘要。"""
     data = json.loads(value) if isinstance(value, str) else value
-    expected = make_capability(data['mode'], data['session'],
+    expected = make_capability(data['session'],
         data['gripper_motor_speed_rad_s'], data['gripper_torque_cap_nm'], data['limits_revision'])
     if data != expected:
         raise ValueError('trajectory capability schema or revision mismatch')

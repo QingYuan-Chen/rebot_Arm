@@ -70,7 +70,7 @@ REQUEST_POLICIES = MappingProxyType({
     'ControllerLifecycle.set_zero': RequestPolicy('device', 5, 5., ('device',)),
     'ArmController.hold_current_position': RequestPolicy('arm', 0, invalidate=('arm',)),
     'ArmController.stop_active_motion': RequestPolicy('device', 0, 5.),
-    'ArmController.submit_arm_trajectory': RequestPolicy('arm'),
+    'ArmController.submit_home': RequestPolicy('arm'),
     # 预约/接纳按普通六轴请求排序；取消和场景变更走设备级高优先级，不能被准备阻塞。
     'ArmController.reserve_arm_preparation': RequestPolicy('arm'),
     'ArmController.planning_snapshot': RequestPolicy('arm'),

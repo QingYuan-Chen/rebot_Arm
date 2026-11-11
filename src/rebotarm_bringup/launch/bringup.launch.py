@@ -1,16 +1,17 @@
-# 标准完整启动文件：一次拉起机械臂控制器、机器人状态发布器和可选的 RViz 可视化。
+# 标准真机启动文件：机械臂控制器、MoveIt 场景/准备服务、状态与可选 RViz。
 #
 # 节点组合：
 #   1. reBotArmController（硬件包）——真实电机通信与轨迹执行；
 #   2. GripperVisualJointStateNode（操作交互包）——把夹爪状态桥接成可视化关节状态；
 #   3. robot_state_publisher ——依据 URDF 发布 TF；
-#   4. rviz2 ——仅当 use_rviz=true 时启动。
+#   4. move_group 与轨迹准备节点 ——提供 continuous 规划、场景复核与准备服务；
+#   5. rviz2 ——仅当 use_rviz=true 时启动。
 #
 # 注意：本文件不含任何运动规划或控制算法，只做启动组合与参数传递。
 #
 # 真实/仿真后端选择逻辑：本文件是”真实硬件“入口，唯一包含的就是硬件控制器节点，没有仿真分支、也不会启动仿真轨迹控制器；
 # 因此与仿真执行后端互斥，任何时候不要与仿真启动文件同时拉起同名的关节状态与轨迹接口。
-# bringup.launch.py = hardware_controller.launch.py 的硬件控制器 + 机器人状态发布链路 + 可选 RViz。
+# bringup.launch.py = hardware_controller.launch.py + moveit_demo.launch.py 的规划、准备与状态链路。
 # 参数来源与安全默认值：
 #   - arm_config / gripper_config 默认指向启动组合包 config/ 下的 YAML；
 #   - channel 为空串表示沿用配置文件里的通道，不在这里硬编码设备名；
@@ -20,11 +21,8 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -37,15 +35,9 @@ def generate_launch_description():
     joint_state_rate = LaunchConfiguration("joint_state_rate")
     cmd_arbitration = LaunchConfiguration("cmd_arbitration")
     arm_namespace = LaunchConfiguration("arm_namespace")
-    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
     use_rviz = LaunchConfiguration("use_rviz")
     frame_id = LaunchConfiguration("frame_id")
     ee_frame_id = LaunchConfiguration("ee_frame_id")
-
-    # URDF 由模型配置包提供，RViz 配置属于本启动组合包。
-    urdf_file = PathJoinSubstitution([FindPackageShare("rebotarm_moveit_config"), "config", "rebotarm.urdf"])
-    rviz_config = PathJoinSubstitution([bringup_share, "rviz", "rebotarm.rviz"])
-    robot_description = ParameterValue(Command(["cat ", urdf_file]), value_type=str)
 
     return LaunchDescription(
         [
@@ -67,15 +59,12 @@ def generate_launch_description():
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             # arm_namespace：话题/服务/动作命名空间段，去首尾斜杠后拼成 /{ns}/...。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
-            # 底层启动不提供准备服务；新模式需由外部完整 MoveIt 组合提供。
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="continuous",
-                choices=["legacy", "continuous"]),
             # use_rviz：是否启动 RViz。默认 false，无可视化也能完成启动与执行。
             DeclareLaunchArgument("use_rviz", default_value="false"),
             # frame_id / ee_frame_id：对外位姿的参考坐标系与末端坐标系名，需与 URDF 中的 link 名一致，否则 TF 查询与可视化会失败。
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             DeclareLaunchArgument("ee_frame_id", default_value="end_link"),
-            # 唯一硬件底层片段；本文件只在其上叠加状态发布与可视化。
+            # 唯一硬件底层片段；本文件叠加规划、准备、状态发布与可视化。
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     PathJoinSubstitution(
@@ -89,36 +78,15 @@ def generate_launch_description():
                     "joint_state_rate": joint_state_rate,
                     "cmd_arbitration": cmd_arbitration,
                     "arm_namespace": arm_namespace,
-                    "trajectory_execution_mode": trajectory_mode,
                     "frame_id": frame_id,
                     "ee_frame_id": ee_frame_id,
                 }.items(),
             ),
-            # 夹爪可视化桥接节点（操作交互包）：把夹爪开口状态换算成左右指关节位置，供 robot_state_publisher 发布 TF 与 RViz 显示；不参与任何电机命令。
-            Node(
-                package="rebotarm_teleop",
-                executable="GripperVisualJointStateNode",
-                name="gripper_visual_joint_state_node",
-                output="screen",
-                parameters=[{"arm_namespace": arm_namespace}],
-            ),
-            # 机器人状态发布器：用 URDF 计算并发布各 link 的 TF。这里把它的输入重映射到/{ns}/visual_joint_states（可视化关节源），与控制器发布的真实关节状态/{ns}/joint_states 分开，避免把可视化状态回灌成控制反馈。
-            Node(
-                package="robot_state_publisher",
-                executable="robot_state_publisher",
-                name="robot_state_publisher",
-                output="screen",
-                parameters=[{"robot_description": robot_description}],
-                remappings=[("/joint_states", ["/", arm_namespace, "/visual_joint_states"])],
-            ),
-            # RViz（可选，条件见 use_rviz）：用本启动组合包的 rebotarm.rviz 显示模型与 TF。
-            Node(
-                package="rviz2",
-                executable="rviz2",
-                name="rviz2",
-                output="screen",
-                arguments=["-d", rviz_config],
-                condition=IfCondition(use_rviz),
-            ),
+            # 规划、准备、状态和可视化由同一 MoveIt 组合提供。
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    PathJoinSubstitution([bringup_share, "launch", "moveit_demo.launch.py"])),
+                launch_arguments={"arm_namespace": arm_namespace, "use_rviz": use_rviz,
+                    "use_fake_joint_states": "false", "use_sim_time": "false"}.items()),
         ]
     )

@@ -6,7 +6,7 @@
 #  3. 网页状态面板节点（网页面板包）：提供本机 HTTP/SSE 界面与命令入口。
 #
 #真实/仿真后端选择逻辑：
-#  - use_hardware=false（默认）：不启动硬件控制器，由 include 的启动文件拉起轻量仿真轨迹控制器，
+#  - use_hardware=false（默认）：不启动硬件控制器，由 include 的启动文件拉起MuJoCo 物理后端，
 #    键盘可以驱动 RViz 姿态，录制时不要求真实电机状态；
 #  - use_hardware=true：由 include 的启动文件启动真机控制器，录制时要求有效电机状态。真机上电后仍处于失能态，必须显式调用 enable 服务才会运动。
 #
@@ -14,7 +14,7 @@
 #
 #安全默认值：web_execute_enabled=false（网页不开放执行，只能看状态）、channel 留空或 auto 表示由机械臂配置文件决定、use_local_rviz=true 便于操作者直接看到机械臂状态。
 #网页执行模式默认为 execute，但 web_execute_enabled 默认关闭；只有显式打开网页执行开关后，
-#Dashboard 才会把命令发送给当前后端（无硬件时为轻量仿真控制器，真机时为真实控制器）。
+#Dashboard 才会把命令发送给当前后端（无硬件时为MuJoCo 后端，真机时为真实控制器）。
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -30,7 +30,9 @@ def generate_launch_description():
     # 先取出全部 LaunchConfiguration 句柄：它们是“延迟求值”的替换表达式，在声明DeclareLaunchArgument 之前就可以安全引用，真正取值发生在启动阶段。
     arm_namespace = LaunchConfiguration("arm_namespace")
     use_hardware = LaunchConfiguration("use_hardware")
-    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
+    use_sim_time = ParameterValue(PythonExpression([
+        "'", use_hardware, "'.lower() != 'true'"
+    ]), value_type=bool)
     use_local_rviz = LaunchConfiguration("use_local_rviz")
     channel = LaunchConfiguration("channel")
     panel = LaunchConfiguration("panel")
@@ -52,9 +54,6 @@ def generate_launch_description():
             # use_hardware=false（默认）：无真机/只演练流程；true 时才由被包含的启动
             # 文件拉起硬件控制器。真机分支不会自动使能电机。
             DeclareLaunchArgument("use_hardware", default_value="false"),
-            DeclareLaunchArgument("trajectory_execution_mode", default_value=PythonExpression(
-                ["'continuous' if '", use_hardware, "'.lower() == 'true' else 'legacy'"]),
-                choices=["legacy", "continuous"]),
             # use_local_rviz：是否随键盘遥操作一起打开本机 RViz，便于直接观察机械臂。
             DeclareLaunchArgument("use_local_rviz", default_value="true"),
             # channel：电机总线通道覆盖值；空串或 auto 表示交给机械臂配置文件。
@@ -108,7 +107,6 @@ def generate_launch_description():
                 launch_arguments={
                     "arm_namespace": arm_namespace,
                     "use_hardware": use_hardware,
-                    "trajectory_execution_mode": trajectory_mode,
                     "use_local_rviz": use_local_rviz,
                     "channel": channel,
                     "common_config": common_config,
@@ -135,6 +133,7 @@ def generate_launch_description():
                         "start_on_launch": False,
                         "keyboard_quit_enabled": False,
                         "require_motor_status": ParameterValue(use_hardware, value_type=bool),
+                        "use_sim_time": use_sim_time,
                     },
                 ],
             ),
@@ -161,7 +160,7 @@ def generate_launch_description():
                         "execution_mode": execution_mode,
                         "record_path": record_path,
                         "use_hardware": use_hardware,
-                        "trajectory_execution_mode": trajectory_mode,
+                        "use_sim_time": use_sim_time,
                     },
                 ],
             ),

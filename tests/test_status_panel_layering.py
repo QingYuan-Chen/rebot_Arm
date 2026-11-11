@@ -710,35 +710,42 @@ def test_teach_record_client_does_not_start_recording_when_gravity_start_fails()
     assert record.calls == 0
 
 
-def test_web_teleop_client_builds_and_sends_joint_trajectory() -> None:
+def test_web_teleop_client_binds_and_sends_complete_six_axis_constraints() -> None:
     action_client = _ActionClient()
+    names = tuple(f"joint{i}" for i in range(1, 7))
+    finalized = []
+    def finalize(trajectory):
+        finalized.append(trajectory)
+        return trajectory
     client = WebTeleopClient(
         action_client=action_client,
-        joint_names=("joint1", "joint2"),
-        joint_limits={"joint1": (-1.0, 1.0), "joint2": (-1.0, 1.0)},
-        joint_velocity_limits={"joint1": 2.0, "joint2": 2.0},
+        joint_names=names,
+        joint_limits=dict.fromkeys(names, (-1.0, 1.0)),
+        joint_velocity_limits=dict.fromkeys(names, 2.0),
         trajectory_factory=_Trajectory,
         trajectory_point_factory=_TrajectoryPoint,
         follow_goal_factory=_FollowGoal,
+        finalize_trajectory=finalize,
     )
-
+    target = dict.fromkeys(names, .02)
     result = client.execute(
-        {"confirm": "EXECUTE", "joint_positions": {"joint1": 0.2, "joint2": -0.1}, "duration": 1.0},
-        current_positions={"joint1": 0.0, "joint2": 0.0},
-        max_delta_rad=1.0,
-        min_duration=0.2,
-        max_duration=5.0,
+        {"confirm": "EXECUTE", "joint_positions": target, "duration": 1.0},
+        current_positions=dict.fromkeys(names, 0.0),
+        max_delta_rad=1.0, min_duration=0.2, max_duration=5.0,
         max_joint_speed_rad_s=2.0,
     )
-
     assert result["accepted"] is True
     assert result["status"]["state"] == "active"
     assert result["goal_future"] is not None
     assert len(action_client.goals) == 1
     trajectory = action_client.goals[0].trajectory
-    assert trajectory.joint_names == ["joint1", "joint2"]
-    assert trajectory.points[0].positions == [0.0, 0.0]
-    assert trajectory.points[-1].positions == [0.2, -0.1]
+    assert finalized == [trajectory]
+    assert trajectory.joint_names == list(names)
+    assert len(trajectory.points) == 2
+    assert trajectory.points[0].positions == [0.] * 6
+    assert trajectory.points[-1].positions == [.02] * 6
+    assert all(p.velocities == [0.] * 6 and p.accelerations == [0.] * 6
+               for p in trajectory.points)
 
 
 def test_web_teleop_client_rejects_when_action_server_unavailable() -> None:
@@ -763,6 +770,45 @@ def test_web_teleop_client_rejects_when_action_server_unavailable() -> None:
 
     assert result["accepted"] is False
     assert result["status"]["state"] == "unavailable"
+
+
+def test_web_teleop_client_does_not_dispatch_without_capability_or_final_binding() -> None:
+    import pytest
+    names = tuple(f"joint{i}" for i in range(1, 7))
+    action = _ActionClient()
+    def unavailable():
+        raise ValueError('trajectory capability unavailable')
+    client = WebTeleopClient(action_client=action, joint_names=names,
+        joint_limits=dict.fromkeys(names, (-1., 1.)),
+        joint_velocity_limits=dict.fromkeys(names, 2.), trajectory_factory=_Trajectory,
+        trajectory_point_factory=_TrajectoryPoint, follow_goal_factory=_FollowGoal,
+        require_trajectory_capability=unavailable)
+    payload = {"confirm": "EXECUTE", "joint_positions": dict.fromkeys(names, .02), "duration": 1.}
+    kwargs = dict(current_positions=dict.fromkeys(names, 0.), max_delta_rad=1.,
+        min_duration=.2, max_duration=5., max_joint_speed_rad_s=2.)
+    result = client.execute(payload, **kwargs)
+    assert not result['accepted'] and 'capability' in result['response']['message']
+    client._require_trajectory_capability = lambda: None
+    with pytest.raises(ValueError, match='final planning binding required'):
+        client.execute(payload, **kwargs)
+    assert action.goals == []
+
+
+def test_keyboard_does_not_dispatch_when_retiming_service_is_unavailable() -> None:
+    import time
+    from types import SimpleNamespace as NS
+    from rebotarm_teleop.teleop_keyboard_node import TeleopKeyboardNode
+    names = tuple(f"joint{i}" for i in range(1, 7))
+    action, events = _ActionClient(), []
+    owner = NS(_busy=False, _capability=NS(require=lambda: None),
+        _feedback_at=time.monotonic(), _action_client=action,
+        _current_positions=dict.fromkeys(names, 0.), _trajectory_duration=.4,
+        _retime_client=NS(service_is_ready=lambda: False),
+        _publish_status=lambda *args, **kwargs: events.append((args, kwargs)))
+    TeleopKeyboardNode._send_target(owner, names, (.02, 0., 0., 0., 0., 0.), 'step', '1')
+    assert action.goals == []
+    assert events[-1][0] == ('unavailable', 'trajectory retiming service unavailable')
+    assert owner._busy is False
 
 
 def test_web_teleop_client_stop_requests_cancel_and_controller_stop() -> None:
@@ -808,7 +854,7 @@ def test_web_teleop_client_stop_without_goal_uses_controller_stop_fallback() -> 
     assert stop.calls == 1
 
 
-def test_web_teleop_client_simulates_gripper_without_action_goal() -> None:
+def test_web_teleop_client_gripper_waits_for_backend_action_result() -> None:
     action_client = _ActionClient()
     client = WebTeleopClient(
         action_client=_ActionClient(),
@@ -824,17 +870,17 @@ def test_web_teleop_client_simulates_gripper_without_action_goal() -> None:
 
     result = client.set_gripper(
         {"confirm": "SET_GRIPPER", "position": 0.03, "max_effort": 0.4},
-        use_hardware=False,
         gripper_limits=(0.0, 0.045),
         default_max_effort=0.3,
         max_effort_limit=1.5,
     )
 
     assert result["accepted"] is True
-    assert result["status"]["state"] == "done"
-    assert result["simulated_position"] == 0.03
-    assert result["goal_future"] is None
-    assert action_client.goals == []
+    assert result["status"]["state"] == "active"
+    assert "simulated_position" not in result
+    assert result["goal_future"] is not None
+    assert len(action_client.goals) == 1
+    assert action_client.goals[0].command.position == 0.03
 
 
 def test_web_teleop_client_sends_gripper_goal_for_hardware() -> None:
@@ -853,7 +899,6 @@ def test_web_teleop_client_sends_gripper_goal_for_hardware() -> None:
 
     result = client.set_gripper(
         {"confirm": "SET_GRIPPER", "position": 0.02, "max_effort": 0.5},
-        use_hardware=True,
         gripper_limits=(0.0, 0.045),
         default_max_effort=0.3,
         max_effort_limit=1.5,

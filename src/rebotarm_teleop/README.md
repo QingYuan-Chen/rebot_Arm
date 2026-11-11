@@ -1,6 +1,6 @@
 # rebotarm_teleop
 
-操作者命令适配包。它把键盘、Web 点动和夹爪显示输入转换成 ROS 命令，集中做参数、限位、轨迹插值和服务调用适配；不渲染 Dashboard，不实现示教回放算法，也不直接访问硬件。
+操作者命令适配包。它把键盘、Web 点动和夹爪显示输入转换成 ROS 命令，集中做参数、限位、轨迹约束和服务调用适配；不渲染 Dashboard，不实现示教回放算法，也不直接访问硬件。
 
 ## 目录结构
 
@@ -9,9 +9,9 @@ rebotarm_teleop/
 ├── rebotarm_teleop/
 │   ├── teleop_core.py                  # 键盘/Web 命令映射、限位和限速纯逻辑
 │   ├── teleop_keyboard_node.py         # 终端按键 -> 关节增量轨迹
-│   ├── web_execute.py                  # Web 关节/夹爪请求校验和插值
+│   ├── web_execute.py                  # Web 关节/夹爪请求校验
 │   ├── web_teleop_client.py            # Web 命令 -> controller Action/service
-│   ├── trajectory_capability.py       # 执行模式与后端能力快照校验
+│   ├── trajectory_capability.py       # continuous 声明与后端能力快照校验
 │   ├── gripper_visual_model.py         # 夹爪开口 -> 左右手指位移
 │   ├── gripper_visual_joint_state_node.py # RViz 可视化关节状态桥
 │   ├── service_call_helpers.py         # Trigger 服务调用
@@ -23,9 +23,9 @@ rebotarm_teleop/
 ## 关键流程
 
 - `teleop_core.py` 是键盘和 Web 共用的纯逻辑层，负责步长、目标关节、限位和限速判断。
-- `teleop_keyboard_node.py` 轮询终端输入，调用 `TeleopTargetPlanner` 形成关节目标；continuous 由 motion 构造完整首末约束并完成规划绑定，legacy 保留单位置点。
-- `web_execute.py` 校验 Web payload；legacy 由 `web_teleop_client.py` 使用 `smoothstep` 位置插值组装轨迹。continuous 复用 motion 的轨迹生成和最终绑定，通过 `ExecuteTeleopMotion` 提交六轴及可选独立夹爪目标。
-- `trajectory_capability.py` 核对前后端模式与版本化能力，能力缺失、模式不匹配或数据损坏时拒绝执行。活动目标及 future 的状态由 Dashboard 调用方持有。
+- `teleop_keyboard_node.py` 轮询终端输入，调用 `TeleopTargetPlanner` 形成关节目标；由 motion 构造完整首末约束并完成规划绑定，再交给 continuous 后端执行。
+- `web_execute.py` 校验 Web payload；`web_teleop_client.py` 复用 motion 的轨迹生成和最终绑定，通过 `ExecuteTeleopMotion` 提交六轴及可选独立夹爪目标。
+- `trajectory_capability.py` 核对后端的 continuous 声明与版本化能力，能力缺失、模式不匹配或数据损坏时拒绝执行。活动目标及 future 的状态由 Dashboard 调用方持有。
 - `gripper_visual_joint_state_node.py` 只为 RViz 把真实夹爪的一路开口反馈映射成 URDF 的左右手指关节，不会改变真实夹爪。
 - `service_call_helpers.py` 统一停止轨迹、使能/失能等 Trigger 调用的等待和错误返回。
 
@@ -35,6 +35,9 @@ rebotarm_teleop/
 ros2 run rebotarm_teleop TeleopKeyboardNode
 ros2 run rebotarm_teleop GripperVisualJointStateNode
 ```
+
+独立夹爪命令统一通过后端 `GripperCommand` Action，界面等待真实硬件或 MuJoCo 的结果。
+无硬件键盘与 RViz 入口统一使用 MuJoCo；轨迹执行方式固定为 continuous，无模式选择参数。
 
 `GripperVisualJointStateNode` 也被 `rebotarm_bringup/moveit_demo.launch.py` 复用。Web 适配通常由 `rebotarm_dashboard` 通过对象接口调用，不在本包提供 HTTP server。
 

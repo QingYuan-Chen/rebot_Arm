@@ -56,7 +56,7 @@ def test_mujoco_moveit_launch_starts_upstream_node_and_moveit_without_fake_joint
 
     assert 'executable="rebotarm_mujoco_node"' in launch_text
     assert "rebotarm_mujoco_adapter" not in launch_text
-    assert "'simulation_backend': 'mujoco'" in launch_text
+    assert 'simulation_backend' not in launch_text
     assert 'DeclareLaunchArgument("simulation_backend"' not in launch_text
     assert 'moveit_demo.launch.py' in launch_text
     assert '"use_fake_joint_states": "false"' in launch_text
@@ -68,7 +68,7 @@ def test_mujoco_moveit_launch_starts_upstream_node_and_moveit_without_fake_joint
     assert "prefix=python_executable" in launch_text
 
 
-def test_physics_and_rviz_preview_launches_select_distinct_execution_backends():
+def test_rviz_execution_uses_the_same_continuous_physics_backend():
     physics_launch = (
         ROOT / "src/rebotarm_bringup/launch/mujoco_moveit_sim.launch.py"
     ).read_text(encoding="utf-8")
@@ -78,9 +78,9 @@ def test_physics_and_rviz_preview_launches_select_distinct_execution_backends():
 
     assert 'executable="rebotarm_mujoco_node"' in physics_launch
     assert 'executable="rebotarm_sim_trajectory_controller"' not in physics_launch
-    assert 'package="rebotarm_preview"' in preview_launch
-    assert 'executable="rebotarm_sim_trajectory_controller"' in preview_launch
-    assert 'executable="rebotarm_mujoco_node"' not in preview_launch
+    assert 'rebotarm_preview' not in preview_launch
+    assert 'rebotarm_sim_trajectory_controller' not in preview_launch
+    assert 'mujoco_moveit_sim.launch.py' in preview_launch
 
 
 def test_upstream_mujoco_ros_node_owns_required_ros_interfaces():

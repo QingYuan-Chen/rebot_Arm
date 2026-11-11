@@ -1,9 +1,9 @@
 # reBotArm MuJoCo 仿真底座
 
 本包整合 [`huangbinai/robotarm_ros2`](https://github.com/huangbinai/robotarm_ros2)
-`main@8c02470f594cfa0180e2ebfb86d1e14a640b4db3` 的仿真分层与轻量 preview 拆分，并保留本地
+`main@8c02470f594cfa0180e2ebfb86d1e14a640b4db3` 的仿真分层，并保留本地
 Viewer、Reach/Pick、Sim2Real、Real2Sim、诊断与批量验收能力，同时保留上游的
-包结构、启动组合、MoveIt 权威 URDF及安全限制；虚拟 RGB-D 发布已随上游退役。
+MoveIt 权威 URDF及安全限制；当前 ROS 仿真执行统一为 MuJoCo continuous，虚拟 RGB-D 发布已退役。
 
 实机状态驱动 MuJoCo 的只读 Real2Sim Bridge、mirror/physics 模式和 Viewer 使用方法见
 [`../../docs/real2sim_bridge_zh.md`](../../docs/real2sim_bridge_zh.md)。
@@ -53,7 +53,7 @@ ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=false use_muj
 cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 python3 scripts/install_python_dependencies.py mujoco --user --break-system-packages
-/usr/bin/python3 -m colcon build --symlink-install --packages-select rebotarm_simulation
+/usr/bin/python3 -m colcon build --symlink-install --packages-up-to rebotarm_bringup
 source install/setup.bash
 ```
 
@@ -259,15 +259,10 @@ contacts
 
 ## ROS 2 适配层
 
-工作区提供两种独立包拥有的后端，验证含义不同：
-
-- `rebotarm_mujoco_node`：加载 MJCF 并推进 MuJoCo 物理，可用于物理状态、执行器力、
-  接触和桌面/瓶子场景验证；
-- `rebotarm_preview/rebotarm_sim_trajectory_controller`：不加载 MuJoCo，只做轨迹插值和 RViz 姿态预演；该轻量后端已从 `rebotarm_simulation` 拆出。
-
-RViz 预演的 Action 成功、姿态变化或视觉流程完成，不能作为 MuJoCo 物理、动力学、
-接触、碰撞或抓取成功证据。需要这些证据时必须启动 MuJoCo 组合入口，并确认只有一个
-轨迹 Action 服务端。
+`rebotarm_mujoco_node` 是无硬件 ROS 执行的唯一后端，加载 MJCF、推进物理并发布
+关节状态、执行器力及接触诊断。网页、键盘和 RViz 执行统一使用 continuous：motion
+完成重定时、规划起点绑定和全曲线碰撞准备，仿真组件负责预约、物理采样和停止确认。
+窗口显示由启动参数控制，同一命名空间只运行一个轨迹 Action 服务端。
 
 只启动 MuJoCo 后端：
 
@@ -275,9 +270,9 @@ RViz 预演的 Action 成功、姿态变化或视觉流程完成，不能作为 
 ros2 launch rebotarm_simulation mujoco_sim.launch.py
 ```
 
-节点先复位到 Home+Hold，再应用入口的 `initial_joint_positions`。独立
-`mujoco_sim.launch.py` 使用节点默认 `legacy`；完整 MuJoCo + MoveIt 组合默认
-`continuous` 并提供轨迹准备服务。公共接口包括：
+节点先复位到 Home+Hold，再应用入口的 `initial_joint_positions`。底层
+`mujoco_sim.launch.py` 提供物理与状态；六轴执行需要同域的重定时、准备和 MoveIt 服务。
+日常操作使用下方完整 `mujoco_moveit_sim.launch.py` 组合。公共接口包括：
 
 - Action：`/rebotarm/follow_joint_trajectory`
 - Action：`/rebotarm/gripper/command`、`/rebotarm/gripper/moveit_command`
@@ -296,24 +291,17 @@ MuJoCo 物理步进定时器固定使用 steady clock，不依赖节点的 ROS �
 MoveIt、RViz 和状态发布节点使用 `use_sim_time:=true` 跟随 `/clock`。这样 `/clock` 的
 发布者不会反过来等待自己尚未发布的仿真时间。
 
-legacy 执行异常按保持、Action 中止、匹配 token 释放的顺序清理；保持或中止失败时，
-错误日志及失败结果保留原执行错误与各清理步骤的原因。迟到回调只处理原目标，后继目标
-继续持有自身执行权。continuous 沿用物理停止确认，停止未确认时保留资源。
-若 ROS Action 中间层持续无法执行 abort 终态迁移，轨迹服务端立即返回
-`status=UNKNOWN`、`error_code=INVALID_GOAL`，保留执行、清理和终态错误及实际状态。
-该服务端进入故障状态并拒绝新目标；活动原生句柄及失败结果保留到服务端关闭，
-支持迟到的结果查询。看到 `trajectory Action requires restart` 后，重启 MuJoCo 节点，
-取得新鲜反馈并重新规划。正常中止、取消和成功仍使用原生终态及结果缓存。
-
-上面的独立 legacy 入口可用以下六关节消息进行接口检查。continuous 使用 MoveIt 或
-网页生成并绑定的最终轨迹，操作顺序见下方联动入口及
+六轴请求由 MoveIt、网页或诊断工具生成并绑定最终轨迹，操作契约见
 [P005 执行说明](../../docs/implemented/features/p005_prepared_trajectory.md)。
-另开已 source 的终端执行：
+执行异常先停止并确认物理保持，停止未确认时保留预约。失败结果和日志保留原执行、
+停止及终态错误；迟到回调只处理原目标身份。持续 abort 失败时返回
+`status=UNKNOWN`、`error_code=INVALID_GOAL`，故障服务端拒绝新目标并保留结果供迟到查询。
+看到 `trajectory Action requires restart` 后重启 MuJoCo 节点，取得新鲜反馈并重新规划。
+先在已核对空闲的非零 ROS 域中启动下方完整组合；各终端使用相同 `ROS_DOMAIN_ID`
+及 localhost 隔离设置。另开已 source 的终端执行：
 
 ```bash
-ros2 action send_goal /rebotarm/follow_joint_trajectory \
-  control_msgs/action/FollowJointTrajectory \
-  "{trajectory: {joint_names: [joint1, joint2, joint3, joint4, joint5, joint6], points: [{positions: [0.1, -0.2, -0.2, 0.2, 0.0, 0.0], time_from_start: {sec: 3}}]}}" --feedback
+rebotarm_mujoco_ros_acceptance --timeout 15
 
 ros2 service call /rebotarm/gripper/set rebotarm_msgs/srv/SetGripper \
   "{position: 0.05, max_effort: 10.0}"
@@ -321,16 +309,11 @@ ros2 service call /rebotarm/gripper/set rebotarm_msgs/srv/SetGripper \
 ros2 service call /rebotarm/trajectory_stop std_srvs/srv/Trigger "{}"
 ```
 
-也可以在 Ubuntu VM 中直接跑一次无实机 ROS 2 接口验收。它在同一进程里启动
-MuJoCo ROS 2 节点和探针节点，检查 `/rebotarm/joint_states`、`/clock`、
-`/rebotarm/gripper/set` 和 `/rebotarm/follow_joint_trajectory`：
-
-```bash
-rebotarm_mujoco_ros_acceptance --timeout 15
-```
-
-输出 JSON 中 `ok=true` 才表示 topic、service 和 action 均通过；该命令不启动
-`rebotarmcontroller`，也不使用 `use_hardware:=true`。
+ROS 接口验收连接已启动的 MuJoCo/MoveIt 图，先核对唯一 MuJoCo FJT 服务端及关节反馈源，
+检查 `/rebotarm/joint_states`、`/clock` 和夹爪服务，再获取规划快照，经
+`/rebotarm/retime_arm_trajectory` 生成有起点绑定的轨迹并发送 FJT。
+输出 JSON 中 `ok=true` 表示本轮 topic、service、action 及终点误差检查通过。
+工具只拥有探针节点，启动组合拥有仿真与 MoveIt 生命周期。
 
 MoveIt 的控制器映射保持为 `/rebotarm/follow_joint_trajectory`。联调时所有
 bringup 必须显式使用 `use_hardware:=false`，且只保留一个该 Action 的服务端。

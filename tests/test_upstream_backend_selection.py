@@ -20,7 +20,7 @@ def test_mujoco_moveit_launch_has_no_selectable_current_backend():
     ).read_text(encoding="utf-8")
 
     assert 'executable="rebotarm_mujoco_node"' in launch_text
-    assert "'simulation_backend': 'mujoco'" in launch_text
+    assert 'simulation_backend' not in launch_text
     assert 'DeclareLaunchArgument("simulation_backend"' not in launch_text
     assert "rebotarm_upstream_mujoco_node" not in launch_text
     assert "rebotarm_mujoco_adapter" not in launch_text

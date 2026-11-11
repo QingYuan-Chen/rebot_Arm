@@ -41,7 +41,6 @@ def generate_launch_description():
         ),
         "cmd_arbitration": LaunchConfiguration("cmd_arbitration"),
         "arm_namespace": LaunchConfiguration("arm_namespace"),
-        'trajectory_execution_mode': LaunchConfiguration('trajectory_execution_mode'),
         "frame_id": LaunchConfiguration("frame_id"),
         "ee_frame_id": LaunchConfiguration("ee_frame_id"),
     }
@@ -79,8 +78,6 @@ def generate_launch_description():
             # arm_namespace：话题/服务/动作命名空间前缀，必须与 MoveIt 配置一致。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             # 仿真默认值不能传染到实机入口；模式不匹配或准备服务缺失时由执行链拒绝。
-            DeclareLaunchArgument('trajectory_execution_mode', default_value='continuous',
-                choices=['legacy', 'continuous']),
             # frame_id / ee_frame_id：对外位姿的参考坐标系与末端坐标系名称，需与 URDF 一致。
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             DeclareLaunchArgument("ee_frame_id", default_value="end_link"),

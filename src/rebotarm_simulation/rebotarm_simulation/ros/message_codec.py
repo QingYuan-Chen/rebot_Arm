@@ -6,8 +6,9 @@
 from __future__ import annotations
 import math
 import threading
-from typing import Any, Sequence
-from rebotarm_simulation.execution.trajectory_sampler import NamedTrajectoryPoint, TrajectorySampler
+from typing import Any
+from rebotarm_trajectory.polynomial import TrajectoryPoint
+from rebotarm_trajectory.joint_contract import canonical_input
 DEFAULT_MAX_TRAJECTORY_POINTS = 10_000
 DEFAULT_MAX_TRAJECTORY_DURATION_SEC = 300.0
 
@@ -28,52 +29,23 @@ def duration_to_seconds(duration: Any) -> float:
 
 
 
-def trajectory_to_sampler(
-    trajectory: Any,
-    *,
-    initial_positions: Sequence[float],
-    max_points: int = DEFAULT_MAX_TRAJECTORY_POINTS,
-    max_duration_sec: float = DEFAULT_MAX_TRAJECTORY_DURATION_SEC,
-) -> TrajectorySampler:
-    """校验外部传入的"类 JointTrajectory"对象并构造采样器。
-
-    这是动作目标的第一道安全门：先把不可信输入挡在仿真之外，再交给采样器。
-    本函数只做规模与结构层面的拒绝式校验（点数上限、时长上限、时长为有限值），
-    关节名合法性、重复点、时间严格递增等语义校验由采样器负责。
-
-    参数：
-        trajectory: 具有 joint_names 与 points 属性的对象（points 需含
-            time_from_start 与 positions）；
-        initial_positions: 六个手臂关节的初始角，单位 rad；用于补齐目标中未列出的关节；
-        max_points: 允许的最大路点数，正整数；
-        max_duration_sec: 允许的最长轨迹时长，单位 s，正的有限值。
-
-    异常：结构不可读、超规模或超时长时抛 ValueError。
-    """
+def trajectory_points(trajectory: Any, *, max_points: int = DEFAULT_MAX_TRAJECTORY_POINTS,
+                      max_duration_sec: float = DEFAULT_MAX_TRAJECTORY_DURATION_SEC):
+    """校验公共 FJT 的规模、完整六轴和原导数，返回规范顺序的不可变点。"""
     if isinstance(max_points, bool) or int(max_points) <= 0:
-        raise ValueError("max points must be positive")
+        raise ValueError('max points must be positive')
     duration_cap = float(max_duration_sec)
-    if not math.isfinite(duration_cap) or duration_cap <= 0.0:
-        raise ValueError("max duration must be finite and positive")
-    try:
-        names = tuple(trajectory.joint_names)
-        raw_points = tuple(trajectory.points)
-    except (AttributeError, TypeError) as exc:
-        raise ValueError("trajectory structure is invalid") from exc
+    if not math.isfinite(duration_cap) or duration_cap <= 0.:
+        raise ValueError('max duration must be finite and positive')
+    names, raw_points = tuple(trajectory.joint_names), tuple(trajectory.points)
     if len(raw_points) > int(max_points):
-        raise ValueError("trajectory contains too many points")
-
-    points = tuple(
-        NamedTrajectoryPoint(duration_to_seconds(point.time_from_start), point.positions)
-        for point in raw_points
-    )
-    # 规范关节名校验、重复名/长度、非空、有限值与时间严格递增这些语义约束统一由
-    # 采样器负责，本文只在上游控制规模。
-    sampler = TrajectorySampler(names, points, initial_positions=initial_positions)
-    # 时长上限在采样器规范化之后才能确知（此时 duration 已含补齐初始点的语义）。
-    if sampler.duration > duration_cap:
-        raise ValueError("trajectory duration exceeds configured limit")
-    return sampler
+        raise ValueError('trajectory contains too many points')
+    points = tuple(TrajectoryPoint(duration_to_seconds(point.time_from_start),
+        point.positions, point.velocities, point.accelerations) for point in raw_points)
+    names, points = canonical_input(names, points)
+    if points[-1].time > duration_cap:
+        raise ValueError('trajectory duration exceeds configured limit')
+    return names, points
 
 
 

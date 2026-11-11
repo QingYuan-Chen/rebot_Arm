@@ -16,10 +16,10 @@
     订阅：``/{ns}/joint_states``、``/{ns}/arm_status``、``/{ns}/joints/<joint>/state``、
         ``/{ns}/gripper/state``、``/{ns}/teleop/status``、``/{ns}/teleop/recording_status``、
         ``/{ns}/teleop/replay_status``；其中 ``{ns}`` 由参数 ``arm_namespace`` 决定。
-    调用：动作 ``/{ns}/follow_joint_trajectory``、``/{ns}/gripper/command``；服务
+    调用：动作 ``/{ns}/execute_teleop_motion``、``/{ns}/follow_joint_trajectory``、``/{ns}/gripper/command``；服务
         ``/{ns}/enable``、``/{ns}/disable``、``/{ns}/safe_home``、``/{ns}/trajectory_stop``、
         ``/{ns}/gravity_compensation/{start,stop}``、``/{ns}/teleop/teach_record/{start,set_path,stop}``。
-    发布：仅在轻量预演时合成夹爪状态；MuJoCo 的物理反馈由仿真后端唯一发布。
+    夹爪反馈由执行后端唯一发布，面板只订阅真实或物理仿真结果。
     轨迹能力：订阅 ``/{ns}/trajectory_execution_mode``，网页命令须与后端能力一致。
     HTTP（只监听本机 UI/API）：GET ``/`` 页面、``/events`` SSE、``/api/status``、
         ``/api/config``、``/api/teach_record_info``、``/api/teach_records``、
@@ -31,8 +31,7 @@
       网关才放行；其余取值一律返回 state="dry_run" 且不下发任何目标。
     - 面板下发命令还要求 ``web_execute_enabled`` 为真；默认关闭，必须由操作者在启动时显式打开。
     - 整臂命令（使能/失能/回原点）在示教回放或停止过程中被锁定，避免人工操作与回放轨迹互相打架。
-    - ``use_hardware`` 为假时，MuJoCo 夹爪通过真实仿真服务执行并遵守资源预约；
-      只有轻量预演使用面板合成反馈，不能把合成位置当成物理到位。
+    - 夹爪通过后端 Action 执行并遵守资源预约；面板等待结果确认。
     - 网页键盘每次按键独立起停，busy 从发送前保持到拒绝/失败/Action 终态，期间新按键直接拒绝。
 
 线程模型
@@ -67,7 +66,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rebotarm_msgs.msg import ArmStatus, JointMotorState
-from rebotarm_msgs.srv import SetTeachRecordPath, SetGripper
+from rebotarm_msgs.srv import SetTeachRecordPath
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
@@ -90,7 +89,6 @@ from rebotarm_teleop.trajectory_capability import TrajectoryCapability
 from rebotarm_motion.trajectory_messages import point_to_point_message
 from rebotarm_teach.teach_record_client import TeachRecordClient
 from rebotarm_teach.teach_replay_workflow import TeachReplayWorkflow
-from rebotarm_teach.teach_replay_trajectory_builder import set_duration
 from .web_robot_assets import (
     DEFAULT_GRIPPER_LIMITS_M,
     gripper_opening_to_finger_joint_positions,
@@ -102,15 +100,6 @@ from rebotarm_teleop.web_execute import (
     WebGripperDecision,
 )
 from rebotarm_teleop.web_teleop_client import WebTeleopClient, decision_response, gripper_decision_response
-
-
-def _set_duration(duration_msg, seconds: float) -> None:
-    """把浮点秒数写入时长消息（``sec`` + ``nanosec``）。
-
-    这里只是转发示教包中同名的轨迹构建工具，避免面板再实现一份时间换算；纳秒部分由
-    被调用方截断取整，因此写入值最多比 ``seconds`` 小 1 ns。
-    """
-    set_duration(duration_msg, seconds)
 
 
 def _request_number(payload: dict, key: str, default: float) -> float:
@@ -314,14 +303,11 @@ class TeleopStatusPanelNode(Node):
         self.declare_parameter("max_tracking_error_rad", 0.25)
         self.declare_parameter("max_live_velocity_rad_s", 3.0)
         # ---------------- 运行模式与安全开关 ----------------
-        # use_hardware（bool）：是否接真实硬件；为假时夹爪走仿真、由本节点自己发布夹爪反馈。
+        # use_hardware（bool）：标识真实硬件与 MuJoCo，供操作授权和重力补偿入口检查。
         self.declare_parameter("use_hardware", False)
         # execution_mode：命令网关闸门，只有 "execute" 才放行真实执行，其余取值（默认 "dry_run"）只做校验。
         self.declare_parameter("execution_mode", "dry_run")
-        self.declare_parameter('trajectory_execution_mode', 'legacy')
-        self._trajectory_capability = TrajectoryCapability(self.get_parameter('trajectory_execution_mode').value)
-        self.declare_parameter('simulation_backend', 'preview')
-        self._physical_simulation = self.get_parameter('simulation_backend').value == 'mujoco'
+        self._trajectory_capability = TrajectoryCapability()
         # panel_mode：界面工作模式，"control" 可操作；"check" 为只读，仅观察状态。
         self.declare_parameter("panel_mode", "control")
         # ---------------- 关节几何 ----------------
@@ -348,8 +334,7 @@ class TeleopStatusPanelNode(Node):
         self.declare_parameter("web_keyboard_max_step_rad", 0.10)
         # web_keyboard_default_duration / min / max（s）：键盘单步默认时长及其允许区间，
         # 它与步长共同决定该步的等效角速度，进而触发限速校验。
-        self.declare_parameter("web_keyboard_default_duration",
-            .4 if self._trajectory_capability.expected == 'continuous' else .2)
+        self.declare_parameter("web_keyboard_default_duration", .4)
         self.declare_parameter("web_keyboard_min_duration", 0.1)
         self.declare_parameter("web_keyboard_max_duration", 2.0)
         # web_keyboard_default_speed_rad_s（rad/s）：键盘遥操作默认速度上限。
@@ -390,22 +375,18 @@ class TeleopStatusPanelNode(Node):
         self._use_hardware = bool(self.get_parameter("use_hardware").value)
         # 命令网关：按 execution_mode 决定放行还是返回 dry_run，是所有 Web 命令的统一入口。
         self._web_command_gateway = WebCommandGateway()
-        # 仿真夹爪的"当前位置"（开口，m）：初值为闭合端，仅在不接硬件时被更新与发布。
-        self._sim_gripper_position = gripper_lower
         self._store = TeleopStatusStore()
         # 关节轨迹动作与夹爪动作：名称空间与控制器侧保持一致，缺一不可。
         self._action_client = ActionClient(
             self,
-            ExecuteTeleopMotion if self._trajectory_capability.expected == 'continuous' else FollowJointTrajectory,
-            f"/{self._arm_namespace}/" + ('execute_teleop_motion' if self._trajectory_capability.expected == 'continuous' else 'follow_joint_trajectory'),
+            ExecuteTeleopMotion,
+            f"/{self._arm_namespace}/execute_teleop_motion",
         )
         self._gripper_action_client = ActionClient(
             self,
             GripperCommand,
             f"/{self._arm_namespace}/gripper/command",
         )
-        self._simulation_gripper_client = self.create_client(SetGripper,
-            f'/{self._arm_namespace}/gripper/set') if self._physical_simulation else None
         # 整臂与示教相关的服务客户端：全部按 arm_namespace 拼接，禁止硬编码顶层名称。
         self._gravity_start_client = self.create_client(
             Trigger,
@@ -466,10 +447,9 @@ class TeleopStatusPanelNode(Node):
             joint_velocity_limits=self._joint_velocity_limits,
             trajectory_factory=JointTrajectory,
             trajectory_point_factory=JointTrajectoryPoint,
-            follow_goal_factory=ExecuteTeleopMotion.Goal if self._trajectory_capability.expected == 'continuous' else FollowJointTrajectory.Goal,
+            follow_goal_factory=ExecuteTeleopMotion.Goal,
             gripper_action_client=self._gripper_action_client,
             gripper_goal_factory=GripperCommand.Goal,
-            trajectory_execution_mode=self._trajectory_capability.expected,
             require_trajectory_capability=self._trajectory_capability.require,
             finalize_trajectory=lambda trajectory:self._retime_coordinated(trajectory,
                 self._trajectory_capability.require_snapshot(), True,
@@ -566,15 +546,6 @@ class TeleopStatusPanelNode(Node):
             self._on_gripper_state,
             sensor_qos,
         )
-        self._sim_gripper_state_pub = None
-        if not self._use_hardware and not self._physical_simulation:
-            # 无硬件时由面板自己扮演夹爪反馈源，否则界面上的夹爪永远没有实时位置。
-            self._sim_gripper_state_pub = self.create_publisher(
-                JointMotorState,
-                f"/{self._arm_namespace}/gripper/state",
-                sensor_qos,
-            )
-            self.create_timer(0.1, self._publish_simulated_gripper_state)
         # 重力补偿状态没有专门话题，靠 1 Hz 轮询服务可用性 + 整臂状态机推断。
         self.create_timer(1.0, self._update_gravity_comp_status)
         # 回放跟踪监控定时器：周期取参数值但不小于 0.02 s，避免过密轮询挤占执行器线程。
@@ -1074,22 +1045,14 @@ class TeleopStatusPanelNode(Node):
         except ValueError as exc:
             return dict(accepted=False, state='rejected', message=str(exc))
         if not self._action_client.wait_for_server(timeout_sec=0.05):
-            message = "follow_joint_trajectory action unavailable"
+            message = "execute_teleop_motion action unavailable"
             self._store.update_teleop_status("status", {"source": "web_keyboard", "state": "unavailable", "message": message, "last_key": decision.key})
             return {"accepted": False, "message": message}
-        trajectory = JointTrajectory()
-        trajectory.joint_names = list(decision.joint_names)
-        point = JointTrajectoryPoint()
-        point.positions = [float(v) for v in decision.positions]
-        # legacy 保留单位置点；continuous 下方替换为含起点及首末 v/a 的完整约束。
-        _set_duration(point.time_from_start, decision.duration)
-        trajectory.points = [point]
-        if self._trajectory_capability.expected == 'continuous':
-            trajectory = point_to_point_message(decision.joint_names,
-                tuple(current_positions[name] for name in decision.joint_names),
-                decision.positions, decision.duration, trajectory_factory=JointTrajectory,
-                point_factory=JointTrajectoryPoint)
-        goal = ExecuteTeleopMotion.Goal() if self._trajectory_capability.expected == 'continuous' else FollowJointTrajectory.Goal()
+        trajectory = point_to_point_message(decision.joint_names,
+            tuple(current_positions[name] for name in decision.joint_names),
+            decision.positions, decision.duration, trajectory_factory=JointTrajectory,
+            point_factory=JointTrajectoryPoint)
+        goal = ExecuteTeleopMotion.Goal()
         goal.trajectory = trajectory
         with self._web_keyboard_lock:
             # HTTP 请求可能并发到达；先原子占用，再异步发送，不能等 Goal 回执才标 busy。
@@ -1285,8 +1248,7 @@ class TeleopStatusPanelNode(Node):
     def _handle_set_gripper(self, payload: dict) -> dict:
         """处理夹爪开口命令（真实硬件或仿真）。
 
-        仿真模式下适配层只给出模拟落点，本方法据此更新仿真开口、立刻发布一帧夹爪反馈，
-        让界面马上看到变化；真实模式则下发动作目标并注册结果回调。
+        通过统一 GripperCommand Action 下发目标，由后端反馈和结果回调确认到位。
         """
         if not bool(self.get_parameter("web_execute_enabled").value):
             return self._legacy_blocked_response(
@@ -1300,7 +1262,6 @@ class TeleopStatusPanelNode(Node):
             return gateway_result
         result = self._web_teleop_client.set_gripper(
             payload,
-            use_hardware=self._use_hardware,
             gripper_limits=self._gripper_limits,
             default_max_effort=float(self.get_parameter("web_gripper_max_effort").value),
             max_effort_limit=float(self.get_parameter("web_gripper_max_effort_limit").value),
@@ -1309,28 +1270,6 @@ class TeleopStatusPanelNode(Node):
         if not decision.accepted:
             self._store.update_teleop_status("web_gripper", result["status"])
             return result["response"]
-        if result.get("simulated_position") is not None:
-            if self._physical_simulation:
-                # MuJoCo 必须实际执行服务，忙时固定夹爪会拒绝；不能直接回显一个虚构落点。
-                client = self._simulation_gripper_client
-                if not client.wait_for_service(timeout_sec=.1):
-                    return dict(accepted=False, message='simulation gripper unavailable')
-                request = SetGripper.Request()
-                request.position, request.max_effort = decision.position, decision.max_effort
-                future = client.call_async(request)
-                deadline = time.monotonic()+.5
-                while not future.done() and time.monotonic() < deadline:
-                    time.sleep(.005)
-                if not future.done():
-                    return dict(accepted=False, message='simulation gripper response unconfirmed')
-                response = future.result()
-                return dict(accepted=response.success, position=response.reached_position,
-                    message='simulation gripper accepted' if response.success else 'simulation gripper reserved or rejected')
-            # 轻量预演没有物理执行，才允许把界面落点作为合成反馈发布。
-            self._sim_gripper_position = float(result["simulated_position"])
-            self._publish_simulated_gripper_state()
-            self._store.update_teleop_status("web_gripper", result["status"])
-            return gripper_decision_response(decision)
         if not result["accepted"]:
             self._store.update_teleop_status("web_gripper", result["status"])
             return result["response"]
@@ -1388,23 +1327,6 @@ class TeleopStatusPanelNode(Node):
                 "effort": effort,
             },
         )
-
-    def _publish_simulated_gripper_state(self) -> None:
-        """在不接硬件时发布一帧仿真夹爪反馈。
-
-        ``position`` 用夹爪开口（m），速度与力矩恒为 0；``status_code=1`` 表示"使能、
-        可接受位置命令"，这样界面在仿真下的显示逻辑与真实硬件一致。
-        """
-        if self._sim_gripper_state_pub is None:
-            return
-        msg = JointMotorState()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.joint_name = "gripper"
-        msg.position = float(self._sim_gripper_position)
-        msg.velocity = 0.0
-        msg.torque = 0.0
-        msg.status_code = 1
-        self._sim_gripper_state_pub.publish(msg)
 
     def _on_execute_cancel_response(self, future, goal_handle) -> None:
         """取消响应只表示请求处理；整体终态只由本 Goal 的 Result 确认。"""
@@ -1477,10 +1399,7 @@ class TeleopStatusPanelNode(Node):
             status = int(result_response.status)
             error_code = int(result.error_code)
             error_string = str(result.error_string)
-            if self._trajectory_capability.expected == 'continuous':
-                arm_state, gripper_state = result.arm_state, result.gripper_state
-            else:
-                arm_state, gripper_state = '', ''
+            arm_state, gripper_state = result.arm_state, result.gripper_state
         except Exception as exc:
             self._store.update_teleop_status("web_execute", {"state": "failed", "message": str(exc)})
             with self._execute_lock:

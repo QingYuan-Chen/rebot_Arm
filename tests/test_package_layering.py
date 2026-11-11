@@ -127,41 +127,14 @@ def test_teach_preview_entrypoint_is_owned_by_simulation() -> None:
     )
 
 
-def test_rviz_preview_backend_is_owned_by_preview_package() -> None:
-    preview = ROOT / "src/rebotarm_preview"
-    simulation = ROOT / "src/rebotarm_simulation"
-    assert (preview / "package.xml").is_file()
-    assert (preview / "rebotarm_preview/rviz_preview_controller_node.py").is_file()
-    assert "rebotarm_preview.rviz_preview_controller_node:main" in (
-        preview / "setup.py"
-    ).read_text(encoding="utf-8")
-    assert not (simulation / "rebotarm_simulation/rviz_preview_controller_node.py").exists()
-    assert "rebotarm_sim_trajectory_controller" not in (
-        simulation / "setup.py"
-    ).read_text(encoding="utf-8")
-
-
-def test_preview_is_independent_of_physics_and_hardware() -> None:
-    preview = ROOT / "src/rebotarm_preview"
-    forbidden = {"mujoco", "mjlab", "torch", "numpy", "rebotarm_simulation",
-                 "rebotarmcontroller", "rebotarm_motion"}
-    for source in (preview / "rebotarm_preview").rglob("*.py"):
-        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Import):
-                modules = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and not node.level:
-                modules = [node.module or ""]
-            else:
-                continue
-            assert not forbidden.intersection(m.split(".")[0] for m in modules), source
-    manifest = ET.parse(preview / "package.xml").getroot()
-    assert not forbidden.intersection(child.text for child in manifest)
+def test_retired_preview_backend_has_no_package_or_entrypoint() -> None:
+    assert not (ROOT / "src/rebotarm_preview/package.xml").exists()
     bringup = ET.parse(ROOT / "src/rebotarm_bringup/package.xml").getroot()
-    assert any(child.text == "rebotarm_preview" for child in bringup)
+    assert not any(child.text == "rebotarm_preview" for child in bringup)
     for name in ("teleop_keyboard.launch.py", "rviz_ee_drag_sim.launch.py"):
         source = (ROOT / "src/rebotarm_bringup/launch" / name).read_text()
-        assert 'package="rebotarm_preview"' in source
-        assert 'package="rebotarm_simulation"' not in source
+        assert "mujoco_moveit_sim.launch.py" in source
+        assert "rebotarm_preview" not in source
 
 
 def test_motion_does_not_import_teach_implementation() -> None:
@@ -276,7 +249,6 @@ def test_bringup_has_one_real_hardware_controller_owner() -> None:
     hardware_consumers = {
         "bringup.launch.py",
         "interactive_system.launch.py",
-        "teleop_keyboard.launch.py",
     }
     for name in hardware_consumers:
         assert "hardware_controller.launch.py" in (launch_dir / name).read_text(
@@ -366,10 +338,9 @@ def test_rviz_moveit_drag_entrypoints_use_visible_native_goal_marker() -> None:
     assert "moveit_hardware.launch.py" in feature_doc
     assert "rviz_ee_drag_sim.launch.py" in feature_doc
     assert not (ROOT / "src/rebotarm_bringup/launch/rviz.launch.py").exists()
-    assert '"use_moveit_preview": "true"' in sim_launch
-    assert '"start_passive_joint_state_publisher": "false"' in sim_launch
-    assert '"use_moveit_fake_joint_states": "false"' in sim_launch
-    assert 'executable="rebotarm_sim_trajectory_controller"' in sim_launch
+    assert '"mujoco_moveit_sim.launch.py"' in sim_launch
+    assert '"use_rviz": "true"' in sim_launch
+    assert 'rebotarm_sim_trajectory_controller' not in sim_launch
     assert "start_interaction_nodes" not in sim_launch
     assert "interactive_control/ee_target" not in feature_doc
     assert "EndEffectorTarget" not in rviz_config

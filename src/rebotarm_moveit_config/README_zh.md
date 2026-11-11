@@ -11,12 +11,12 @@
 - OMPL 默认使用 `RRTConnectkConfigDefault`，另提供 RRTstar 等配置。具体限位和规划参数读取本包 YAML。
 - MoveIt 六轴执行映射到 `/rebotarm/follow_joint_trajectory`；夹爪映射到
   `/rebotarm/gripper/moveit_command`，按左指位移请求，后端转换为双指总开口。
-- 真机及 MuJoCo 完整组合默认 `continuous`：motion 负责最终起点绑定、重定时及执行前准备，
+- 真机及 MuJoCo 执行统一使用 `continuous`：motion 负责最终起点绑定、重定时及执行前准备，
   后端复核会话、代次、能力与场景后执行。接口见
   [P005 执行说明](../../docs/implemented/features/p005_prepared_trajectory.md)。
 
 启动组合由 `rebotarm_bringup` 拥有。真机由唯一硬件控制器执行，MuJoCo 由唯一仿真后端执行；
-同一机械臂命名空间只运行一个轨迹执行服务端。轻量 RViz 预演使用 `rebotarm_preview`。
+同一机械臂命名空间只运行一个轨迹执行服务端。RViz 无硬件执行同样使用 MuJoCo 后端。
 
 ## 构建与离线查看
 
@@ -39,7 +39,7 @@ ros2 launch rebotarm_bringup moveit_demo.launch.py use_rviz:=true
 | 用途 | 入口 |
 | --- | --- |
 | MuJoCo 物理执行、MoveIt 与 RViz | `mujoco_moveit_sim.launch.py` |
-| 轻量 RViz 轨迹预演 | `rviz_ee_drag_sim.launch.py` |
+| RViz 末端拖动与 MuJoCo 执行 | `rviz_ee_drag_sim.launch.py` |
 | 真机 MoveIt 规划与执行 | `moveit_hardware.launch.py` |
 | 真机网页、示教与 MoveIt | `rebotarm_app.launch.py` |
 

@@ -16,7 +16,7 @@ import time
 
 from rebotarm_trajectory.planning import planning_state, decode_plan, require_plan_context
 from rebotarm_trajectory.polynomial import curve_from_payload
-from .trajectory_state import ActiveTrajectory, TrajectoryCommandGate, ExecutionLifecycle, GateOutcome
+from .trajectory_state import ActiveTrajectory, TrajectoryCommandGate, GateOutcome
 from .trajectory_sampler import ARM_JOINT_NAMES, PreparedTrajectorySampler
 from .gripper_execution import GripperExecution, GripperTask
 
@@ -78,18 +78,16 @@ class ExecutionStatus:
 class TrajectoryExecution:
     """执行状态唯一所有者；节点只持有此组件及 ROS 传输对象。"""
 
-    def __init__(self, access, control, capability, mode, settling_policy, *, clock=time.monotonic):
+    def __init__(self, access, control, capability, settling_policy, *, clock=time.monotonic):
         self.access, self.control, self.capability = access, control, capability
-        self.mode, self.settling_policy, self.clock = mode, settling_policy, clock
+        self.settling_policy, self.clock = settling_policy, clock
         self.active = ActiveTrajectory()
         self.lock = self.active._lock
         self.gate = TrajectoryCommandGate(self.active)
-        self.lifecycle = ExecutionLifecycle(self.active, self.gate)
         self.gripper = access.run(lambda sim: GripperExecution(sim, self.active, capability))
         self.planning_generation = 0
         self.scene_revision = ''
         self.preparation: Preparation | None = None
-        self.pending_sampler = None
         self._sample_history = deque(maxlen=512)
         self._last_physics_wall = self.clock()
         self.stop_unconfirmed = False
@@ -102,7 +100,12 @@ class TrajectoryExecution:
             self.control.hold_current_position()
             if self.gripper.task is not None:
                 self.gripper.cancel(self.gripper.task, 'combination stopped')
-        self.access.run(apply)
+        try:
+            self.access.run(apply)
+        except Exception:
+            # 保持失败仍保留预约；后续显式停止及新物理帧确认完成后才能释放。
+            self.stop_unconfirmed = True
+            raise
 
     def _admission_snapshot(self, sim):
         state = sim.get_state()
@@ -163,8 +166,8 @@ class TrajectoryExecution:
         with self.lock:
             if not self.scene_revision:
                 raise RuntimeError('scene revision unavailable')
-            if self.active.busy or self.gripper.busy:
-                raise RuntimeError('arm/gripper resources reserved')
+            if self.active.busy or self.gripper.busy or self.stop_unconfirmed:
+                raise RuntimeError('arm/gripper resources reserved or stop unconfirmed')
             def reserve_in_sim(sim):
                 state, hold = self._admission_snapshot(sim)
                 if sim.control_mode not in ('position', 'hold'):
@@ -181,22 +184,9 @@ class TrajectoryExecution:
                 if not self.active.try_start(token):
                     raise RuntimeError('arm/gripper resources reserved')
                 self.preparation = preparation
-                self.pending_sampler = None
                 self.stop_unconfirmed = False
                 return preparation
             return self.access.run(reserve_in_sim)
-
-    def admit_legacy(self, token, sampler):
-        with self.lock:
-            if self.gripper.busy or not self.active.try_start(token):
-                raise RuntimeError('arm/gripper resources reserved')
-            self.pending_sampler = sampler
-            self.planning_generation += 1
-
-    def take_sampler(self):
-        with self.lock:
-            sampler, self.pending_sampler = self.pending_sampler, None
-            return sampler
 
     def accepted_context(self, token):
         """返回本次 Action 的只读时间起点与夹爪句柄，后续写入仍由组件负责。"""
@@ -204,16 +194,6 @@ class TrajectoryExecution:
             if self.active.token is not token or self.active.prepared is None:
                 raise RuntimeError('accepted trajectory ownership lost')
             return self.active.prepared.start, self.active.prepared.gripper
-
-    def fail_legacy(self, token, notify):
-        """持目标锁执行旧路径清理；清理异常交由 ROS 汇总进失败诊断。"""
-        with self.lock:
-            # 身份检查与 hold 必须处于同一临界区，防止迟到回调保持或释放后继目标。
-            if self.active.token is token:
-                self.lifecycle.fail(token, self.hold, notify)
-            else:
-                # 旧 Action 的通知保留原句柄，当前采样器和执行权由后继 token 持有。
-                notify()
 
     def preparation_for(self, token):
         with self.lock:
@@ -268,7 +248,7 @@ class TrajectoryExecution:
         return PreparedTrajectorySampler(curve)
 
     def observe(self, token, sampler, start_time, cancel_requested):
-        """闸门内读取反馈；legacy 下发目标，prepared 的采样写入只在物理周期发生。"""
+        """闸门内读取反馈；曲线采样写入只在物理周期发生。"""
         observation = None
         def apply():
             nonlocal observation
@@ -276,8 +256,6 @@ class TrajectoryExecution:
                 state = sim.get_state()
                 elapsed = max(0., state.simulation_time-start_time)
                 desired = sampler.sample(min(elapsed, sampler.duration))
-                if self.mode == 'legacy':
-                    self.control.command_joint_positions(desired)
                 settling = self.settling_policy.evaluate(sampler.sample(sampler.duration)[:6],
                     tuple(state.joint_positions[:6]), tuple(state.joint_velocities[:6]),
                     max(0., elapsed-sampler.duration)) if elapsed >= sampler.duration else 'tracking'
@@ -288,7 +266,7 @@ class TrajectoryExecution:
                     raise RuntimeError(grip.reason or 'independent gripper failed')
                 if settling == 'succeeded' and grip and grip.state != 'succeeded':
                     settling = 'settling'
-                if self.mode == 'continuous' and settling == 'succeeded':
+                if settling == 'succeeded':
                     if active is None or active.sent_at is None or state.simulation_time <= active.sent_at:
                         settling = 'settling'
                 return ExecutionObservation(state, elapsed, desired, settling, arm_state,
@@ -300,10 +278,7 @@ class TrajectoryExecution:
     def complete(self, token, sampler, cancel_requested, notify):
         """终态通知与释放保持原闸门事务顺序，通知回调在仿真锁外运行。"""
         def succeed():
-            if self.mode == 'continuous':
-                self.access.run(lambda _sim: self.control.command_joint_positions(sampler.sample(sampler.duration)[:6]))
-            else:
-                self.hold()
+            self.access.run(lambda _sim: self.control.command_joint_positions(sampler.sample(sampler.duration)[:6]))
             notify()
         return self.gate.complete_with_reason(token, cancel_requested, self.hold, succeed)
 
@@ -313,7 +288,7 @@ class TrajectoryExecution:
             def advance(sim):
                 for _ in range(count):
                     active = self.active.prepared
-                    if self.mode == 'continuous' and active is not None and not self.active.cancel_requested:
+                    if active is not None and not self.active.cancel_requested:
                         current = sim.get_state()
                         elapsed = current.simulation_time-active.start
                         self.control.command_joint_positions(active.curve.sample(elapsed)[0])
@@ -321,13 +296,11 @@ class TrajectoryExecution:
                             active.sent_at = current.simulation_time
                     self.gripper.advance()
                     state = sim.step()
-                    if self.mode == 'continuous':
-                        # 记录器只读本步快照，任务写权限留在执行组件。
-                        record(state, sim.get_control_status(),
-                            dict(curve=active.curve, start=active.start) if active else None)
-                        self._sample_history.append(state)
-                if self.mode == 'continuous':
-                    self._last_physics_wall = self.clock()
+                    # 记录器只读本步快照，任务写权限留在执行组件。
+                    record(state, sim.get_control_status(),
+                        dict(curve=active.curve, start=active.start) if active else None)
+                    self._sample_history.append(state)
+                self._last_physics_wall = self.clock()
                 return state
             return self.access.run(advance)
 

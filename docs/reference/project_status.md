@@ -6,11 +6,15 @@
 功能、架构、参数与启动命令分别链接到对应手册；不维护历史任务阶段、进度百分比或重复流水。
 状态变化时直接更新本文，不再生成独立状态 JSON 或事件日志。
 
-稳定版起点绑定接口已同步到日常安装区，13 包构建及导入通过；构建未启动设备。隔离验收、旧生成产物
+当前独立副本的默认安装区已重建为 12 包，起点绑定接口及运行代码与源码一致。既有隔离验收、旧生成产物
 备份及实际检查范围见 [P005 起点绑定验收](../implemented/features/p005_prepared_trajectory.md#规划起点绑定验收2026-11-04)。
 P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控制器使用组合句柄、MuJoCo 执行职责已拆分；功能关闭状态保留。
 
 ## 当前基线
+
+- 2026-11-11 独立副本完成 legacy 轨迹模式退役：控制器、MuJoCo、网页、键盘及示教统一 continuous，删除模式选择参数、离散执行入口和 `rebotarm_preview` 包；只读能力声明保留。Safe Home 使用专属限速停靠任务，保留反馈准入、发送确认、到位、取消代次及超时保持。默认安装区全新 **12 包**构建通过，**271 份 Python 文件、147 份资源**与源码摘要一致，旧包及旧安装模块已清除。完整回归 **1862 passed / 2 skipped**（275.46 s；跳过 Torch 可选用例与未启用的 10k 碰撞基准，保留两条既有 Gymnasium 提示），分层 **26 passed**，规定及控制器/仿真/共享轨迹编译、差异与退役入口审计通过。域 223 的安装版控制器＋内存假电机＋真实 MoveIt、域 222 的 MuJoCo＋MoveIt＋Dashboard 完整操作链通过；continuous 最大跟踪误差 **0.003398 rad**、hold 漂移 **0.00002664 rad**、网页独立夹爪开度误差 **0.000865 m**。域 224–226 补验组合入口：真实 PTY 键盘点动 **0.020655 rad**、时钟参数一致、唯一状态源；RViz 连续执行终点最大误差 **0.000463 rad**；被动 MoveIt 生成 **6 点**路径。两轮集成共 **38 个**后台节点正常退出，五类真机入口仅展开参数。RViz 的可选 `/recognize_objects` 缺失提示保留，轨迹执行通过。接口见 [P005 执行接入](../implemented/features/p005_prepared_trajectory.md)，入口见 [启动说明](../../src/rebotarm_bringup/launch/README.md)，本机证据在 `log/legacy_retirement_20261111/`。修改和构建均位于本副本，原工程由其他线程维护。
+
+- 2026-11-11 独立副本基础功能测试通过：在 `/home/a/.codex/worktrees/rebot-arm-isolated/rebot_Arm` 的 `codex/isolated-work-20261111@a86ed92` 及复制时已有修改上，独立构建 **13 包**，9 个运行包的 Python 导入与 ament 索引均指向副本安装区；39 个文件的定向测试 **917 passed / 0 skipped**（含分层 **27 passed**），规定及控制器、视觉、仿真 compileall 通过。空闲 localhost 域 223 的安装版控制器＋内存假电机＋真实 MoveIt 完成默认失能拒绝、显式使能、FJT、取消保持、MoveIt 执行、六轴＋夹爪组合、残留取消后的后继目标、IK、位姿 Action 和显式失能；域 222 的 MuJoCo＋MoveIt＋Dashboard 完成规划起点绑定、六轴与夹爪执行、网页/终端键盘、组合取消与后继执行、合成示教预演与回放、场景变化停止及 jerk/环境/附着物碰撞拒绝。固定物理对照的 continuous 最大跟踪误差 **0.003398 rad**、hold 漂移 **0.00002664 rad**；两个探针和 launch 退出码均为 **0**，14 个后台节点正常退出，测试域进程、DDS 与 Dashboard 监听端口已释放。测试结束、更新本文前，805 份既有文件 SHA256 及完整 Git 差异与测试前一致。范围为软件及仿真，视觉/标定覆盖离线单元用例；本轮未操作真机或运行完整回归。复用入口见 [P005 验收](../implemented/features/p005_prepared_trajectory.md#验收与记录)，证据在 `log/basic_function_20261111_xomRnu/`。
 
 - 2026-11-11 关闭与 Action 故障收尾完成：重定时节点的 `Destroyable` 提示由 Jazzy 多线程执行器先销毁唤醒句柄、后等待排队回调触发；节点现在先停止自旋、排空线程与服务回复，再释放句柄和 ROS context，SIGINT/SIGTERM 均采用该顺序。轨迹 Action 保留原执行和清理错误；持续 abort 失败时，以 `UNKNOWN / INVALID_GOAL` 及时回复并进入故障状态，拒绝新目标，原生句柄及结果保留至服务端关闭；重启后恢复接纳。实现及恢复说明见[MuJoCo README](../../src/rebotarm_simulation/README_mujoco.md)和[规划服务生命周期](../implemented/features/p005_prepared_trajectory.md#规划起点绑定)。定向 **208 passed**（含分层 **27 passed**、关闭 **6 项**、真实 DDS 故障/重建 **4 项**及文档/资源检查），规定及仿真编译、差异检查通过。motion/simulation 两包独立构建，三份修改后的生产文件与安装摘要一致；域 228 安装版 MuJoCo 验证正常、取消/后继、执行与保持双故障、持续 abort 三重故障、迟到结果及故障拒绝，进程与 DDS 端口释放。证据在 `log/shutdown_action_fix_smr3rxwx/`。本轮按故障范围定向验证，未重跑完整回归、未操作真机、未提交或推送。
 
@@ -344,7 +348,7 @@ P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控�
 - 按用户确认保留夹爪电机、齿条和滑块，左右各接入一套新 Mount + Finger；规范 URDF 和 MuJoCo 共用分部件网格，软指采用未变形刚体近似。夹爪可视配色与机械臂统一为银灰色。源文件、安装坐标和生成命令见[软指模型](../implemented/features/soft_gripper_model.md)。
 - 2026-10-25 软件验收：软指专项 5 项通过；银灰配色同步后完整回归 1249 passed / 2 skipped，分层 26 项与规定编译检查通过。`rebotarm_moveit_config` 与 `rebotarm_simulation` 构建通过；安装区 MuJoCo 场景正常加载，7 个夹爪可视部件色值与机械臂一致，离屏渲染通过。未连接或操作真实硬件。
 - J2/J3 软件位置范围保留 `[-3.14,+0.02] rad`，目标和反馈同样检查；不改零位或对反馈加偏移。
-- MuJoCo Viewer、Reach/Pick、示教离线预演、Sim2Real/Real2Sim 和诊断保留；采用上游 `core/control/execution/ros/apps/diagnostics` 分层。无物理引擎的 RViz 轻量预演归新包 `rebotarm_preview`，MuJoCo 物理执行仍归 `rebotarm_simulation`。
+- MuJoCo Viewer、Reach/Pick、示教离线预演、Sim2Real/Real2Sim 和诊断保留；采用上游 `core/control/execution/ros/apps/diagnostics` 分层。无硬件键盘和 RViz 执行统一使用 `rebotarm_simulation` 的 MuJoCo 后端；轻量预演包已随 legacy 退役删除。
 - 视觉节点、策略、推理后端及工具采用子包布局；launch 按输入、候选、过滤和显示职责拆分，保留采集时间戳检查。示教录制、准备及回放模块拆分后继续保留原停止与碰撞门。
 - MJX 专属训练、依赖和对比工具已剥离；CPU Gymnasium Reach 与可选 SB3/PPO 保留。新的 MJLab 独立工作区位于 `/home/a/project/rebot_Arm_rl/MJLab/`，后续 IsaacLab 使用独立同级目录（尚未引入），不改变现有 ROS 仿真环境，见 [DRL 使用与部署](../../../rebot_Arm_rl/MJLab/README.md)。
 - 2026-10-04 用户选定并授权实现、打包 Reach-and-Hold（末端到达并稳定保持）；到达后须停稳并连续保持，不能将瞬时经过目标算作成功。任务范围与初版仿真契约见 [DRL 任务说明](../../../rebot_Arm_rl/MJLab/README.md#首个任务reach-and-hold)。

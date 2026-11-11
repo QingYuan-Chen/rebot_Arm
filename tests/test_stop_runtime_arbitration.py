@@ -75,8 +75,8 @@ def test_disable_cancels_passthrough_continuation_before_any_direct_write(monkey
     bus = opened[0]
     for motor in bus.motors[:6]:
         motor.state.vel = .2
-    task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-        [(0.,) * 6, (.01, -.01, -.01, 0., 0., 0.)], [0., 10.])
+    monkeypatch.setattr(bus.motors[0], 'send_pos_vel', lambda *_: None)
+    task = manager.arm.submit_home((.1, -.1, -.1, 0., 0., 0.), (.3,)*6, 10.)
     command = SimpleNamespace(mode=1, pos=.02, vel=0., kp=1., kd=.1, tau=0., vlim=.3,
         **{f'use_{key}': True for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')})
     errors = []

@@ -4,7 +4,7 @@
     六轴任务所有者, 将数值执行器的发送状态与反馈收敛组合为任务终态.
 
 对外接口
-    ArmTask 保存身份与事件, ArmResult 是查询快照; ArmTrajectory 负责 submit/update/finish.
+    ArmTask 保存身份与事件, ArmResult 是查询快照; ArmTrajectory 负责连续曲线接纳、停靠、update 和 finish.
 
 安全与并发约束
     任务句柄跨线程保留身份; 成功要求末点发送后的新反馈. 健康超差保留使能并交回当前位置保持.
@@ -61,25 +61,19 @@ class ArmTrajectory:
         self.task = None
         self.lock = threading.RLock()
 
-    def submit(self, points, times, current, *, tolerance=.03, settle=2., velocity=None,
-               hold_on_success=False):
-        """在任务锁内检查资源与起点, 接纳数值轨迹并返回专属任务句柄.
+    def submit_home(self, target, velocity, timeout):
+        """登记限速停靠目标；只用于显式 safe_home，成功后交回反馈保持。
 
-        points 为六轴关节角, times 为相对秒; tolerance 为终点容差 rad, settle 为末点后预算 s.
-        返回只表示数值执行器接纳; 终点成功需 update 观察到末点发送之后的新反馈.
+        停靠没有轨迹时间轴，由固件速度上限控制接近；仍等待发送后的新反馈确认到位。
         """
         with self.lock:
             if self.task is not None and not self.task.event.is_set():
                 raise RuntimeError('arm resource busy')
-            if np.max(np.abs(np.asarray(points[0])-current)) > .10:
-                raise ValueError('first trajectory point is too far from current joint state')
+            if not self.execution.running:
+                raise RuntimeError('home rejected by inactive execution')
             now = self.clock()
-            # 任务与数值轨迹绑定同一代次, 后来取消或新目标不会被旧事件确认成功.
-            if not self.execution.submit(points, times, self.execution.generation,
-                                         now=now, velocity=velocity):
-                raise RuntimeError('trajectory rejected by inactive execution')
-            task = ArmTask(self.execution.generation, tuple(points[-1]),
-                           now + times[-1] + settle, tolerance, hold_on_success)
+            generation = self.execution.begin_scoped_target(target, velocity)
+            task = ArmTask(generation, tuple(target), now + timeout, .02, True)
             self.task = task
             return task
 

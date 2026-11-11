@@ -1,9 +1,9 @@
 # P005 共享轨迹与 continuous 执行
 
-`prepared_v1` 已正式更名为 `continuous`，启动参数、能力话题与能力快照统一使用新名称；
-历史验收记录中的模式名称按当前名称表述。旧名称不再作为启动参数或能力值接受。
+轨迹执行统一使用 `continuous`。可选 legacy 模式、旧离散执行和轻量预演后端已退役；
+模式话题保留为只读能力声明，启动和节点参数已移除模式选择。历史验收数据按当时实现保留。
 
-> 问题状态：**已解决**。用户已确认本轮测试无问题，稳定代码已合入 main。
+> P005 既有问题状态：**已解决**。用户已确认此前测试无问题，对应稳定代码已合入 main；本次 legacy 退役保留在独立副本，验证结果见[项目状态](../../reference/project_status.md)。
 > 本页开头为当前接口与行为；带日期的旧方案、排查及验收段落保留历史证据，不表示仍在执行。
 > 当前状态涵盖用户的真机功能测试；整机硬件全项及实机定量连续性验收另行安排。
 
@@ -48,8 +48,8 @@ MoveIt 响应链为 TOTG → Ruckig → 执行曲线重定时 → ValidateSoluti
 motion 采用混合构建，C++ 插件复用 Python 数值服务。MoveIt RobotTrajectory 不保存
 JointTrajectory header，插件分别缓存 MoveIt 重编码匹配值和服务权威纳秒轨迹，由原
 simple controller manager 的装饰器匹配后下发权威轨迹及绑定；缓存缺失要求重新规划。
-`ompl_reference` 复用 OMPL 配置，但其结果不能直接执行。prepared 分支 TOTG `min_angle_change=1e-7`，
-避免其默认 0.001 同时应用 rad/m 时吞掉亚毫米手指轨迹；legacy 保持原值。
+`ompl_reference` 复用 OMPL 配置，但其结果不能直接执行。执行管线 TOTG `min_angle_change=1e-7`，
+保留亚毫米手指轨迹节点。只读模型查询使用禁用执行的 MoveIt 组合。
 
 内部准备明确绑定两种碰撞策略：网页 Action 固定使用 WEB_CLOSED（双指均为零）；
 普通 FJT、MoveIt 机械臂、示教和视觉使用 FIXED_CURRENT（准备时取得的真实开度，全段固定）。
@@ -62,7 +62,7 @@ simple controller manager 的装饰器匹配后下发权威轨迹及绑定；缓
 机械臂末点仍须满足原 0.03 rad 到位容差，独立夹爪沿用电机角 0.12 rad 到位容差；
 不恢复已删除的逐周期参考误差中止或约 0.001144 rad 位置偏差准入门限。
 
-MoveIt 公共启动配置的执行起点容差现为 `0.03 rad`（legacy / continuous 共用），
+MoveIt 公共启动配置的执行起点容差现为 `0.03 rad`，
 与实机控制器普通轨迹的终点到位容差一致。前者比较规划首点与 MoveIt 当前状态，后者
 比较实际反馈与已发送终点，两者用途不同。示教起点分档、对齐跳过阈值和 Safe Home
 专用到位容差不变；MoveIt 执行预算仍为 `1.2T + 0.5 s`。修改需重启 MoveIt 后生效。
@@ -186,7 +186,7 @@ MoveIt/MoveItPy 正常退出，本轮进程已清理。
 
 ### 机械臂再次准入（2026-11-04）
 
-按用户要求，continuous 与 legacy 一样不以六轴静止窗口作为再次接纳任务的条件。
+按用户要求，continuous 的机械臂再次准入沿用新鲜反馈与资源条件，停止事务仍保留静止确认。
 控制器预约、接纳和诊断以及 MuJoCo 对应路径同步调整；运动层保留内部 `stationary`
 兼容字段，但不再依赖该字段作准入，也不虚报机械臂已静止。正常结束后可在其他检查
 通过时立即申请下一轨迹；取消或停止后仍须等待停止事务完成。准备曲线仍从最后成功
@@ -409,7 +409,7 @@ FJT、默认失能、显式使能、MoveIt Plan/Execute、协同执行、IK/Pose
 
 同一轨迹混合缺失导数拒绝。C0/C1 段内导数检查不代表节点跳变满足高阶限值。
 网页点对点和键盘由 motion 构造首末完整 q/v/a 约束；prepared 键盘默认为
-`0.02 rad / 0.4 s`，独立起停、忙时拒绝、不排队。legacy 时长仍为 0.2 s。
+`0.02 rad / 0.4 s`，独立起停、忙时拒绝、不排队。
 PoseCompat 保留 q-only；公共 FJT 仍按完整字段分级，混合字段拒绝。
 示教保留输入等级。q/v 由滤波后 q/t 生成派生参考 v，a 为空；对齐适配明确把规划
 q/v/a 转换为 q/v，保留 q/t 与中间 v、首末 v 归零，与保持及示教拼成一次 C1 执行。
@@ -449,21 +449,15 @@ MoveItPy `read_only()` 场景锁中完成所有样本。按段内速度极值安
 
 ## 模式与启动
 
-`trajectory_execution_mode` 只接受 `legacy / continuous`。
-后端以锁存 `/<ns>/trajectory_execution_mode` 发布能力；网页和键盘必须观察到匹配模式，
-不匹配或能力未知拒绝，无失败后回退。真实硬件默认 continuous，专用 safe_home 等路径保留原语义。
-日常 `mujoco_moveit_sim.launch.py` 已默认 continuous，终端键盘须显式选择相同模式。
-轻量 RViz preview 发布 legacy 能力，保留旧入口兼容，不提供 continuous。
+硬件与 MuJoCo 固定执行 continuous。后端持续发布只读
+`/<ns>/trajectory_execution_mode=continuous` 及版本化能力快照，网页和键盘取得
+匹配能力后才可提交。节点和 launch 的模式选择参数已删除。
+完整真机、MuJoCo、键盘及 RViz 拖动组合提供场景、重定时与准备服务。
+独立底层节点需复用外部准备服务；被动视觉/模型查询关闭轨迹执行。
+无硬件键盘与 RViz 拖动复用 MuJoCo，使用唯一仿真时钟和物理反馈。
 
-第三批将 `trajectory_execution_mode` 显式贯通 MoveIt、网页工作台、键盘遥操作和视觉抓取
-的现有启动链。真机 continuous 组合复用 `moveit_demo` 提供场景和准备服务，
-唯一控制器及真实反馈仍由硬件片段拥有；键盘新分支不重复启动控制器、状态发布或 RViz。
-轻量预演保持 legacy，真机入口默认 continuous；legacy 可显式选择。
-独立底层启动默认 continuous，准备服务由外部组合提供。
-
-随包键盘与网页 YAML 不再固定覆盖时长；节点已有的模式默认实际生效：
-continuous 为 0.02 rad / 0.4 s，legacy 仍为 0.02 rad / 0.2 s。
-用户 YAML 显式配置仍有效，独立单步、busy 拒绝、不排队和超限拒绝语义不变。
+键盘与网页默认单步 0.02 rad / 0.4 s；用户 YAML 可显式设置时长。
+忙时拒绝、独立单步及超限拒绝语义保持。
 
 先构建并 source 安装区：
 
@@ -473,16 +467,15 @@ colcon build --symlink-install --packages-up-to rebotarm_bringup
 source install/setup.bash
 export ROS_DOMAIN_ID=77 ROS_LOCALHOST_ONLY=1
 ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py \
-  use_rviz:=false use_mujoco_viewer:=false trajectory_execution_mode:=continuous \
+  use_rviz:=false use_mujoco_viewer:=false \
   use_dashboard:=true dashboard_port:=18088 \
   trajectory_trace_path:=/tmp/p005_physics.jsonl
 ```
 
 此链仅加载 MuJoCo、MoveIt、准备服务和可选 Dashboard，不加载真实控制器。
-Dashboard 的 `simulation_backend=mujoco` 消费物理后端的反馈，独立夹爪发往仿真服务，
-新模式关节、键盘及组合操作提交 ExecuteTeleopMotion，组合夹爪独立推进，
-不再发布模拟落点污染物理反馈。`use_dashboard` 默认 false，不改变既有界面启动偏好。
-终端键盘可另启动 `TeleopKeyboardNode --ros-args -p trajectory_execution_mode:=continuous`。
+Dashboard 消费物理后端反馈，独立夹爪使用 GripperCommand Action；
+关节、键盘及组合操作提交 ExecuteTeleopMotion，组合夹爪独立推进。`use_dashboard` 默认 false，不改变既有界面启动偏好。
+终端键盘可另启动 `TeleopKeyboardNode --ros-args -p use_sim_time:=true`。
 
 ### 第三批首次软件交付与用户实测
 
@@ -517,8 +510,8 @@ python3 scripts/validate_p005_simulation.py \
 ```
 
 工具记录资源摘要、参考 q/v/a/jerk、实际 q/v/力矩和模式。
-离线对照以相同物理起点比较五次曲线与旧阶梯；正式链另以每物理步 JSONL 记录执行。
-固定单步最大误差要求 ≤0.005 rad 且优于旧方案；结束后独立 5 s 观察内达到
+离线验收执行 continuous 五次曲线，正式链另以每物理步 JSONL 记录执行。
+固定单步最大误差要求 ≤0.005 rad；结束后独立 5 s 观察内达到
 q 误差 ≤0.001 rad、速度 ≤0.01 rad/s，持续 0.5 s；静止 position→hold
 观察 1 s 并记录漂移，支撑力矩不被清零；漂移不再以旧量化位置值作为通过门槛。
 旧越限目标现在在状态变更之前拒绝，position→hold 保留控制器记忆。
@@ -687,7 +680,7 @@ manager 仍只装配；分层与职责门禁继续覆盖这些约束。
 删除第一批实验测试 `tests/test_p005_offline_handoff.py`：它替换正式执行器为
 `OfflineCurveExecution`，已不代表当前生产接纳链。覆盖映射为：
 
-- 序列化/同曲线采样/旧阶梯语义：`test_p005_shared_trajectory.py`；
+- 序列化/同曲线采样/离线位置记录采样：`test_p005_shared_trajectory.py`；
 - 周期延迟、实际发送、部分失败、取消与迟到响应、忙拒绝、失能/重连：
   `test_p005_prepared_controller.py`；
 - 上下文失效、未知/不完整碰撞不生成候选：`test_polynomial_trajectory.py`、

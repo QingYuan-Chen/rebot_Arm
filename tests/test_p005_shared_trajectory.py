@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from rebotarm_trajectory.polynomial import curve_from_payload
-from rebotarm_trajectory.sampling import linear_sample, step_index, validate_samples
+from rebotarm_trajectory.sampling import linear_sample, validate_samples
 from rebotarm_motion.polynomial_trajectory import JOINT_NAMES, TrajectoryPoint, build_curve
 from rebotarm_motion.trajectory_preparation import point_to_point
 from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
@@ -34,7 +34,7 @@ def test_final_plan_normalizes_before_retiming_and_survives_nanoseconds(grade,de
     from trajectory_msgs.msg import JointTrajectory,JointTrajectoryPoint
     config=Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
     revision=constraint_revision(*(config.joinpath(n).read_bytes() for n in ('rebotarm.urdf','joint_limits.yaml')))
-    cap=make_capability('continuous',10,.5,1.,revision)
+    cap=make_capability(10,.5,1.,revision)
     source=tuple(TrajectoryPoint(p.time,p.positions,p.velocities if grade>=1 else (),
         p.accelerations if grade>=2 else ()) for p in point_to_point((0.,)*6,(.02,)*6,.4))
     msg=curve_message(build_curve(JOINT_NAMES,source),trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
@@ -118,7 +118,7 @@ def test_web_coordinated_plan_is_single_use():
     from rebotarm_teleop.web_coordinated import CoordinatedWebPlans
     from rebotarm_trajectory.capability import make_capability
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-    cap = make_capability('continuous',1,.5,1.,'1'*64)
+    cap = make_capability(1,.5,1.,'1'*64)
     from rebotarm_trajectory.planning import plan_binding, planning_state
     def retime(message,*args):
         points = tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
@@ -171,7 +171,7 @@ def test_coordinated_teach_uses_source_time_and_preserves_raw_samples():
     from rebotarm_teach.teach_preparation import prepare_teach_replay_samples
     config = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
     revision = constraint_revision(*(config.joinpath(n).read_bytes() for n in ('rebotarm.urdf','joint_limits.yaml')))
-    cap = make_capability('continuous',1,.5,1.,revision)
+    cap = make_capability(1,.5,1.,revision)
     samples = [TeachSample(i*.1,JOINT_NAMES,(i*.0002,0.,0.,0.,0.,0.),(),(),{},'GRAVITY_COMP',
         format_version=2,gripper_width_m=.02+i*.00001,gripper_source_stamp=i*.1,gripper_valid=True)
         for i in range(11)]
@@ -217,9 +217,9 @@ def test_fixed_stationary_plan_does_not_check_artificial_start_displacement(name
 
 def test_capability_revision_changes_on_reconnect_and_rejects_tampering():
     from rebotarm_trajectory.capability import make_capability, decode_capability
-    first = make_capability('continuous',1,.5,1.,'1'*64)
+    first = make_capability(1,.5,1.,'1'*64)
     assert decode_capability(first) == first
-    assert first['revision'] != make_capability('continuous',2,.5,1.,'1'*64)['revision']
+    assert first['revision'] != make_capability(2,.5,1.,'1'*64)['revision']
     first['gripper_torque_cap_nm'] = 2.
     with pytest.raises(ValueError, match='revision'):
         decode_capability(first)
@@ -261,19 +261,6 @@ def test_joint_state_bridge_never_restamps_cached_gripper_or_fabricates_zero():
     assert len(published)==before
 
 
-@pytest.mark.parametrize('names', [JOINT_NAMES, ('left_finger_joint',),
-    (*JOINT_NAMES,'left_finger_joint'), (*JOINT_NAMES,'right_finger_joint')])
-def test_lightweight_preview_uses_the_same_six_joint_fjt_contract(names):
-    import threading
-    from types import SimpleNamespace as NS
-    from rclpy.action import GoalResponse
-    from rebotarm_preview.rviz_preview_controller_node import SimTrajectoryControllerNode
-    owner = NS(_recovery_lock=threading.Lock(),_motion_lock=threading.Lock(),
-        _stop_requested=threading.Event(),_joint_names=JOINT_NAMES,get_logger=lambda:NS(warn=lambda message:None))
-    result = SimTrajectoryControllerNode._goal_callback(owner,NS(trajectory=NS(joint_names=names)))
-    assert result == (GoalResponse.ACCEPT if names == JOINT_NAMES else GoalResponse.REJECT)
-
-
 def test_five_captured_moveit_rejections_pass_only_after_planning_retime():
     import json
     from rebotarm_motion.coordinated_trajectory import retime_curve
@@ -300,7 +287,7 @@ def test_planning_rejects_geometry_capability_and_nanosecond_damage():
     from rebotarm_trajectory.capability import make_capability
     config = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
     with pytest.raises(ValueError,match='revision mismatch'):
-        effective_limits(config,JOINT_NAMES,make_capability('continuous',1,.5,1.,'1'*64))
+        effective_limits(config,JOINT_NAMES,make_capability(1,.5,1.,'1'*64))
     low,high,limits = load_reference_limits(config)
     with pytest.raises(ValueError,match='position extremum'):
         retime_curve(JOINT_NAMES,point_to_point((0.,)*6,(99.,)*6),low,high,limits)
@@ -350,10 +337,8 @@ def test_shared_decoder_rejects_damaged_payload(damage):
         curve_from_payload(payload)
 
 
-def test_legacy_lookup_matches_prior_due_point_and_linear_semantics():
+def test_offline_position_record_linear_sampling_boundaries():
     points, times = validate_samples([(1.,) * 6, (2.,) * 6, (3.,) * 6], [.2, .5, 1.])
-    for elapsed in (0., .1, .2, .49, .5, .9, 1., 2.):
-        assert step_index(times, elapsed) == sum(t <= elapsed for t in times)
     assert linear_sample(times, points, (0.,) * 6, .1) == (.5,) * 6
     assert linear_sample(times, points, (0.,) * 6, .5) == points[1]
     assert linear_sample(times, points, (0.,) * 6, 2.) == points[-1]
@@ -418,7 +403,7 @@ def test_motion_message_factory_builds_complete_quintic_without_dense_points():
 def test_operator_capability_rejects_unknown_or_mismatched_backend_without_fallback():
     from types import SimpleNamespace
     from rebotarm_teleop.trajectory_capability import TrajectoryCapability
-    capability = TrajectoryCapability('continuous')
+    capability = TrajectoryCapability()
     with pytest.raises(ValueError, match='mismatch'): capability.require()
     capability.update(SimpleNamespace(data='legacy'))
     with pytest.raises(ValueError, match='mismatch'): capability.require()
@@ -431,17 +416,18 @@ def test_continuous_capability_requires_renamed_mode_and_matching_snapshot():
     from rebotarm_teleop.trajectory_capability import TrajectoryCapability
     from rebotarm_trajectory.capability import decode_capability, make_capability
 
-    snapshot = make_capability('continuous', 1, .5, 1., '1' * 64)
+    snapshot = make_capability(1, .5, 1., '1' * 64)
     assert decode_capability(snapshot)['mode'] == 'continuous'
-    operator = TrajectoryCapability('continuous')
+    operator = TrajectoryCapability()
     operator.update(SimpleNamespace(data='continuous'))
     operator.update_snapshot(SimpleNamespace(data=json.dumps(snapshot)))
     assert operator.require_snapshot() == snapshot
     operator.update(SimpleNamespace(data='prepared_v1'))
     with pytest.raises(ValueError, match='mismatch'):
         operator.require_snapshot()
-    with pytest.raises(ValueError, match='invalid capability identity'):
-        make_capability('prepared_v1', 1, .5, 1., '1' * 64)
+    snapshot['mode'] = 'legacy'
+    with pytest.raises(ValueError, match='schema or revision'):
+        decode_capability(snapshot)
 
 
 def test_teach_builder_requires_explicit_alignment_conversion_before_splice():

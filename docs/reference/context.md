@@ -63,9 +63,9 @@ Dashboard HTTP is local UI, not vision transport. `connected` means feedback
 communication, `enabled` means holding torque, and `ready_for_motion` requires
 both plus a healthy lifecycle. Motor feedback sequence counters are independent.
 
-`rebotarm_preview` owns lightweight trajectory interpolation without physics.
-MuJoCo remains a separate backend owned by `rebotarm_simulation`; neither backend
-opens real hardware. The teach package owns record preparation and replay policy,
+`rebotarm_simulation` owns the MuJoCo backend used by every no-hardware execution
+entrypoint, including keyboard and RViz. It uses the same continuous execution
+contract as the hardware backend, with its own simulation clock. The teach package owns record preparation and replay policy,
 while MuJoCo teach-preview execution and Viewer lifecycle belong to simulation.
 
 FollowJointTrajectory accepts exactly the six arm joints (rad); finger and seven-axis
@@ -76,7 +76,8 @@ for both independent executors. Web checks use closed fingers only in a calculat
 copy; other arm requests freeze fresh actual opening. Feedback and the public scene
 always remain real, with separate arm/gripper source timestamps. MoveIt arm and gripper
 execute independently; teach replay is six-axis. Real
-hardware stays disabled by default and uses continuous; legacy remains explicitly selectable.
+hardware stays disabled by default. Continuous is the only trajectory execution path;
+the mode topic is read-only and no mode parameter is exposed.
 See [P005 coordination](../implemented/features/p005_prepared_trajectory.md#修订协同接口).
 
 The visual entrypoint owns perception, candidate filtering and display. Offline mode

@@ -87,7 +87,6 @@ class reBotArmController(Node):
         self.declare_parameter("arm_config", "")
         self.declare_parameter("gravity_config", "")
         # 实机默认连续轨迹；模式选择不隐含使能或实机验收许可。
-        self.declare_parameter("trajectory_execution_mode", "continuous")
         # gripper_config: 夹爪配置文件路径; 空串表示使用默认夹爪配置.
         self.declare_parameter("gripper_config", "")
         # channel: 电机总线通道(串口设备); 空串表示由配置文件决定.
@@ -199,7 +198,6 @@ class reBotArmController(Node):
             self, self.arm_namespace, runtime=self.hardware.runtime,
             lifecycle=self.hardware.lifecycle, feedback=self.hardware.feedback,
             arm=self.hardware.arm, gripper=self.hardware.gripper,
-            trajectory_execution_mode=self.get_parameter("trajectory_execution_mode").value,
         )
         self.motor_passthrough = MotorPassthrough(
             self,

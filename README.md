@@ -1,7 +1,7 @@
 # reBotArm ROS 2
 
 面向 reBot B601 的 ROS 2 Jazzy 工作空间，包含机械臂与夹爪控制、MoveIt 规划、
-网页遥操作、示教、RGB-D 视觉抓取、轻量 RViz 预演和 MuJoCo 仿真。
+网页遥操作、示教、RGB-D 视觉抓取、基于 MuJoCo 的 RViz 预演与物理仿真。
 
 ## 从这里开始
 
@@ -18,7 +18,7 @@
 
 ## 工程结构
 
-- `src/`：13 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属；共享轨迹数值契约归 `rebotarm_trajectory`。
+- `src/`：12 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属；共享轨迹数值契约归 `rebotarm_trajectory`。
 - `docs/setup/dependencies/`：分环境的 Markdown 依赖版本清单与安装说明。
 - `scripts/`：环境安装、验证和离线工具。
 - `tests/`：软件回归与架构检查。
@@ -61,7 +61,7 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests -q
 GraspNet。Windows、HTTP、MJPEG、远端 JSON 和独立 GraspNet 服务已删除。
 MoveIt 执行还需要 `ros-jazzy-moveit-simple-controller-manager`；规划成功不等于
 执行成功。真机默认轨迹模式为 `continuous`，启动默认失能；运动前须取得新鲜反馈、
-完成现场安全检查并显式使能。`legacy` 保留显式选择，轻量 RViz 预演默认使用 `legacy`。
+完成现场安全检查并显式使能。全部执行入口固定使用 continuous；无硬件键盘与 RViz 拖动统一使用 MuJoCo。
 
 ## 真机边界
 
