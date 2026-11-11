@@ -1,4 +1,8 @@
-"""Offline hand-eye comparison. Selection uses training data, never the holdout."""
+"""离线手眼求解与比较：训练集选择算法，独立验证集检查所选结果。
+
+solve_dataset 返回残差、质量门和来源摘要；人工接受与外参部署由后续工作流处理。
+atomic_write_json 提供同目录临时文件、原子替换和目录同步，供会话所有者持久化。
+"""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -9,12 +13,12 @@ import tempfile
 
 import cv2
 
-from .handeye_residual import analyze_handeye_residual, matrix_transform, transform_matrix
+from .handeye_residual import analyze_handeye_residual, matrix_transform, transform_matrix, robot_pose_key
 from .handeye_solver import HAND_EYE_METHODS, evaluate_eye_in_hand, solve_eye_in_hand
 
 
 def atomic_write_json(path, payload):
-    """Serialize before touching destination; publish a complete fsynced file."""
+    """先完成有限数值 JSON 序列化，再将完整临时文件 fsync、替换目标并同步目录。"""
     data = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + '\n'
     path = Path(path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,10 +43,10 @@ def atomic_write_json(path, payload):
 
 
 def solve_dataset(dataset):
-    """Schema 1: metadata + explicitly separate training/validation samples.
+    """读取 schema 1 的元数据和独立训练/验证样本，返回数值质量报告。
 
-    Require independent sample IDs and reject copied poses across splits. A pass
-    is numerical validation only, never operator acceptance or deployment.
+    两组的样本身份和机器人姿态均须独立；通过结果仍保持 accepted/deployed 为 False，
+    供后续人工审核与部署流程显式推进。
     """
     if not isinstance(dataset, dict) or dataset.get('schema_version') != 1:
         raise ValueError('unsupported dataset schema')
@@ -64,7 +68,7 @@ def solve_dataset(dataset):
         if not isinstance(samples, list):
             raise ValueError(f'{name} requires at least five samples')
         samples = [sample for sample in samples if not isinstance(sample, dict) or sample.get('sample_id') not in excluded]
-        if not isinstance(samples, list) or len(samples) < 5:
+        if len(samples) < 5:
             raise ValueError(f'{name} requires at least five samples')
         normalized = []
         for sample in samples:
@@ -77,7 +81,7 @@ def solve_dataset(dataset):
             normalized_sample = {'sample_id': identity, 'label': identity}
             for field in ('base_to_end', 'camera_to_marker'):
                 normalized_sample[field] = matrix_transform(transform_matrix(sample[field]))
-            pose = tuple(round(float(v), 8) for v in transform_matrix(sample['base_to_end']).ravel())
+            pose = robot_pose_key(sample['base_to_end'])
             if pose in poses:
                 raise ValueError('duplicate robot pose; use independent diverse samples')
             poses.add(pose)
@@ -134,7 +138,7 @@ def solve_dataset(dataset):
             methods[method] = {'passed': False, 'error': str(exc)}
     eligible = [name for name, result in methods.items()
                 if 'training' in result and result['training']['acceptance']['pass']]
-    # Dimensionless score normalized by gates; holdout never influences selection.
+    # 用质量门阈值归一化位置/旋转误差；算法排序只用训练集，保留验证集的独立检验作用。
     selected = min(eligible, key=lambda name:
                    methods[name]['training']['position_residual']['rms_m'] / .005 +
                    methods[name]['training']['rotation_residual']['rms_deg'] / 1.5) if eligible else None

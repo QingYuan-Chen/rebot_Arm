@@ -139,11 +139,11 @@ class ArmCommandPort(Protocol):
         """只读缓存准入诊断；不在 ROS 发布线程发设备请求。"""
         ...
 
-    def trajectory_capability(self, mode):
+    def trajectory_capability(self):
         """当前设备会话与生效限值的只读版本化快照。"""
         ...
 
-    def planning_snapshot(self, mode):
+    def planning_snapshot(self):
         """经设备线程取得只读规划快照；不会预约或变更设备输出。"""
         ...
 
@@ -165,10 +165,6 @@ class ArmCommandPort(Protocol):
 
     def update_trajectory_scene(self, revision):
         """约定交接已观察到的碰撞环境版本。"""
-        ...
-
-    def submit_arm_trajectory(self, joint_names, points, times, *, home=False, velocity=None, timeout=2.):
-        """约定接纳数值轨迹并返回专属任务, 接纳不表示发送或到位."""
         ...
 
     def arm_execution_status(self, task):
@@ -241,10 +237,6 @@ class GripperCommandPort(GripperStatePort, Protocol):
 
     def set_gripper_position(self, position_m: float, max_effort: float = 0.):
         """约定同步等待位置任务, 返回是否成功与当前开口 m."""
-        ...
-
-    def grasp_gripper(self, **kwargs):
-        """约定等待堵转抓取结果, 保持有期限且不声称测得接触力."""
         ...
 
     def cancel_gripper_position_command(self, *args, **kwargs):

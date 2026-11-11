@@ -47,6 +47,7 @@
   <exec_depend>trajectory_msgs</exec_depend>
 
   <exec_depend>rebotarm_trajectory</exec_depend>
+  <exec_depend>rebotarm_force_control</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

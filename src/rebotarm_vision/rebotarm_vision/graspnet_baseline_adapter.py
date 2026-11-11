@@ -99,7 +99,7 @@ class GraspNetPrediction:
     score：抓取得分，无量纲，越大越好；已由后端按分数降序排列。
     translation_xyz：末端夹爪中心在相机坐标系下的位置，单位 m。
     rotation_matrix：3x3 旋转矩阵（行优先），描述末端抓取姿态；正交化由后端保证，
-      转四元数时才会再次归一化。
+      转换前校验近似正交与正行列式，四元数输出再归一化。
     width_m：抓取该目标所需的夹爪开口宽度，单位 m；超出夹爪行程的候选必须被下游丢弃。
     object_length_m：目标在夹爪闭合方向之外的估计长度，单位 m；用于判断夹爪是否与目标或
       桌面干涉。取不到该信息时保持 0.0（表示未知，而不是"长度为零"）。
@@ -239,7 +239,7 @@ def payload_to_candidate_array(
     fallback_frame_id: str,
     max_candidates: int,
 ) -> GraspCandidateArray:
-    """把推理 payload 字典转成抓取候选数组消息（字段缺失时都有兜底）。
+    """把推理 payload 字典转成抓取候选数组消息。
 
     payload 约定字段：``candidates``（候选列表，元素可为 dict 或对象）、``source``、
     ``class_name``、``frame_id``、``timestamp_ns``。frame_id 缺失或为空串时退回
@@ -249,15 +249,14 @@ def payload_to_candidate_array(
     """
     predictions: list[GraspNetPrediction] = []
     class_names: list[str] = []
-    for item in list(payload.get("candidates", []))[: max(0, int(max_candidates))]:
-        # 单条候选解析失败只跳过该条（容错），不影响其余候选，也不抛出到调用方。
+    items = payload["candidates"]
+    if not isinstance(items, list):
+        raise ValueError("candidates must be a list")
+    for item in items:
         if not isinstance(item, dict):
-            continue
-        try:
-            predictions.append(_prediction_from_raw(item))
-            class_names.append(str(item.get("class_name", payload.get("class_name", ""))))
-        except Exception:
-            continue
+            raise ValueError("candidate must be an object")
+        predictions.append(_prediction_from_raw(item))
+        class_names.append(str(item.get("class_name", payload.get("class_name", ""))))
     source = str(payload.get("source", "graspnet_baseline"))
     # 注意 payload 里的空 frame_id 也要退回 fallback，否则消息头坐标系为空会让下游 TF 查询失败。
     frame_id = str(payload.get("frame_id", fallback_frame_id) or fallback_frame_id)
@@ -453,27 +452,37 @@ def _prediction_from_raw(item) -> GraspNetPrediction:
     兼容三种形态：已是预测对象则原样返回；dict 用 ``rotation_matrix``/``rotation``、
     ``translation_xyz``/``translation``、``score``/``confidence``、``width_m``/``width``、
     ``object_length_m``/``object_length`` 两套键名取值；其余对象按其属性取同名值。
-    缺字段一律退化为 0.0，缺平移/旋转则会在 ``_tuple3``/``_matrix3`` 中抛 ValueError。
+    必需字段缺失或数值损坏时抛错；目标长度可缺省。
     """
     if isinstance(item, GraspNetPrediction):
-        return item
-    if isinstance(item, dict):
+        prediction = item
+    elif isinstance(item, dict):
         rotation = item.get("rotation_matrix", item.get("rotation"))
         translation = item.get("translation_xyz", item.get("translation"))
-        return GraspNetPrediction(
-            score=float(item.get("score", item.get("confidence", 0.0))),
+        prediction = GraspNetPrediction(
+            score=float(item["score"] if "score" in item else item["confidence"]),
             translation_xyz=_tuple3(translation),
             rotation_matrix=_matrix3(rotation),
-            width_m=float(item.get("width_m", item.get("width", 0.0))),
+            width_m=float(item["width_m"] if "width_m" in item else item["width"]),
             object_length_m=float(item.get("object_length_m", item.get("object_length", 0.0))),
         )
-    return GraspNetPrediction(
-        score=float(getattr(item, "score", getattr(item, "confidence", 0.0))),
-        translation_xyz=_tuple3(getattr(item, "translation_xyz", getattr(item, "translation", None))),
-        rotation_matrix=_matrix3(getattr(item, "rotation_matrix", getattr(item, "rotation", None))),
-        width_m=float(getattr(item, "width_m", getattr(item, "width", 0.0))),
-        object_length_m=float(getattr(item, "object_length_m", getattr(item, "object_length", 0.0))),
-    )
+    else:
+        prediction = GraspNetPrediction(
+            score=float(item.score if hasattr(item, "score") else item.confidence),
+            translation_xyz=_tuple3(getattr(item, "translation_xyz", getattr(item, "translation", None))),
+            rotation_matrix=_matrix3(getattr(item, "rotation_matrix", getattr(item, "rotation", None))),
+            width_m=float(item.width_m if hasattr(item, "width_m") else item.width),
+            object_length_m=float(getattr(item, "object_length_m", getattr(item, "object_length", 0.0))),
+        )
+    rotation = np.asarray(prediction.rotation_matrix, dtype=float)
+    if (not np.isfinite([prediction.score, prediction.width_m, prediction.object_length_m,
+                         *prediction.translation_xyz, *rotation.ravel()]).all()
+            or prediction.width_m < 0.0
+            or rotation.shape != (3, 3)
+            or not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-3)
+            or np.linalg.det(rotation) <= 0):
+        raise ValueError("invalid grasp prediction")
+    return prediction
 
 
 def _tuple3(values) -> tuple[float, float, float]:
@@ -485,7 +494,7 @@ def _tuple3(values) -> tuple[float, float, float]:
 
 
 def _matrix3(values) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]:
-    """按行优先把输入整形成 3x3 嵌套元组；元素个数不是 9 的倍数时 reshape 会抛 ValueError。"""
+    """按行优先整形成 3x3 嵌套元组；元素个数须恰好为 9。"""
     arr = np.asarray(values, dtype=np.float64).reshape(3, 3)
     return tuple(tuple(float(v) for v in row) for row in arr)  # type: ignore[return-value]
 

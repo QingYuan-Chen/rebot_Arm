@@ -70,7 +70,7 @@ REQUEST_POLICIES = MappingProxyType({
     'ControllerLifecycle.set_zero': RequestPolicy('device', 5, 5., ('device',)),
     'ArmController.hold_current_position': RequestPolicy('arm', 0, invalidate=('arm',)),
     'ArmController.stop_active_motion': RequestPolicy('device', 0, 5.),
-    'ArmController.submit_arm_trajectory': RequestPolicy('arm'),
+    'ArmController.submit_home': RequestPolicy('arm'),
     # 预约/接纳按普通六轴请求排序；取消和场景变更走设备级高优先级，不能被准备阻塞。
     'ArmController.reserve_arm_preparation': RequestPolicy('arm'),
     'ArmController.planning_snapshot': RequestPolicy('arm'),
@@ -82,11 +82,9 @@ REQUEST_POLICIES = MappingProxyType({
     'ArmController.ensure_pos_vel_control': RequestPolicy('arm', 5),
     'ArmController.send_joint_motor_cmd': RequestPolicy('arm', ttl=.25),
     'GripperController.set_gripper_target': RequestPolicy('gripper'),
-    'GripperController.submit_grasp': RequestPolicy('gripper'),
     'GripperController.send_gripper_motor_cmd': RequestPolicy('gripper', ttl=.25),
     'GripperController.cancel_gripper_position_command': RequestPolicy('gripper', 0),
     'GripperController._release_gripper_position_target': RequestPolicy('gripper', 0),
-    'GripperController.release_grasp_hold': RequestPolicy('gripper', 0, invalidate=('gripper',)),
     'GravityController.start_gravity_compensation': RequestPolicy('arm', 5, invalidate=('arm',)),
     'GravityController.stop_gravity_compensation': RequestPolicy('arm', 5, invalidate=('arm',)),
 })
@@ -211,6 +209,7 @@ def device_request(method):
         runtime = self._backend
         if runtime.in_writer:
             return method(self, *args, **kwargs)
+        # 请求可能延后执行，冻结调用时的输入可防止调用方随后修改列表或消息而改变待发命令。
         values, options = copy.deepcopy(args), copy.deepcopy(kwargs)
         result = runtime.call(lambda: method(self, *values, **options),
             resource=policy.resource, priority=policy.priority, ttl=policy.ttl, invalidate=policy.invalidate)

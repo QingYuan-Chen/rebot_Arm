@@ -6,7 +6,7 @@
 
 对外接口
     plan_joint_positions 规划关节目标; plan_pose 规划带参考系的位姿目标.
-    plan_preview 适配预览值对象, 三个入口均以 MotionPlanResult 描述正常规划结果.
+    两个入口均以 MotionPlanResult 描述正常规划结果.
     服务名由调用方指定, 通常为 /plan_kinematic_path.
 
 安全与并发约束
@@ -21,15 +21,12 @@
 文件结构(按定义顺序)
     MotionPlanResult: 规划成功标志, 原因和关节轨迹引用.
     MoveItMotionPlanner: 复用配置和客户端, 为每次调用建立独立请求.
-    rpy_to_quaternion: 将固定轴 XYZ 欧拉角转为 (x, y, z, w) 单位四元数.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from math import cos, sin
-from typing import Any
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
@@ -181,43 +178,6 @@ class MoveItMotionPlanner:
         motion_request.goal_constraints = [constraints]
         return self._call_plan_service(request)
 
-    def plan_preview(self, preview: Any) -> MotionPlanResult:
-        """按预览对象的位姿目标规划(末端笛卡尔位姿约束).
-
-        ``preview.pose_target`` 需提供 ``x/y/z``(m)与 ``roll/pitch/yaw``(rad)属性;
-        为 ``None`` 时直接返回失败. 本入口的速度/加速度缩放固定写死为 0.1, 不接受调用方
-        覆盖(预览与语音相对运动走这条路径).
-        """
-        pose_target = preview.pose_target
-        if pose_target is None:
-            return MotionPlanResult(
-                success=False,
-                message="preview has no pose target for moveit planning",
-                trajectory=None,
-            )
-
-        if not self._client.wait_for_service(timeout_sec=0.5):
-            return MotionPlanResult(
-                success=False,
-                message="moveit planning service unavailable",
-                trajectory=None,
-            )
-
-        request = GetMotionPlan.Request()
-        motion_request = request.motion_plan_request
-        motion_request.group_name = self._group_name
-        motion_request.pipeline_id = self._planning_pipeline
-        motion_request.planner_id = self._planner_id
-        motion_request.num_planning_attempts = self._num_attempts
-        motion_request.allowed_planning_time = self._planning_time
-        # 固定在 0.1: 预览入口不接受调用方覆盖缩放, 始终按额定动态的 10% 规划.
-        motion_request.max_velocity_scaling_factor = 0.1
-        motion_request.max_acceleration_scaling_factor = 0.1
-        motion_request.start_state.is_diff = True
-        motion_request.goal_constraints = [self._build_goal_constraints(preview)]
-
-        return self._call_plan_service(request)
-
     def plan_pose(
         self,
         pose: PoseStamped,
@@ -299,9 +259,9 @@ class MoveItMotionPlanner:
             )
 
         trajectory = response.motion_plan_response.trajectory
-        joint_trajectory = getattr(trajectory, "joint_trajectory", None)
+        joint_trajectory = trajectory.joint_trajectory
         # 有成功码但没有轨迹点, 等于没有可执行内容: 绝不能当成成功下发.
-        if joint_trajectory is None or not joint_trajectory.points:
+        if not joint_trajectory.points:
             return MotionPlanResult(
                 success=False,
                 message="moveit planning returned empty joint trajectory",
@@ -313,34 +273,6 @@ class MoveItMotionPlanner:
             message="moveit trajectory planned",
             trajectory=joint_trajectory,
         )
-
-    def _build_goal_constraints(self, preview: Any) -> Constraints:
-        """把预览对象的位姿目标转成规划位姿约束.
-
-        预览目标是简单的 ``rpy + xyz`` 结构(``preview.pose_target`` 非 ``None`` 由调用方
-        保证), 这里先组装成带 ``frame_id`` 的位姿消息, 再复用
-        :meth:`_build_pose_constraints`. ``header.stamp`` 保持默认 0, 约定为"使用该坐标系的
-        最新可用变换".
-        """
-        pose_target = preview.pose_target
-        assert pose_target is not None
-
-        pose = PoseStamped()
-        pose.header.frame_id = self._frame_id
-        pose.pose.position.x = float(pose_target.x)
-        pose.pose.position.y = float(pose_target.y)
-        pose.pose.position.z = float(pose_target.z)
-        qx, qy, qz, qw = rpy_to_quaternion(
-            float(pose_target.roll),
-            float(pose_target.pitch),
-            float(pose_target.yaw),
-        )
-        pose.pose.orientation.x = qx
-        pose.pose.orientation.y = qy
-        pose.pose.orientation.z = qz
-        pose.pose.orientation.w = qw
-
-        return self._build_pose_constraints(pose)
 
     def _build_pose_constraints(self, pose: PoseStamped) -> Constraints:
         """构造位置 + 姿态两个约束, 两者都作用在 ``self._ee_frame_id`` 上.
@@ -391,25 +323,3 @@ class MoveItMotionPlanner:
         while not future.done() and self._node.get_clock().now() < deadline:
             # 50 ms 轮询: 远小于规划时间, 既不占 CPU 又能及时取回结果.
             time.sleep(0.05)
-
-
-def rpy_to_quaternion(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
-    """把外旋 XYZ 欧拉角转成单位四元数, 返回 ``(x, y, z, w)``.
-
-    约定为外旋 XYZ, 即旋转矩阵 ``R = Rz(yaw) · Ry(pitch) · Rx(roll)``(常说的"先 roll 再
-    pitch 再 yaw"); 角度单位 rad. 返回顺序是 x, y, z, w(``w`` 在最后, 与位姿消息的字段
-    顺序一致). 同包 ``pose_math`` 中有一个数学等价的同名实现.
-    """
-    # 0.5 是半角系数: 四元数各分量用旋转角的一半做三角运算.
-    cr = cos(roll * 0.5)
-    sr = sin(roll * 0.5)
-    cp = cos(pitch * 0.5)
-    sp = sin(pitch * 0.5)
-    cy = cos(yaw * 0.5)
-    sy = sin(yaw * 0.5)
-    return (
-        sr * cp * cy - cr * sp * sy,
-        cr * sp * cy + sr * cp * sy,
-        cr * cp * sy - sr * sp * cy,
-        cr * cp * cy + sr * sp * sy,
-    )

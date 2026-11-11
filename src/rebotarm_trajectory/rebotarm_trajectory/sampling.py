@@ -1,15 +1,14 @@
-"""离散轨迹的旧阶梯和线性兼容采样。
+"""离线位置记录的线性采样。
 
 文件职责
-    提供纯数值输入校验、到期点查找和线性位置采样，保留迁移前的时间边界语义。
+    提供纯数值输入校验和线性位置采样，供离线 q-only 记录预演使用。
 对外接口
-    validate_samples 返回复制后的六轴点与时间元组；step_index 返回到期点右边界；
+    validate_samples 返回复制后的六轴点与时间元组；
     linear_sample 接收已校验的点、起始位置及非负经过时间，返回位置元组。
 安全约束
     不读取时钟、不拥有游标、不确认设备发送；调用方负责位置限位与执行生命周期。
-    step_index 的 cursor 由后端确认状态提供；计算出候选点不代表发送或到位成功。
 文件结构
-    离散输入校验 → 阶梯索引 → 线性插值。
+    离散输入校验 → 线性插值。
 """
 
 from bisect import bisect_right
@@ -30,11 +29,6 @@ def validate_samples(points, times):
     return values, stamps
 
 
-def step_index(times, elapsed, cursor=0):
-    """返回当前已到期点的右边界；发送确认游标仍由后端拥有。"""
-    return bisect_right(times, elapsed, lo=cursor)
-
-
 def linear_sample(times, positions, initial, elapsed):
     """首点前从 initial 插值，节点取该点，末点后保持；不生成速度或加速度约束。"""
     if elapsed >= times[-1]:
@@ -45,7 +39,5 @@ def linear_sample(times, positions, initial, elapsed):
     lower = positions[upper - 1] if upper else initial
     if lower_time == elapsed and upper:
         return lower
-    if times[upper] == lower_time:
-        return positions[upper]
     ratio = (elapsed - lower_time) / (times[upper] - lower_time)
     return tuple(a + ratio * (b - a) for a, b in zip(lower, positions[upper]))

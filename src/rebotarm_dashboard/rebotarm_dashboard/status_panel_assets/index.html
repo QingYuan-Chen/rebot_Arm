@@ -1903,6 +1903,7 @@
         stopButton.disabled = false;
       }
     };
+    // plan_id 对应服务端保存的最终轨迹和起点绑定；浏览器仅持有预览及一次提交所需身份。
     let coordinatedPlan = null;
     let previewAnimation = 0;
     const planCoordinated = async () => {
@@ -1928,6 +1929,7 @@
           ? `计划：${fmt(result.duration,3)} s，起点已绑定` : '仅预览：使能后须重新预览';
         const start = performance.now();
         const animate = (now) => {
+          // 新计划替换对象后，旧动画立即退出；动画时间只控制显示，执行时间由后端拥有。
           if (coordinatedPlan !== result) return;
           const t = Math.min(result.duration,(now-start)/1000);
           const sample = result.preview.find(p => p.time >= t) || result.preview.at(-1);
@@ -1953,14 +1955,15 @@
         const response = await fetch('/api/execute_preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'EXECUTE',plan_id:plan.plan_id})});
         const result = await response.json();
         if (!result.accepted) window.alert(result.message || '组合任务被拒绝。');
+        // HTTP 接纳只显示“已提交”，整体 Action 结果与反馈由后续状态流更新。
         else document.getElementById('motion-result').textContent = '任务：已提交';
         exitPreviewToLive();
       } catch(error) { window.alert(`组合请求失败：${error.message}`); exitPreviewToLive(); }
     };
     // 夹爪不参与示教回放；请先独立设置开度，再检查六轴路径。
     // 示教轨迹检查（dry-run）：只向后端提交检查请求，不下发任何真实轨迹。
-    // 检查结果保存在本地，回放时会作为令牌原样送回后端，
-    // 保证“先检查后回放”的顺序不可绕过。
+    // 检查凭据由服务端回放工作流保存；浏览器展示结果，并在回放时提交记录路径与设置。
+    // 服务端复核凭据后，仍以当前反馈重新构建整条曲线并检查质量与碰撞。
     const runTeachDryRun = async () => {
       const button = document.getElementById('run-teach-dry-run');
       const status = document.getElementById('teach-dry-run-status');

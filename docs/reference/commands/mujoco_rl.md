@@ -20,7 +20,7 @@ cd /home/a/project/rebot_Arm
 python3 -m venv third_party/rebotarm_rl_venv
 python3 scripts/install_python_dependencies.py rl --python third_party/rebotarm_rl_venv/bin/python
 export REBOTARM_MUJOCO_PYTHON="$PWD/third_party/rebotarm_rl_venv/bin/python"
-export PYTHONPATH="$PWD/src/rebotarm_simulation${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$PWD/src/rebotarm_simulation:$PWD/src/rebotarm_force_control${PYTHONPATH:+:$PYTHONPATH}"
 "$REBOTARM_MUJOCO_PYTHON" -m pip check
 "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.diagnostics.mujoco_health --skip-renderer
 "$REBOTARM_MUJOCO_PYTHON" -m rebotarm_simulation.apps.rl_reach check

@@ -1,4 +1,5 @@
 from pathlib import Path
+import pytest
 import ast
 import shutil
 from urllib.parse import urlsplit
@@ -9,6 +10,32 @@ from rebotarm_simulation.control.control_config import load_motor_control_parame
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _registered_interfaces() -> list[str]:
+    cmake_text = (ROOT / "src/rebotarm_msgs/CMakeLists.txt").read_text(encoding="utf-8")
+    interfaces: list[str] = []
+    for line in cmake_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('"') and stripped.endswith('"'):
+            value = stripped.strip('"')
+            if value.startswith(("msg/", "srv/", "action/")):
+                interfaces.append(value)
+    return interfaces
+
+
+def test_rebotarm_msgs_registered_interfaces_exist():
+    missing = [
+        interface for interface in _registered_interfaces()
+        if not (ROOT / "src/rebotarm_msgs" / interface).is_file()
+    ]
+    assert missing == []
+
+
+def test_retired_visual_execution_interfaces_are_absent():
+    for name in ("ExecutePose", "PublishTrajectoryPreview", "GraspGripper"):
+        assert f"srv/{name}.srv" not in _registered_interfaces()
+        assert not (ROOT / "src/rebotarm_msgs/srv" / f"{name}.srv").exists()
 
 
 def test_bringup_installs_launch_structure_documentation():
@@ -134,3 +161,18 @@ def test_hardware_has_no_teach_file_or_workflow_dependency():
         source = path.read_text()
         assert "rebotarm_teach" not in source
         assert "teleop/teach_record/" not in source
+
+
+def test_package_file_reports_selected_install_path_when_resource_missing(tmp_path, monkeypatch):
+    """已选安装位置缺文件时报告实际路径, 不回退到源码目录.\n"""
+    from rebotarm_force_control import gravity_control
+
+    share = tmp_path / "install" / "rebotarmcontroller"
+    share.mkdir(parents=True)
+    monkeypatch.setattr(
+        "ament_index_python.packages.get_package_share_directory",
+        lambda _name: str(share),
+    )
+    missing = share / "config" / "missing.yaml"
+    with pytest.raises(FileNotFoundError, match=str(missing)):
+        gravity_control.package_file("rebotarmcontroller", "config/missing.yaml")

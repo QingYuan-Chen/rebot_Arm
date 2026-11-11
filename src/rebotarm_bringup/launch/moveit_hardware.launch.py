@@ -26,7 +26,6 @@ def generate_launch_description():
         "arm_config": LaunchConfiguration("arm_config"),
         "gripper_config": LaunchConfiguration("gripper_config"),
         "arm_namespace": LaunchConfiguration("arm_namespace"),
-        "trajectory_execution_mode": LaunchConfiguration("trajectory_execution_mode"),
         "channel": LaunchConfiguration("channel"),
         "shutdown_safe_home": LaunchConfiguration("shutdown_safe_home"),
         "joint_state_rate": LaunchConfiguration("joint_state_rate"),
@@ -43,7 +42,6 @@ def generate_launch_description():
         "gripper_feedback_stale_timeout_sec": LaunchConfiguration(
             "gripper_feedback_stale_timeout_sec"
         ),
-        "grasp_hold_timeout_sec": LaunchConfiguration("grasp_hold_timeout_sec"),
         "cmd_arbitration": LaunchConfiguration("cmd_arbitration"),
         "frame_id": LaunchConfiguration("frame_id"),
         "ee_frame_id": LaunchConfiguration("ee_frame_id"),
@@ -70,9 +68,6 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
-            # 首次交付保留旧默认；现场实测新路径时由操作者显式选择。
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
-                choices=["legacy", "prepared_v1"]),
             DeclareLaunchArgument("channel", default_value=""),
             DeclareLaunchArgument("shutdown_safe_home", default_value="false"),
             DeclareLaunchArgument("joint_state_rate", default_value="100.0"),
@@ -81,7 +76,6 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_position_max_speed_rad_s", default_value="1.5"),
             DeclareLaunchArgument("gripper_position_timeout_margin_sec", default_value="1.5"),
             DeclareLaunchArgument("gripper_feedback_stale_timeout_sec", default_value="0.15"),
-            DeclareLaunchArgument("grasp_hold_timeout_sec", default_value="10.0"),
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             DeclareLaunchArgument("ee_frame_id", default_value="end_link"),

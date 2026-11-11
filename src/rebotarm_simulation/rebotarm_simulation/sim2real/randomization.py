@@ -2,29 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import os
 from pathlib import Path
-import sys
 from typing import Any, Mapping
 
 import numpy as np
 import yaml
+from rebotarm_simulation.core.resource_paths import package_resource
 
 
 def default_randomization_config_path() -> Path:
-    relative = Path("config/sim2real_randomization.yaml")
-    package_root = Path(__file__).resolve().parents[2]
-    candidates = [
-        package_root / relative,
-        Path(sys.prefix) / "share/rebotarm_simulation" / relative,
-    ]
-    for prefix in os.environ.get("AMENT_PREFIX_PATH", "").split(os.pathsep):
-        if prefix:
-            candidates.append(Path(prefix) / "share/rebotarm_simulation" / relative)
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise FileNotFoundError("could not locate sim2real_randomization.yaml")
+    return package_resource("rebotarm_simulation", "config/sim2real_randomization.yaml")
 
 
 @dataclass(frozen=True)

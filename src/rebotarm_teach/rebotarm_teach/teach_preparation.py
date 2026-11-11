@@ -199,162 +199,26 @@ def retime_teach_samples(
     initial_delay_sec: float = 0.2,
     boundary_zero_velocity: bool = True,
 ) -> list[RetimedTeachPoint]:
-    """保留示教位置点、只重排时间轴，使速度/加速度/加加速度满足上限（本模块的兜底重定时）。
-
-    六轴执行路径由 motion 按参考输入等级构建曲线，按段内解析极值整体放慢，
-    位置节点和相对时序保持；首末导数归零。旧局部维度分析保留以下差分时间参数化。
-    按原时间间隔除以 ``replay_speed`` 得到候选 dt，再保证 dt 不小于"按关节速度上限
-    所需的最短时间"（各关节 ``|Δq| / 速度上限`` 的最大值），然后最多迭代 24 次、每次把 dt
-    放大 1.25 倍，直到加速度与 jerk 同时不越界为止；因此它只放慢、绝不加速，是保守的安全
-    重定时。位置点本身不做改动，只在时间上被拉开。
-    参数单位：``replay_speed`` 倍速（下限 0.01）、``max_velocity_rad_s`` rad/s（可为逐关节
-    字典/列表）、``max_acceleration_rad_s2`` rad/s^2、``max_jerk_rad_s3`` rad/s^3、
-    ``initial_delay_sec`` 首点相对回放起点的延时（秒）。
-    ``boundary_zero_velocity=True`` 时把首点速度强制为 0，并同样用"放大 1.25 倍、最多 24 次"
-    的方式推迟末点时间，使末点速度也为 0——保证起停无速度冲击（否则末点残留速度会让
-    控制器在轨迹结束时急停）。
-    关节名或位置向量长度不一致时抛 ``ValueError``（结构性异常，重定时无法修复）。
-    """
+    """把录制对象转换成共享数值点，统一调用 motion 六轴重定时。"""
     if not samples:
         return []
-    expected_joints = samples[0].joint_names
-    expected_len = len(expected_joints)
-    for index, sample in enumerate(samples):
-        if sample.joint_names != expected_joints:
-            raise ValueError(f"joint_names mismatch at sample {index}")
-        if len(sample.positions) != expected_len:
-            raise ValueError(f"positions length mismatch at sample {index}")
-    speed = max(float(replay_speed), 0.01)
-    velocity_limits = _velocity_limits_for_joints(max_velocity_rad_s, expected_joints)
-    acceleration_limit = max(float(max_acceleration_rad_s2), 0.01)
-    jerk_limit = max(float(max_jerk_rad_s3), 0.01)
-    if expected_joints == tuple(f'joint{i}' for i in range(1,7)):
-        from rebotarm_motion.trajectory_time_parameterization import parameterize_teach_waypoints
-        points = parameterize_teach_waypoints(expected_joints, samples, velocity_limits,
-            acceleration_limit, jerk_limit, replay_speed=speed,
-            initial_delay=max(float(initial_delay_sec),0.),zero_endpoints=boundary_zero_velocity)
-        return [RetimedTeachPoint(p.time,p.positions,i,p.velocities,p.accelerations)
-                for i,p in enumerate(points)]
-    zero_velocity = tuple(0.0 for _ in samples[0].positions)
-    retimed = [
-        RetimedTeachPoint(
-            time_from_start=max(float(initial_delay_sec), 0.0),
-            positions=tuple(float(v) for v in samples[0].positions),
-            source_sample=0,
-            velocities=zero_velocity,
-        )
-    ]
-    previous = samples[0]
-    previous_velocity = zero_velocity
-    previous_acceleration = zero_velocity
-    elapsed = retimed[0].time_from_start
-    for index, sample in enumerate(samples[1:], start=1):
-        # 倍速只作用于原始时间间隔；真正的下限由速度上限和下面的加速度/jerk 迭代决定。
-        recorded_dt = max(0.0, float(sample.stamp) - float(previous.stamp)) / speed
-        min_velocity_dt = max(
-            (
-                abs(float(current) - float(last)) / velocity_limit
-                for current, last, velocity_limit in zip(sample.positions, previous.positions, velocity_limits)
-            ),
-            default=0.0,
-        )
-        # 三段合取：原始(倍速后)间隔、速度上限允许的最短时间、1 ms 硬下限（防止零时长点）。
-        dt = max(recorded_dt, min_velocity_dt, 0.001)
-        delta = tuple(
-            float(current) - float(last)
-            for current, last in zip(sample.positions, previous.positions)
-        )
-        # 放慢迭代：最多 24 轮、每轮 ×1.25（约可放大 100 倍），仍未收敛就接受当前 dt，
-        # 避免在极端数据上无限循环。
-        for _ in range(24):
-            velocity = tuple(value / dt for value in delta)
-            acceleration = tuple(
-                (float(current) - float(last)) / dt
-                for current, last in zip(velocity, previous_velocity)
-            )
-            max_acceleration = max((abs(value) for value in acceleration), default=0.0)
-            max_jerk = max(
-                (
-                    abs(float(current) - float(last)) / dt
-                    for current, last in zip(acceleration, previous_acceleration)
-                ),
-                default=0.0,
-            )
-            # 加 1e-12 容差，避免浮点误差导致刚满足上限时再多迭代一轮。
-            if (
-                max_acceleration <= acceleration_limit + 1e-12
-                and max_jerk <= jerk_limit + 1e-12
-            ):
-                break
-            dt *= 1.25
-        velocity = tuple(value / dt for value in delta)
-        acceleration = tuple(
-            (float(current) - float(last)) / dt
-            for current, last in zip(velocity, previous_velocity)
-        )
-        elapsed += dt
-        retimed.append(
-            RetimedTeachPoint(
-                time_from_start=elapsed,
-                positions=tuple(float(v) for v in sample.positions),
-                source_sample=index,
-                velocities=velocity,
-            )
-        )
-        previous = sample
-        previous_velocity = velocity
-        previous_acceleration = acceleration
-    if boundary_zero_velocity and retimed:
-        # 首点速度归零：起点是保持段，直接置零不会引入误差。
-        retimed[0] = RetimedTeachPoint(
-            time_from_start=retimed[0].time_from_start,
-            positions=retimed[0].positions,
-            source_sample=retimed[0].source_sample,
-            velocities=zero_velocity,
-        )
-        if len(retimed) > 1:
-            previous_point = retimed[-2]
-            last_point = retimed[-1]
-            prior_acceleration = zero_velocity
-            if len(retimed) > 2:
-                # 用倒数第三点估算末点之前的加速度，作为 jerk 迭代的比较基准。
-                before_previous = retimed[-3]
-                prior_dt = max(previous_point.time_from_start - before_previous.time_from_start, 1e-9)
-                prior_acceleration = tuple(
-                    (float(current) - float(last)) / prior_dt
-                    for current, last in zip(previous_point.velocities, before_previous.velocities)
-                )
-            current_dt = last_point.time_from_start - previous_point.time_from_start
-            adjusted_dt = max(current_dt, 0.001)
-            # 末点速度从 v 拉到 0 会带来 v/dt 的减速度：若越限就继续拉长末段（×1.25，最多 24 轮）。
-            for _ in range(24):
-                final_acceleration = tuple(
-                    (0.0 - float(value)) / adjusted_dt
-                    for value in previous_point.velocities
-                )
-                max_acceleration = max((abs(value) for value in final_acceleration), default=0.0)
-                max_jerk = max(
-                    (
-                        abs(float(current) - float(last)) / adjusted_dt
-                        for current, last in zip(final_acceleration, prior_acceleration)
-                    ),
-                    default=0.0,
-                )
-                if (
-                    max_acceleration <= acceleration_limit + 1e-12
-                    and max_jerk <= jerk_limit + 1e-12
-                ):
-                    break
-                adjusted_dt *= 1.25
-            adjusted_time = previous_point.time_from_start + adjusted_dt
-            retimed[-1] = RetimedTeachPoint(
-                time_from_start=adjusted_time,
-                positions=last_point.positions,
-                source_sample=last_point.source_sample,
-                velocities=tuple(0.0 for _ in last_point.positions),
-            )
-    # 局部维度分析沿用旧 q/v 数值工具，不自动补 a 或冒称 C2。
-    return retimed
+    result = _parameterize_record(samples, method='auto', replay_speed=replay_speed,
+        max_velocity_rad_s=max_velocity_rad_s, max_acceleration_rad_s2=max_acceleration_rad_s2,
+        max_jerk_rad_s3=max_jerk_rad_s3, initial_delay_sec=initial_delay_sec,
+        boundary_zero_velocity=boundary_zero_velocity)
+    return [RetimedTeachPoint(p.time,p.positions,i,p.velocities,p.accelerations)
+            for i,p in enumerate(result.points)]
+
+
+def _parameterize_record(samples, *, max_velocity_rad_s, **settings):
+    """唯一记录格式适配；数据等级、曲线生成和重定时结论均由运动层返回。"""
+    from rebotarm_motion.polynomial_trajectory import TrajectoryPoint
+    names = samples[0].joint_names
+    if any(s.joint_names != names for s in samples):
+        raise ValueError('joint_names mismatch in teach retiming')
+    return parameterize_teach_samples(names,
+        tuple(TrajectoryPoint(s.stamp,s.positions,s.velocities,s.accelerations) for s in samples),
+        velocity_limits=_velocity_limits_for_joints(max_velocity_rad_s,names), **settings)
 
 
 def lowpass_filter_teach_samples(
@@ -637,12 +501,11 @@ def prepare_teach_replay_samples(
         # 以"样本数是否变化"判定重采样是否真的生效（等间隔记录可能点数不变）。
         resample_applied = len(prepared) != len(samples)
     retimed_points: list[RetimedTeachPoint] = []
-    if retime_enabled and not _has_structural_teach_anomaly(filtered_quality):
-        # 时间参数化后端由运动包提供；这里把兜底重定时函数作为回调传入，后端不可用时自动回退。
-        time_parameterization = parameterize_teach_samples(
-            path_samples if six_axis else prepared,
+    if retime_enabled and path_samples and not _has_structural_teach_anomaly(filtered_quality):
+        # 数据格式适配后直接交运动层；执行参数化只有一套分级算法。
+        time_parameterization = _parameterize_record(
+            path_samples,
             method=time_parameterization_method,
-            fallback_retime=retime_teach_samples,
             replay_speed=effective_speed,
             max_velocity_rad_s=max_velocity_rad_s,
             max_acceleration_rad_s2=max_acceleration_rad_s2,
@@ -650,11 +513,8 @@ def prepare_teach_replay_samples(
             initial_delay_sec=0.0,
             boundary_zero_velocity=True,
         )
-        retimed_points = time_parameterization.points
-        if six_axis:
-            time_parameterization = replace(time_parameterization,
-                used_method=f'c{ {"q":0,"q/v":1,"q/v/a":2}[input_grade]}_waypoint_retime',
-                message=f'{input_grade}: {velocity_source}; uniform segment-extrema retiming; no grade upgrade')
+        retimed_points = [RetimedTeachPoint(p.time,p.positions,i,p.velocities,p.accelerations)
+                          for i,p in enumerate(time_parameterization.points)]
         retime_applied = len(retimed_points) > 0
     else:
         time_parameterization = None

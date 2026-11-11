@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -76,3 +77,45 @@ def test_candidate_tf_adapter_uses_lookup_when_frames_differ():
     assert transformed.position.x == pytest.approx(0.4)
     assert transformed.position.y == pytest.approx(0.1)
     assert transformed.position.z == pytest.approx(0.5)
+
+
+def test_candidate_tf_query_uses_frame_stamp_and_reuses_same_frame_transform():
+    from builtin_interfaces.msg import Time as RosTime
+    from rebotarm_vision.candidate_ik_gateway import CandidateIkGateway
+
+    calls = []
+    stamp = RosTime(sec=12, nanosec=345)
+    buffer = SimpleNamespace(
+        lookup_transform=lambda target, source, query_time, timeout: calls.append(
+            (target, source, query_time.nanoseconds)
+        ) or object()
+    )
+    gateway = CandidateIkGateway(
+        config=SimpleNamespace(service_timeout_sec=0.1), ik_client=None,
+        validity_client=None, tf_buffer=buffer, joint_state=None,
+        logger=SimpleNamespace(warn=lambda *_args: None),
+        publish_ranked=lambda *_args: None, publish_empty=lambda *_args: None,
+    )
+    gateway.begin_frame()
+    first = gateway.lookup_transform("base_link", "camera", stamp)
+    second = gateway.lookup_transform("base_link", "camera", stamp)
+    assert first is second
+    assert calls == [("base_link", "camera", 12_000_000_345)]
+
+
+@pytest.mark.parametrize("stamp", [None, SimpleNamespace(sec=0, nanosec=0)])
+def test_candidate_tf_rejects_missing_sensor_stamp_before_lookup(stamp):
+    from rebotarm_vision.candidate_ik_gateway import CandidateIkGateway
+    from tf2_ros import TransformException
+
+    calls = []
+    gateway = CandidateIkGateway(
+        config=SimpleNamespace(service_timeout_sec=0.1), ik_client=None,
+        validity_client=None,
+        tf_buffer=SimpleNamespace(lookup_transform=lambda *args, **kwargs: calls.append(args)),
+        joint_state=None, logger=SimpleNamespace(warn=lambda *_args: None),
+        publish_ranked=lambda *_args: None, publish_empty=lambda *_args: None,
+    )
+    with pytest.raises(TransformException, match="sensor timestamp"):
+        gateway.lookup_transform("base_link", "camera", stamp)
+    assert calls == []

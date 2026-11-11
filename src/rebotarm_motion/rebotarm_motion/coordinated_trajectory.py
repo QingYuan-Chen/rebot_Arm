@@ -20,8 +20,8 @@ def effective_limits(config_directory, names, capability):
     from .trajectory_preparation import load_reference_limits
     low, high, limits = load_reference_limits(config_directory, names)
     capability = decode_capability(capability)
-    if capability['mode'] != 'prepared_v1':
-        raise ValueError('prepared_v1 backend capability required')
+    if capability['mode'] != 'continuous':
+        raise ValueError('continuous backend capability required')
     from pathlib import Path
     directory = Path(config_directory)
     revision = constraint_revision(*(directory.joinpath(name).read_bytes()
@@ -107,6 +107,7 @@ def retime_curve(names, points, lower, upper, limits, *, velocity_scaling=1.,
     if fixed and scale > 1.+1e-9:
         raise ValueError(f'fixed duration exceeds limits; minimum duration >= {base.duration*scale:.6f} s')
     scale = 1. if fixed else max(1., scale*(1.+1e-6))
+    # 以最终 ROS 纳秒编码重建曲线；时间取整会改变段长，需让下方极值复核覆盖实际发送值。
     def scaled(candidate):
         return tuple(TrajectoryPoint(round(p.time*scale*1e9)*1e-9, p.positions,
             tuple(v/scale for v in p.velocities), tuple(a/scale**2 for a in p.accelerations)) for p in candidate)

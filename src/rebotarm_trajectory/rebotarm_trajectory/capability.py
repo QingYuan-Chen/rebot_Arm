@@ -1,9 +1,9 @@
 """版本化执行能力的数值协议。
 
-文件职责：规范后端生效的速度、力矩、会话及系数版本，并绑定规划消息。
-对外接口：make_capability、decode_capability、binding；调用方负责发布和接收时刻。
+文件职责：规范后端生效的速度、力矩、会话及系数版本，生成配置摘要。
+对外接口：make_capability、decode_capability、constraint_revision；调用方负责发布和接收时刻。
 安全约束：摘要只标识配置与会话，不代表使能或运动许可；不读取任何时钟。
-文件结构：能力构造及校验 → 摘要 → FJT header 的绑定字符串。
+文件结构：资源摘要 → 能力构造及校验；最终计划绑定由 planning 模块负责。
 """
 
 import hashlib
@@ -21,16 +21,16 @@ def constraint_revision(*documents):
     return digest.hexdigest()
 
 
-def make_capability(mode, session, speed, torque, limits_revision='0'*64):
+def make_capability(session, speed, torque, limits_revision):
     """速度为夹爪电机 rad/s，力矩为 N·m；与开口单位的转换必须显式。"""
-    if mode not in ('legacy', 'prepared_v1') or type(session) is not int or session < 0:
+    if type(session) is not int or session < 0:
         raise ValueError('invalid capability identity')
     if not all(math.isfinite(v) and v > 0 for v in (speed, torque)):
         raise ValueError('positive finite gripper capabilities required')
     if (not isinstance(limits_revision,str) or len(limits_revision) != 64
             or any(c not in '0123456789abcdef' for c in limits_revision)):
         raise ValueError('sha256 limits revision required')
-    data = dict(version=3, mode=mode, session=session, coefficient_versions=[1, 2],
+    data = dict(version=3, mode='continuous', session=session, coefficient_versions=[1, 2],
         planning_binding_version=1,
         joint_sets=[list(JOINT_NAMES)], teleop_action_version=1,
         gripper_execution='independent_position',
@@ -43,13 +43,8 @@ def make_capability(mode, session, speed, torque, limits_revision='0'*64):
 def decode_capability(value):
     """重新构造并比对全部字段，拒绝未知版本、漏字段和伪造的摘要。"""
     data = json.loads(value) if isinstance(value, str) else value
-    expected = make_capability(data['mode'], data['session'],
+    expected = make_capability(data['session'],
         data['gripper_motor_speed_rad_s'], data['gripper_torque_cap_nm'], data['limits_revision'])
     if data != expected:
         raise ValueError('trajectory capability schema or revision mismatch')
     return expected
-
-
-def binding(capability):
-    """JointTrajectory 无几何坐标语义；保留前缀用于显式能力版本绑定。"""
-    return 'rebotarm-capability:' + decode_capability(capability)['revision']

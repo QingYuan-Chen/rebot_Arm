@@ -23,7 +23,7 @@
 | `features/moveit_planning.md` | MoveIt、轨迹、碰撞和执行适配 |
 | `features/operator_control.md` | Dashboard、键盘和 RViz 操作 |
 | `features/teach_replay.md` | 示教录制、准备、检查和回放 |
-| `features/vision_readonly.md` / `features/visual_grasp.md` | 视觉链路与抓取规划 |
+| `features/vision_readonly.md` / `features/visual_grasp.md` | 视觉链路与候选筛选 |
 | `features/calibration_acceptance.md` | 网页手眼/TCP 软件验收 |
 | `features/mujoco_*.md` | MuJoCo 仿真和 RL 功能 |
 

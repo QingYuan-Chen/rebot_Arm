@@ -67,11 +67,32 @@ def test_manager_and_ros_have_no_legacy_private_access():
                 assert not node.attr.startswith('_'), (name, node.lineno, node.attr)
 
 
-def test_omitted_gripper_gains_keep_legacy_loader_defaults(tmp_path):
-    # 完整 YAML 将 MIT 参数覆盖为 8/1；缺省时保留旧的 18/2 回退值。
+@pytest.mark.parametrize('mutation,field', [
+    (lambda a,g: a['joints'][0].pop('model'),'joints[0].model is required'),
+    (lambda a,g: a['joints'][0].pop('MIT'),'joints[0].MIT is required'),
+    (lambda a,g: a['joints'][0]['POS_VEL'].pop('pos_kp'),'joints[0].POS_VEL.pos_kp is required'),
+    (lambda a,g: g['gripper'][0].pop('vendor'),'gripper[0].vendor is required'),
+    (lambda a,g: a.pop('channel'),'root.channel is required'),
+    (lambda a,g: a.pop('rate'),'root.rate is required'),
+])
+def test_configuration_requires_complete_motor_and_bus_fields(mutation,field,tmp_path):
+    """缺失字段不得回退为旧型号, 增益或通道默认值, 错误须指出文件与字段."""
+    arm=yaml.safe_load(default_config('arm').read_text())
     grip=yaml.safe_load(default_config('gripper').read_text())
-    grip['gripper'][0].pop('MIT')
-    grip['gripper'][0].pop('POS_VEL')
-    path=tmp_path/'gripper.yaml';path.write_text(yaml.safe_dump(grip))
-    cfg=load_configuration(gripper_path=path).gripper
-    assert (cfg.kp,cfg.kd,cfg.vel_kp,cfg.vel_ki,cfg.pos_kp,cfg.pos_ki,cfg.vlim)==(18.,2.,.0008,.002,50.,1.,3.)
+    mutation(arm,grip)
+    a,g=tmp_path/'a.yaml',tmp_path/'g.yaml'
+    a.write_text(yaml.safe_dump(arm));g.write_text(yaml.safe_dump(grip))
+    with pytest.raises(ValueError) as error:
+        load_configuration(a,g)
+    message=str(error.value)
+    assert field in message and (str(a) in message or str(g) in message)
+
+
+def test_configuration_rejects_non_numeric_rate(tmp_path):
+    arm=yaml.safe_load(default_config('arm').read_text())
+    grip=yaml.safe_load(default_config('gripper').read_text())
+    arm['rate']='fast'
+    a,g=tmp_path/'a.yaml',tmp_path/'g.yaml'
+    a.write_text(yaml.safe_dump(arm));g.write_text(yaml.safe_dump(grip))
+    with pytest.raises(ValueError, match='rate must be finite and positive'):
+        load_configuration(a,g)

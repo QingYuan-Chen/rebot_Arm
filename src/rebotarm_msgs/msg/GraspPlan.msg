@@ -1,5 +1,5 @@
-# 抓取执行计划：在最优抓取候选基础上补齐"接近点"，是运动侧真正执行的完整方案。
-# 发布在 /grasp/plan 一类话题上，供抓取执行器、可视化标记与仿真基准共用。
+# 筛选结果：在最优抓取候选基础上补齐预抓取位姿。
+# 发布在 /grasp/plan 一类话题上，供可视化标记与候选消费者使用。
 
 # 时间戳与坐标系。frame_id 覆盖本消息内所有位姿（candidate、pregrasp_pose、grasp_pose）。
 std_msgs/Header header

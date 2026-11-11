@@ -23,20 +23,6 @@ class ControlDiagnostic:
     values: tuple[DiagnosticValue, ...]
 
 
-def _status_value(status: Any, name: str, default: Any) -> Any:
-    if status is None:
-        return default
-    if isinstance(status, dict):
-        return status.get(name, default)
-    return getattr(status, name, default)
-
-
-def _bool_count(value: Any) -> int:
-    if isinstance(value, (tuple, list)):
-        return sum(bool(item) for item in value)
-    return int(bool(value))
-
-
 def build_control_diagnostic(
     *,
     arm_namespace: str,
@@ -49,25 +35,17 @@ def build_control_diagnostic(
     max_contact_penetration_m: float,
 ) -> ControlDiagnostic:
     """Evaluate control/contact health without importing ROS message types."""
-    mode = str(_status_value(status, "mode", "unknown"))
+    mode = str(status.mode)
     actual_positions = tuple(state.joint_positions[:6])
-    targets = tuple(
-        _status_value(status, "joint_targets", actual_positions)
-    )
-    if len(targets) != 6:
-        targets = actual_positions
+    targets = tuple(status.joint_targets)
+    if len(actual_positions) != 6 or len(targets) != 6:
+        raise ValueError("diagnostics require six arm positions and targets")
     max_error = max(
         abs(float(target) - float(actual))
         for target, actual in zip(targets, actual_positions)
     )
-    saturated_count = _bool_count(
-        _status_value(
-            status,
-            "saturated",
-            _status_value(status, "saturation", False),
-        )
-    )
-    watchdog_value = _status_value(status, "watchdog_remaining_s", 0.0)
+    saturated_count = sum(status.saturated)
+    watchdog_value = status.watchdog_remaining_s
     watchdog = 0.0 if watchdog_value is None else float(watchdog_value)
     contact_items = tuple(contacts)
     max_force = max(

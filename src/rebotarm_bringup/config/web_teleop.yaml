@@ -20,7 +20,7 @@
     web_keyboard_default_step_rad: 0.02
     web_keyboard_min_step_rad: 0.005
     web_keyboard_max_step_rad: 0.10
-    # 默认时长由节点按模式选取：legacy 0.2 s，prepared_v1 0.4 s。
+    # 默认时长为 0.4 s。
     # 需要自定义时可显式设置 web_keyboard_default_duration，超限轨迹仍会拒绝。
     web_keyboard_min_duration: 0.1
     web_keyboard_max_duration: 2.0

@@ -68,22 +68,24 @@ from rebotarm_dashboard.web_robot_assets import (
     DEFAULT_GRIPPER_LIMITS_M,
     clamp_gripper_opening,
     gripper_opening_to_finger_joint_positions,
-    load_gripper_limits,
-    load_moveit_velocity_limits,
     load_urdf_joint_limits,
-    merge_velocity_limits,
-    merge_joint_limits,
     rewrite_package_mesh_uris,
     safe_mesh_path,
 )
 from rebotarm_teleop.web_execute import (
-    interpolate_joint_points,
     validate_web_gripper_request,
     validate_web_execute_request,
 )
 
 
 class KeyboardTeleopCoreTests(unittest.TestCase):
+    def test_keyboard_parameters_reject_explicit_invalid_values(self) -> None:
+        from rebotarm_dashboard.teleop_status_panel_node import _request_number
+        self.assertEqual(_request_number({}, "step_rad", .2), .2)
+        for value in (None, "invalid", float("nan"), float("inf")):
+            with self.assertRaisesRegex(ValueError, "invalid step_rad"):
+                _request_number({"step_rad": value}, "step_rad", .2)
+
     def test_keyboard_mapping_uses_configured_joint_pairs(self) -> None:
         mapper = KeyboardCommandMapper(
             joint_names=("joint1", "joint2"),
@@ -111,6 +113,13 @@ class KeyboardTeleopCoreTests(unittest.TestCase):
         self.assertTrue(target.accepted)
         self.assertEqual(target.positions, (1.0, 0.0))
         self.assertIn("clamped", target.message)
+
+    def test_target_planner_rejects_incomplete_or_nonfinite_feedback(self) -> None:
+        planner = TeleopTargetPlanner(joint_names=("joint1", "joint2"),
+            joint_limits={"joint1": (-1., 1.), "joint2": (-1., 1.)}, joint_step_rad=.1)
+        for current in ({"joint1": 0.}, {"joint1": 0., "joint2": float("nan")}):
+            self.assertFalse(planner.apply_delta(current_positions=current,
+                joint_name="joint1", direction=1.).accepted)
 
     def test_web_keyboard_command_uses_key_mapping_and_duration(self) -> None:
         decision = validate_web_keyboard_command(
@@ -207,6 +216,9 @@ class ArmCommandApiTests(unittest.TestCase):
 class StatusPanelApiRouterTests(unittest.TestCase):
     class FakePanelNode:
         def __init__(self) -> None:
+            import threading
+            self._operator_request_lock = threading.RLock()
+            self._calibration_gravity_owned = False
             self.calls: list[tuple[str, object]] = []
 
         def _handle_arm_service_command(self, command: str) -> dict:
@@ -243,6 +255,19 @@ class StatusPanelApiRouterTests(unittest.TestCase):
         self.assertIn("/api/arm_safe_home", paths)
         self.assertIn("/api/teach_replay_execute", paths)
         self.assertIn("/api/keyboard_key", paths)
+
+
+def _six_axis_samples(samples, *, with_velocity=False):
+    """将单轴示例扩成完整六轴测试夹具，其余轴固定零位。"""
+    from dataclasses import replace
+    names = tuple(f'joint{i}' for i in range(1,7))
+    result = []
+    for sample in samples:
+        q = dict(zip(sample.joint_names,sample.positions))
+        v = dict(zip(sample.joint_names,sample.velocities))
+        result.append(replace(sample,joint_names=names,positions=tuple(q.get(n,0.) for n in names),
+            velocities=tuple(v.get(n,0.) for n in names) if with_velocity or v else ()))
+    return result
 
 
 class TeachRecordingCoreTests(unittest.TestCase):
@@ -680,6 +705,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.05, ("joint1",), (0.04,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.10, ("joint1",), (0.08,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
         retimed = retime_teach_samples(
             samples,
@@ -716,6 +742,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.05, ("joint1",), (0.2,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.10, ("joint1",), (0.21,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples, with_velocity=True)
 
         retimed = retime_teach_samples(
             samples,
@@ -726,13 +753,13 @@ class TeachRecordingCoreTests(unittest.TestCase):
             boundary_zero_velocity=True,
         )
 
-        self.assertEqual(retimed[0].velocities, (0.0,))
-        self.assertEqual(retimed[-1].velocities, (0.0,))
-        for previous, current in zip(retimed, retimed[1:]):
-            dt = current.time_from_start - previous.time_from_start
-            for last_velocity, velocity in zip(previous.velocities, current.velocities):
-                acceleration = abs(float(velocity) - float(last_velocity)) / dt
-                self.assertLessEqual(acceleration, 0.500001)
+        self.assertEqual(retimed[0].velocities, (0.0,)*6)
+        self.assertEqual(retimed[-1].velocities, (0.0,)*6)
+        from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
+        from rebotarm_motion.trajectory_time_parameterization import teach_curve_analysis
+        curve = build_curve(samples[0].joint_names, tuple(TrajectoryPoint(
+            p.time_from_start-retimed[0].time_from_start,p.positions,p.velocities,p.accelerations) for p in retimed))
+        self.assertLessEqual(teach_curve_analysis(curve)['segment_peaks']['acceleration'], .500001)
 
     def test_retime_teach_samples_caps_jerk(self) -> None:
         samples = [
@@ -741,6 +768,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.10, ("joint1",), (0.21,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.15, ("joint1",), (0.4,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples, with_velocity=True)
 
         retimed = retime_teach_samples(
             samples,
@@ -752,28 +780,25 @@ class TeachRecordingCoreTests(unittest.TestCase):
             boundary_zero_velocity=True,
         )
 
-        last_velocity = retimed[0].velocities[0]
-        last_acceleration = 0.0
-        for previous, current in zip(retimed, retimed[1:]):
-            dt = current.time_from_start - previous.time_from_start
-            velocity = current.velocities[0]
-            acceleration = (velocity - last_velocity) / dt
-            jerk = abs(acceleration - last_acceleration) / dt
-            self.assertLessEqual(abs(acceleration), 0.800001)
-            self.assertLessEqual(jerk, 1.200001)
-            last_velocity = velocity
-            last_acceleration = acceleration
+        from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
+        from rebotarm_motion.trajectory_time_parameterization import teach_curve_analysis
+        curve = build_curve(samples[0].joint_names, tuple(TrajectoryPoint(
+            p.time_from_start-retimed[0].time_from_start,p.positions,p.velocities,p.accelerations) for p in retimed))
+        peaks = teach_curve_analysis(curve)['segment_peaks']
+        self.assertLessEqual(peaks['acceleration'], .800001)
+        self.assertLessEqual(peaks['jerk'], 1.200001)
 
     def test_retime_teach_samples_uses_per_joint_velocity_limits(self) -> None:
         samples = [
             TeachSample(0.0, ("joint1", "joint4"), (0.0, 0.0), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.1, ("joint1", "joint4"), (0.3, 0.3), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples, with_velocity=True)
 
         retimed = retime_teach_samples(
             samples,
             replay_speed=1.0,
-            max_velocity_rad_s=(3.0, 1.8),
+            max_velocity_rad_s=(3.0,3.0,3.0,1.8,3.0,3.0),
             max_acceleration_rad_s2=999.0,
             max_jerk_rad_s3=999.0,
             initial_delay_sec=0.0,
@@ -783,7 +808,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
         dt = retimed[1].time_from_start - retimed[0].time_from_start
         self.assertGreaterEqual(dt, 0.3 / 1.8)
         self.assertLessEqual(abs(retimed[1].velocities[0]), 3.000001)
-        self.assertLessEqual(abs(retimed[1].velocities[1]), 1.800001)
+        self.assertLessEqual(abs(retimed[1].velocities[3]), 1.800001)
 
     def test_analyze_teach_trajectory_uses_per_joint_velocity_limits(self) -> None:
         samples = [
@@ -904,6 +929,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.10, ("joint1",), (0.13,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.15, ("joint1",), (0.14,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
         prepared = prepare_teach_replay_samples(
             samples,
@@ -930,6 +956,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.1, ("joint1",), (0.1,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.2, ("joint1",), (0.2,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
         prepared = prepare_teach_replay_samples(
             samples,
@@ -943,7 +970,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
         payload = prepared_teach_replay_to_dict(prepared)
 
         self.assertEqual(payload["time_parameterization"]["requested_method"], "ruckig")
-        self.assertIn(payload["time_parameterization"]["used_method"], ("ruckig", "current_jerk_retime"))
+        self.assertEqual(payload["time_parameterization"]["used_method"], "c0_waypoint_retime")
         self.assertTrue(payload["time_parameterization"]["message"])
         self.assertTrue(prepared.retime_applied)
 
@@ -953,21 +980,21 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.1, ("joint1",), (0.1,), (), (), {}, "GRAVITY_COMP"),
             TeachSample(0.2, ("joint1",), (0.2,), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
-        with patch("rebotarm_motion.trajectory_time_parameterization.ruckig_python_available", return_value=True):
-            prepared = prepare_teach_replay_samples(
-                samples,
-                retime_enabled=True,
-                time_parameterization_method="ruckig",
-                replay_speed=0.2,
-                max_velocity_rad_s=1.0,
-                max_acceleration_rad_s2=0.5,
-                max_jerk_rad_s3=1.2,
-            )
+        prepared = prepare_teach_replay_samples(
+            samples,
+            retime_enabled=True,
+            time_parameterization_method="ruckig",
+            replay_speed=0.2,
+            max_velocity_rad_s=1.0,
+            max_acceleration_rad_s2=0.5,
+            max_jerk_rad_s3=1.2,
+        )
         payload = prepared_teach_replay_to_dict(prepared)
 
         self.assertEqual(payload["time_parameterization"]["requested_method"], "ruckig")
-        self.assertEqual(payload["time_parameterization"]["used_method"], "current_jerk_retime")
+        self.assertEqual(payload["time_parameterization"]["used_method"], "c0_waypoint_retime")
         self.assertIn("python ruckig waypoint adapter not implemented", payload["time_parameterization"]["message"])
 
     def test_prepare_teach_replay_samples_keeps_requested_speed_for_large_motion(self) -> None:
@@ -976,6 +1003,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
             TeachSample(0.5, ("joint1", "joint2"), (0.6, 0.4), (), (), {}, "GRAVITY_COMP"),
             TeachSample(1.0, ("joint1", "joint2"), (1.2, 0.8), (), (), {}, "GRAVITY_COMP"),
         ]
+        samples = _six_axis_samples(samples)
 
         prepared = prepare_teach_replay_samples(
             samples,
@@ -1004,6 +1032,7 @@ class TeachRecordingCoreTests(unittest.TestCase):
                 TeachSample(0.10, ("joint1",), (0.13,), (), (), {}, "GRAVITY_COMP"),
                 TeachSample(0.15, ("joint1",), (0.14,), (), (), {}, "GRAVITY_COMP"),
             ]
+            samples = _six_axis_samples(samples)
             raw_path.write_text(
                 "\n".join(encode_teach_sample(sample) for sample in samples) + "\n",
                 encoding="utf-8",
@@ -1028,7 +1057,9 @@ class TeachRecordingCoreTests(unittest.TestCase):
             self.assertEqual(output_path.name, "teach1.prepared.v5.jsonl")
             self.assertEqual([s.accelerations for s in exported],
                              [p.accelerations for p in prepared.retimed_points])
-            self.assertGreater(len(exported), len(samples))
+            self.assertEqual(len(exported), len(samples))
+            self.assertEqual([p.positions for p in exported],
+                             [p.positions for p in prepared.retimed_points])
             self.assertTrue(all(sample.arm_state == "PREPARED_REPLAY" for sample in exported))
             self.assertEqual(exported[0].stamp, 0.0)
             self.assertTrue(all(a.stamp <= b.stamp for a, b in zip(exported, exported[1:])))
@@ -1183,29 +1214,12 @@ class WebRobotAssetTests(unittest.TestCase):
     def test_load_urdf_joint_limits_reads_revolute_limits(self) -> None:
         urdf_path = ROOT / "src" / "rebotarm_moveit_config" / "config" / "rebotarm.urdf"
 
-        limits = load_urdf_joint_limits(urdf_path, ("joint1", "joint2", "missing_joint"))
+        limits = load_urdf_joint_limits(urdf_path, ("joint1", "joint2"))
 
         self.assertEqual(limits["joint1"], (-2.8, 2.8))
         self.assertEqual(limits["joint2"], (-3.14, 0.02))
-        self.assertNotIn("missing_joint", limits)
-
-    def test_merge_joint_limits_prefers_urdf_and_falls_back_to_params(self) -> None:
-        merged = merge_joint_limits(
-            joint_names=("joint1", "joint2"),
-            fallback_limits={"joint1": (-1.0, 1.0), "joint2": (-2.0, 2.0)},
-            preferred_limits={"joint2": (-0.5, 0.5)},
-        )
-
-        self.assertEqual(merged["joint1"], (-1.0, 1.0))
-        self.assertEqual(merged["joint2"], (-0.5, 0.5))
-
-    def test_load_gripper_limits_defaults_to_controller_opening_range(self) -> None:
-        self.assertEqual(load_gripper_limits({}), DEFAULT_GRIPPER_LIMITS_M)
-
-    def test_load_gripper_limits_accepts_explicit_opening_range(self) -> None:
-        limits = load_gripper_limits({"closed_position_m": 0.01, "open_position_m": 0.08})
-
-        self.assertEqual(limits, (0.01, 0.08))
+        with self.assertRaisesRegex(ValueError, "missing_joint"):
+            load_urdf_joint_limits(urdf_path, ("missing_joint",))
 
     def test_gripper_opening_maps_to_symmetric_visual_finger_joints(self) -> None:
         self.assertEqual(clamp_gripper_opening(0.12, (0.0, 0.09)), 0.09)
@@ -1254,7 +1268,7 @@ class WebRobotAssetTests(unittest.TestCase):
                 f"{path} end_link collision should not use old end_link.STL",
             )
 
-    def test_status_panel_simulates_gripper_state_without_hardware(self) -> None:
+    def test_status_panel_uses_backend_gripper_action_and_feedback(self) -> None:
         source = (
             ROOT
             / "src"
@@ -1271,10 +1285,10 @@ class WebRobotAssetTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('self._use_hardware = bool(self.get_parameter("use_hardware").value)', source)
-        self.assertIn("use_hardware=self._use_hardware", source)
         self.assertIn('f"/{self._arm_namespace}/gripper/state"', source)
-        self.assertIn("self._publish_simulated_gripper_state", source)
-        self.assertIn('"simulated": True', client_source)
+        self.assertNotIn("_publish_simulated_gripper_state", source)
+        self.assertIn('f"/{self._arm_namespace}/gripper/command"', source)
+        self.assertNotIn("simulated_position", client_source)
 
     def test_teach_recorder_retries_auto_gravity_comp_start(self) -> None:
         source = (
@@ -1316,23 +1330,6 @@ class WebRobotAssetTests(unittest.TestCase):
                     "parent_group": "arm",
                 },
             )
-
-    def test_load_moveit_velocity_limits_reads_joint_limits_yaml(self) -> None:
-        path = ROOT / "src" / "rebotarm_moveit_config" / "config" / "joint_limits.yaml"
-
-        limits = load_moveit_velocity_limits(path, ("joint1", "joint6", "left_finger_joint"))
-
-        self.assertEqual(limits, {"joint1": 3.0, "joint6": 1.8, "left_finger_joint": 0.2})
-
-    def test_merge_velocity_limits_uses_default_when_missing(self) -> None:
-        merged = merge_velocity_limits(
-            joint_names=("joint1", "joint2"),
-            default_limit=0.5,
-            preferred_limits={"joint2": 1.0},
-        )
-
-        self.assertEqual(merged, {"joint1": 0.5, "joint2": 1.0})
-
 
 class WebExecuteCoreTests(unittest.TestCase):
     def test_web_execute_requires_confirmation(self) -> None:
@@ -1399,17 +1396,19 @@ class WebExecuteCoreTests(unittest.TestCase):
         self.assertEqual(decision.max_delta_limit, 0.8)
         self.assertEqual(decision.duration, 6.0)
 
-    def test_interpolated_web_execute_starts_at_current_position(self) -> None:
-        points = interpolate_joint_points(
-            current=(0.0, 1.0),
-            target=(0.2, 0.8),
-            duration=1.0,
-            step_period=0.5,
-        )
-
-        self.assertEqual(points[0], (0.0, (0.0, 1.0)))
-        self.assertEqual(points[-1], (1.0, (0.2, 0.8)))
-        self.assertGreater(len(points), 2)
+    def test_web_motion_constraints_include_start_and_complete_endpoint_derivatives(self) -> None:
+        from rebotarm_motion.trajectory_messages import point_to_point_message
+        from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+        names = tuple(f"joint{i}" for i in range(1, 7))
+        start, target = (0.,) * 6, (.02,) * 6
+        trajectory = point_to_point_message(names, start, target, 1.,
+            trajectory_factory=JointTrajectory, point_factory=JointTrajectoryPoint)
+        self.assertEqual(len(trajectory.points), 2)
+        self.assertEqual(tuple(trajectory.points[0].positions), start)
+        self.assertEqual(tuple(trajectory.points[-1].positions), target)
+        for point in trajectory.points:
+            self.assertEqual(tuple(point.velocities), (0.,) * 6)
+            self.assertEqual(tuple(point.accelerations), (0.,) * 6)
 
     def test_web_execute_rejects_duration_that_exceeds_speed_limit(self) -> None:
         decision = validate_web_execute_request(

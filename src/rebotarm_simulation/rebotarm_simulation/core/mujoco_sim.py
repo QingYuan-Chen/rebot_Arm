@@ -1,3 +1,11 @@
+"""拥有 MuJoCo 模型与物理状态，为 ROS、Viewer 和离线应用提供统一仿真接口。
+
+接口按构造、状态/模式、目标写入、物理步进、快照与场景操作、关闭组织。
+控制记忆归 SimControlRuntime；多线程调用方负责统一加锁，快照返回复制后的数值。
+关节阻抗重力使用独立零速度数据，控制更新遵循原物理节拍。
+Viewer 借用原生句柄期间，所有者需先结束借用再关闭实例。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -26,27 +34,14 @@ from rebotarm_simulation.core.resource_paths import model_resource
 from rebotarm_simulation.control.sim_control_runtime import SimControlRuntime
 from rebotarm_simulation.core.state_snapshot import StateSnapshot
 from rebotarm_simulation.core.observations import read_state, read_contacts
+from rebotarm_simulation.core.validation import finite_vector as _finite_vector
 
 
 ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
 FINGER_JOINT_NAMES = ("left_finger_joint", "right_finger_joint")
 JOINT_NAMES = ARM_JOINT_NAMES + FINGER_JOINT_NAMES
-CONTROL_MODES = ("position", "hold", "gravity_comp", "raw_torque")
+CONTROL_MODES = ("position", "hold", "gravity_comp", "raw_torque", "joint_impedance")
 _CONTROL_MODE_ALIASES = {"pos_vel": "position"}
-
-
-def _finite_vector(values: Sequence[float], length: int, label: str) -> tuple[float, ...]:
-    if isinstance(values, (str, bytes)):
-        raise TypeError(f"{label} must be a numeric sequence")
-    try:
-        result = tuple(float(value) for value in values)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"{label} must be a numeric sequence") from exc
-    if len(result) != length:
-        raise ValueError(f"{label} must contain exactly {length} values")
-    if not all(math.isfinite(value) for value in result):
-        raise ValueError(f"{label} values must be finite")
-    return result
 
 
 def _ordered_bounds(values: Sequence[float], label: str) -> tuple[float, float]:
@@ -95,7 +90,7 @@ class RebotArmMujoco:
                 "in the active Python environment."
             ) from exc
         self.model_path = str(model_resource(explicit=model_path))
-        # MjModel 是不可变的模型定义；MjData 保存逐次步进的运行时状态。
+        # MjModel 保存模型参数（本实例可显式随机化）；MjData 保存逐次步进的物理状态。
         self._model = self._mj.MjModel.from_xml_path(self.model_path)
         if collisionless:
             # Reach-only opt-in: visual meshes and inertial properties remain;
@@ -103,6 +98,7 @@ class RebotArmMujoco:
             self._model.geom_contype[:] = 0
             self._model.geom_conaffinity[:] = 0
         self._data = self._mj.MjData(self._model)
+        self._gravity_data = self._mj.MjData(self._model)
         self._closed = False
         # 复现用随机数发生器；reset(seed=...) 会按给定种子重建它。
         self._rng = np.random.default_rng()
@@ -122,7 +118,8 @@ class RebotArmMujoco:
             self._name_id(self._mj.mjtObj.mjOBJ_ACTUATOR, actuator_name_for_joint(name))
             for name in JOINT_NAMES
         )
-        self._control = SimControlRuntime(motor_parameters, float(self._model.opt.timestep), self._joint_ids, self._actuator_ids)
+        self._control = SimControlRuntime(motor_parameters, float(self._model.opt.timestep),
+            self._joint_ids, self._actuator_ids, self._joint_gravity_torque)
         # 末端执行器参考点（site）用于输出 TCP 位置与姿态。
         self._ee_site_id = self._name_id(self._mj.mjtObj.mjOBJ_SITE, "ee_site")
         # 场景中带自由关节的物体（被操作物），用于读写物体位姿。
@@ -141,14 +138,11 @@ class RebotArmMujoco:
 
 
     def borrow_viewer_handles(self):
-        """Borrow mutable native model/data exclusively for a passive Viewer.
+        """为被动 Viewer 借出可变原生 model/data，所有权仍归本实例。
 
-        This does not transfer ownership or acquire a lock. The caller must
-        serialize physics access and viewer.sync() using its existing simulation
-        access gate. Native handles may be retained for the Viewer lifetime;
-        stop rendering and finish native Viewer shutdown before sim.close().
-        Do not use this interface for business logic or release the model/data.
-        Already borrowed handles cannot be revoked by Python after close().
+        调用方通过现有仿真锁串行协调物理访问与 viewer.sync()，并在 sim.close()
+        前确认 Viewer 已完成关闭。借用只服务显示；业务查询使用值快照接口。
+        已借出的 Python 引用会继续存活，关闭顺序由持有这些引用的应用保证。
         """
         self._ensure_open()
         return self._model, self._data
@@ -310,6 +304,10 @@ class RebotArmMujoco:
         self._control._raw_torque_command.fill(0.0)
         self._control._raw_torque_requested.fill(0.0)
         self._control._raw_torque_deadline = None
+        self._control._impedance_command = None
+        self._control._impedance_deadline = None
+        self._control._impedance_handoff = False
+        self._control._last_control_time = float(self._data.time)
         self._control._requested_arm_torque.fill(0.0)
         self._control._applied_arm_torque.fill(0.0)
         self._control._arm_torque_saturated.fill(False)
@@ -341,12 +339,26 @@ class RebotArmMujoco:
         self._ensure_open()
         return self._control.command_joint_torques(self._model, self._data, torques, timeout_s)
 
+    def command_joint_impedance(self, targets: Sequence[float], stiffness: Sequence[float],
+                                damping: Sequence[float], timeout_s: float = 0.1) -> tuple[float, ...]:
+        """接纳六轴静态平衡点；刚度 N·m/rad、阻尼 N·m·s/rad，期限按仿真时间。"""
+        self._ensure_open()
+        return self._control.command_joint_impedance(self._model, self._data,
+            targets, stiffness, damping, timeout_s)
+
+    def _joint_gravity_torque(self, qvel_addresses, data) -> np.ndarray:
+        """在独立零速度数据上计算 g(q)，避免混入科氏项或改写当前物理状态。"""
+        self._gravity_data.qpos[:] = data.qpos
+        self._gravity_data.qvel[:] = 0.0
+        self._mj.mj_forward(self._model, self._gravity_data)
+        return np.asarray(self._gravity_data.qfrc_bias[qvel_addresses], dtype=float)
+
     def command_gripper_width(self, width_m: float, max_force_n: float | None = None) -> float:
         self._ensure_open()
         return self._control.command_gripper_width(self._model, self._data, width_m, max_force_n)
 
     def command_gripper_position(self, width, torque_cap):
-        """米制左指参考与启动限矩；不重新生成曲线。"""
+        """提交双指总开口 m 与电机限矩 N·m；单指位移换算由控制组件完成。"""
         return self._control.command_gripper_position(self._model,self._data,width,torque_cap)
 
     def release_gripper_position(self):
@@ -366,6 +378,8 @@ class RebotArmMujoco:
     ) -> SimulationState:
         """Kinematically synchronize arm state while preserving free objects."""
         self._ensure_open()
+        if self.control_mode == "joint_impedance":
+            raise RuntimeError("joint impedance active; enter hold before mirroring state")
         position_values = _finite_vector(positions, len(ARM_JOINT_NAMES), "joint positions")
         velocity_values = (
             (0.0,) * len(ARM_JOINT_NAMES)
@@ -542,10 +556,12 @@ class RebotArmMujoco:
 
 
     def close(self) -> None:
+        """释放本实例持有的原生引用；调用方应已结束执行线程与 Viewer 借用。"""
         if self._closed:
             return
         self._closed = True
         self._data = None
+        self._gravity_data = None
         self._model = None
 
 

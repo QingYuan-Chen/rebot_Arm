@@ -58,7 +58,7 @@ src/rebotarm_simulation/config/real2sim_mapping.yaml
 cd /home/a/project/rebot_Arm
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-export PYTHONPATH="$PWD/src/rebotarm_simulation:$PYTHONPATH"
+export PYTHONPATH="$PWD/src/rebotarm_simulation:$PWD/src/rebotarm_force_control${PYTHONPATH:+:$PYTHONPATH}"
 
 python3 -m rebotarm_simulation.diagnostics.real2sim_acceptance \
   --mode mirror \

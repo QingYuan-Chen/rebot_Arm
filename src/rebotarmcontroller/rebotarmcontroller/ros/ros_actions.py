@@ -5,8 +5,7 @@
 
 对外接口
     ArmActions 注册回调, 提交数值请求, 发布缓存反馈并映射任务终态.
-    同一公共 FJT 按配置选择 legacy 或 prepared_v1；后者异步调用内部准备服务，
-    经原所有者复核后提交，准备失败不回退到 legacy。
+    公共 FJT 异步调用内部准备服务，经原所有者复核后执行 continuous 曲线。
 
 安全与并发约束
     准入检查不能替代设备线程中的再次检查; 取消携带任务身份或代次.
@@ -32,15 +31,11 @@ class ArmActions:
     """将 ROS Action 协议映射到原组件的数值任务与查询端口, 不拥有执行状态."""
 
     def __init__(self, node, namespace, *, runtime: RuntimeStatePort, lifecycle: LifecycleStatePort,
-                 feedback: JointFeedbackPort, arm: ArmCommandPort, gripper: GripperCommandPort,
-                 trajectory_execution_mode='legacy'):
+                 feedback: JointFeedbackPort, arm: ArmCommandPort, gripper: GripperCommandPort):
         """注入各职责组件并注册可重入 FJT 与夹爪 Action, 设备串行化由运行时负责."""
         self._node = node
         self._runtime, self._lifecycle = runtime, lifecycle
         self._feedback, self._arm, self._gripper = feedback, arm, gripper
-        if trajectory_execution_mode not in ('legacy', 'prepared_v1'):
-            raise ValueError('trajectory_execution_mode must be legacy or prepared_v1')
-        self._trajectory_mode = trajectory_execution_mode
         # 保留请求对象本身，避免只用 id 时对象被回收重用而把迟到回调配到另一 Goal。
         self._pending_preparations = {}
         from std_msgs.msg import String
@@ -48,7 +43,7 @@ class ArmActions:
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._capability_publisher = node.create_publisher(
             String, f'/{namespace}/trajectory_execution_mode', qos)
-        self._capability_publisher.publish(String(data=trajectory_execution_mode))
+        self._capability_publisher.publish(String(data='continuous'))
         self._versioned_capabilities = node.create_publisher(
             String, f'/{namespace}/trajectory_capabilities', qos)
         from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
@@ -56,7 +51,7 @@ class ArmActions:
 
         def publish_admission():
             """只读数值缓存；标准诊断不替代 Action 因果信息，也不改变电机故障码。"""
-            capability = self._arm.trajectory_capability(self._trajectory_mode)
+            capability = self._arm.trajectory_capability()
             self._versioned_capabilities.publish(String(data=json.dumps(capability, allow_nan=False)))
             snapshot = self._arm.admission_snapshot()
             status = DiagnosticStatus(name=f'{namespace}/trajectory_admission', hardware_id='trajectory',
@@ -73,7 +68,7 @@ class ArmActions:
         def get_planning_state(_request, response):
             """只读服务走所有者设备队列；服务成功不授予执行资源。"""
             try:
-                state = self._arm.planning_snapshot(self._trajectory_mode)
+                state = self._arm.planning_snapshot()
                 response.state_json = json.dumps(state, allow_nan=False)
                 response.success, response.message = True, 'ready' if state['executable'] else 'preview only: disabled'
             except (ValueError, RuntimeError) as exc:
@@ -82,14 +77,13 @@ class ArmActions:
         self._planning_state_service = node.create_service(GetArmPlanningState,
             f'/{namespace}/get_arm_planning_state', get_planning_state,
             callback_group=node.reentrant_group)
-        if trajectory_execution_mode == 'prepared_v1':
-            from rebotarm_msgs.srv import PrepareArmTrajectory
-            self._prepare_type = PrepareArmTrajectory
-            self._prepare_client = node.create_client(PrepareArmTrajectory,
-                f'/{namespace}/prepare_arm_trajectory', callback_group=node.reentrant_group)
-            node.create_subscription(String, f'/{namespace}/trajectory_scene_revision',
-                lambda message: self._arm.update_trajectory_scene(message.data), qos,
-                callback_group=node.reentrant_group)
+        from rebotarm_msgs.srv import PrepareArmTrajectory
+        self._prepare_type = PrepareArmTrajectory
+        self._prepare_client = node.create_client(PrepareArmTrajectory,
+            f'/{namespace}/prepare_arm_trajectory', callback_group=node.reentrant_group)
+        node.create_subscription(String, f'/{namespace}/trajectory_scene_revision',
+            lambda message: self._arm.update_trajectory_scene(message.data), qos,
+            callback_group=node.reentrant_group)
         self._follow_joint_trajectory_server = ActionServer(
             node, FollowJointTrajectory, f'/{namespace}/follow_joint_trajectory',
             execute_callback=self.execute_follow_joint_trajectory,
@@ -105,17 +99,16 @@ class ArmActions:
             execute_callback=lambda goal: self.execute_gripper_command(goal, moveit=True),
             goal_callback=self.goal_callback, cancel_callback=self.cancel_gripper_command,
             callback_group=node.reentrant_group)
-        if trajectory_execution_mode == 'prepared_v1':
-            self._teleop_server = ActionServer(
-                node, ExecuteTeleopMotion, f'/{namespace}/execute_teleop_motion',
-                execute_callback=lambda goal: self.execute_follow_joint_trajectory(goal, web=True),
-                goal_callback=lambda request: self.trajectory_goal_callback(request, web=True),
-                cancel_callback=self.cancel_follow_joint_trajectory, callback_group=node.reentrant_group)
+        self._teleop_server = ActionServer(
+            node, ExecuteTeleopMotion, f'/{namespace}/execute_teleop_motion',
+            execute_callback=lambda goal: self.execute_follow_joint_trajectory(goal, web=True),
+            goal_callback=lambda request: self.trajectory_goal_callback(request, web=True),
+            cancel_callback=self.cancel_follow_joint_trajectory, callback_group=node.reentrant_group)
 
     def goal_callback(self, _request):
         """只按当前 ready_for_motion 做第一层准入; 实际提交仍要在设备线程重新校验."""
         return (GoalResponse.ACCEPT if self._lifecycle.ready_for_motion
-                and not (self._trajectory_mode == 'prepared_v1' and self._runtime.arm_resource_reserved)
+                and not self._runtime.arm_resource_reserved
                 else GoalResponse.REJECT)
 
     def trajectory_goal_callback(self, request, *, web=False):
@@ -125,8 +118,6 @@ class ArmActions:
             if (len(request.trajectory.joint_names) != 6
                     or set(request.trajectory.joint_names) != set(self._runtime.joint_names)):
                 raise ValueError('FJT requires exactly joint1..joint6; use independent gripper command')
-            if self._trajectory_mode == 'legacy':
-                return self.goal_callback(request)
             if not self._lifecycle.ready_for_motion:
                 snapshot = self._arm.admission_snapshot()
                 raise RuntimeError('controller not ready: '+ '; '.join(snapshot['reasons']))
@@ -145,7 +136,7 @@ class ArmActions:
             points = tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
                 p.positions, p.velocities, p.accelerations) for p in request.trajectory.points)
             planning = decode_plan(request.trajectory.header.frame_id, request.trajectory.joint_names,
-                points, capability_revision=self._arm.trajectory_capability(self._trajectory_mode)['revision'],
+                points, capability_revision=self._arm.trajectory_capability()['revision'],
                 require_execution=True)
             options = dict(web=web, gripper_command=command)
             if planning is not None:
@@ -155,8 +146,7 @@ class ArmActions:
             self._pending_preparations[id(request)] = (request, token)
             return GoalResponse.ACCEPT
         except (ValueError, RuntimeError, IndexError, AttributeError, TypeError) as exc:
-            if hasattr(self._node, 'get_logger'):
-                self._node.get_logger().warning(f'FJT goal rejected: {exc}')
+            self._node.get_logger().warning(f'FJT goal rejected: {exc}')
             return GoalResponse.REJECT
 
     def _prepare_follow_goal(self, goal_handle, token):
@@ -172,7 +162,7 @@ class ArmActions:
         request.gripper_generation = token.gripper_generation
         request.gripper_collision_policy = token.collision_policy
         request.scene_revision, request.deadline_monotonic = token.scene_revision, token.deadline
-        request.capability_json = json.dumps(self._arm.trajectory_capability(self._trajectory_mode), allow_nan=False)
+        request.capability_json = json.dumps(self._arm.trajectory_capability(), allow_nan=False)
         future = self._prepare_client.call_async(request)
         while not future.done():
             if goal_handle.is_cancel_requested or time.monotonic() >= token.deadline:
@@ -193,15 +183,14 @@ class ArmActions:
         return self._arm.admit_prepared_arm_trajectory(token, handoff)
 
     def cancel_follow_joint_trajectory(self, goal):
-        """准备路径先撤销本 Goal 令牌；旧路径由执行回调按任务身份停止。"""
-        if self._trajectory_mode == 'prepared_v1':
-            pending = self._pending_preparations.get(id(goal.request))
-            if pending is not None and pending[0] is goal.request:
-                try:
-                    # 撤销所有者令牌先于取消回执，已排队的接纳也不能越过取消。
-                    self._arm.cancel_arm_preparation(pending[1], wait_for_stop=False)
-                except RuntimeError as exc:
-                    self._node.get_logger().error(f'trajectory cancel stop unconfirmed: {exc}')
+        """先撤销本 Goal 令牌，执行回调按任务身份确认停止。"""
+        pending = self._pending_preparations.get(id(goal.request))
+        if pending is not None and pending[0] is goal.request:
+            try:
+                # 撤销所有者令牌先于取消回执，已排队的接纳也不能越过取消。
+                self._arm.cancel_arm_preparation(pending[1], wait_for_stop=False)
+            except RuntimeError as exc:
+                self._node.get_logger().error(f'trajectory cancel stop unconfirmed: {exc}')
         return CancelResponse.ACCEPT
 
     def cancel_gripper_command(self, _goal):
@@ -217,8 +206,7 @@ class ArmActions:
         """
         result = ExecuteTeleopMotion.Result() if web else FollowJointTrajectory.Result()
         task = None
-        pending = (self._pending_preparations.get(id(goal_handle.request))
-            if self._trajectory_mode == 'prepared_v1' else None)
+        pending = self._pending_preparations.get(id(goal_handle.request))
         token = pending[1] if pending is not None and pending[0] is goal_handle.request else None
         try:
             if goal_handle.is_cancel_requested:
@@ -230,19 +218,13 @@ class ArmActions:
                 return result
             trajectory = goal_handle.request.trajectory
             names = list(trajectory.joint_names)
-            points = [tuple(point.positions) for point in trajectory.points]
-            times = [float(p.time_from_start.sec)+p.time_from_start.nanosec*1e-9
-                     for p in trajectory.points]
-            if self._trajectory_mode == 'prepared_v1':
-                if token is None:
-                    raise RuntimeError('trajectory was not reserved')
-                if web:
-                    goal_handle.publish_feedback(ExecuteTeleopMotion.Feedback(
-                        stage='preparing',gripper_state='not_started',
-                        gripper_position=self._gripper.gripper_position_m()))
-                task = self._prepare_follow_goal(goal_handle, token)
-            else:
-                task = self._arm.submit_arm_trajectory(names, points, times)
+            if token is None:
+                raise RuntimeError('trajectory was not reserved')
+            if web:
+                goal_handle.publish_feedback(ExecuteTeleopMotion.Feedback(
+                    stage='preparing',gripper_state='not_started',
+                    gripper_position=self._gripper.gripper_position_m()))
+            task = self._prepare_follow_goal(goal_handle, token)
             self._node.publish_arm_status()
             while not task.event.is_set():
                 if goal_handle.is_cancel_requested:
@@ -274,6 +256,7 @@ class ArmActions:
                 goal_handle.publish_feedback(feedback)
                 task.event.wait(.05)
             status = self._arm.arm_execution_status(task)
+            # 停止服务返回后仍读取该句柄的最终结果，保留停止超时或清理失败的原因。
             if web:
                 result.arm_state, result.gripper_state = self._arm.teleop_execution_status(task)
             result.error_string = status.message
@@ -359,11 +342,13 @@ class ArmActions:
                     return result
                 time.sleep(.05)
         except Exception as exc:
+            message = f'gripper action failed: {exc}'
             if generation is not None:
                 try:
                     self._gripper.cancel_gripper_position_command(str(exc), expected_generation=generation)
-                except Exception:
-                    pass
-            self._node.get_logger().error(f'gripper action failed: {exc}')
+                except Exception as cleanup_error:
+                    # 取消失败不能覆盖原 Action 失败; 两者一并上报运行边界。
+                    message += f'; gripper cleanup failed: {cleanup_error}'
+            self._node.get_logger().error(message)
             goal_handle.abort()
             return result

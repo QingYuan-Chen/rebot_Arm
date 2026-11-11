@@ -102,8 +102,12 @@ def test_passthrough_arbitration_result(case, monkeypatch):
     manager.lifecycle.connect()
     manager.lifecycle.enable()
     bus = opened[0]
-    task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-        [(0.,) * 6, (.01, -.01, -.01, 0., 0., 0.)], [0., 10.])
+    send = bus.motors[0].send_pos_vel
+    def delayed_position(*args):
+        send(*args)
+        bus.motors[0].state.pos = 0.
+    monkeypatch.setattr(bus.motors[0], 'send_pos_vel', delayed_position)
+    task = manager.arm.submit_home((.1, -.1, -.1, 0., 0., 0.), (.3,)*6, 10.)
     generation = manager.runtime.target_generation
     command = SimpleNamespace(mode=1, pos=case['position'], vel=0., kp=1., kd=.1, tau=0., vlim=.3,
         **{f'use_{key}': True for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')})

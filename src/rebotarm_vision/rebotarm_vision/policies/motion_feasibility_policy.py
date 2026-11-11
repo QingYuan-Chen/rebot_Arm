@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from ..visual_grasp_sequence import PoseTarget
+from ..candidate_pose import PoseTarget
 
 
 CheckTarget = Callable[[PoseTarget, str], object | None]

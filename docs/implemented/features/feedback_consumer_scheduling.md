@@ -1,13 +1,12 @@
 # 反馈消费端接收调度
 
-运动、视觉与标定节点使用同进程内的独立接收节点和 `SingleThreadedExecutor`。
+运动与标定节点使用同进程内的独立接收节点和 `SingleThreadedExecutor`。
 原业务节点保留多线程执行器，用于同步等待规划、Action 和 Service；接收节点不处理这些请求，
 也不访问电机 SDK。组件分别由所属包拥有，不放入硬件控制器，不新增跨包依赖。
 
 | 消费方 | 接收所有者 | 交接与约束 |
 | --- | --- | --- |
-| `pose_compat_node`、`pose_execution_node` | motion 的 `feedback_receiver.py` | 关节、控制器状态及按需夹爪状态；复制快照与独立停止证据，不获取运动业务锁 |
-| `visual_grasp_executor_node` | vision 的 `grasp_input_receiver.py` | 有界计划/候选邮箱及 TF Buffer；业务侧按接收次序交接，输入接收不获取执行状态锁 |
+| `pose_compat_node` | motion 的 `feedback_receiver.py` | 关节、控制器状态及按需夹爪状态；复制快照与独立停止证据，不获取运动业务锁 |
 | `handeye_capture_node` | calibration 的 `capture_input_receiver.py` | 有界图像/CameraInfo 缓存及 TF Buffer；检测、稳定性判断与落盘在业务侧完成 |
 
 ## 时间与安全语义
@@ -23,18 +22,13 @@
 收到的新鲜帧也不能让旧规划或旧执行请求继续。FJT 终态到达后仍检查该代次；取消继续要求
 动作终态与新鲜静止反馈，失败只保持/阻断，不附带使能、失能或回位。
 
-各用途的门限继续独立：运动层 `StopFeedback`、控制器 `ArmStop`、现场静止验收、视觉计划
-有效期及标定采集窗口均保持原值。不能用删除 QoS 诊断、放宽门限或重新标记时间来替代调度修复。
-
-视觉邮箱最多保存最新计划、最新候选和最近一次空候选撤销；撤销事件不会被随后非空候选
-覆盖，从而重新激活旧计划。停止时关闭邮箱，确认停止后清空积压再开放，必须等新输入。
-工作流在等待新计划时主动交接邮箱，不依赖多线程业务定时器及时调度。
+运动层 `StopFeedback`、控制器 `ArmStop`、现场静止验收及标定采集窗口各自使用原有门限。
 
 标定话题配置通过 guard condition 交给接收线程：先创建新订阅，再交换代次、清空缓存及销毁
 旧订阅。旧代次回调即使晚到，也不能填入新缓存。源图像、内参匹配、历史 TF 查询与连续稳定
 窗口检查保持；快照复制、ArUco 计算与文件写入不占接收锁。
 
-接收线程异常由快照/邮箱读取报告，位姿兼容和视觉输入保持执行门控；显式关闭先唤醒执行器并等待线程退出，再销毁
+接收线程异常由快照读取报告，位姿兼容保持执行门控；显式关闭先唤醒执行器并等待线程退出，再销毁
 订阅和 TF 句柄。线程没有退出时保留句柄并报告失败。接收器关闭可重复调用。
 
 ## 无硬件验证
@@ -44,7 +38,7 @@
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest \
   tests/test_feedback_consumers.py tests/test_pose_compat_protocol.py \
-  tests/test_motion_stop_confirmation.py tests/test_visual_stop_confirmation_runtime.py \
+  tests/test_motion_stop_confirmation.py \
   tests/test_handeye_capture_runtime.py -q
 ```
 

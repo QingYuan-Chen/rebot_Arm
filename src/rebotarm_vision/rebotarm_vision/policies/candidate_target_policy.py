@@ -34,7 +34,7 @@ from .visual_grasp_pose_policy import (
     build_official_geometry_grasp_targets,
     build_preserve_candidate_grasp_targets,
 )
-from ..visual_grasp_sequence import PoseTarget
+from ..candidate_pose import PoseTarget
 
 
 @dataclass(frozen=True)

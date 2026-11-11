@@ -16,6 +16,7 @@
     关节位置为 rad, 角速度为 rad/s, 力矩为 N·m, 单调时间为 s.
 
 文件结构(按定义顺序)
+    FeedbackUnavailableError: 当前反馈不可用的诊断异常.
     MotorFeedback: 从设备状态复制的位置, 速度, 力矩和原始状态码.
     VerifiedFeedbackSample: 采集时已校验的反馈, 逐电机序号和观测时间.
     CachedMotorFeedback: 保留原始状态, 样本及不可用原因的只读缓存结果.
@@ -24,6 +25,10 @@
 """
 
 from dataclasses import dataclass
+
+
+class FeedbackUnavailableError(RuntimeError):
+    """反馈当前不可用; 原始原因由采集与健康判定提供."""
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,71 @@
 from __future__ import annotations
 
 
+def test_stop_request_reports_service_exception():
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    errors = []
+    def fail(**_kwargs):
+        raise RuntimeError('transport failed')
+    owner = NS(_trajectory_stop_client=NS(wait_for_service=fail),
+               get_logger=lambda: NS(error=errors.append))
+    ok, message = TeleopStatusPanelNode._request_controller_trajectory_stop(owner, timeout_sec=.2)
+    assert not ok
+    assert 'transport failed' in message
+    assert 'transport failed' in errors[-1]
+
+
+def test_keyboard_disable_reports_stop_failure():
+    import threading
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates = []
+    owner = NS(
+        _route_web_command=lambda *_args: None,
+        _web_keyboard_lock=threading.Lock(),
+        _web_keyboard_enabled=True,
+        _request_controller_trajectory_stop=lambda **_kwargs: (False, "transport failed"),
+        _store=NS(update_teleop_status=lambda *args: updates.append(args)),
+    )
+    result = TeleopStatusPanelNode._handle_keyboard_disable(owner)
+    assert not result["trajectory_stop_requested"]
+    assert "transport failed" in result["message"]
+    assert updates[-1][1] == result
+
+
+def test_status_callback_accepts_plain_text():
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates = []
+    owner = NS(_store=NS(update_teleop_status=lambda key, value: updates.append((key, value))))
+    TeleopStatusPanelNode._on_status(owner, 'status', NS(data='ready'))
+    assert updates == [('status', 'ready')]
+
+
+def test_incomplete_action_result_is_reported_as_failed():
+    import threading
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates = []
+    owner = NS(_store=NS(update_teleop_status=lambda key, value: updates.append((key, value))),
+               _execute_lock=threading.Lock(), _execute_goal_handle=object())
+    future = NS(result=lambda: NS(status=4, result=NS()))
+    TeleopStatusPanelNode._on_execute_result(owner, future, NS())
+    assert updates[-1][1]['state'] == 'failed'
+    assert 'error_code' in updates[-1][1]['message']
+    assert owner._execute_goal_handle is None
+
+
+def test_incomplete_gripper_result_is_reported_as_failed():
+    from types import SimpleNamespace as NS
+    from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
+    updates = []
+    owner = NS(_store=NS(update_teleop_status=lambda key, value: updates.append((key, value))))
+    TeleopStatusPanelNode._on_gripper_result(owner, NS(result=lambda: NS(result=NS())), NS())
+    assert updates[-1][1]['state'] == 'failed'
+    assert 'reached_goal' in updates[-1][1]['message']
+
+
 def test_web_cancel_reply_is_not_a_terminal_result_and_cannot_overwrite_next_goal():
     import threading
     from types import SimpleNamespace as NS
@@ -242,10 +307,12 @@ class _RetimedPoint:
         self.time_from_start = time_from_start
         self.positions = positions
         self.velocities = velocities
+        self.accelerations = ()
 
 
 class _PreparedReplay:
     def __init__(self) -> None:
+        self.reference_grade = "q/v"
         self.samples = [_TeachSample(stamp=0.0, positions=(0.1, -0.1))]
         self.effective_replay_speed = 1.0
         self.after_quality = _ReplayQuality()
@@ -253,6 +320,15 @@ class _PreparedReplay:
             _RetimedPoint(time_from_start=0.0, positions=(0.1, -0.1), velocities=(0.0, 0.0)),
             _RetimedPoint(time_from_start=0.5, positions=(0.2, -0.2), velocities=(0.0, 0.0)),
         ]
+
+
+def test_teach_builder_rejects_invalid_prepared_grade():
+    import pytest
+    prepared = _PreparedReplay()
+    prepared.reference_grade = ""
+    builder = TeachReplayTrajectoryBuilder(trajectory_factory=_Trajectory, trajectory_point_factory=_TrajectoryPoint)
+    with pytest.raises(ValueError, match="reference grade"):
+        builder.build(prepared=prepared, current_positions={}, start_band="direct", settings={}, config=None)
 
 
 class _PlanResult:
@@ -325,6 +401,26 @@ def test_select_collision_samples_evenly_keeps_first_and_last() -> None:
     selected = select_collision_samples(list(range(10)), max_samples=4)
 
     assert selected == [(0, 0), (3, 3), (6, 6), (9, 9)]
+
+
+def test_collision_transport_errors_remain_unknown_with_original_cause():
+    def fail():
+        raise RuntimeError('transport disconnected')
+    for boundary in ('discovery','send','result'):
+        client = _StateValidityClient([_StateValidityResponse(valid=True)])
+        if boundary == 'discovery':
+            client.service_is_ready = fail
+        elif boundary == 'send':
+            client.call_async = lambda request: fail()
+        else:
+            client.call_async = lambda request: type('Future',(),{
+                'done': staticmethod(lambda: True), 'result': staticmethod(fail)})()
+        prechecker = CollisionPrechecker(client=client,request_factory=_StateValidityRequest)
+        result = prechecker.check_positions(joint_names=('joint1',),positions_list=[(0.,)],
+            config=CollisionPrecheckConfig(True,'/check_state_validity','arm',10,1.))
+        assert result['state'] == 'unknown'
+        assert 'transport disconnected' in result['message']
+        assert result['checked_samples'] == 0
 
 
 def test_collision_prechecker_returns_pass_after_sampling_state_validity() -> None:
@@ -520,6 +616,37 @@ def test_replay_runtime_monitor_clears_pending_violation_after_recovery() -> Non
     assert monitor.stop_requested is False
 
 
+def test_missing_or_nonfinite_feedback_stops_after_grace_and_latches():
+    trajectory = dict(joint_names=['joint1'],points=[dict(time_from_start=0.,positions=[0.])])
+    config = ReplayRuntimeMonitorConfig(True,0.,.2,.1,5.)
+    for joints, reason in [({'joint1': {'position': 0.}}, 'missing_joint_state'),
+            ({'joint1': {'velocity': 0.}}, 'missing_joint_state'),
+            ({}, 'missing_joint_state'),
+            ({'joint1': {'position': float('nan'), 'velocity': 0.}}, 'invalid_joint_state'),
+            ({'joint1': {'position': 0., 'velocity': float('inf')}}, 'invalid_joint_state')]:
+        monitor = ReplayRuntimeMonitor()
+        assert not monitor.check(trajectory=trajectory,started_at=0.,joints=joints,now=1.,config=config).should_stop
+        decision = monitor.check(trajectory=trajectory,started_at=0.,joints=joints,now=1.21,config=config)
+        assert decision.should_stop and decision.status['runtime_monitor']['reason'] == reason
+        assert not monitor.check(trajectory=trajectory,started_at=0.,joints=joints,now=1.5,config=config).should_stop
+        monitor.reset()
+        assert not monitor.check(trajectory=trajectory,started_at=0.,joints=joints,now=2.,config=config).should_stop
+        good = {'joint1': {'position': 0., 'velocity': 0.}}
+        assert not monitor.check(trajectory=trajectory,started_at=0.,joints=good,now=2.1,config=config).should_stop
+        assert monitor.violation_since is None
+
+
+def test_tracking_rejects_partial_velocity_and_nonfinite_feedback_but_accepts_optional_empty_velocity():
+    from rebotarm_motion.trajectory_safety_monitor import evaluate_replay_tracking
+    trajectory = dict(joint_names=['joint1','joint2'],points=[dict(time_from_start=0.,positions=[0.,0.])])
+    kwargs = dict(joint_names=['joint1','joint2'], positions=[0.,0.],elapsed_sec=0.,
+        max_tracking_error_rad=.1,max_live_velocity_rad_s=5.)
+    assert evaluate_replay_tracking(trajectory,**kwargs).ok
+    assert evaluate_replay_tracking(trajectory,**kwargs,velocities=[0.]).reason == 'missing_joint_state'
+    for values in ([0.,float('nan')], [0.,float('inf')], [0.,'bad']):
+        assert evaluate_replay_tracking(trajectory,**kwargs,velocities=values).reason == 'invalid_joint_state'
+
+
 def test_teach_record_client_sets_path_then_starts_gravity_and_recording() -> None:
     set_path = _SetPathClient()
     gravity = _TriggerClient(message="gravity")
@@ -583,35 +710,42 @@ def test_teach_record_client_does_not_start_recording_when_gravity_start_fails()
     assert record.calls == 0
 
 
-def test_web_teleop_client_builds_and_sends_joint_trajectory() -> None:
+def test_web_teleop_client_binds_and_sends_complete_six_axis_constraints() -> None:
     action_client = _ActionClient()
+    names = tuple(f"joint{i}" for i in range(1, 7))
+    finalized = []
+    def finalize(trajectory):
+        finalized.append(trajectory)
+        return trajectory
     client = WebTeleopClient(
         action_client=action_client,
-        joint_names=("joint1", "joint2"),
-        joint_limits={"joint1": (-1.0, 1.0), "joint2": (-1.0, 1.0)},
-        joint_velocity_limits={"joint1": 2.0, "joint2": 2.0},
+        joint_names=names,
+        joint_limits=dict.fromkeys(names, (-1.0, 1.0)),
+        joint_velocity_limits=dict.fromkeys(names, 2.0),
         trajectory_factory=_Trajectory,
         trajectory_point_factory=_TrajectoryPoint,
         follow_goal_factory=_FollowGoal,
+        finalize_trajectory=finalize,
     )
-
+    target = dict.fromkeys(names, .02)
     result = client.execute(
-        {"confirm": "EXECUTE", "joint_positions": {"joint1": 0.2, "joint2": -0.1}, "duration": 1.0},
-        current_positions={"joint1": 0.0, "joint2": 0.0},
-        max_delta_rad=1.0,
-        min_duration=0.2,
-        max_duration=5.0,
+        {"confirm": "EXECUTE", "joint_positions": target, "duration": 1.0},
+        current_positions=dict.fromkeys(names, 0.0),
+        max_delta_rad=1.0, min_duration=0.2, max_duration=5.0,
         max_joint_speed_rad_s=2.0,
     )
-
     assert result["accepted"] is True
     assert result["status"]["state"] == "active"
     assert result["goal_future"] is not None
     assert len(action_client.goals) == 1
     trajectory = action_client.goals[0].trajectory
-    assert trajectory.joint_names == ["joint1", "joint2"]
-    assert trajectory.points[0].positions == [0.0, 0.0]
-    assert trajectory.points[-1].positions == [0.2, -0.1]
+    assert finalized == [trajectory]
+    assert trajectory.joint_names == list(names)
+    assert len(trajectory.points) == 2
+    assert trajectory.points[0].positions == [0.] * 6
+    assert trajectory.points[-1].positions == [.02] * 6
+    assert all(p.velocities == [0.] * 6 and p.accelerations == [0.] * 6
+               for p in trajectory.points)
 
 
 def test_web_teleop_client_rejects_when_action_server_unavailable() -> None:
@@ -636,6 +770,45 @@ def test_web_teleop_client_rejects_when_action_server_unavailable() -> None:
 
     assert result["accepted"] is False
     assert result["status"]["state"] == "unavailable"
+
+
+def test_web_teleop_client_does_not_dispatch_without_capability_or_final_binding() -> None:
+    import pytest
+    names = tuple(f"joint{i}" for i in range(1, 7))
+    action = _ActionClient()
+    def unavailable():
+        raise ValueError('trajectory capability unavailable')
+    client = WebTeleopClient(action_client=action, joint_names=names,
+        joint_limits=dict.fromkeys(names, (-1., 1.)),
+        joint_velocity_limits=dict.fromkeys(names, 2.), trajectory_factory=_Trajectory,
+        trajectory_point_factory=_TrajectoryPoint, follow_goal_factory=_FollowGoal,
+        require_trajectory_capability=unavailable)
+    payload = {"confirm": "EXECUTE", "joint_positions": dict.fromkeys(names, .02), "duration": 1.}
+    kwargs = dict(current_positions=dict.fromkeys(names, 0.), max_delta_rad=1.,
+        min_duration=.2, max_duration=5., max_joint_speed_rad_s=2.)
+    result = client.execute(payload, **kwargs)
+    assert not result['accepted'] and 'capability' in result['response']['message']
+    client._require_trajectory_capability = lambda: None
+    with pytest.raises(ValueError, match='final planning binding required'):
+        client.execute(payload, **kwargs)
+    assert action.goals == []
+
+
+def test_keyboard_does_not_dispatch_when_retiming_service_is_unavailable() -> None:
+    import time
+    from types import SimpleNamespace as NS
+    from rebotarm_teleop.teleop_keyboard_node import TeleopKeyboardNode
+    names = tuple(f"joint{i}" for i in range(1, 7))
+    action, events = _ActionClient(), []
+    owner = NS(_busy=False, _capability=NS(require=lambda: None),
+        _feedback_at=time.monotonic(), _action_client=action,
+        _current_positions=dict.fromkeys(names, 0.), _trajectory_duration=.4,
+        _retime_client=NS(service_is_ready=lambda: False),
+        _publish_status=lambda *args, **kwargs: events.append((args, kwargs)))
+    TeleopKeyboardNode._send_target(owner, names, (.02, 0., 0., 0., 0., 0.), 'step', '1')
+    assert action.goals == []
+    assert events[-1][0] == ('unavailable', 'trajectory retiming service unavailable')
+    assert owner._busy is False
 
 
 def test_web_teleop_client_stop_requests_cancel_and_controller_stop() -> None:
@@ -681,7 +854,7 @@ def test_web_teleop_client_stop_without_goal_uses_controller_stop_fallback() -> 
     assert stop.calls == 1
 
 
-def test_web_teleop_client_simulates_gripper_without_action_goal() -> None:
+def test_web_teleop_client_gripper_waits_for_backend_action_result() -> None:
     action_client = _ActionClient()
     client = WebTeleopClient(
         action_client=_ActionClient(),
@@ -697,17 +870,17 @@ def test_web_teleop_client_simulates_gripper_without_action_goal() -> None:
 
     result = client.set_gripper(
         {"confirm": "SET_GRIPPER", "position": 0.03, "max_effort": 0.4},
-        use_hardware=False,
         gripper_limits=(0.0, 0.045),
         default_max_effort=0.3,
         max_effort_limit=1.5,
     )
 
     assert result["accepted"] is True
-    assert result["status"]["state"] == "done"
-    assert result["simulated_position"] == 0.03
-    assert result["goal_future"] is None
-    assert action_client.goals == []
+    assert result["status"]["state"] == "active"
+    assert "simulated_position" not in result
+    assert result["goal_future"] is not None
+    assert len(action_client.goals) == 1
+    assert action_client.goals[0].command.position == 0.03
 
 
 def test_web_teleop_client_sends_gripper_goal_for_hardware() -> None:
@@ -726,7 +899,6 @@ def test_web_teleop_client_sends_gripper_goal_for_hardware() -> None:
 
     result = client.set_gripper(
         {"confirm": "SET_GRIPPER", "position": 0.02, "max_effort": 0.5},
-        use_hardware=True,
         gripper_limits=(0.0, 0.045),
         default_max_effort=0.3,
         max_effort_limit=1.5,
@@ -836,7 +1008,8 @@ def test_teach_replay_coordinator_builds_execute_rejection_payload() -> None:
         },
         settings={"replay_speed": 1.0, "align_duration": 3.0, "align_steps": 20, "final_hold_sec": 1.0},
         decision=decision,
-        prepared_payload={"after_quality": {"risk_level": "green", "max_jump_rad": 0.01}},
+        prepared_payload={"after_quality": {"risk_level": "green", "max_jump_rad": 0.01,
+                                             "max_acceleration_rad_s2": 0.0, "max_jerk_rad_s3": 0.0}},
         prepared_record_path="teleop_records/teach1.prepared.jsonl",
         moveit_align={"state": "ready", "message": "MoveIt ready"},
         collision_precheck={"state": "pass", "message": "ok"},
@@ -863,7 +1036,8 @@ def test_teach_replay_coordinator_accepts_execute_when_dry_run_token_matches() -
     decision = coordinator.evaluate_execute_request(
         info_payload={"path": "teleop_records/teach1.jsonl", "start_band": "direct", "quality": {"risk_level": "green"}},
         settings=settings,
-        prepared_quality={"risk_level": "green", "max_jump_rad": 0.01},
+        prepared_quality={"risk_level": "green", "max_jump_rad": 0.01,
+                          "max_acceleration_rad_s2": 0.0, "max_jerk_rad_s3": 0.0},
         dry_run_token={
             "accepted": True,
             "record_path": "teleop_records/teach1.jsonl",
@@ -889,7 +1063,8 @@ def test_teach_replay_coordinator_blocks_execute_when_dry_run_token_is_stale() -
     decision = coordinator.evaluate_execute_request(
         info_payload={"path": "teleop_records/new.jsonl", "start_band": "direct", "quality": {"risk_level": "green"}},
         settings=settings,
-        prepared_quality={"risk_level": "green", "max_jump_rad": 0.01},
+        prepared_quality={"risk_level": "green", "max_jump_rad": 0.01,
+                          "max_acceleration_rad_s2": 0.0, "max_jerk_rad_s3": 0.0},
         dry_run_token={
             "accepted": True,
             "record_path": "teleop_records/old.jsonl",
@@ -906,6 +1081,16 @@ def test_teach_replay_coordinator_blocks_execute_when_dry_run_token_is_stale() -
 
     assert decision.accepted is False
     assert decision.message == "real replay requires a successful dry-run first"
+
+
+def test_teach_replay_coordinator_rejects_incomplete_prepared_quality():
+    import pytest
+    with pytest.raises(KeyError, match="risk_level"):
+        TeachReplayCoordinator().evaluate_execute_request(
+            info_payload={}, settings={"replay_speed": 1.0}, prepared_quality={},
+            dry_run_token={}, limits=TeachReplayLimits(0.02, 5.0, 20.0),
+            yellow_max_speed=0.6,
+        )
 
 
 def test_teach_replay_trajectory_builder_appends_soft_start_retimed_points_and_final_hold() -> None:
@@ -945,6 +1130,15 @@ def test_teach_replay_trajectory_builder_appends_soft_start_retimed_points_and_f
     ]
     assert trajectory.points[-1].positions == [0.2, -0.2]
     assert trajectory.points[-1].velocities == [0.0, 0.0]
+
+
+def test_teach_replay_trajectory_builder_rejects_missing_or_nonfinite_feedback():
+    import pytest
+    builder = TeachReplayTrajectoryBuilder(trajectory_factory=_Trajectory, trajectory_point_factory=_TrajectoryPoint)
+    for current in ({"joint1": 0.0}, {"joint1": 0.0, "joint2": float("nan")}):
+        with pytest.raises(ValueError, match="joint feedback"):
+            builder.build(prepared=_PreparedReplay(), current_positions=current, start_band="direct",
+                          settings={}, config=None)
 
 
 def test_teach_replay_trajectory_builder_calls_moveit_alignment_with_keywords() -> None:
@@ -1147,3 +1341,13 @@ def test_teach_replay_settings_provider_honors_manual_align_duration_when_disabl
     settings = provider.from_payload({"settings": {"align_duration": 6.0}}, max_error=0.5)
 
     assert settings["align_duration"] == 6.0
+
+
+def test_teach_replay_settings_reject_invalid_values():
+    import pytest
+    provider = TeachReplaySettingsProvider(1.0, 3.0, True, 0.1, 2.0, 8.0, 30)
+    assert provider.from_payload({})["replay_speed"] == 1.0
+    for value in (None, [], "wrong", {"replay_speed": float("nan")},
+                  {"align_duration": float("inf")}, {"align_steps": None}, {"replay_speed": True}):
+        with pytest.raises(ValueError):
+            provider.from_payload({"settings": value})

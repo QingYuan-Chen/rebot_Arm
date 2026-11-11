@@ -5,7 +5,7 @@
 支持的部署环境为 Ubuntu 24.04 / ROS 2 Jazzy：
 
 ```text
-Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/检测结果 -> 本地 GraspNet
+D405 -> YOLO -> ROS RGB-D/CameraInfo/检测结果 -> 本地 GraspNet
 ```
 
 不得恢复已退役的 Windows、HTTP、MJPEG、远程 JSON 或独立 GraspNet 服务视觉路线。
@@ -21,6 +21,10 @@ Before changing code, read `docs/implemented/architecture.md`, `docs/reference/c
 - 新加入和修改的功能遵循现在的包分类原则，避免功能包的职责不清晰
 - 单个节点尽量只负责单一功能，不要让一个节点承载过多的功能
 - 控制器新增及调整的代码块需增添必要的注释、文档字符串使用中文，在并发、生命周期和安全约束等需要解释之处补充说明，并且在文件开头声明职责，对外接口，安全约束以及文件结构。
+- 当代码赖以工作的关键假设被破坏时，尽早且可见地失败，而不是试图打补丁
+- 倾向于将错误向上传播给调用者，而不是在`try/catch`内部静默地‘警告
+- 如果你相当确定数据应该始终存在，就假定它存在，而不是生成不必要的护栏或存在性检查
+- 绝不要因为错误而产生无效的‘默认值’，无论是对用户还是下游调用者s
 
 ## Project State
 

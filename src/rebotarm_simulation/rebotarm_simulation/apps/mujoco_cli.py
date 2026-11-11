@@ -56,6 +56,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--observe", type=_nonnegative_finite, default=0.2,
         help="simulation seconds to observe, including watchdog fallback",
     )
+    impedance = subparsers.add_parser("impedance", help="run joint impedance and verify watchdog hold")
+    impedance.add_argument("--model", help="path to an MJCF scene")
+    impedance.add_argument("--positions", nargs=6, type=float, required=True, metavar="RAD")
+    impedance.add_argument("--stiffness", nargs=6, type=float, required=True, metavar="NM_PER_RAD")
+    impedance.add_argument("--damping", nargs=6, type=float, required=True, metavar="NM_S_PER_RAD")
+    impedance.add_argument("--duration", type=_positive_finite, default=2.0)
+    impedance.add_argument("--timeout", type=_positive_finite, default=0.1)
     return parser
 
 
@@ -121,6 +128,40 @@ def _run_torque(sim, values, *, timeout: float, observe: float):
     }
 
 
+def _run_impedance(sim, positions, stiffness, damping, *, duration: float, timeout: float):
+    """按仿真时间续期，停止续期后验证看门狗实际返回保持。"""
+    if timeout < 2 * sim.timestep:
+        raise ValueError("impedance CLI timeout must cover at least two physics steps")
+    start = float(sim.get_state().simulation_time)
+    sim.command_joint_impedance(positions, stiffness, damping, timeout_s=timeout)
+    renew_at = start + timeout / 2
+    while float(sim.get_state().simulation_time) - start + 1e-15 < duration:
+        now = float(sim.get_state().simulation_time)
+        if now + 1e-15 >= renew_at:
+            sim.command_joint_impedance(positions, stiffness, damping, timeout_s=timeout)
+            renew_at = now + timeout / 2
+        sim.step()
+    active_control = sim.get_control_status()
+    if active_control.mode != "joint_impedance":
+        raise RuntimeError("joint impedance expired before the requested duration")
+    # 保留停止续期前的状态，随后只推进物理时间，检查真正的到期路径。
+    observe_until = float(sim.get_state().simulation_time) + timeout + sim.timestep
+    while float(sim.get_state().simulation_time) + 1e-15 < observe_until:
+        sim.step()
+    control = sim.get_control_status()
+    if control.mode != "hold":
+        raise RuntimeError("joint impedance watchdog did not enter hold")
+    return {
+        "state": sim.get_state(),
+        "active_control": active_control,
+        "control": control,
+        "requested_duration_s": duration,
+        "requested_timeout_s": timeout,
+        "observed_duration_s": float(sim.get_state().simulation_time) - start,
+        "watchdog_entered_hold": True,
+    }
+
+
 def _interactive(sim, stdin, stdout) -> int:
     paused = False
     for line in stdin:
@@ -154,6 +195,10 @@ def main(argv=None, *, sim_factory=RebotArmMujoco, stdin=None, stdout=None, stde
                 ),
                 stdout,
             )
+            return 0
+        if args.command == "impedance":
+            _emit(_run_impedance(sim, args.positions, args.stiffness, args.damping,
+                duration=args.duration, timeout=args.timeout), stdout)
             return 0
         return _interactive(sim, stdin, stdout)
     except Exception as exc:

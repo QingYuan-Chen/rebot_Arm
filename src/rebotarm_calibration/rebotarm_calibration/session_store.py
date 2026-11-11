@@ -1,25 +1,61 @@
-"""Durable hand-eye sessions; adapters supply already gated observations.
+"""手眼/TCP 会话的持久化所有者；采集适配器先完成观测质量门，再提交样本。
 
-No HTTP, ROS, or motor dependencies. Every mutation has an idempotency key and
-an expected revision; commit uses atomic persistence before replacing memory.
+create 以会话身份重试，mutate 以请求身份和预期 revision 串行提交；每次变更在锁内
+读取文件、核对身份、原子落盘后返回副本。HTTP、ROS 及设备调用由外层适配器负责。
 """
 from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import threading
 from uuid import uuid4
 
-from .handeye_residual import matrix_transform, transform_matrix
+from .handeye_residual import matrix_transform, transform_matrix, robot_pose_key
 from .handeye_workflow import atomic_write_json, solve_dataset
 
 
+def _reject_nonfinite(value):
+    raise ValueError(f'invalid saved session number: {value}')
+
+
 class SessionStore:
-    def __init__(self, directory):
+    def __init__(self, directory, *, image_topic='/camera/color/image_raw',
+                 camera_info_topic='/camera/color/camera_info'):
         self.directory = Path(directory).expanduser()
         self.lock = threading.Lock()
+        self.metadata_defaults = {'mode': 'handeye', 'image_topic': image_topic,
+                                  'camera_info_topic': camera_info_topic,
+                                  'dictionary': 'DICT_4X4_50', 'marker_id': 0}
+
+    def normalize_metadata(self, metadata):
+        if not isinstance(metadata, dict):
+            raise ValueError('invalid session metadata')
+        metadata = deepcopy(metadata)
+        metadata.setdefault('mode', 'handeye')
+        mode = metadata['mode']
+        if mode not in ('handeye', 'tcp'):
+            raise ValueError('unsupported calibration mode')
+        if mode == 'handeye':
+            for name in ('image_topic', 'camera_info_topic', 'dictionary', 'marker_id'):
+                metadata.setdefault(name, self.metadata_defaults[name])
+            for name in ('image_topic', 'camera_info_topic', 'dictionary'):
+                if not isinstance(metadata[name], str) or not metadata[name].strip():
+                    raise ValueError(f'invalid {name}')
+            if type(metadata['marker_id']) is not int or metadata['marker_id'] < 0:
+                raise ValueError('invalid marker_id')
+            if 'marker_length_m' in metadata:
+                length = metadata['marker_length_m']
+                if isinstance(length, bool) or not isinstance(length, (int, float)) or not math.isfinite(length) or length <= 0:
+                    raise ValueError('invalid marker_length_m')
+        fields = ('base_frame', 'end_link_frame') if mode == 'tcp' else (
+            'base_frame', 'end_link_frame', 'camera_frame', 'marker_frame')
+        for name in fields:
+            if not isinstance(metadata.get(name), str) or not metadata[name].strip():
+                raise ValueError(f'missing {name}')
+        return metadata
 
     def _path(self, session_id):
         if not isinstance(session_id, str) or not re.fullmatch(r'[0-9a-f]{32}', session_id):
@@ -27,23 +63,27 @@ class SessionStore:
         return self.directory / (session_id + '.json')
 
     def read(self, session_id):
-        data = json.loads(self._path(session_id).read_text(encoding='utf-8'))
-        if data.get('schema_version') != 1 or data.get('session_id') != session_id:
+        data = json.loads(self._path(session_id).read_text(encoding='utf-8'),
+                          parse_constant=_reject_nonfinite)
+        if not isinstance(data, dict) or data.get('schema_version') != 1 or data.get('session_id') != session_id:
             raise ValueError('invalid saved session')
+        if (type(data.get('revision')) is not int or data['revision'] < 0
+                or data.get('state') not in ('active', 'solved', 'accepted', 'aborted')
+                or not isinstance(data.get('requests'), dict)
+                or not isinstance(data.get('training_samples'), list)
+                or not isinstance(data.get('validation_samples'), list)
+                or 'report' not in data
+                or (data['report'] is not None and not isinstance(data['report'], dict))
+                or (data['state'] in ('solved', 'accepted') and not isinstance(data['report'], dict))):
+            raise ValueError('invalid saved session fields')
+        data['metadata'] = self.normalize_metadata(data.get('metadata'))
         return data
 
     def create(self, metadata, *, session_id=None):
-        """Caller-generated ID makes retrying creation safe after HTTP timeout."""
+        """复用调用方生成的会话 ID，使响应超时后的同内容重试返回已有会话。"""
         session_id = session_id or uuid4().hex
         path = self._path(session_id)
-        metadata = deepcopy(metadata)
-        mode = metadata.get('mode', 'handeye')
-        if mode not in ('handeye', 'tcp'):
-            raise ValueError('unsupported calibration mode')
-        fields = ('base_frame', 'end_link_frame') if mode == 'tcp' else ('base_frame', 'end_link_frame', 'camera_frame', 'marker_frame')
-        for name in fields:
-            if not isinstance(metadata.get(name), str) or not metadata[name].strip():
-                raise ValueError(f'missing {name}')
+        metadata = self.normalize_metadata(metadata)
         json.dumps(metadata, allow_nan=False)
         with self.lock:
             if path.exists():
@@ -69,6 +109,7 @@ class SessionStore:
         with self.lock:
             data = self.read(session_id)
             previous = data['requests'].get(request_id)
+            # 重试先认请求摘要再检查 revision：首次提交已经推进版本，重复提交仍应幂等返回。
             if previous:
                 if previous != digest:
                     raise ValueError('request_id reused with different content')
@@ -84,18 +125,22 @@ class SessionStore:
                 if split not in ('training', 'validation'):
                     raise ValueError('split must be training or validation')
                 sample = deepcopy(payload.get('sample', {}))
-                fields = ('base_to_end',) if data['metadata'].get('mode') == 'tcp' else ('base_to_end', 'camera_to_marker')
+                fields = ('base_to_end',) if data['metadata']['mode'] == 'tcp' else ('base_to_end', 'camera_to_marker')
                 for field in fields:
                     sample[field] = matrix_transform(transform_matrix(sample[field]))
-                # Freeze acquisition conditions across both splits and restarts.
-                # Legacy offline datasets may omit provenance, but cannot be mixed
-                # with live observations inside an existing session.
+                # 首个样本冻结采集条件，训练/验证组及进程重启后都沿用同一来源和内参。
+                # 旧离线样本可整体缺少 provenance；同一会话中仍要求后续样本条件一致。
                 conditions = {key: sample.get(key) for key in ('camera_info', 'provenance')}
                 existing = data['training_samples'] + data['validation_samples']
                 if existing:
                     reference = {key: existing[0].get(key) for key in conditions}
                     if conditions != reference:
                         raise ValueError('acquisition conditions changed; create a new session')
+                if data['metadata']['mode'] != 'tcp':
+                    key = robot_pose_key(sample['base_to_end'])
+                    duplicate = next((item for item in existing if robot_pose_key(item['base_to_end']) == key), None)
+                    if duplicate is not None:
+                        raise ValueError(f"duplicate robot pose matches sample {duplicate['sample_id']}; change robot pose")
                 sample['sample_id'] = request_id
                 sample['sample_index'] = len(existing)
                 sample['recorded_at'] = datetime.now(timezone.utc).isoformat()
@@ -106,12 +151,12 @@ class SessionStore:
                 from .tcp_workflow import solve_tcp_dataset
                 effective = deepcopy(data)
                 excluded = set(data.get('excluded_sample_ids', []))
-                if data['metadata'].get('mode') == 'tcp':
+                if data['metadata']['mode'] == 'tcp':
                     for split in ('training', 'validation'):
                         key = split + '_samples'
                         effective[key] = [sample for sample in data[key] if sample['sample_id'] not in excluded]
-                data['report'] = solve_tcp_dataset(effective) if data['metadata'].get('mode') == 'tcp' else solve_dataset(data)
-                if data['metadata'].get('mode') == 'tcp' and 'final_validation_after_index' in data:
+                data['report'] = solve_tcp_dataset(effective) if data['metadata']['mode'] == 'tcp' else solve_dataset(data)
+                if data['metadata']['mode'] == 'tcp' and 'final_validation_after_index' in data:
                     final = deepcopy(effective)
                     final['validation_samples'] = [sample for sample in effective['validation_samples']
                         if sample['sample_index'] > data['final_validation_after_index']]
@@ -144,7 +189,7 @@ class SessionStore:
                     (method for method in methods.values() if 'training' in method), {})
                 for split in ('training', 'validation'):
                     flagged.update(item['label'] for item in selected.get(split, {}).get('diagnostics', {}).get('flagged_samples', []))
-                if added and (data['state'] != 'solved' or data['metadata'].get('mode') == 'tcp' or added - flagged):
+                if added and (data['state'] != 'solved' or data['metadata']['mode'] == 'tcp' or added - flagged):
                     raise ValueError('only reported outliers can be newly excluded')
                 if set(ids) == old:
                     raise ValueError('sample selection unchanged')
@@ -154,6 +199,7 @@ class SessionStore:
                 if (set(ids) ^ old) & validation_ids and not str(payload.get('evidence', '')).strip():
                     raise ValueError('validation exclusion requires acquisition evidence')
                 data['final_validation_after_index'] = max(
+                    # 人工调整样本后，以已有最大索引划线，最终验证只使用此后新采的姿态。
                     (sample['sample_index'] for split in ('training', 'validation') for sample in data[split + '_samples']), default=-1)
                 data['excluded_sample_ids'] = sorted(ids)
                 if data.get('report'):

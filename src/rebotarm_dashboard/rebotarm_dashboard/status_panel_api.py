@@ -105,14 +105,12 @@ def _dispatch_post_request(node: object, path: str, payload_reader: Callable[[],
 
 
 def dispatch_post_request(node, path, payload_reader):
-    from contextlib import nullcontext
     # Calibration has its own lock and never commands motion. Do not let its
     # potentially long solve hold the operator lock or delay a stop request.
     if path == '/api/calibration/command':
         return _dispatch_post_request(node, path, payload_reader)
-    lock = getattr(node, '_operator_request_lock', None)
-    with lock if lock is not None else nullcontext():
-        if getattr(node, '_calibration_gravity_owned', False) and path not in {
+    with node._operator_request_lock:
+        if node._calibration_gravity_owned and path not in {
             '/api/calibration/command', '/api/calibration/gravity', '/api/stop_execute',
             '/api/teach_record_stop', '/api/teach_dry_run', '/api/teach_replay_stop',
             '/api/keyboard_disable', '/api/arm_disable',

@@ -24,13 +24,13 @@ rebotarm_bringup/
 | 入口 | 用途 |
 |---|---|
 | `hardware_controller.launch.py` | 唯一直接启动真实 `reBotArmController` 的底层入口 |
-| `bringup.launch.py` | 硬件、状态发布、TF 和基础 RViz |
+| `bringup.launch.py` | 硬件、MoveIt、轨迹准备、状态发布和可选 RViz |
 | `moveit_hardware.launch.py` | 真机 MoveIt 规划/执行入口 |
 | `rebotarm_app.launch.py` | 真机 MoveIt、示教录制和 Dashboard 工作台 |
-| `teleop_keyboard.launch.py` | 键盘点动和基础 RViz |
+| `teleop_keyboard.launch.py` | 键盘点动、MoveIt 和 RViz，默认使用 MuJoCo |
 | `teleop_system.launch.py` | 键盘点动、示教和 Dashboard 组合 |
 | `rviz_ee_drag_sim.launch.py` | 无硬件仿真规划与 RViz 拖动 |
-| `visual_grasp_system.launch.py` | 视觉只读、plan-only 和受控执行组合 |
+| `visual_grasp_system.launch.py` | 视觉感知、候选筛选和显示组合 |
 
 日常可复制命令统一维护在 [`docs/reference/commands/`](../../docs/reference/commands/README.md)，
 本包不在多个文档中重复维护同一套命令。
@@ -40,7 +40,7 @@ rebotarm_bringup/
 ```text
 rebotarm_bringup
   ├── 组合 rebotarmcontroller / rebotarm_motion / rebotarm_vision 等包的入口
-  ├── 选择 hardware / simulation / preview 后端
+  ├── 选择真机 / MuJoCo 执行后端，或仅提供模型查询与显示
   └── 安装 launch、config、rviz 资源
 ```
 

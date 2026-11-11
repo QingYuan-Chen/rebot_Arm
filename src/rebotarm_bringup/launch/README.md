@@ -26,7 +26,7 @@ src/rebotarm_bringup/launch/
 ├── teleop_keyboard.launch.py
 ├── teleop_system.launch.py
 ├── rviz_ee_drag_sim.launch.py
-└── visual_grasp_system.launch.py       # 唯一视觉入口（use_hardware 选择仿真／真机）
+└── visual_grasp_system.launch.py       # 视觉候选入口（选择离线或外部环境）
 ```
 
 内部组合片段位于 `launch/includes/`，由正式总入口加载，不作为用户入口单独启动：
@@ -38,8 +38,6 @@ includes/
 ├── visual_input.launch.py
 ├── grasp_candidate.launch.py
 ├── candidate_filter.launch.py
-├── motion_execution.launch.py
-├── grasp_executor.launch.py
 └── grasp_preview.launch.py
 ```
 
@@ -49,7 +47,6 @@ includes/
 - `visual_grasp_interfaces.yaml`：跨节点 topic、frame、MoveIt service 和规划组名称；由
   bringup 维护，避免在多个节点启动字典中重复硬编码。
 - `rebotarm_vision/config/`：相机、YOLO、GraspNet、候选评分与视觉策略；由视觉包维护。
-- `rebotarm_motion/config/`：视觉就绪、运动规划和执行相关策略；由运动包维护。
 - launch 文件：只负责后端选择、生命周期开关和兼容性覆盖；不新增算法默认值。
 
 视觉主入口已统一为 `visual_grasp_system.launch.py`，旧 compact、readonly、plan_only、
@@ -64,14 +61,17 @@ execute 包装入口已删除。新接口参数先加到 `visual_grasp_interface
 
 ```text
 hardware_controller.launch.py                  唯一真实硬件控制器定义
-├── bringup.launch.py                          + 状态发布 + 基础 RViz
+├── bringup.launch.py                          + MoveIt + 准备服务 + 状态发布 + RViz
 ├── interactive_system.launch.py               状态源/MoveIt/RViz 的共享实现
 │   ├── moveit_hardware.launch.py              固定真机后端的薄入口
 │   │   └── rebotarm_app.launch.py             + 示教录制 + Dashboard + 状态 RViz（不含键盘）
-│   ├── rviz_ee_drag_sim.launch.py             仿真 MotionPlanning 入口
-│   └── visual_grasp_system.launch.py          真实感知 + 仿真／真机视觉抓取组合
-├── teleop_keyboard.launch.py                  键盘 + 状态发布 + 基础 RViz（控制器点动适配）
-│   └── teleop_system.launch.py                + 示教录制 + Dashboard（控制器点动适配）
+└── teleop_keyboard.launch.py                  真机键盘分支 + MoveIt + RViz
+    └── teleop_system.launch.py                + 示教录制 + Dashboard
+
+mujoco_moveit_sim.launch.py                    MuJoCo + MoveIt + 准备服务
+├── rviz_ee_drag_sim.launch.py                  仿真 MotionPlanning 入口
+└── teleop_keyboard.launch.py                  无硬件键盘分支 + RViz
+    └── teleop_system.launch.py                + 示教录制 + Dashboard
 ```
 
 `interactive_system.launch.py` 只有在 `use_hardware=true` 时才包含硬件片段；纯预览和仿真
@@ -82,34 +82,30 @@ hardware_controller.launch.py                  唯一真实硬件控制器定义
 | 文件 | 类型 | 功能和边界 |
 |---|---|---|
 | `hardware_controller.launch.py` | 底层片段 | 唯一直接启动 `reBotArmController` 的文件；统一串口、反馈频率、夹爪保护、仲裁、命名空间和坐标系参数 |
-| `bringup.launch.py` | 基础真机入口 | 硬件、夹爪可视化状态桥、TF 和可选基础 RViz；不启动 MoveIt |
+| `bringup.launch.py` | 基础真机入口 | 硬件、MoveIt、轨迹准备服务、夹爪可视化状态桥、TF 和可选 RViz |
 | `moveit_hardware.launch.py` | 唯一真机 MoveIt 用户入口 | 薄包装 `interactive_system.launch.py`，固定真机、MoveIt、真实关节状态和唯一状态源；启动后仍需显式 Enable |
 | `moveit_demo.launch.py` | 离线 MoveIt 演示入口 | 使用 `rebotarm_moveit_config` 的模型与规划参数，启动 MoveIt、RViz 和夹爪可视化桥；不接真机 |
-| `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 唯一 MuJoCo 后端、MoveIt 与轨迹准备服务；默认 prepared_v1，可选 Dashboard |
+| `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 唯一 MuJoCo 后端、MoveIt 与轨迹准备服务；使用 continuous，可选 Dashboard |
 | `interactive_system.launch.py` | 共享实现 | 统一拥有状态发布、MoveIt、RViz 以及真机/无硬件状态源的互斥选择；不建议用户手写其内部组合参数启动真机 |
 | `rebotarm_app.launch.py` | 完整真机入口 | 包含真机 MoveIt 组合，再增加示教录制、Dashboard 和状态 RViz；不启动键盘节点 |
-| `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认不接真机。无硬件模式使用 RViz 轨迹插值预演控制器，按键可以改变 RViz 姿态，但不代表物理仿真 |
-| `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；默认不接真机。真机 prepared_v1 复用 MoveIt 场景/准备服务；legacy 与无硬件轻量预演沿用原状态链 |
-| `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 使用 RViz 轨迹插值预演控制器提供 Plan/Execute，无物理引擎 |
-| `visual_grasp_system.launch.py` | 唯一视觉入口 | 固定执行流程；默认 `use_hardware=false`，在 RViz 轨迹插值预演后端执行，无物理引擎 |
+| `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认使用 MuJoCo。两类后端均提供 MoveIt 场景与准备服务 |
+| `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；默认使用 MuJoCo |
+| `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 复用 MuJoCo、MoveIt 与准备服务，在 RViz 中提供 Plan/Execute |
+| `visual_grasp_system.launch.py` | 唯一视觉入口 | 感知、筛选及显示；默认 `robot_context=offline`，也可接入外部环境 |
 
-这里的 RViz 轨迹插值预演只验证 ROS/MoveIt/视觉流程和姿态显示，**不代表 MuJoCo
-物理验证**。它不计算动力学、执行器力、接触、碰撞或抓取结果；这些内容必须使用
-`mujoco_moveit_sim.launch.py` 验证；无窗口时设置
+无硬件执行统一由 MuJoCo 推进物理时间和轨迹，RViz 负责显示模型、规划及反馈。
+直接运行 `mujoco_moveit_sim.launch.py` 可选择 Dashboard 与 MuJoCo Viewer；无窗口时设置
 `use_rviz:=false use_mujoco_viewer:=false`。
 
-MuJoCo 组合的 `trajectory_execution_mode` 默认为 `prepared_v1`；真实硬件仍默认为
-`legacy`。可选 `use_dashboard:=true` 使用相同轨迹模式；另起终端键盘时也须选择
-`trajectory_execution_mode:=prepared_v1`，默认单步为 0.02 rad / 0.4 s。
-前后端能力不匹配或未知时拒绝，不自动回退；契约与验收见
+轨迹执行方式统一为 `continuous`，`trajectory_execution_mode` 启动/节点参数已删除；
+同名话题保留为后端只读能力声明。网页和终端键盘自动核对能力，默认单步为 0.02 rad / 0.4 s。
+能力不匹配或未知时拒绝；契约与验收见
 [P005 执行接入](../../../docs/implemented/features/p005_prepared_trajectory.md)。
 
-四类日常入口均显式转发模式：`moveit_hardware`、`rebotarm_app`、
-`teleop_keyboard`（及 `teleop_system`）、`visual_grasp_system`。
-真机首次软件交付需显式传 `trajectory_execution_mode:=prepared_v1`；默认仍 legacy，
-等待用户通过现有网页/键盘和 MoveIt 实测后再切换。独立 `hardware_controller`/`bringup`
-不提供准备服务，保留底层 legacy 默认。所有真机入口继续默认失能。
-随包 YAML 不覆盖键盘时长：prepared_v1 默认 0.02 rad / 0.4 s，legacy 保留 0.2 s；
+`bringup`、`moveit_hardware`、`rebotarm_app`、`teleop_keyboard`（及 `teleop_system`）自动提供准备服务。
+底层 `hardware_controller` 和 `mujoco_sim` 片段的准备服务由上层组合提供。
+所有真机入口继续默认失能。
+随包 YAML 不覆盖键盘时长：默认 0.02 rad / 0.4 s；
 自定义 YAML 可显式覆盖，超限直接拒绝。
 
 ### Jazzy MoveIt 退出兼容
@@ -130,33 +126,14 @@ MoveIt 对象仍执行正常清理，不捕获段错误或改写退出码。
 |---|---|---|
 | 只需真机 MoveIt 规划/执行 | `moveit_hardware.launch.py` | Dashboard、键盘遥操、示教录制 |
 | 需要真机 MoveIt + 示教录制 + Dashboard 完整工作台 | `rebotarm_app.launch.py` | 键盘遥操 |
-| 只需键盘点动和基础 RViz | `teleop_keyboard.launch.py` | Dashboard、示教录制；仅真机 prepared_v1 补齐 MoveIt 场景与准备服务 |
-| 需要键盘 + 示教录制 + Dashboard | `teleop_system.launch.py` | legacy 不含 MoveIt；真机 prepared_v1 由键盘组合补齐场景与准备服务 |
+| 只需键盘点动和 RViz | `teleop_keyboard.launch.py` | Dashboard、示教录制 |
+| 需要键盘 + 示教录制 + Dashboard | `teleop_system.launch.py` | 默认关闭网页执行，需显式设置 `web_execute_enabled:=true` |
 
 因此它们共享部分界面，但不是重复实现。`moveit_hardware.launch.py` 和
 `teleop_keyboard.launch.py` 是可独立使用的基础组合；各自的上层入口只叠加自己的功能。
 `rebotarm_app.launch.py` 与 `teleop_system.launch.py` 不应在同一命名空间同时启动。
 
-视觉主入口固定为执行流程，`use_hardware` 选择仿真或真机。启动后等待操作员调用
-`/rebotarm/visual_grasp/execute`，不自动使能或抓取。IK、运动服务和抓取编排自动启动，
-无硬件时自动提供 `rebotarm_preview/rebotarm_sim_trajectory_controller`，仅验证 ROS 执行流程和 RViz 姿态；
-物理、动力学和接触验证使用 MuJoCo 组合入口。
-
-```bash
-# 仿真轨迹执行 + Open3D（真实相机输入，不是物体接触物理仿真）
-ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
-  use_hardware:=false start_open3d_viewer:=true
-
-# 真机：启动后仍须检查反馈、预览和现场环境，并显式 enable
-ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
-  use_hardware:=true channel:=auto \
-  execute_gripper:=true start_open3d_viewer:=true
-```
-
-先在仿真后端调用 execute 检查轨迹，再退出仿真并启动真机后端。真机根据真实反馈和
-新鲜目标重新规划，不复用仿真轨迹。只读相机诊断使用 `scripts/run_ubuntu_vision.sh`。
-公共 execution_mode 已删除；旧 plan_only/readonly 参数会报错退出，避免误把预览请求
-当成执行。节点内部的规划预检能力保留，算法参数和碰撞/新鲜度门槛不变。
+视觉入口支持 `robot_context:=offline` 和 `robot_context:=external`。离线模式使用被动关节状态与 MoveIt 查询，外部模式复用已启动的机器人环境。MuJoCo 外部接入时设置 `use_sim_time:=true`；具体命令见[视觉候选命令](../../../docs/reference/commands/visual_grasp_commands.md)。
 
 ## includes/ 是什么
 
@@ -166,35 +143,9 @@ ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
 
 | 内部文件 | 负责的组合 | 不负责 |
 |---|---|---|
-| `visual_backend.launch.py` | 包含 interactive_system；无硬件时启动 `rebotarm_preview` 的 RViz 轨迹插值预演控制器 | 不重复定义真实硬件节点，不实现抓取策略 |
-| `visual_lifecycle.launch.py` | 顺序列出下面六个视觉处理片段 | 不触发自动摆位；文件名沿用历史命名 |
-| `visual_input.launch.py` | 包含 vision.launch，启动 Gemini 2、YOLO、手眼 TF 与 TCP TF | 不执行机械臂动作 |
-| `grasp_candidate.launch.py` | GraspNet、原始候选 Marker、可选 Open3D | 不保证候选可达，不执行候选 |
-| `candidate_filter.launch.py` | 候选的 TF、工作空间、IK、碰撞过滤节点 | 不下发运动 |
-| `motion_execution.launch.py` | motion 包的位姿规划/执行服务与停止确认 | 不决定抓取阶段顺序 |
-| `grasp_executor.launch.py` | vision 包的抓取阶段编排，调用运动与夹爪接口 | 不直接访问电机 SDK |
-| `grasp_preview.launch.py` | 过滤后抓取 Marker，以及默认关闭的目标预览发送器 | 不承担整条轨迹的规划执行 |
-
-实际视觉组合关系如下；这里只列节点组合依赖，不表示启动后自动开始抓取：
-
-```text
-visual_grasp_system.launch.py
-├── includes/visual_backend.launch.py
-│   ├── interactive_system.launch.py
-│   │   └── hardware_controller.launch.py（仅真机）
-│   └── RViz 轨迹插值预演控制器（仅无硬件）
-└── includes/visual_lifecycle.launch.py
-    ├── visual_input.launch.py
-    ├── grasp_candidate.launch.py
-    ├── candidate_filter.launch.py
-    ├── motion_execution.launch.py
-    ├── grasp_executor.launch.py
-    └── grasp_preview.launch.py
-```
-
-Open3D 显示原始候选；过滤结果和机械臂轨迹在 RViz 中检查。
-调用 execute 才开始抓取；stop 成功表示停止已确认，不自动回位。
-第三批视觉只贯通模式与公共执行链，标记为“链路已贯通、工作流未验收”，不构成实机抓取验收。
-
-固定观察位工具已移除。抓取从当前姿态规划；safe_home 保留为独立操作员命令。
-仿真初始姿态由 motion profile 中 sim_initial_joint_positions 指定，默认与 safe_home 一致（joint3=-1°，其余为零），仅用于初始化仿真状态；不让真机启动时自动回位。
+| `visual_backend.launch.py` | 离线模式装配被动状态、模型、TF 与 MoveIt 查询；按需启动 RViz | 外部环境的公共节点 |
+| `visual_lifecycle.launch.py` | 组合输入、候选、筛选和显示 | 运动控制 |
+| `visual_input.launch.py` | D405、YOLO 和显式配置的手眼 TF | 运动控制 |
+| `grasp_candidate.launch.py` | GraspNet、原始候选 Marker、可选 Open3D | IK 筛选 |
+| `candidate_filter.launch.py` | TF、工作空间、IK 和碰撞筛选 | 运动控制 |
+| `grasp_preview.launch.py` | 筛选结果 Marker | 运动控制 |

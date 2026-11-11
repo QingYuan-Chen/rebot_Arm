@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- 职责：共享力控算法、动力学模型与参数的包元数据。
+     接口：ament_python 库；硬件与仿真单向使用本包。
+     安全约束：不依赖设备 SDK、硬件控制器、仿真实现或 ROS 节点。
+     文件结构：包身份、构建工具、数值与资源依赖、构建导出。 -->
+<package format="3">
+  <name>rebotarm_force_control</name>
+  <version>0.1.0</version>
+  <description>Shared gravity and joint force control algorithms for reBotArm.</description>
+  <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>pinocchio</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rebotarm_moveit_config</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

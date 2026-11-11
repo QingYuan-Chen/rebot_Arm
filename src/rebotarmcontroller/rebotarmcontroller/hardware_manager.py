@@ -25,7 +25,7 @@ from typing import Optional
 from .configuration import HardwareSettings, load_configuration, default_config
 from .runtime.controller_runtime import ControllerRuntime
 from .arm.controller_kinematics import ArmKinematics
-from .gravity.gravity_control import GravitySettings, load_gravity_model, package_file
+from rebotarm_force_control.gravity_control import GravitySettings, load_gravity_model, package_file
 from .runtime.lifecycle import ControllerLifecycle, LifecyclePorts
 from .arm.arm_controller import ArmController
 from .contracts.component_ports import (
@@ -42,7 +42,7 @@ from .runtime.controller_protection import ControllerProtection
 from .controller_parameters import (
     _HARDWARE_FEEDBACK_RATE_HZ, _G_LARGE_MOVE_MAX_TAU_NM,
     _G_POSITION_MAX_SPEED_RAD_S, _G_POSITION_TIMEOUT_MARGIN_SEC,
-    _G_FEEDBACK_STALE_TIMEOUT_SEC, _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC,
+    _G_FEEDBACK_STALE_TIMEOUT_SEC,
 )
 
 
@@ -59,7 +59,6 @@ class HardwareManager:
         gripper_position_max_speed_rad_s: float = _G_POSITION_MAX_SPEED_RAD_S,
         gripper_position_timeout_margin_sec: float = _G_POSITION_TIMEOUT_MARGIN_SEC,
         gripper_feedback_stale_timeout_sec: float = _G_FEEDBACK_STALE_TIMEOUT_SEC,
-        grasp_hold_timeout_sec: float = _G_GRASP_HOLD_TIMEOUT_DEFAULT_SEC,
         gravity_config: Optional[str] = None,
         *,
         runtime_factory=ControllerRuntime,
@@ -73,10 +72,10 @@ class HardwareManager:
         """
         settings = HardwareSettings(hardware_feedback_rate_hz, gripper_position_torque_cap_nm,
             gripper_position_max_speed_rad_s, gripper_position_timeout_margin_sec,
-            gripper_feedback_stale_timeout_sec, grasp_hold_timeout_sec)
+            gripper_feedback_stale_timeout_sec)
         configuration = load_configuration(arm_cfg, gripper_cfg, channel)
         gravity_path = (Path(gravity_config).expanduser() if gravity_config else
-                        package_file('rebotarmcontroller', 'config/gravity_compensation.yaml'))
+                        package_file('rebotarm_force_control', 'config/gravity_compensation.yaml'))
         model = load_gravity_model(package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'),
                                    GravitySettings.from_yaml(gravity_path))
         # 先创建状态所有者, 后接线; 构造期间只有资源加载和数值校验, 没有总线会话.
@@ -153,6 +152,7 @@ class HardwareManager:
         )
         gravity_protection_port = GravityProtectionPort(
             clear_execution=self.gravity.clear_execution,
+            clear_hold_fault=self.gravity.clear_hold_fault,
         )
         gravity_arm_port = GravityArmPort(
             stop_gravity_compensation=self.gravity.stop_gravity_compensation,
@@ -206,6 +206,7 @@ class HardwareManager:
             confirm_disabled=self.protection.confirm_disabled,
             protect=self.protection.protect,
         )
+        # 全部端口绑定完成后才挂运行时回调，确保首次设备请求触发采集时各所有者均已就绪。
         self.runtime.idle_callback = self.cycle.feedback_tick
         self.runtime.on_error = lambda exc: self.protection.protect(
             str(exc), category="CONTROLLER")

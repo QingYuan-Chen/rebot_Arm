@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from .teach_recording import compute_auto_align_duration, normalize_teach_replay_settings
 
@@ -49,8 +50,19 @@ class TeachReplaySettingsProvider:
 
         返回字典中的 ``final_hold_sec`` 在实现内被固定为 1.0 s（末尾保持时长）。
         """
-        # payload 里没有 settings 或类型不对时一律按默认值处理，不抛异常。
-        values = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+        values = payload.get("settings", {})
+        if not isinstance(values, dict):
+            raise ValueError("settings must be a mapping")
+        for name in ("replay_speed", "align_duration", "align_steps"):
+            if name in values:
+                if isinstance(values[name], bool):
+                    raise ValueError(f"invalid setting {name}")
+                try:
+                    valid = math.isfinite(float(values[name]))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"invalid setting {name}") from exc
+                if not valid:
+                    raise ValueError(f"invalid setting {name}")
         align_duration = self.auto_align_duration(max_error)
         if not self.align_duration_auto:
             # 手动模式下允许 payload 覆盖对齐时长，缺省则用构造时的参数值。

@@ -115,7 +115,7 @@ class ArmControlClient:
             while time.monotonic() < deadline:
                 if future.done():
                     response = future.result()
-                    return bool(getattr(response, "success", False)), str(getattr(response, "message", ""))
+                    return bool(response.success), str(response.message)
                 time.sleep(0.02)
             return False, "service timeout"
         except Exception as exc:

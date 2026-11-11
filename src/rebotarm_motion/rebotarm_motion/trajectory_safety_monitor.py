@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Sequence
 
 
@@ -40,7 +41,7 @@ class ReplayTrackingResult:
 
     - `ok`: 是否在全部容差内; False 时 `reason` 给出机器可读原因;
     - `reason`: `ok` / `missing_trajectory` / `missing_joint_state` /
-      `tracking_error` / `live_velocity` 之一, 上层据此分类告警;
+      `invalid_joint_state` / `tracking_error` / `live_velocity` 之一, 上层据此分类告警;
     - `message`: 面向人的说明文本(英文, 用于日志与报告);
     - `worst_joint`: 误差或速度最大的关节名; 速度违规时指向速度最大的关节;
     - `max_tracking_error_rad`: 本帧最大位置偏差, 单位 rad;
@@ -156,6 +157,16 @@ def evaluate_replay_tracking(
     if not trajectory_names or not expected:
         return ReplayTrackingResult(False, "missing_trajectory", "active replay trajectory is empty")
 
+    if len(positions) != len(joint_names) or (velocities and len(velocities) != len(joint_names)):
+        return ReplayTrackingResult(False, "missing_joint_state", "joint_states arrays must cover every named joint")
+    try:
+        positions = tuple(float(value) for value in positions)
+        velocities = tuple(float(value) for value in velocities)
+    except (TypeError, ValueError, OverflowError) as exc:
+        return ReplayTrackingResult(False, "invalid_joint_state", f"invalid joint_states values: {exc}")
+    if len(set(joint_names)) != len(joint_names) or not all(math.isfinite(v) for v in (*positions, *velocities)):
+        return ReplayTrackingResult(False, "invalid_joint_state", "joint_states require unique names and finite values")
+
     # 实测按关节名建索引: 未出现在实测里的轨迹关节会被判缺失, 而不是错位比较.
     actual_by_name = {
         str(name): float(position)
@@ -196,7 +207,7 @@ def evaluate_replay_tracking(
         worst_velocity_joint = ""
         max_velocity = 0.0
         for name in trajectory_names:
-            velocity = float(velocity_by_name.get(name, 0.0))
+            velocity = velocity_by_name[name]
             if velocity > max_velocity:
                 max_velocity = velocity
                 worst_velocity_joint = str(name)

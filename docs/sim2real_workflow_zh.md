@@ -23,7 +23,7 @@
 
 ```bash
 cd /home/a/project/rebot_Arm
-export PYTHONPATH="$PWD/src/rebotarm_simulation:${PYTHONPATH:-}"
+export PYTHONPATH="$PWD/src/rebotarm_simulation:$PWD/src/rebotarm_force_control${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p logs/sim2real
 ```
 
@@ -74,6 +74,9 @@ python3 -m rebotarm_simulation.apps.sim2real_cli compare \
 ```
 
 这些阈值表示两条轨迹之间允许的最大误差，不是机械臂自身的物理限位。
+空轨迹或样本数量、时刻、步号、动作维度不匹配时，报告的 `ok` 为 `false`，
+`metrics` 为 `null`，`sample_count` 为 0，具体原因记录在 `validation_errors`。
+可以比较但超出阈值时，报告保留实际误差数值。
 
 ## 4. 批量安全与复现性验收
 

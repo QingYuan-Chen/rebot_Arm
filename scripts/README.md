@@ -9,7 +9,6 @@
 | `setup_ubuntu_vision.sh` | 安装视觉依赖到 `.venv-vision` |
 | `setup_ubuntu_graspnet.sh` | 安装 GraspNet 依赖到 `.venv-graspnet` |
 | `patch_graspnet_deprecations.py` | 为本机第三方 GraspNet 源码应用兼容修补，由安装脚本调用 |
-| `install_orbbec_udev_rules.sh` | 安装相机 USB 访问规则，需要 sudo |
 | `setup_motorbridge_fresh_feedback.py` | 检查、构建或显式安装 MotorBridge 安全补丁 |
 | `source_local_environment.bash` | 加载本机 ROS 与解释器环境，使用 source 调用 |
 | `run_ubuntu_vision.sh` | 启动相机与 YOLO 感知链路 |

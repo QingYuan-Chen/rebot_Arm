@@ -137,9 +137,9 @@ class TeachRecordClient:
                 return False, "record path service timeout", ""
             response = future.result()
             return (
-                bool(getattr(response, "success", False)),
-                str(getattr(response, "message", "")),
-                str(getattr(response, "normalized_path", "")),
+                bool(response.success),
+                str(response.message),
+                str(response.normalized_path),
             )
         except Exception as exc:
             return False, str(exc), ""

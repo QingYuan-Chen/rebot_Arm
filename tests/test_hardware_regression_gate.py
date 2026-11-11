@@ -197,8 +197,9 @@ def test_client_audit_write_errors_are_visible(tmp_path):
         if audit.failed: break
         threading.Event().wait(.001)
     assert audit.failed
-    with pytest.raises(RuntimeError, match='审计不完整'):
+    with pytest.raises(RuntimeError, match='审计不完整') as error:
         audit.close()
+    assert 'serializable' in str(error.value)
 
 
 def test_cancel_request_is_reported_separately_from_terminal():

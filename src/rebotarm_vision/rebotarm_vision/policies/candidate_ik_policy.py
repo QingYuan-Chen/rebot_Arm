@@ -10,8 +10,6 @@ if TYPE_CHECKING:
 
     from rebotarm_msgs.msg import GraspCandidateArray
 
-from tf2_ros import TransformException
-
 from .candidate_gate_policy import CandidateGateConfig, evaluate_candidate_gate
 from .candidate_motion_policy import (
     JointMotionPolicyConfig,
@@ -21,14 +19,11 @@ from .candidate_motion_policy import (
 from .candidate_precheck_policy import CandidatePrecheckConfig, evaluate_candidate_precheck
 from .candidate_target_policy import CandidateTargetPolicyConfig, build_candidate_target_variants
 from .pose_variant_policy import PoseVariantConfig
-from ..visual_grasp_sequence import PoseTarget
+from ..candidate_pose import PoseTarget
 
 
 def _parameter(context, name):
-    config = getattr(context, "_config", None)
-    if config is not None:
-        return SimpleNamespace(value=config.values[name])
-    return context.get_parameter(name)
+    return SimpleNamespace(value=context._config.values[name])
 
 
 class CandidateIkPolicy:
@@ -60,8 +55,8 @@ class CandidateIkPolicy:
     def _candidate_precheck_allows(self, candidate) -> bool:
         """候选级预检：置信度有限且不低于下限，夹爪宽度有限且落在可信行程内。"""
         result = evaluate_candidate_precheck(
-            confidence=float(getattr(candidate, "confidence", 0.0)),
-            jaw_width_m=float(getattr(candidate, "jaw_width", 0.0)),
+            confidence=float(candidate.confidence),
+            jaw_width_m=float(candidate.jaw_width),
             config=CandidatePrecheckConfig(
                 min_confidence=float(_parameter(self, "candidate_min_confidence").value),
                 min_jaw_width_m=float(_parameter(self, "candidate_min_jaw_width_m").value),
@@ -78,11 +73,7 @@ class CandidateIkPolicy:
         变换；开启时把候选自身位姿变换到 target_frame 当作目标中心，并用它与抓取点的
         距离判断抓取点是否已明显偏离物体。
         """
-        try:
-            workspace_enabled = bool(_parameter(self, "candidate_workspace_gate_enabled").value)
-        except (KeyError, AttributeError):
-            # 参数缺失或类型异常时按"不启用"处理，与默认配置保持一致
-            workspace_enabled = False
+        workspace_enabled = bool(_parameter(self, "candidate_workspace_gate_enabled").value)
         object_center_xyz = None
         # 闸门关闭时使用与参数默认值相同的占位范围（该分支下不会被用到）
         workspace_min_xyz = (-0.35, -0.64, 0.0)
@@ -96,7 +87,7 @@ class CandidateIkPolicy:
                 _parameter(self, "candidate_max_grasp_to_object_center_m").value
             )
         result = evaluate_candidate_gate(
-            jaw_width_m=float(getattr(candidate, "jaw_width", 0.0)),
+            jaw_width_m=float(candidate.jaw_width),
             grasp_position_xyz=tuple(float(v) for v in grasp.position),
             object_center_xyz=object_center_xyz,
             config=CandidateGateConfig(
@@ -116,21 +107,15 @@ class CandidateIkPolicy:
 
 
     def _candidate_object_center_in_target_frame(self, candidate) -> tuple[float, float, float] | None:
-        """取候选位姿作为目标中心并变换到 target_frame；变换失败返回 None。
+        """取候选位姿作为目标中心并变换到 target_frame；变换失败交由帧编排器处理。
 
         候选消息没有独立的目标中心字段，这里用候选位姿近似目标中心，仅用于"抓取点是否
         离物体太远"这一粗粒度判断。
         """
-        pose = getattr(candidate, "pose", None)
-        if pose is None:
-            return None
-        source_frame = str(getattr(getattr(candidate, "header", None), "frame_id", "") or "")
-        try:
-            stamp = getattr(getattr(candidate, "header", None), "stamp", None)
-            object_pose = self._transform_pose_to_target_frame(pose, source_frame, stamp)
-        except (TransformException, RuntimeError, ValueError) as exc:
-            self.get_logger().warn(f"candidate object center transform failed: source_frame={source_frame}: {exc}")
-            return None
+        pose = candidate.pose
+        source_frame = str(candidate.header.frame_id)
+        stamp = candidate.header.stamp
+        object_pose = self._transform_pose_to_target_frame(pose, source_frame, stamp)
         return (
             float(object_pose.position.x),
             float(object_pose.position.y),
@@ -156,7 +141,7 @@ class CandidateIkPolicy:
         其中 yaw/z 下标对应参数列表下标。
         """
         source_frame = str(candidates.header.frame_id)
-        stamp = getattr(candidates.header, "stamp", None)
+        stamp = candidates.header.stamp
         grasp_pose = self._transform_pose_to_target_frame(pose, source_frame, stamp)
         position_xyz = (
             float(grasp_pose.position.x),
@@ -200,7 +185,7 @@ class CandidateIkPolicy:
         找不到公共关节名时返回 0 代价，即"无法比较就不惩罚"，避免因为反馈缺失而否决全部候选。
         """
         current = self._joint_positions_by_name(self._latest_joint_state)
-        solution_joint_state = getattr(robot_state, "joint_state", None)
+        solution_joint_state = robot_state.joint_state
         target = self._joint_positions_by_name(solution_joint_state)
         # 只统计以 joint 开头的臂关节，夹爪等执行器关节不参与位移代价
         common_names = [name for name in current if name in target and name.startswith("joint")]
@@ -230,6 +215,6 @@ class CandidateIkPolicy:
         """把关节状态整理成 {关节名: 弧度} 字典，非有限值直接跳过。"""
         if joint_state is None:
             return {}
-        names = list(getattr(joint_state, "name", []))
-        positions = list(getattr(joint_state, "position", []))
+        names = list(joint_state.name)
+        positions = list(joint_state.position)
         return joint_positions_by_name(names, positions)

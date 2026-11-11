@@ -1,8 +1,8 @@
 # Ubuntu 视觉只读测试手册
 
-> 状态：REFERENCE；类型：只读视觉验证；适用范围：Gemini 2/YOLO/GraspNet；不授权机械臂运动。
+> 状态：REFERENCE；类型：只读视觉验证；适用范围：D405/YOLO/GraspNet；不授权机械臂运动。
 
-本手册只启动 Gemini 2、YOLO、ROS RGB-D/CameraInfo/detection 和本地 GraspNet
+本手册只启动 D405、YOLO、ROS RGB-D/CameraInfo/detection 和本地 GraspNet
 候选发布，不启动机械臂控制器，不调用 enable，不发送轨迹。
 
 ## 前置条件与环境准备
@@ -32,6 +32,10 @@ export GRASPNET_CHECKPOINT_PATH=/absolute/path/to/checkpoint-rs.tar
 ```bash
 ./scripts/run_ubuntu_vision.sh
 ```
+
+先用 `rs-enumerate-devices -s` 确认 D405。默认手眼外参为空，RGB-D/YOLO
+可独立核查；机器人系筛选需显式传入 D405 重标定结果，步骤见
+[视觉环境](../../setup/ubuntu_vision_setup_zh.md)。
 
 默认值为：
 
@@ -87,8 +91,8 @@ ros2 topic hz /grasp/graspnet_candidates
 ./scripts/run_ubuntu_vision.sh
 ```
 
-上述入口负责相机、YOLO 和 TF；GraspNet/Open3D 与仿真执行组合参见
-[视觉抓取命令](visual_grasp_commands.md)，不能把该执行组合当作相机只读入口。
+上述入口负责相机、YOLO、相机内部 TF 和显式配置的手眼 TF；GraspNet/Open3D 组合参见
+[视觉候选命令](visual_grasp_commands.md)；该组合还提供候选筛选和 MoveIt 查询。
 
 ## 验证顺序与判定
 

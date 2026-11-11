@@ -1,5 +1,5 @@
 # 文件职责：网页六轴运动及可选独立夹爪目标的整体执行契约。
-# 对外接口：/<namespace>/execute_teleop_motion，仅在 prepared_v1 下提供。
+# 对外接口：/<namespace>/execute_teleop_motion，仅在 continuous 下提供。
 # 安全约束：六轴准备通过后两侧才启动；碰撞计算使用本请求内的闭合模型，
 # 不覆盖真实反馈；取消、失败及成功均由后端确认，不将接纳当成完成。
 # 文件结构：Goal（六轴与独立开合）→ Result（整体和两侧终态）→ Feedback。

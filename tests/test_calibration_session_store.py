@@ -3,6 +3,50 @@ from rebotarm_calibration.session_store import SessionStore
 from test_handeye_workflow import dataset
 
 
+def test_legacy_metadata_defaults_are_normalized_without_rewriting(tmp_path):
+    import json
+    store = SessionStore(tmp_path, image_topic='/custom/image', camera_info_topic='/custom/info')
+    created = store.create(dataset()['metadata'])
+    path = tmp_path / (created['session_id'] + '.json')
+    legacy = json.loads(path.read_text())
+    for key in ('mode', 'image_topic', 'camera_info_topic', 'dictionary', 'marker_id'):
+        legacy['metadata'].pop(key, None)
+    path.write_text(json.dumps(legacy))
+    before = path.read_bytes()
+    restored = store.read(created['session_id'])
+    assert restored['metadata']['mode'] == 'handeye'
+    assert restored['metadata']['image_topic'] == '/custom/image'
+    assert path.read_bytes() == before
+    assert store.create(dataset()['metadata'], session_id=created['session_id']) == restored
+
+
+@pytest.mark.parametrize('field,value', [
+    ('metadata', None), ('revision', -1), ('training_samples', None),
+    ('requests', []), ('state', 'bogus'), ('report', []),
+])
+def test_corrupt_saved_session_is_rejected(tmp_path, field, value):
+    import json
+    store = SessionStore(tmp_path)
+    created = store.create(dataset()['metadata'])
+    path = tmp_path / (created['session_id'] + '.json')
+    data = json.loads(path.read_text())
+    data[field] = value
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match='invalid'):
+        store.read(created['session_id'])
+
+
+def test_nonfinite_saved_session_is_rejected(tmp_path):
+    store = SessionStore(tmp_path)
+    created = store.create(dataset()['metadata'])
+    path = tmp_path / (created['session_id'] + '.json')
+    content = path.read_text().replace('"training_samples": []', '"training_samples": [NaN]')
+    assert content != path.read_text()
+    path.write_text(content)
+    with pytest.raises(ValueError, match='invalid saved session number'):
+        store.read(created['session_id'])
+
+
 def test_durable_workflow_retry_accept_and_restart(tmp_path):
     source = dataset()
     store = SessionStore(tmp_path)
@@ -97,6 +141,28 @@ def test_returned_session_is_detached(tmp_path):
                          payload={'split':'training','sample':source['training_samples'][0]})
     current['training_samples'][0]['base_to_end']['translation'][0]=999
     assert store.read(sid)['training_samples'][0]['base_to_end']['translation'][0]!=999
+
+
+@pytest.mark.parametrize('split', ['training', 'validation'])
+def test_duplicate_pose_rejected_before_persistence_and_retry_stays_idempotent(tmp_path, split):
+    from copy import deepcopy
+    store = SessionStore(tmp_path)
+    source = dataset()
+    data = store.create(source['metadata'])
+    sid = data['session_id']
+    payload = {'split': 'training', 'sample': source['training_samples'][0]}
+    saved = store.mutate(sid, request_id='first', revision=0, operation='capture', payload=payload)
+    raw = (tmp_path / (sid+'.json')).read_bytes()
+    duplicate = deepcopy(payload['sample'])
+    duplicate['camera_to_marker']['translation'][0] += .02
+    with pytest.raises(ValueError, match='duplicate robot pose matches sample first'):
+        SessionStore(tmp_path).mutate(sid, request_id='duplicate', revision=1,
+            operation='capture', payload={'split': split, 'sample': duplicate})
+    assert (tmp_path / (sid+'.json')).read_bytes() == raw
+    assert store.mutate(sid, request_id='first', revision=0, operation='capture', payload=payload) == saved
+    duplicate['base_to_end'] = source['training_samples'][1]['base_to_end']
+    assert store.mutate(sid, request_id='different', revision=1, operation='capture',
+                        payload={'split':split, 'sample':duplicate})['revision'] == 2
 
 
 def test_audit_indices_and_retries_are_stable(tmp_path):

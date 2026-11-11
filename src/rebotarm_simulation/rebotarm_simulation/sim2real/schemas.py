@@ -168,7 +168,7 @@ class TrajectoryMetrics:
 @dataclass(frozen=True)
 class ComparisonReport:
     ok: bool
-    metrics: TrajectoryMetrics
+    metrics: TrajectoryMetrics | None
     validation_errors: tuple[str, ...]
     sample_count: int
 
@@ -177,13 +177,15 @@ class ComparisonReport:
         count = int(self.sample_count)
         if count < 0:
             raise ValueError("sample_count must be non-negative")
+        if self.metrics is None and (self.ok or count != 0):
+            raise ValueError("missing metrics require a failed comparison with no samples")
         object.__setattr__(self, "validation_errors", errors)
         object.__setattr__(self, "sample_count", count)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ok": bool(self.ok),
-            "metrics": self.metrics.to_dict(),
+            "metrics": None if self.metrics is None else self.metrics.to_dict(),
             "validation_errors": list(self.validation_errors),
             "sample_count": self.sample_count,
         }

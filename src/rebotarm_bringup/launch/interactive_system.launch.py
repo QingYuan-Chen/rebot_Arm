@@ -5,7 +5,7 @@
 #后端选择逻辑（互斥，同一条启动里只会生效一个）：
 #
 #- use_moveit_preview=true：复用 MoveIt 组合；接硬件时只使用真实反馈，无硬件时可选择假状态；
-#- use_moveit_preview=false：默认只提供状态与可选硬件；硬件 prepared_v1 自动复用 MoveIt 场景和准备服务。
+#- use_moveit_preview=false：默认只提供状态与可选硬件；硬件 continuous 自动复用 MoveIt 场景和准备服务。
 #
 #关键话题约定：机器人模型订阅 "/<arm_namespace>/visual_joint_states"（可视化用的关节状态，可能来自控制器反馈，也可能由假状态源填充）；"/<arm_namespace>/joint_states"则是控制器/仿真后端发布的执行侧关节状态。
 #
@@ -54,13 +54,10 @@ def generate_launch_description():
     use_local_rviz = LaunchConfiguration("use_local_rviz")
     use_moveit_preview = LaunchConfiguration("use_moveit_preview")
     use_hardware = LaunchConfiguration("use_hardware")
-    trajectory_mode = LaunchConfiguration("trajectory_execution_mode")
     # 新模式必须有完整规划场景；复用同一 MoveIt 组合，状态发布器随组合互斥。
-    prepare_trajectories = PythonExpression([
-        "'", use_hardware, "'.lower() == 'true' and '", trajectory_mode, "' == 'prepared_v1'",
-    ])
+    prepare_trajectories = use_hardware
     use_moveit_stack = PythonExpression([
-        "'", use_moveit_preview, "'.lower() == 'true' or (", prepare_trajectories, ")",
+        "'", use_moveit_preview, "'.lower() == 'true' or '", use_hardware, "'.lower() == 'true'",
     ])
     joint_state_rate = LaunchConfiguration("joint_state_rate")
     hardware_feedback_rate_hz = LaunchConfiguration("hardware_feedback_rate_hz")
@@ -68,7 +65,6 @@ def generate_launch_description():
     gripper_position_max_speed_rad_s = LaunchConfiguration("gripper_position_max_speed_rad_s")
     gripper_position_timeout_margin_sec = LaunchConfiguration("gripper_position_timeout_margin_sec")
     gripper_feedback_stale_timeout_sec = LaunchConfiguration("gripper_feedback_stale_timeout_sec")
-    grasp_hold_timeout_sec = LaunchConfiguration("grasp_hold_timeout_sec")
     cmd_arbitration = LaunchConfiguration("cmd_arbitration")
     frame_id = LaunchConfiguration("frame_id")
     ee_frame_id = LaunchConfiguration("ee_frame_id")
@@ -115,7 +111,7 @@ def generate_launch_description():
             ),
             # 机械臂命名空间：决定话题前缀（/<ns>/joint_states 等）
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
-            # 串口设备路径；留空表示由上层自行解析（例如 auto 探测 ttyACM0/1）
+            # 串口设备路径；留空或 auto 表示由控制器配置选择通道，显式路径优先
             DeclareLaunchArgument("channel", default_value=""),
             # 退出时是否先回到安全位再失能：默认 false，避免退出流程带动机械臂
             DeclareLaunchArgument("shutdown_safe_home", default_value="false"),
@@ -132,8 +128,6 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_position_timeout_margin_sec", default_value="1.5"),
             # 抓爪反馈过期阈值（s）：超过该时长没有新反馈即判定为不新鲜
             DeclareLaunchArgument("gripper_feedback_stale_timeout_sec", default_value="0.15"),
-            # 保持夹持的最长时间（s）：超时后松开，避免长时间堵转发热
-            DeclareLaunchArgument("grasp_hold_timeout_sec", default_value="10.0"),
             # 多路命令仲裁策略：reject 表示发现冲突命令直接拒绝（不做静默覆盖）
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             # 是否在本文件内启动 RViz
@@ -142,8 +136,6 @@ def generate_launch_description():
             DeclareLaunchArgument("use_moveit_preview", default_value="false"),
             # 是否打开真实硬件通道：默认 false，必须显式开启
             DeclareLaunchArgument("use_hardware", default_value="false"),
-            DeclareLaunchArgument("trajectory_execution_mode", default_value="legacy",
-                choices=["legacy", "prepared_v1"]),
             # 规划与执行使用的基座坐标系
             DeclareLaunchArgument("frame_id", default_value="base_link"),
             # 末端（法兰）坐标系名
@@ -167,7 +159,6 @@ def generate_launch_description():
                     "use_rviz": "false",
                     "arm_namespace": arm_namespace,
                     "prepare_trajectories": prepare_trajectories,
-                    "trajectory_execution_mode": trajectory_mode,
                     "use_fake_joint_states": PythonExpression(
                         [
                             "'false' if '",
@@ -198,10 +189,8 @@ def generate_launch_description():
                     "gripper_position_max_speed_rad_s": gripper_position_max_speed_rad_s,
                     "gripper_position_timeout_margin_sec": gripper_position_timeout_margin_sec,
                     "gripper_feedback_stale_timeout_sec": gripper_feedback_stale_timeout_sec,
-                    "grasp_hold_timeout_sec": grasp_hold_timeout_sec,
                     "cmd_arbitration": cmd_arbitration,
                     "arm_namespace": arm_namespace,
-                    "trajectory_execution_mode": trajectory_mode,
                     "frame_id": frame_id,
                     "ee_frame_id": ee_frame_id,
                 }.items(),

@@ -1,9 +1,52 @@
-"""viewer lifecycle; ownership and behavior unchanged."""
+"""协调 ROS 执行器与原生 Viewer 关闭，确认借用结束后释放仿真资源。
+
+关闭超时或生命周期信号读取失败时，保留完整所有权图并向调用者抛错。
+接口按资源保留、执行器关闭、Viewer 关闭顺序组织；等待预算使用单调时钟。
+"""
 from __future__ import annotations
 import time
 import math
 from typing import Callable, Sequence
 _RETAINED_UNSAFE_VIEWERS = []
+
+
+def retain_unsafe_resources(viewer, sim, model, data, *owners) -> None:
+    """保持仍被原生查看器或执行线程使用的所有权图。"""
+    _RETAINED_UNSAFE_VIEWERS.append((viewer, sim, model, data, *owners))
+
+
+def stop_executor(executor, thread, *, multi_threaded: bool = False) -> None:
+    """等待执行器和自旋线程结束，再允许释放其访问的模型。"""
+    if executor is None:
+        return
+    deadline = time.monotonic() + 2.0
+    if multi_threaded:
+        # Jazzy shutdown 会先销毁 guard。先停止派发、唤醒并结束自旋，再排空工作线程。
+        with executor._shutdown_lock:
+            executor._is_shutdown = True
+        executor.wake()
+        if thread is not None:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if thread.is_alive():
+                raise TimeoutError("ROS executor did not finish closing")
+        executor._executor.shutdown(wait=False)
+        workers = tuple(executor._executor._threads)
+        for worker in workers:
+            worker.join(timeout=max(0.0, deadline - time.monotonic()))
+        if any(worker.is_alive() for worker in workers):
+            raise TimeoutError("ROS executor workers did not finish closing")
+        stopped = executor.shutdown(timeout_sec=max(0.0, deadline-time.monotonic()), wait_for_threads=False)
+    else:
+        stopped = executor.shutdown(timeout_sec=2.0)
+    if thread is not None:
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    if not stopped or (thread is not None and thread.is_alive()):
+        raise TimeoutError("ROS executor did not finish closing")
+    if multi_threaded:
+        errors = [future.exception() for future in executor._futures if future.done()]
+        errors = [error for error in errors if error is not None]
+        if errors:
+            raise ExceptionGroup('ROS executor callbacks failed during shutdown', errors)
 
 
 def _close_viewer_then_sim(
@@ -44,22 +87,21 @@ def _close_viewer_then_sim(
         if model_is_released:
             sim.close()
         else:
-            _RETAINED_UNSAFE_VIEWERS.append((viewer, sim, model, data))
+            retain_unsafe_resources(viewer, sim, model, data)
         raise
 
-    viewer_model = getattr(viewer, "m", None)
-    if viewer_model is None:
-        sim.close()
-        return
-    started = clock()
-    while viewer_model is not None:
-        if clock() - started >= timeout:
-            # 查看器仍暴露模型时释放 MjModel/MjData 会让进程崩溃。保留整套所有权图，
-            # 并把清理失败上报出去，而不是冒险造成 use-after-free。
-            _RETAINED_UNSAFE_VIEWERS.append((viewer, sim, model, data))
-            raise TimeoutError("MuJoCo passive viewer did not finish closing")
-        sleep(0.01)
-        viewer_model = getattr(viewer, "m", None)
+    try:
+        viewer_model = viewer.m
+        started = clock() if viewer_model is not None else None
+        while viewer_model is not None:
+            if clock() - started >= timeout:
+                raise TimeoutError("MuJoCo passive viewer did not finish closing")
+            sleep(0.01)
+            viewer_model = viewer.m
+    except BaseException:
+        # 无法确认原生线程释放时，保留模型和数据并向调用方传递错误。
+        retain_unsafe_resources(viewer, sim, model, data)
+        raise
     sim.close()
 
 
@@ -73,11 +115,7 @@ def close_passive_viewer_safely(
     sleep: Callable[[float], None] = time.sleep,
     timeout: float = 5.0,
 ) -> None:
-    """Close a passive viewer before releasing its MuJoCo resources.
-
-    This public wrapper keeps ownership-retention details inside the simulation
-    package so callers do not depend on ``_RETAINED_UNSAFE_VIEWERS``.
-    """
+    """先确认被动 Viewer 释放模型，再关闭仿真；资源保留细节由本包统一维护。"""
     _close_viewer_then_sim(
         viewer,
         sim,

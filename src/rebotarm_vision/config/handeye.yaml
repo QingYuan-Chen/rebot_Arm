@@ -1,10 +1,11 @@
-# 手眼标定结果（Eye-in-hand）：Gemini2 相机装在夹爪附近的安装外参。
+# 历史 Gemini2 手眼标定原始记录，保留数值供追溯；D405 入口已撤下此默认文件。
+# D405 需重新标定，并通过 handeye_config / vision_handeye_config 显式加载新文件。
 # 上游手眼标定参数 / Upstream hand-eye calibration parameters.
 # 来源：/home/a/project/rebot_refer，提交号
 # 152f8f14ceec5cc8fc61664ff63915187a412800。
 #
 # 坐标约定：ROS TF 中使用 end_link -> camera_depth_frame 这条静态变换；
-# 当前生效的对齐 RGB-D 链路用彩色内参做反投影，因此**不允许**再叠加一次
+# 对齐 RGB-D 链路用彩色内参做反投影，因此**不允许**再叠加一次
 # 出厂彩色/深度外参，否则深度会二次校正而错位。
 # 注意：本文件中的键名与坐标系名都是对外接口，禁止改动；只允许增加注释。
 handeye:

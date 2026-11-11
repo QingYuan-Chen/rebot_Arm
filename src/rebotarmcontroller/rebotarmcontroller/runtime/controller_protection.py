@@ -44,6 +44,7 @@ class ControllerProtection:
 
     def confirm_disabled(self):
         """显式失能以新帧确认后解除故障锁存; 反馈恢复本身不得调用."""
+        self.gravity.clear_hold_fault()
         self._command_guard.confirm_disabled()
 
     @property
@@ -88,6 +89,7 @@ class ControllerProtection:
         controllers: list[object] = []
         disable_errors: list[str] = []
         try:
+            # 六轴与夹爪可引用同一总线对象，按身份去重使一次保护只向该总线请求一次失能。
             for controller in self._backend.controllers():
                 if all(controller is not existing for existing in controllers):
                     controllers.append(controller)
@@ -99,12 +101,8 @@ class ControllerProtection:
         ):
             controllers.append(gripper_controller)
         for controller in controllers:
-            disable_all = getattr(controller, "disable_all", None)
-            if not callable(disable_all):
-                disable_errors.append(f'{type(controller).__name__}: disable_all unavailable')
-                continue
             try:
-                disable_all()
+                controller.disable_all()
             except Exception as exc:
                 disable_errors.append(f"{type(controller).__name__}: {exc}")
         if disable_errors:

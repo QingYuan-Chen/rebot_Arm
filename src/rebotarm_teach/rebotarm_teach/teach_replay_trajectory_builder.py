@@ -19,6 +19,7 @@ yellow 风险等级还会在这里把速度压到配置上限以内。
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Callable
 
 from .teach_recording import (
@@ -113,8 +114,7 @@ class TeachReplayTrajectoryBuilder:
 
         - ``prepared``：预处理结果（含 ``samples``、``retimed_points``、
           ``effective_replay_speed``、``after_quality.risk_level`` 等字段）。
-        - ``current_positions``：当前关节反馈，``{关节名: 位置(rad)}``；缺失的关节
-          退回使用记录首点位置（宁可不动，也不用 0 冒充真实反馈）。
+        - ``current_positions``：当前关节反馈，``{关节名: 位置(rad)}``，须完整且有限。
         - ``start_band``：起始分级（direct / align / moveit_align / reject），
           决定软启动用哪一组时长与步数。
         - ``settings``：已规范化的回放设置，需含 ``align_duration`` / ``align_steps`` /
@@ -129,18 +129,19 @@ class TeachReplayTrajectoryBuilder:
         if not replay_samples:
             raise ValueError("record contains no samples")
         first = replay_samples[0]
-        reference = prepared.retimed_points[0] if prepared.retimed_points else first
-        grade = getattr(prepared, 'reference_grade', '') or (
-            'q/v/a' if getattr(reference,'accelerations',()) else
-            'q/v' if getattr(reference,'velocities',()) else 'q')
+        grade = prepared.reference_grade
+        if grade not in ("q", "q/v", "q/v/a"):
+            raise ValueError(f"invalid prepared reference grade: {grade}")
         trajectory = self._trajectory_factory()
         # 关节顺序以记录首样本为准，后续所有点都按这个顺序排列。
         trajectory.joint_names = list(first.joint_names)
-        # 当前反馈按关节名取值；反馈里没有的关节退回首点位置，保证与记录同序等长。
-        current = tuple(
-            float(current_positions.get(name, start))
-            for name, start in zip(first.joint_names, first.positions)
-        )
+        # 对齐起点必须来自实际反馈，并按记录的关节顺序排列。
+        try:
+            current = tuple(float(current_positions[name]) for name in first.joint_names)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"missing or invalid current joint feedback: {exc}") from exc
+        if not all(math.isfinite(value) for value in current):
+            raise ValueError("non-finite current joint feedback")
         if config.use_moveit_start_align:
             if moveit_start_alignment is None:
                 raise ValueError("MoveIt start alignment callback is required")
@@ -169,7 +170,7 @@ class TeachReplayTrajectoryBuilder:
         for point in trajectory.points:
             for field in ('velocities', 'accelerations'):
                 expected = grade != 'q' if field == 'velocities' else grade == 'q/v/a'
-                if len(getattr(point,field,())) != (len(trajectory.joint_names) if expected else 0):
+                if len(getattr(point,field)) != (len(trajectory.joint_names) if expected else 0):
                     raise ValueError(f'teach {grade} splice has incompatible {field}')
         self.append_final_hold(trajectory, final_hold_sec=float(settings["final_hold_sec"]))
         return TeachReplayTrajectoryResult(trajectory=trajectory)
@@ -247,13 +248,13 @@ class TeachReplayTrajectoryBuilder:
         from rebotarm_motion.polynomial_trajectory import TrajectoryPoint
         from rebotarm_motion.trajectory_time_parameterization import prepare_teach_reference
         retimed_points = prepare_teach_reference(tuple(TrajectoryPoint(
-            p.time_from_start, p.positions, p.velocities, getattr(p,'accelerations',()))
+            p.time_from_start, p.positions, p.velocities, p.accelerations)
             for p in retimed_points))
         for retimed in retimed_points:
             point = self._trajectory_point_factory()
             point.positions = [float(v) for v in retimed.positions]
-            point.velocities = [float(v) for v in getattr(retimed, 'velocities', ())]
-            point.accelerations = [float(v) for v in getattr(retimed, 'accelerations', ())]
+            point.velocities = [float(v) for v in retimed.velocities]
+            point.accelerations = [float(v) for v in retimed.accelerations]
             set_duration(point.time_from_start, float(elapsed) + initial_delay + retimed.time)
             if trajectory.points and point.time_from_start == trajectory.points[-1].time_from_start:
                 if any(getattr(point, f) != getattr(trajectory.points[-1], f)
@@ -278,7 +279,7 @@ class TeachReplayTrajectoryBuilder:
         hold_point = self._trajectory_point_factory()
         hold_point.positions = [float(v) for v in last_point.positions]
         for field in ('velocities', 'accelerations'):
-            values = getattr(last_point, field, ())
+            values = getattr(last_point, field)
             if values and any(float(value) != 0. for value in values):
                 raise ValueError('final hold requires stationary endpoint derivatives')
             setattr(hold_point, field, [0.0]*len(hold_point.positions) if values else [])

@@ -19,8 +19,8 @@
 
 本节保留第一批（`39028d1`）的历史验证。第二批已迁移共享内核并接入准备服务、
 正式控制周期和 MuJoCo；当前契约与软件/仿真结果见
-[P005 共享轨迹与 prepared_v1 执行](p005_prepared_trajectory.md)。
-实机默认仍为 legacy，尚未进行第二批对应的实机验证。
+[P005 共享轨迹与 continuous 执行](p005_prepared_trajectory.md)。
+实机默认 continuous，用户已完成模式功能测试；定量硬件验收另行安排。
 
 第一批仅实现离线数值参考、校验及假设备交接, **没有切换生产 FJT 执行器**。
 新增实现位于 motion 的 `polynomial_trajectory.py` 和 `trajectory_preparation.py`;
@@ -395,7 +395,7 @@ test "$SDK_PROBE_RESULT" -eq 0
 
 收尾只处理本轮启动进程, 并检查无残留。软件通过不证明反馈实时时延或新增实机验收。
 
-文件归属及唯一批次编号见[重构规划](../../design/controller_refactor_plan.md#分批交付与完成条件)。
+当前文件归属见[控制器说明](../../../src/rebotarmcontroller/README.md#文件结构)。
 
 - 设备、模式、寄存器、反馈请求、POS_VEL/MIT/VEL 和释放归本地驱动；
   调度和线程归 runtime，目标和速度覆盖归 execution，位置输出归 control。
@@ -404,7 +404,8 @@ test "$SDK_PROBE_RESULT" -eq 0
 - SDK 构造打开设备、逐电机吞发送异常、寄存器失败继续和 disable 内 join
   均不能隐式保留。新驱动构造不打开；发送错误返回逐电机回执，输出不可确认时
   停止普通写入并保护失能；健康参数/任务失败停止并保持。失败不能误报已失能。
-- 新生命周期和反馈仍由 manager 现有严格逻辑验证；新合法帧恢复不自动使能。
+- 生命周期事务由 `runtime/lifecycle.py` 验证，反馈由 `hardware/feedback_acquisition.py`
+  校验；`HardwareManager` 负责装配接线。新合法帧恢复后仍需显式使能。
   模式/寄存器/关闭延时、回位上限 0.3 rad/s 和 20 ms 轮询归 `ProtocolTiming`；
   使能/失能沿用共享 Controller 命令后 0.05 s、最多 10 次状态轮询及 0.1 s 间隔。
 - 规范模型保留 `joint3` 和 J2/J3 `+0.02 rad`，FK 发布切换前作相同关节输入对照；
@@ -413,8 +414,8 @@ test "$SDK_PROBE_RESULT" -eq 0
 `python3 scripts/check_motorbridge_abi.py` 只动态加载安装库，编译临时 C++ 客户端，
 核对必需符号、反馈序号能力和 State 布局；不会创建设备句柄。句柄/传输的离线
 验证使用 `/dev/pts/`，已覆盖七句柄共享、反馈序号、错误与释放/重连。
-真实设备切换需独立完成规划中的 2H 实机检查；软件验证没有操作真机，
-历史夹爪端点验收不自动覆盖本地驱动和新周期线程。
+真机分项结果和后续验收范围见[项目状态](../../reference/project_status.md)；
+软件验证没有操作真机，历史夹爪端点验收不自动覆盖本地驱动和新周期线程。
 
 SDK 树无独立许可文件，README 声明 MIT，尚未取得上游许可文本。本地配置、
 驱动、运行时和位姿计算按接口及项目规范模型独立实现，不直接复制 SDK 源码；来源与
@@ -422,13 +423,17 @@ SDK 树无独立许可文件，README 声明 MIT，尚未取得上游许可文�
 
 ## 重力补偿控制
 
+共享模型、补偿状态和力矩限制归 `rebotarm_force_control/gravity_control.py`；
+控制器的 `gravity_controller.py` 负责设备门控、反馈验证、模式交接、周期发送与诊断。
+两侧保持单向依赖，共享算法在离线与仿真中复用。
+
 补偿使用 `rebotarm_moveit_config/config/rebotarm.urdf` 的六轴约化模型，保持
 `joint1..joint6` 顺序和原始反馈坐标；夹爪关节锁定在模型零位。模型加载检查
 关节限位与硬件一致，力矩上限读取 URDF effort，且不得超过前三轴 27 N.m、
 后三轴 7 N.m 的软件上限。重力与雅可比使用同一模型；末端速度采用
 `LOCAL_WORLD_ALIGNED`，对应 end_link 原点速度和基座坐标轴。
 
-补偿配置位于 `src/rebotarmcontroller/config/gravity_compensation.yaml`，随包安装，
+补偿配置位于 `src/rebotarm_force_control/config/gravity_compensation.yaml`，随包安装，
 可用控制器参数或唯一硬件 launch 的 `gravity_config` 显式覆盖。保留 Kp=7、
 Kd=0.8；积分按实测 dt 计算，增益 1 N.m/(rad*s)，限幅 0.5 N.m。
 总力矩估计包含电机端 PD 与前馈；同时限制前馈和总力矩，以及总力矩变化率
@@ -438,12 +443,13 @@ PD 增益。这些是软件边界，实际反馈间隔中的电机输出仍需�
 `gravity_xyz_m_s2` 是 base_link 中的重力向量，默认水平安装；
 `payload_mass_kg`、`payload_com_xyz_m` 是额外负载的质量与 end_link 中的质心。
 默认额外负载为零，不重复加入 URDF 已有的末端 0.5 kg。URDF 缺少独立手指的
-惯性，当前 MuJoCo 另外具有手指、Gemini 2 相机和支架质量；仿真与补偿交叉验证
+惯性，当前 MuJoCo 另外具有手指、D405 相机和支架的估计质量；仿真与补偿交叉验证
 必须显式对齐这些附加载荷。仿真网格推算出的手指质量不能当作实物称量结果。
 实际安装的相机、支架、手指及抓取物负载需要测量后配置；零位和关节方向仍需
 在实机逐轴核对，不能由模型加载或仿真证明。
 
-控制频率使用 arm.yaml 的 rate（当前 100 Hz），反馈刷新上限默认 50 Hz；
+控制频率使用所选 arm.yaml 的 rate（控制器包默认 500 Hz，bringup 配置为 100 Hz），回调耗时计入本周期预算，按下一截止时间
+等待剩余时间；错过下一周期时重新排期，跳过积压周期。反馈刷新上限默认 50 Hz；
 不把 SDK 的 500 Hz 默认值视作实测能力。补偿中每 5 s 输出 `gravity diagnostics`，
 包括实际最大周期、回调耗时、错过截止时间次数、逐轴新序号观测速率、反馈年龄
 及模型路径/摘要、重力方向和负载配置，也可通过 `gravity_compensation_diagnostics()` 读取。
@@ -457,8 +463,14 @@ Python 线程与 sleep 不提供硬实时保证；新诊断用于实机采样后
 POS_VEL 保持。发送失败、反馈失效、电机异常或保持恢复失败时按严重故障保护性
 失能。退出补偿重新获取新反馈并确认 POS_VEL 切换结果；不在停止失败时另起写入者。
 
-新增软件边界和模式切换连续性尚未作为当前基线实机验收结果。当前任务只完善
-已有重力补偿，笛卡尔阻抗控制器仍未实现。
+`GRAVITY_HOLD` 锁存后，网页显示故障保持和具体原因，补偿活动及要求补偿的录制就绪状态
+均为 false。反馈新鲜、机械臂仍使能且错误仅为 `GRAVITY_HOLD` 时，操作员可确认现场状态后
+点击“退出重力补偿”，成功交接到当前位置 POS_VEL 保持后清除该故障，再显式启动补偿。
+显式失能在六轴及夹爪的新反馈确认后同样清除重力故障。退出或失能确认失败时保留锁存；
+其他控制器、电机和反馈错误继续沿用原有门禁，重力补偿保持原有超时与力矩门限。
+
+重力补偿与模式交接的问题关闭情况、现场反馈及剩余物理标定统一见
+[项目状态](../../reference/project_status.md)。笛卡尔阻抗控制器仍未实现。
 
 ## 验证结果
 

@@ -4,13 +4,13 @@
     管理单个活动目标，通过同一把目标锁序列化发送、取消和成功通知。
 对外接口
     ActiveTrajectory 保存目标身份；TrajectoryCommandGate 运行持锁钩子并返回
-    GateOutcome；terminal_disposition 映射终态；ExecutionLifecycle 提供旧路径异常清理。
+    GateOutcome；terminal_disposition 映射终态。
 安全约束
     旧 token 不能释放新目标；prepared 保存已接纳曲线，必须和所属 token 一起清理。
-    取消标记只阻止继续输出，不证明物理静止；prepared 路径由 ROS 所有者另行等待新帧，
+    取消标记只阻止继续输出，不证明物理静止；prepared 路径由执行组件复核新物理帧，
     未确认时保留资源。调用钩子如需仿真锁，应遵守目标锁在外、仿真锁在内的顺序。
 文件结构
-    活动状态 → 闸门结果和终态映射 → 原子命令闸门 → legacy 异常清理协调。
+    活动状态 → 闸门结果和终态映射 → 原子命令闸门。
 """
 from __future__ import annotations
 import threading
@@ -176,28 +176,3 @@ class TrajectoryCommandGate:
             self._active._cancel_requested = False
             self._active.prepared = None
             return GateOutcome.SUCCEEDED
-
-
-
-class ExecutionLifecycle:
-    """legacy 异常路径的兜底清理：保证已准入的 token 被释放。
-
-    执行回调抛异常时，若只 abort 而不释放执行权，动作服务器会永久处于 busy
-    状态、后续所有目标都被拒绝。这里先尽量把当前位置保持住（失败也不影响
-    清理），再 abort，最后无论如何都 finish 掉 token。
-    prepared_v1 不使用此无条件释放路径，而由节点确认物理停止后再清理。
-    """
-
-    def __init__(self, active: ActiveTrajectory, gate: TrajectoryCommandGate) -> None:
-        self._active = active
-        self._gate = gate
-
-    def fail(self, token, hold, abort) -> None:
-        try:
-            self._gate.stop_and_hold(hold)
-        except Exception:
-            pass
-        try:
-            abort()
-        finally:
-            self._active.finish(token)

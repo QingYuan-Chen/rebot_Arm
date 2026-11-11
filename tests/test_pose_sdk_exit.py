@@ -10,7 +10,6 @@ import numpy as np
 import pinocchio as pin
 import pytest
 from rebotarm_motion.pose_kinematics import JOINT_NAMES, PoseKinematics
-from rebotarm_motion.pose_preview_solver import PosePreviewSolver
 from rebotarm_motion.cartesian_trajectory import plan_cartesian, retime_path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,11 +21,6 @@ def test_fk_ik_roundtrip_and_canonical_upper_limits(q):
     assert result.success and result.error <= 1e-4
     assert result.q == pytest.approx(q)
     assert solver.upper[1:3] == pytest.approx((.02,.02))
-    preview = PosePreviewSolver(ROOT)
-    target = preview.compute_pose_target(q)
-    assert preview.solve_pose(target, q, JOINT_NAMES).success
-    with pytest.raises(ValueError, match='order'):
-        preview.solve_pose(target, q, tuple(reversed(JOINT_NAMES)))
 
 
 def test_unreachable_ik_and_fixed_retry_source():
@@ -113,7 +107,7 @@ def test_active_scripts_and_manifests_have_no_implicit_legacy_resource_path():
 def test_source_imports_and_computation_with_sdk_blocked_in_fresh_process():
     script = (ROOT/'tests/fixtures/controller_sdk_exit_probe.py').read_text()
     env = dict(os.environ)
-    env['PYTHONPATH'] = ':'.join(str(ROOT/'src'/p) for p in ('rebotarmcontroller', 'rebotarm_motion')) + ':' + env.get('PYTHONPATH','')
+    env['PYTHONPATH'] = ':'.join(str(ROOT/'src'/p) for p in ('rebotarmcontroller', 'rebotarm_motion', 'rebotarm_force_control')) + ':' + env.get('PYTHONPATH','')
     subprocess.run([sys.executable, '-c', script], cwd='/tmp', env=env, check=True, timeout=20)
 
 
@@ -131,13 +125,13 @@ def test_fixed_sdk_comparison_vectors(case):
 @pytest.mark.parametrize('package,relative', [
     ('rebotarmcontroller', 'config/arm.yaml'),
     ('rebotarmcontroller', 'config/gripper.yaml'),
-    ('rebotarmcontroller', 'config/gravity_compensation.yaml'),
+    ('rebotarm_force_control', 'config/gravity_compensation.yaml'),
     ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
 ])
 def test_owned_resource_uses_source_when_install_index_is_missing(monkeypatch, package, relative):
     """只隔离安装索引，确保目录迁移后的源码回退深度仍能找到实际资源。"""
     import ament_index_python.packages
-    from rebotarmcontroller.gravity.gravity_control import package_file
+    from rebotarm_force_control.gravity_control import package_file
 
     def missing_index(name):
         raise LookupError(name)
@@ -149,13 +143,13 @@ def test_owned_resource_uses_source_when_install_index_is_missing(monkeypatch, p
 @pytest.mark.parametrize('package,relative', [
     ('rebotarmcontroller', 'config/arm.yaml'),
     ('rebotarmcontroller', 'config/gripper.yaml'),
-    ('rebotarmcontroller', 'config/gravity_compensation.yaml'),
+    ('rebotarm_force_control', 'config/gravity_compensation.yaml'),
     ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
 ])
 def test_owned_resource_prefers_install_index_to_existing_source(tmp_path, monkeypatch, package, relative):
     """让源码与安装资源同时存在，必须选安装索引，避免本机源码掩盖安装错误。"""
     import ament_index_python.packages
-    from rebotarmcontroller.gravity.gravity_control import package_file
+    from rebotarm_force_control.gravity_control import package_file
 
     share = tmp_path/'share'/package
     installed = share/relative
@@ -169,18 +163,18 @@ def test_owned_resource_prefers_install_index_to_existing_source(tmp_path, monke
 @pytest.mark.parametrize('package,relative', [
     ('rebotarmcontroller', 'config/arm.yaml'),
     ('rebotarmcontroller', 'config/gripper.yaml'),
-    ('rebotarmcontroller', 'config/gravity_compensation.yaml'),
+    ('rebotarm_force_control', 'config/gravity_compensation.yaml'),
     ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
 ])
 def test_missing_owned_resource_fails_without_legacy_fallback(tmp_path, monkeypatch, package, relative):
     import ament_index_python.packages
-    from rebotarmcontroller.gravity import gravity_control
+    from rebotarm_force_control import gravity_control
     from rebotarm_motion import pose_kinematics
     monkeypatch.setattr(ament_index_python.packages, 'get_package_share_directory',
                         lambda name: str(tmp_path/'install/share'/name))
     # 同时隔离源码回退, 否则当前机器的正常资源会掩盖缺失安装文件.
     monkeypatch.setattr(gravity_control, '__file__',
-                        str(tmp_path/'missing/src/rebotarmcontroller/rebotarmcontroller/gravity/gravity_control.py'))
+                        str(tmp_path/'missing/src/rebotarm_force_control/rebotarm_force_control/gravity_control.py'))
     monkeypatch.setattr(pose_kinematics, '__file__', str(tmp_path/'missing/src/pkg/module.py'))
     with pytest.raises(FileNotFoundError):
         gravity_control.package_file(package, relative)

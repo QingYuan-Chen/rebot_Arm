@@ -47,7 +47,7 @@ def compare_trajectories(
     count = min(len(reference), len(candidate))
     if count == 0:
         errors.append("no samples")
-        return ComparisonReport(False, _zero_metrics(), tuple(errors), 0)
+        return ComparisonReport(False, None, tuple(errors), 0)
     for index, (left, right) in enumerate(zip(reference[:count], candidate[:count])):
         if left.step_index != right.step_index:
             errors.append(f"step_index[{index}]")
@@ -56,7 +56,7 @@ def compare_trajectories(
         if len(left.action) != len(right.action):
             errors.append(f"action_shape[{index}]")
     if errors:
-        return ComparisonReport(False, _zero_metrics(), tuple(errors), 0)
+        return ComparisonReport(False, None, tuple(errors), 0)
 
     position_rmse, position_max = _metric(
         _array(reference, "joint_positions") - _array(candidate, "joint_positions")
@@ -105,10 +105,6 @@ def compare_trajectories(
 
 def _array(samples: Sequence[TrajectorySample], field_name: str) -> np.ndarray:
     return np.asarray([getattr(sample, field_name) for sample in samples], dtype=float)
-
-
-def _zero_metrics() -> TrajectoryMetrics:
-    return TrajectoryMetrics(*(0.0 for _ in range(12)))
 
 
 def replay_actions(

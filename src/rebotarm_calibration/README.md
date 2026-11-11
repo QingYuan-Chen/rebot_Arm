@@ -67,6 +67,10 @@ ros2 run rebotarm_calibration rebotarm_tcp_calibration
 入口参数以 `--help` 和当前源码为准。网页采集节点提供
 `/rebotarm_handeye_capture/command`，支持 `create/status/preflight/preview/tf_check/`
 `capture/solve/reopen/accept/abort`。同一会话目录只能由一个采集节点写入。
+另提供 `/rebotarm_handeye_capture/observation`，复用 `CalibrationCommand` 类型且只接受
+`observe`。它独立读取匹配会话的新鲜相机快照及 ArUco 位姿，返回光学中心到标记中心
+距离和光学坐标 XYZ；无需 TF/稳定窗口，采集等待期间仍可查询，保留订阅和会话内容。
+网页每 0.5 秒查询，过期或质量失败后清除旧值，详细口径见[操作说明](../../docs/reference/commands/calibration_web.md#实时距离与采样反馈)。
 
 ## 会话和求解规则
 
@@ -81,7 +85,16 @@ ros2 run rebotarm_calibration rebotarm_tcp_calibration
 
 ArUco 模式要求 Image、CameraInfo 的 frame 和分辨率匹配，使用新鲜且时间戳推进的
 图像/TF；默认还检查重投影 RMSE、标记面积、正深度、距离和连续稳定窗口。
+图像与内参使用 RELIABLE 订阅，与正式 D405 发布端匹配。手眼稳定窗口同时检查
+`base_to_end` 与 `camera_to_marker`，沿用 0.4 秒、最大间隔 0.2 秒、平移 1 mm、旋转
+0.5° 的门限；从窗口中选择总位姿距离最小的实测配对帧，保留机器人与视觉的同期关系。
+跨训练/验证的重复机器人姿态在保存前拒绝，判定精度与求解器一致；同一请求重试保持幂等。
 相对旋转约束必须满秩且条件数满足阈值，单轴重复运动会被拒绝。
+
+新手眼样本保存角点、图像/内参/TF 时间及 frame、窗口逐帧观测、所选帧无损 PNG/base64
+和 SHA256。`arm_namespace` 默认 `rebotarm`，用于订阅原始 JointState；各观测附带图像
+时刻两侧最近的关节源消息及时间差，缺失时明确留空。TF2 仍负责历史变换查询。
+这些字段随现有会话 JSON 原子保存、导出和重试；旧会话可继续只读求解，代码版本变化后新建采集会话。
 
 TCP/手眼采样失败只返回结构化错误并保留已持久化状态，不会自动退出重力补偿、失能或回位。
 硬件 Enable 和 Gravity Start/Stop 由 Dashboard 的显式操作管理。

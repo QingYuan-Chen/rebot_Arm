@@ -20,7 +20,7 @@
   <!-- 以下四个是接口字段直接引用的类型来源，必须与 CMakeLists.txt 的
        find_package/DEPENDENCIES 保持一致：builtin_interfaces 提供 Time 时间戳，
        geometry_msgs 提供 Pose/PoseStamped，std_msgs 提供 Header，
-       trajectory_msgs 提供 JointTrajectory（ExecutePose 响应回填规划轨迹）。 -->
+       trajectory_msgs 提供轨迹消息。 -->
   <depend>builtin_interfaces</depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>

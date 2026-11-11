@@ -23,11 +23,11 @@ tf_transformations.quaternion_from_matrix = lambda _m: (0.0, 0.0, 0.0, 1.0)
 sys.modules.setdefault("tf_transformations", tf_transformations)
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_ROOT = ROOT / "src" / "rebotarmcontroller"
+PACKAGE_ROOT = ROOT / "src" / "rebotarm_force_control"
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-from rebotarmcontroller.controller_parameters import apply_gravity_compensation_tau_scale  # type: ignore[import-not-found]
+from rebotarm_force_control.gravity_control import apply_gravity_compensation_tau_scale  # type: ignore[import-not-found]
 
 
 class GravityCompensationCoreTests(unittest.TestCase):
@@ -38,6 +38,10 @@ class GravityCompensationCoreTests(unittest.TestCase):
 
         np.testing.assert_allclose(scaled, tau)
         np.testing.assert_allclose(tau, np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+
+    def test_tau_scale_rejects_non_six_axis_vector(self) -> None:
+        with self.assertRaisesRegex(ValueError, "6 values"):
+            apply_gravity_compensation_tau_scale(np.array([1.0, 2.0]))
 
 
 if __name__ == "__main__":

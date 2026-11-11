@@ -6,7 +6,7 @@
 工作方式：以 ``poll_period`` 为周期轮询终端（非阻塞），每个有效按键由
 ``KeyboardCommandMapper`` 映射为「某关节 ±1 步」，再由 ``TeleopTargetPlanner``
 在当前反馈角上叠加 ``joint_step_rad`` 并夹紧到关节限位，再发送 FJT。
-legacy 保留单个位置点；prepared_v1 由运动层生成完整五次首末约束，默认单步 0.02 rad / 0.4 s。
+运动层生成完整五次首末约束，默认单步 0.02 rad / 0.4 s。
 
 对外话题/动作（``<ns>`` 取自参数 arm_namespace，默认 rebotarm）：
 - 动作 ``/<ns>/follow_joint_trajectory``：下发目标关节角；
@@ -23,7 +23,7 @@ legacy 保留单个位置点；prepared_v1 由运动层生成完整五次首末�
 所有目标角都经关节限位夹紧；请求前核对执行能力和完整六轴反馈的本地接收年龄。
 反馈接收及时不代替后端源数据验证；忙时明确丢弃本次按键，不累积下一步目标。
 
-文件结构：时长编码 → 节点参数与终端设置 → 反馈/读键 → 单步发送与终态回调 → 状态发布和退出。
+文件结构：节点参数与终端设置 → 反馈/读键 → 规划绑定与单步发送 → 终态回调、状态发布和退出。
 """
 
 from __future__ import annotations
@@ -49,17 +49,6 @@ from .parameter_helpers import build_joint_limits, sensor_qos_kwargs
 from .teleop_core import KeyboardCommandMapper, TeleopTargetPlanner
 
 
-def _set_duration(duration_msg, seconds: float) -> None:
-    """把浮点秒数写入 ROS 时间字段（sec 整秒 + nanosec 纳秒）。
-
-    纳秒直接截断小数部分得到，落在 [0, 1e9) 内；调用方需保证 seconds 非负。
-    键盘节点用它设置轨迹点的 time_from_start。
-    """
-    whole = int(seconds)
-    duration_msg.sec = whole
-    duration_msg.nanosec = int((float(seconds) - whole) * 1_000_000_000)
-
-
 class TeleopKeyboardNode(Node):
     """键盘遥操作节点：单线程 executor 下由定时器驱动按键轮询与动作下发。
 
@@ -68,7 +57,7 @@ class TeleopKeyboardNode(Node):
     - ``joint_names`` / ``joint_lower_limits`` / ``joint_upper_limits``：平行数组参数，
       经 ``build_joint_limits`` 组装成关节名 → (下限, 上限) 映射，单位 rad；
     - ``joint_step_rad``：单次按键的关节增量（rad），默认 0.02；
-    - ``trajectory_duration``：单点轨迹的 time_from_start（s），默认 0.2，越小动作越急；
+    - ``trajectory_duration``：单步完整轨迹时长（s），默认 0.4，越小动作越急；
     - ``poll_period``：键盘轮询周期（s），默认 0.05；
     - ``input_timeout``：按键静默判超时、以及死锁键授权窗口的时长（s），默认 0.5；
     - ``deadman_required`` / ``deadman_key``：是否要求先按住式确认键，默认 false / "z"。
@@ -92,10 +81,9 @@ class TeleopKeyboardNode(Node):
             [3.14159, 3.14159, 3.14159, 3.14159, 3.14159, 3.14159],
         )
         self.declare_parameter("joint_step_rad", 0.02)
-        self.declare_parameter("trajectory_execution_mode", 'legacy')
         from .trajectory_capability import TrajectoryCapability
-        self._capability = TrajectoryCapability(self.get_parameter('trajectory_execution_mode').value)
-        self.declare_parameter("trajectory_duration", .4 if self._capability.expected == 'prepared_v1' else .2)
+        self._capability = TrajectoryCapability()
+        self.declare_parameter("trajectory_duration", .4)
         self._busy = False
         self._step_generation = 0
         self._retime_pending = None
@@ -240,7 +228,7 @@ class TeleopKeyboardNode(Node):
         message: str,
         key: str,
     ) -> None:
-        """把一次按键结果按配置等级发出，并占用单步状态直到 Action 终态。
+        """把一次按键结果生成完整约束并发出，并占用单步状态直到 Action 终态。
 
         只等 0.05 s 服务端：控制器不在线时立刻报 unavailable 并丢弃本次目标，
         不排队、不阻塞定时器，避免按键积压成突然的大幅运动。
@@ -259,33 +247,24 @@ class TeleopKeyboardNode(Node):
         if not self._action_client.wait_for_server(timeout_sec=0.05):
             self._publish_status("unavailable", "follow_joint_trajectory action unavailable")
             return
-        trajectory = JointTrajectory()
-        trajectory.joint_names = list(joint_names)
-        point = JointTrajectoryPoint()
-        point.positions = [float(v) for v in positions]
-        _set_duration(point.time_from_start, self._trajectory_duration)
-        trajectory.points = [point]
-        if self._capability.expected == 'prepared_v1':
-            # 前端不实现插值数学；运动层给出完整约束，后端准备后逐周期采样。
-            from rebotarm_motion.trajectory_messages import point_to_point_message
-            trajectory = point_to_point_message(joint_names,
-                tuple(self._current_positions[name] for name in joint_names), positions,
-                self._trajectory_duration, trajectory_factory=JointTrajectory,
-                point_factory=JointTrajectoryPoint)
-            if not self._retime_client.service_is_ready():
-                self._publish_status('unavailable', 'trajectory retiming service unavailable', key=key)
-                return
-            request = self._retime_type.Request()
-            request.trajectory, request.fixed_duration = trajectory, True
-            request.velocity_scaling = request.acceleration_scaling = 1.
-            self._busy = True
-            generation = self._step_generation
-            deadline = time.monotonic()+2.
-            future = self._retime_client.call_async(request)
-            self._retime_pending = (future, generation, deadline)
-            future.add_done_callback(lambda result:self._retimed_step(result,generation,deadline,message,key))
+        # 前端不实现插值数学；运动层给出完整约束，后端准备后逐周期采样。
+        from rebotarm_motion.trajectory_messages import point_to_point_message
+        trajectory = point_to_point_message(joint_names,
+            tuple(self._current_positions[name] for name in joint_names), positions,
+            self._trajectory_duration, trajectory_factory=JointTrajectory,
+            point_factory=JointTrajectoryPoint)
+        if not self._retime_client.service_is_ready():
+            self._publish_status('unavailable', 'trajectory retiming service unavailable', key=key)
             return
-        self._dispatch_step(trajectory, message, key)
+        request = self._retime_type.Request()
+        request.trajectory, request.fixed_duration = trajectory, True
+        request.velocity_scaling = request.acceleration_scaling = 1.
+        self._busy = True
+        generation = self._step_generation
+        deadline = time.monotonic()+2.
+        future = self._retime_client.call_async(request)
+        self._retime_pending = (future, generation, deadline)
+        future.add_done_callback(lambda result:self._retimed_step(result,generation,deadline,message,key))
 
     def _retimed_step(self, future, generation, deadline, message, key):
         """固定时长只检查不延长；异步等待不阻塞反馈，旧按键响应不能触发发送。"""

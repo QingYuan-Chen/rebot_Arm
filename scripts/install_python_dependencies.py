@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Install a dependency profile from its single Markdown requirements block."""
+"""从依赖文档唯一的 requirements 代码块安装指定 profile，--show 仅显示命令。
+
+包含路径相对所属文档解析；递归发现循环或重复代码块时在调用 pip 前报错，
+保留 Markdown 为依赖版本的唯一来源。安装目标由 --python 指定。
+"""
 from __future__ import annotations
 
 import argparse

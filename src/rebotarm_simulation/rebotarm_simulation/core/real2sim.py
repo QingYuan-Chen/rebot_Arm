@@ -2,34 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import os
 from pathlib import Path
-import sys
 from typing import Mapping, Sequence
 
 import numpy as np
 import yaml
 
 from rebotarm_simulation.core.mujoco_sim import ARM_JOINT_NAMES
+from rebotarm_simulation.core.resource_paths import package_resource
 
 
 REAL2SIM_MODES = ("mirror", "physics")
 
 
 def default_real2sim_mapping_path() -> Path:
-    relative = Path("config/real2sim_mapping.yaml")
-    package_root = Path(__file__).resolve().parents[1]
-    candidates = [
-        package_root / relative,
-        Path(sys.prefix) / "share/rebotarm_simulation" / relative,
-    ]
-    for prefix in os.environ.get("AMENT_PREFIX_PATH", "").split(os.pathsep):
-        if prefix:
-            candidates.append(Path(prefix) / "share/rebotarm_simulation" / relative)
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise FileNotFoundError("could not locate real2sim_mapping.yaml")
+    return package_resource("rebotarm_simulation", "config/real2sim_mapping.yaml")
 
 
 def _finite_tuple(values, *, length: int, label: str) -> tuple[float, ...]:

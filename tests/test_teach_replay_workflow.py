@@ -10,6 +10,20 @@ from rebotarm_teach.teach_replay_workflow import TeachReplayWorkflow
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_partial_joint_record_remains_readable_but_retiming_requires_six_axes():
+    import pytest
+    from rebotarm_teach.teach_models import TeachSample
+    from rebotarm_teach.teach_preparation import prepare_teach_replay_samples, retime_teach_samples
+    samples = [TeachSample(i*.1, ('joint1',), (i*.001,), (), (), {}, 'record') for i in range(3)]
+    analyzed = prepare_teach_replay_samples(samples, retime_enabled=False)
+    assert analyzed.samples[0].joint_names == ('joint1',)
+    assert analyzed.samples[-1].positions == samples[-1].positions
+    with pytest.raises(ValueError, match='joint1..joint6'):
+        prepare_teach_replay_samples(samples, retime_enabled=True)
+    with pytest.raises(ValueError, match='joint1..joint6'):
+        retime_teach_samples(samples, replay_speed=1., max_velocity_rad_s=1.)
+
+
 def workflow_fixture(tmp_path):
     # Exercise the actual dashboard parameter contract without a ROS or HTTP server.
     source = ROOT / "src/rebotarm_dashboard/rebotarm_dashboard/teleop_status_panel_node.py"
@@ -44,6 +58,8 @@ def workflow_fixture(tmp_path):
         publish_status=lambda channel, value: events.update({channel: value}),
         collision_defaults=lambda names: (), action_client=object(),
         trajectory_stop_client=client, request_stop=lambda **kwargs: True,
+        trajectory_capability=lambda: {"mode": "continuous", "revision": "test"},
+        retime_trajectory=lambda trajectory, *_args: trajectory,
     )
     return workflow, events, calls
 
@@ -65,6 +81,26 @@ def test_workflow_without_valid_dry_run_never_sends_goal(tmp_path):
     assert calls == []
 
 
+def test_missing_action_result_is_reported_as_failure(tmp_path):
+    workflow, events, _ = workflow_fixture(tmp_path)
+    workflow._teach_replay_goal_handle = object()
+    future = Future()
+    future.set_result(SimpleNamespace(status=4, result=None))
+    workflow._on_teach_replay_result(future, {}, 0)
+    assert events["replay"]["state"] == "failed"
+    assert "error_code" in events["replay"]["message"]
+    assert workflow._teach_replay_goal_handle is None
+
+
+def test_invalid_dry_run_settings_invalidate_previous_token(tmp_path):
+    import pytest
+    workflow, _, _ = workflow_fixture(tmp_path)
+    workflow._last_teach_dry_run = {"accepted": True}
+    with pytest.raises(ValueError, match="settings"):
+        workflow.dry_run({"settings": None})
+    assert workflow._last_teach_dry_run is None
+
+
 def test_workflow_stop_uses_controller_fallback_without_active_goal(tmp_path):
     workflow, events, calls = workflow_fixture(tmp_path)
     result = workflow.stop()
@@ -72,6 +108,29 @@ def test_workflow_stop_uses_controller_fallback_without_active_goal(tmp_path):
     assert result["state"] == "stop_requested"
     assert len(calls) == 1
     assert events["replay"] == result
+
+
+def test_missing_tracking_feedback_requests_stop_before_cancel_once(tmp_path, monkeypatch):
+    import rebotarm_teach.teach_replay_workflow as module
+    workflow, events, calls = workflow_fixture(tmp_path)
+    order = []
+    workflow._request_controller_trajectory_stop = lambda **kwargs: order.append('stop')
+    workflow._teach_replay_goal_handle = SimpleNamespace(cancel_goal_async=lambda: order.append('cancel'))
+    workflow._active_teach_replay_trajectory = dict(joint_names=['joint1'],
+        points=[dict(time_from_start=0.,positions=[0.])])
+    workflow._active_teach_replay_started_at = 0.
+    workflow._snapshot = lambda: SimpleNamespace(joints={'joint1': {'position': 0.}},teleop=events)
+    now = [10.]
+    monkeypatch.setattr(module.time,'monotonic',lambda: now[0])
+    workflow.check_tracking()
+    assert order == []
+    now[0] = 100.
+    workflow.check_tracking()
+    assert order == ['stop','cancel']
+    assert events['replay']['state'] == 'safety_stop'
+    assert events['replay']['runtime_monitor']['reason'] == 'missing_joint_state'
+    workflow.check_tracking()
+    assert order == ['stop','cancel']
 
 
 def test_workflow_prepares_dry_run_then_executes_through_injected_action(tmp_path):

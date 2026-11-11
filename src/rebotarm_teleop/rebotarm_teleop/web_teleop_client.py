@@ -9,8 +9,7 @@
   ROS 消息类型，可以在没有 ROS 运行时的环境下做单元测试。
 
 对外交互（客户端由调用方注入）：
-- 关节动作：legacy 使用 ``/<ns>/follow_joint_trajectory``；prepared_v1 使用
-  ``/<ns>/execute_teleop_motion`` 提交六轴五次约束和可选独立夹爪目标；
+- 关节动作：``/<ns>/execute_teleop_motion`` 提交六轴五次约束和可选独立夹爪目标；
 - 夹爪动作 ``/<ns>/gripper/command``：接收目标开口与最大力矩；
 - 触发器服务 ``/<ns>/trajectory_stop``：请求硬件控制器停止当前轨迹。
 
@@ -20,7 +19,7 @@
 - 正式入口注入执行能力核对回调；配置与后端不匹配时拒绝，不因失败回退到旧模式；
 - 停止流程总是先请求控制器级 trajectory_stop，再取消动作目标，两条路径互不阻塞。
 
-文件结构：时长和响应编码 → WebTeleopClient 依赖注入 → 点对点/旧轨迹组装 → 停止与夹爪适配。
+文件结构：响应编码 → WebTeleopClient 依赖注入 → 点对点轨迹组装 → 停止与夹爪适配。
 """
 
 from __future__ import annotations
@@ -31,23 +30,9 @@ from .service_call_helpers import call_trigger_service
 from .web_execute import (
     WebExecuteDecision,
     WebGripperDecision,
-    interpolate_joint_points,
     validate_web_gripper_request,
     validate_web_execute_request,
 )
-
-
-def set_duration(duration_msg: Any, seconds: float) -> None:
-    """把浮点秒数写入 ROS 时间字段。
-
-    时间消息由 ``sec``（整秒）与 ``nanosec``（纳秒）两部分构成，二者都必须是非负整数，
-    因此这里先取整秒，再把小数部分按 1e9 换算成纳秒。
-    调用方需保证 ``seconds`` 非负；本函数不做范围校验，也不做进位取整。
-    """
-    whole = int(seconds)
-    duration_msg.sec = whole
-    # 小数部分 ×1e9 得到纳秒；直接截断，保证结果落在 [0, 1e9) 区间内
-    duration_msg.nanosec = int((float(seconds) - whole) * 1_000_000_000)
 
 
 def decision_response(decision: WebExecuteDecision) -> dict:
@@ -103,7 +88,6 @@ class WebTeleopClient:
         follow_goal_factory: Callable[[], Any],
         gripper_action_client: Any | None = None,
         gripper_goal_factory: Callable[[], Any] | None = None,
-        trajectory_execution_mode: str = 'legacy',
         require_trajectory_capability: Callable[[], None] = lambda: None,
         finalize_trajectory=None,
     ) -> None:
@@ -128,7 +112,6 @@ class WebTeleopClient:
         self._follow_goal_factory = follow_goal_factory
         self._gripper_action_client = gripper_action_client
         self._gripper_goal_factory = gripper_goal_factory
-        self._trajectory_mode = trajectory_execution_mode
         self._require_trajectory_capability = require_trajectory_capability
         self._finalize_trajectory = finalize_trajectory
 
@@ -158,8 +141,7 @@ class WebTeleopClient:
         - ``unavailable``：动作服务器 0.1 s 内未就绪（``goal_future`` 为 None）；
         - ``active``：目标已发出，``goal_future`` 交由调用方注册回调。
 
-        校验通过后按固定周期插值成多点轨迹：起点是当前角度，终点是校验后的目标角度，
-        这样控制器拿到的是连续小步而非单点跳变，避免末端突变。
+        校验通过后构造首末 q/v/a 约束，并绑定最终规划；连续采样由执行后端负责。
         """
         decision = validate_web_execute_request(
             payload,
@@ -188,7 +170,7 @@ class WebTeleopClient:
                 status=dict(state='rejected', message=str(exc)))
         # 只等 0.1 s：Web 命令背后是人在等反馈，宁可快速失败也不要阻塞面板线程
         if not self._action_client.wait_for_server(timeout_sec=0.1):
-            message = "follow_joint_trajectory action unavailable"
+            message = "execute_teleop_motion action unavailable"
             return {
                 "accepted": False,
                 "decision": decision,
@@ -197,21 +179,16 @@ class WebTeleopClient:
                 "goal_future": None,
             }
 
-        trajectory = self._trajectory_factory()
-        trajectory.joint_names = list(decision.joint_names)
         # 起点必须与决策里的关节顺序对齐，否则位置会挂到错误的关节上
         current = tuple(current_positions[name] for name in decision.joint_names)
-        if self._trajectory_mode == 'prepared_v1':
-            # 两点包含 q/v/a，连续曲线由运动层准备；此处不离散化或修改请求时长。
-            from rebotarm_motion.trajectory_messages import point_to_point_message
-            trajectory = point_to_point_message(decision.joint_names, current,
-                decision.positions, decision.duration, trajectory_factory=self._trajectory_factory,
-                point_factory=self._trajectory_point_factory)
-            if self._finalize_trajectory is None:
-                raise ValueError('final planning binding required')
-            trajectory = self._finalize_trajectory(trajectory)
-        else:
-            self._append_legacy_points(trajectory, current, decision)
+        # 两点包含 q/v/a，连续曲线由运动层准备；此处不离散化或修改请求时长。
+        from rebotarm_motion.trajectory_messages import point_to_point_message
+        trajectory = point_to_point_message(decision.joint_names, current,
+            decision.positions, decision.duration, trajectory_factory=self._trajectory_factory,
+            point_factory=self._trajectory_point_factory)
+        if self._finalize_trajectory is None:
+            raise ValueError('final planning binding required')
+        trajectory = self._finalize_trajectory(trajectory)
         goal = self._follow_goal_factory()
         goal.trajectory = trajectory
         future = self._action_client.send_goal_async(goal)
@@ -235,10 +212,8 @@ class WebTeleopClient:
     def send_planned(self, trajectory, decision, *, gripper=(), feedback_callback=None):
         """提交已预览的准确联合消息；不再插值、改时长或发送独立夹爪 Action。"""
         self._require_trajectory_capability()
-        if self._trajectory_mode != 'prepared_v1':
-            raise ValueError('coordinated execution requires prepared_v1')
         if not self._action_client.wait_for_server(timeout_sec=.1):
-            raise ValueError('follow_joint_trajectory action unavailable')
+            raise ValueError('execute_teleop_motion action unavailable')
         goal = self._follow_goal_factory()
         goal.trajectory = trajectory
         goal.move_gripper = bool(gripper)
@@ -249,31 +224,18 @@ class WebTeleopClient:
             trajectory=trajectory,goal_future=self._action_client.send_goal_async(goal,
                 feedback_callback=feedback_callback))
 
-    def _append_legacy_points(self, trajectory, current, decision):
-        """保留旧模式的位置点序列；不补写导数，避免把兼容输入错误标成 C1/C2。"""
-        for elapsed, positions in interpolate_joint_points(
-            current=current,
-            target=decision.positions,
-            duration=decision.duration,
-        ):
-            point = self._trajectory_point_factory()
-            point.positions = [float(v) for v in positions]
-            # time_from_start 是相对轨迹起点的时刻（s），由插值函数按步长给出
-            set_duration(point.time_from_start, elapsed)
-            trajectory.points.append(point)
-
     def stop(self, goal_handle: Any | None, *, trajectory_stop_client: Any) -> dict:
         """停止 Web 触发的运动：先请求控制器级停止，再取消动作目标。
 
-        两条路径并行，因为控制器级的 trajectory_stop 是最后一道保险：
-        即使动作层取消抛异常（已被捕获），只要控制器停止成功仍返回 ``accepted=True``。
+        先有界等待 trajectory_stop 服务，再提交异步取消；取消响应由调用方继续跟踪。
+        即使动作层取消抛异常，只要停止服务成功仍返回 ``accepted=True``。
 
         参数：
         - ``goal_handle``：当前活动的动作目标句柄，None 表示没有 Web 运动在跑；
         - ``trajectory_stop_client``：控制器触发器服务客户端。
 
         返回值约定：
-        - ``accepted``：是否至少有一路停止生效；
+        - ``accepted``：停止服务成功或取消请求已提交；目标终态由后续回调确认；
         - ``status.state``：``cancel_requested`` / ``idle`` / ``failed``；
         - ``cancel_future``：取消请求的 future，供调用方注册回调；
         - ``clear_goal_handle``：True 表示调用方应清空保存的目标句柄。
@@ -306,7 +268,7 @@ class WebTeleopClient:
         try:
             future = goal_handle.cancel_goal_async()
         except Exception as exc:
-            # 取消请求本身失败不算致命：控制器级停止若已生效，仍视为停止成功
+            # 保存取消异常，同时返回已确认的停止服务结果，供调用方继续核对目标状态。
             message = f"failed to request trajectory cancel: {exc}"
             if stop_requested:
                 message = f"{message}; controller trajectory_stop requested"
@@ -352,7 +314,6 @@ class WebTeleopClient:
         self,
         payload: dict,
         *,
-        use_hardware: bool,
         gripper_limits: tuple[float, float],
         default_max_effort: float,
         max_effort_limit: float,
@@ -362,15 +323,13 @@ class WebTeleopClient:
         参数：
         - ``payload``：Web 请求体，须含 ``confirm="SET_GRIPPER"`` 与 ``position``（开口，m）；
           可选 ``max_effort``（力矩上限，超过硬上限时会被夹紧）；
-        - ``use_hardware``：False 表示仿真模式，只回显模拟结果、不发送任何动作目标；
         - ``gripper_limits``：夹爪开口允许区间 (下限, 上限)，单位 m；
         - ``default_max_effort``：请求未给 ``max_effort`` 时使用的默认力矩；
         - ``max_effort_limit``：力矩硬上限，任何请求都不会越过它。
 
         返回值 dict 的 ``status.state`` 取值：
         - ``rejected``：校验失败；
-        - ``done``：仿真模式执行完毕，``simulated_position`` 为模拟落点（m）；
-        - ``unavailable``：真实模式但夹爪动作不可用；
+        - ``unavailable``：夹爪动作不可用；
         - ``active``：目标已下发，``goal_future`` 交由调用方注册回调。
         """
         decision = validate_web_gripper_request(
@@ -386,22 +345,6 @@ class WebTeleopClient:
                 "response": gripper_decision_response(decision),
                 "status": {"state": "rejected", "message": decision.message},
                 "goal_future": None,
-                "simulated_position": None,
-            }
-        if not use_hardware:
-            return {
-                "accepted": True,
-                "decision": decision,
-                "response": gripper_decision_response(decision),
-                "status": {
-                    "state": "done",
-                    "message": f"simulated gripper position={decision.position:.4f} m",
-                    "position": decision.position,
-                    "max_effort": decision.max_effort,
-                    "simulated": True,
-                },
-                "goal_future": None,
-                "simulated_position": float(decision.position),
             }
         if self._gripper_action_client is None or self._gripper_goal_factory is None:
             message = "gripper command action unavailable"
@@ -411,7 +354,6 @@ class WebTeleopClient:
                 "response": {"accepted": False, "message": message},
                 "status": {"state": "unavailable", "message": message},
                 "goal_future": None,
-                "simulated_position": None,
             }
         # 同 execute：只等 0.1 s，避免 Web 请求线程被动作发现过程阻塞
         if not self._gripper_action_client.wait_for_server(timeout_sec=0.1):
@@ -422,7 +364,6 @@ class WebTeleopClient:
                 "response": {"accepted": False, "message": message},
                 "status": {"state": "unavailable", "message": message},
                 "goal_future": None,
-                "simulated_position": None,
             }
         goal = self._gripper_goal_factory()
         # 位置单位为 m；max_effort 已在校验环节夹紧到硬上限，这里只做数值类型归一
@@ -440,5 +381,4 @@ class WebTeleopClient:
                 "max_effort": decision.max_effort,
             },
             "goal_future": future,
-            "simulated_position": None,
         }

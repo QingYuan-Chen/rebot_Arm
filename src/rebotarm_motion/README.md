@@ -7,15 +7,15 @@
 ```text
 rebotarm_motion/
 ├── rebotarm_motion/
-│   ├── command_models.py                  # 预览/执行数据模型与状态枚举
-│   ├── mode_manager.py                    # sim/real 控制模式解析
-│   ├── preview_manager.py                 # 当前状态与最后一次预览缓存
-│   ├── message_codec.py                   # 预览命令/状态 JSON 编解码
 │   ├── pose_math.py                       # 四元数与 RPY 互转
-│   ├── pose_preview_solver.py             # SDK 运动学的无硬件预览
+│   ├── pose_kinematics.py                 # 规范模型 FK/阻尼 IK
+│   ├── cartesian_trajectory.py            # SE(3) 采样、连续 IK 与重定时
+│   ├── pose_compat_node.py                # move_to_pose Action/IK 服务
 │   ├── moveit_planner.py                  # MoveIt 规划客户端适配
-│   ├── execution_coordinator.py           # 预览到执行的唯一门控
-│   ├── pose_execution_node.py             # 位姿目标规划与 FollowJointTrajectory 执行
+│   ├── polynomial_trajectory.py           # 系数生成、极值与碰撞采样时刻
+│   ├── coordinated_trajectory.py          # 有效约束与最终曲线重定时
+│   ├── trajectory_preparation_node.py     # 带能力/场景绑定的碰撞准备服务
+│   ├── trajectory_retiming_node.py        # 规划重定时服务
 │   ├── paired_trajectory_protocol.py      # 真机/仿真共用轨迹命令协议
 │   ├── trajectory_time_parameterization.py# 示教轨迹重定时策略选择
 │   ├── trajectory_runtime_limits.py       # 速度/力矩/加速度/jerk 运行时守卫
@@ -32,18 +32,17 @@ rebotarm_motion/
 
 ## 关键脚本
 
-- `moveit_planner.py` 只请求规划并返回轨迹；`pose_execution_node.py` 负责规划/可选执行服务，执行最终走控制器 Action。
-- `pose_preview_solver.py` 可在无 ROS/无硬件条件下做 FK/IK 预览；`execution_coordinator.py` 防止绕过预览直接执行。
-- `trajectory_time_parameterization.py` 选择 Ruckig 或回退重定时实现；`trajectory_runtime_limits.py` 和 `trajectory_safety_monitor.py` 分别检查运行时物理限值与跟踪误差。
+- `pose_kinematics.py` 提供纯计算 FK/IK；`pose_compat_node.py` 完成反馈准入、规划和 FJT 执行协调。
+- `trajectory_time_parameterization.py` 按 q/qv/qva 等级重定时，保留合法历史方法名并报告实际算法，未知方法名显式失败。
+- `trajectory_runtime_limits.py` 校验 YAML 限位映射；`trajectory_safety_monitor.py` 检查完整有限的反馈位置和速度。
 - `collision_precheck.py` 在下发前按采样点调用 MoveIt 状态有效性服务；它只检查，不发送运动。
 - `replay_runtime_monitor.py`、`teach_replay_start_alignment.py` 为 `rebotarm_teach` 提供回放安全能力。
 - `paired_trajectory_protocol.py` 负责可校验、可哈希、可采样的关节轨迹命令；`real_failure_recovery.py` 遵守健康 enabled 状态下保持或受控回 baseline 的安全原则。
+- 准备器必须接收配置目录和有效能力快照，按能力摘要核验实际约束；运行监控将缺字段及非有限反馈纳入现有持续违规停止流程。
 
 ## 对外入口
 
-```bash
-ros2 run rebotarm_motion PoseExecutionNode
-```
+`PoseCompatNode`、`TrajectoryPreparationNode` 和 `TrajectoryRetimingNode` 由相应操作组合启动。
 
 
 ## 依赖边界

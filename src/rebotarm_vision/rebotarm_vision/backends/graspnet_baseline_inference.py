@@ -44,17 +44,18 @@ def install_training_knn_fallback() -> None:
     sys.modules["knn_modules"] = module
 
 
-def load_grasp_group(model_root: str):
-    """Load GraspGroup without importing graspnetAPI's evaluation-only stack."""
+def load_grasp_group():
+    """Load GraspGroup without importing graspnetAPI's evaluation-only stack.
+
+    显式 ``GRASPNET_API_ROOT`` 优先；未设置时只尝试已安装的 ``graspnetAPI``。
+    不沿模型目录父级猜测第三方源码位置。
+    """
     configured = os.environ.get("GRASPNET_API_ROOT", "").strip()
-    candidates = []
-    if configured:
-        candidates.append(Path(configured).expanduser())
-    candidates.append(Path(model_root).resolve().parent / "graspnetAPI" / "graspnetAPI")
+    candidates = [Path(configured).expanduser()] if configured else []
     for api_root in candidates:
         grasp_path = api_root / "grasp.py"
         if not grasp_path.is_file():
-            continue
+            raise FileNotFoundError(f"GRASPNET_API_ROOT does not contain grasp.py: {grasp_path}")
         package = types.ModuleType("graspnetAPI")
         package.__path__ = [str(api_root)]
         package.__package__ = "graspnetAPI"
@@ -328,8 +329,15 @@ def graspnet_array_to_candidates(
     stage_counts: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     array = np.asarray(grasp_array, dtype=np.float32)
-    if array.ndim == 1:
+    if array.size == 0:
+        array = np.empty((0, 16), dtype=np.float32)
+    elif array.ndim == 1:
         array = array.reshape(1, -1)
+    if array.ndim != 2 or array.shape[1] < 16 or not np.isfinite(array[:, :16]).all():
+        raise ValueError("invalid GraspNet prediction array")
+    for rotation in array[:, 4:13].reshape(-1, 3, 3):
+        if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-3) or np.linalg.det(rotation) <= 0:
+            raise ValueError("invalid GraspNet prediction rotation")
     if target_detection is not None and camera_info is not None:
         array = filter_grasp_array_by_detection_projection(array, target_detection=target_detection, camera_info=camera_info)
     if stage_counts is not None:
@@ -342,21 +350,12 @@ def graspnet_array_to_candidates(
         width_limit = float(max_jaw_width_m)
         if not np.isfinite(width_limit) or width_limit <= 0.0:
             raise ValueError("max_jaw_width_m must be finite and positive")
-        if array.ndim != 2 or array.shape[1] < 2:
-            array = array[:0]
-        else:
-            widths = array[:, 1]
-            array = array[
-                np.isfinite(widths)
-                & (widths > 0.0)
-                & (widths <= width_limit)
-            ]
+        widths = array[:, 1]
+        array = array[(widths > 0.0) & (widths <= width_limit)]
     if stage_counts is not None:
         stage_counts["after_jaw_width"] = int(len(array))
     candidates: list[dict[str, Any]] = []
     for row in array[: max(0, int(max_grasps))]:
-        if row.size < 16:
-            continue
         rotation = row[4:13].reshape(3, 3)
         translation = row[13:16]
         candidates.append(
@@ -554,17 +553,16 @@ class GraspNetBaselineInference:
         import torch
         install_training_knn_fallback()
         from graspnet import GraspNet, pred_decode
-        GraspGroup = load_grasp_group(self.model_root)
+        GraspGroup = load_grasp_group()
+        from grasp_nms import nms_grasp  # noqa: F401
 
         self._torch = torch
         self._pred_decode = pred_decode
         self._GraspGroup = GraspGroup
-        try:
+        if self.collision_thresh > 0:
             from collision_detector import ModelFreeCollisionDetector
 
             self._ModelFreeCollisionDetector = ModelFreeCollisionDetector
-        except Exception:
-            self._ModelFreeCollisionDetector = None
 
         net = GraspNet(
             input_feature_dim=0,
@@ -663,15 +661,12 @@ class GraspNetBaselineInference:
             decoded = self._pred_decode(end_points)
         grasp_group = self._GraspGroup(decoded[0].detach().cpu().numpy())
         self.last_stage_counts["raw"] = int(len(grasp_group))
-        if self._ModelFreeCollisionDetector is not None and self.collision_thresh > 0:
+        if self.collision_thresh > 0:
             detector = self._ModelFreeCollisionDetector(full_points, voxel_size=self.voxel_size)
             collision_mask = detector.detect(grasp_group, approach_dist=0.05, collision_thresh=self.collision_thresh)
             grasp_group = grasp_group[~collision_mask]
         self.last_stage_counts["after_collision"] = int(len(grasp_group))
-        try:
-            grasp_group = grasp_group.nms()
-        except ModuleNotFoundError:
-            pass
+        grasp_group = grasp_group.nms()
         self.last_stage_counts["after_nms"] = int(len(grasp_group))
         grasp_group = grasp_group.sort_by_score()
         self.last_stage_counts["after_score_sort"] = int(len(grasp_group))

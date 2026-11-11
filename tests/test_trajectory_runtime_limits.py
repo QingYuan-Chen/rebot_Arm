@@ -8,6 +8,38 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize('document', ['', '[]', 'joint_limits: null', 'joint_limits: []',
+    'joint_limits: {}', 'joint_limits: {joint1: null}', 'joint_limits: {joint1: []}',
+    'joint_limits: {joint1: {has_velocity_limits: true}}'])
+def test_malformed_limit_config_fails_explicitly(tmp_path, document):
+    from rebotarm_motion.trajectory_runtime_limits import load_joint_runtime_limits
+    path = tmp_path/'limits.yaml'
+    path.write_text(document)
+    with pytest.raises(ValueError):
+        load_joint_runtime_limits(path, ['joint1'])
+
+
+def test_declared_optional_limits_remain_disabled(tmp_path):
+    from rebotarm_motion.trajectory_runtime_limits import load_joint_runtime_limits
+    path = tmp_path/'limits.yaml'
+    path.write_text('joint_limits: {joint1: {}}')
+    limit = load_joint_runtime_limits(path, ['joint1'])['joint1']
+    assert limit.max_velocity is limit.max_acceleration is limit.max_jerk is None
+
+
+@pytest.mark.parametrize('method,expected', [(None, 'auto'), ('', 'auto'), (' default ', 'auto'),
+    ('Auto', 'auto'), (' RUCKIG ', 'ruckig'), ('current_jerk_retime', 'current_jerk_retime')])
+def test_retiming_method_aliases(method, expected):
+    from rebotarm_motion.trajectory_time_parameterization import normalize_time_parameterization_method
+    assert normalize_time_parameterization_method(method) == expected
+
+
+def test_unknown_retiming_method_fails_explicitly():
+    from rebotarm_motion.trajectory_time_parameterization import normalize_time_parameterization_method
+    with pytest.raises(ValueError, match='unknown time parameterization method'):
+        normalize_time_parameterization_method('ruckgi')
+
+
 def _limits(**overrides):
     from rebotarm_motion.trajectory_runtime_limits import JointRuntimeLimit
 

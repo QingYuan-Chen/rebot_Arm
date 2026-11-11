@@ -7,7 +7,9 @@ import threading
 import time
 from typing import Sequence
 
-from rebotarm_simulation.apps.mujoco_viewer import _close_viewer_then_sim
+from rebotarm_simulation.apps.viewer_lifecycle import (
+    close_passive_viewer_safely, retain_unsafe_resources, stop_executor,
+)
 from rebotarm_simulation.ros.real2sim_ros_node import build_node_class
 
 
@@ -33,13 +35,14 @@ def main(
     launch_passive=None,
 ) -> int:
     import rclpy
-    from rclpy.executors import SingleThreadedExecutor
+    from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 
     args, ros_args = build_parser().parse_known_args(argv)
     rclpy.init(args=ros_args)
     node = executor = viewer = thread = None
     simulation = model = data = None
     quit_events = SimpleQueue()
+    worker_errors = []
     try:
         if node_factory is None:
             node_factory = build_node_class()
@@ -56,14 +59,26 @@ def main(
         viewer = launch_passive(model, data, key_callback=on_key)
         executor = SingleThreadedExecutor()
         executor.add_node(node)
+        def spin_executor():
+            try:
+                executor.spin()
+            except (KeyboardInterrupt, ExternalShutdownException):
+                pass
+            except BaseException as exc:
+                worker_errors.append(exc)
+
         thread = threading.Thread(
-            target=executor.spin,
+            target=spin_executor,
             name="real2sim-ros-executor",
             daemon=True,
         )
         thread.start()
         started = time.monotonic()
-        while viewer.is_running():
+        while rclpy.ok() and viewer.is_running():
+            if worker_errors:
+                raise RuntimeError("real2sim executor failed") from worker_errors[0]
+            if not thread.is_alive():
+                raise RuntimeError("real2sim executor stopped unexpectedly")
             try:
                 quit_events.get_nowait()
                 break
@@ -74,25 +89,33 @@ def main(
             if args.duration is not None and time.monotonic() - started >= args.duration:
                 break
             time.sleep(0.01)
-        return 0
     except KeyboardInterrupt:
         return 130
     finally:
-        if executor is not None:
-            executor.shutdown()
-        if thread is not None:
-            thread.join(timeout=2.0)
-        if node is not None and executor is not None:
-            try:
+        try:
+            stop_executor(executor, thread)
+        except BaseException:
+            retain_unsafe_resources(viewer, simulation, model, data, node, executor, thread)
+            if rclpy.ok():
+                rclpy.shutdown()
+            raise
+        try:
+            if node is not None and executor is not None:
                 executor.remove_node(node)
-            except Exception:
-                pass
-        if simulation is not None:
-            _close_viewer_then_sim(viewer, simulation, model, data)
-        if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        finally:
+            try:
+                if simulation is not None:
+                    close_passive_viewer_safely(viewer, simulation, model, data)
+            finally:
+                try:
+                    if node is not None:
+                        node.destroy_node()
+                finally:
+                    if rclpy.ok():
+                        rclpy.shutdown()
+    if worker_errors:
+        raise RuntimeError("real2sim executor failed") from worker_errors[0]
+    return 0
 
 
 if __name__ == "__main__":

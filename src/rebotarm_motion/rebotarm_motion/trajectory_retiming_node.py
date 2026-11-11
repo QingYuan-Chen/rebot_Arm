@@ -42,8 +42,8 @@ def retime_message(request, capability, config_directory, planning_state=None):
     # 必须在起点替换前拒绝原始越界节点，不能以保持值覆盖来修复非法输入。
     if any(q < lo-1e-9 or q > hi+1e-9 for p in points for q,lo,hi in zip(p.positions,low,high)):
         raise ValueError('original planning position outside limits')
-    purpose = 'reference' if getattr(request, 'planning_purpose', 0) == 1 else 'execution'
-    if getattr(request, 'planning_purpose', 0) not in (0, 1):
+    purpose = 'reference' if request.planning_purpose == 1 else 'execution'
+    if request.planning_purpose not in (0, 1):
         raise ValueError('unknown planning purpose')
     if names == ('left_finger_joint',):
         purpose = 'gripper'
@@ -58,7 +58,7 @@ def retime_message(request, capability, config_directory, planning_state=None):
             points = (replace(points[0], positions=tuple(planning_state['hold'])),)+points[1:]
         else:
             purpose = 'preview'
-    speed = float(getattr(request,'max_arm_speed_rad_s',0.))
+    speed = float(request.max_arm_speed_rad_s)
     if not math.isfinite(speed) or speed < 0:
         raise ValueError('nonnegative finite arm speed cap required')
     if speed:
@@ -87,8 +87,22 @@ def retime_message(request, capability, config_directory, planning_state=None):
     return result, scale
 
 
+def _shutdown_executor(executor):
+    """自旋结束后先排空工作线程，再释放仍被排队回调引用的唤醒句柄。"""
+    # Jazzy shutdown 先销毁 guard 再 join 线程池；这里提前 join，避免排队回调触碰已销毁句柄。
+    executor._executor.shutdown(wait=True)
+    executor.shutdown()
+    failures = [future.exception() for future in executor._futures if future.done()]
+    failures = [error for error in failures if error is not None]
+    if failures:
+        raise ExceptionGroup('retiming executor callbacks failed during shutdown', failures)
+
+
 def main(args=None):
+    import signal
+    import threading
     import rclpy
+    from rclpy.signals import SignalHandlerOptions
     from rclpy.node import Node
     from rclpy.qos import QoSProfile, DurabilityPolicy
     from rclpy.executors import ExternalShutdownException
@@ -97,7 +111,11 @@ def main(args=None):
     from rclpy.callback_groups import ReentrantCallbackGroup
     from rclpy.executors import MultiThreadedExecutor
     from std_msgs.msg import String
-    rclpy.init(args=args)
+    # 信号只请求停止自旋；排空回调和发送服务回复期间保持 ROS context 有效。
+    stopping = threading.Event()
+    previous_signals = {sig: signal.signal(sig, lambda *_: stopping.set())
+                        for sig in (signal.SIGINT, signal.SIGTERM)}
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = Node('trajectory_retiming')
     namespace = node.declare_parameter('arm_namespace','rebotarm').value.strip('/')
     # 默认关闭；仿真验收显式指定，用于对照原输入、后端快照与准确输出，页面不刷数值日志。
@@ -166,11 +184,16 @@ def main(args=None):
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
     try:
-        executor.spin()
+        while rclpy.ok() and not stopping.is_set():
+            executor.spin_once(timeout_sec=.1)
     except (KeyboardInterrupt,ExternalShutdownException):
         pass
     finally:
-        executor.shutdown()
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        try:
+            _shutdown_executor(executor)
+        finally:
+            node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+            for sig, handler in previous_signals.items():
+                signal.signal(sig, handler)

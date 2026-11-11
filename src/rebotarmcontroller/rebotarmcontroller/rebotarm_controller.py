@@ -46,7 +46,7 @@ from .hardware_manager import HardwareManager
 from .runtime.lifecycle import shutdown_policy
 from .ros.motor_passthrough import MotorPassthrough
 from .ros.ros_actions import ArmActions
-from .ros.ros_publishers import JointStatePublisher
+from .ros.ros_publishers import JointStatePublisher, validated_publish_rate
 from .ros.ros_services import ArmServices
 
 
@@ -86,8 +86,7 @@ class reBotArmController(Node):
         # arm_config: 机械臂配置文件路径; 空串表示使用本包默认配置, 不从旧 SDK 加载.
         self.declare_parameter("arm_config", "")
         self.declare_parameter("gravity_config", "")
-        # 实机默认 legacy；准备模式只改变协议路径，不隐含使能或实机验收许可。
-        self.declare_parameter("trajectory_execution_mode", "legacy")
+        # 实机默认连续轨迹；模式选择不隐含使能或实机验收许可。
         # gripper_config: 夹爪配置文件路径; 空串表示使用默认夹爪配置.
         self.declare_parameter("gripper_config", "")
         # channel: 电机总线通道(串口设备); 空串表示由配置文件决定.
@@ -110,9 +109,6 @@ class reBotArmController(Node):
         # gripper_feedback_stale_timeout_sec: 夹爪反馈新鲜度阈值(秒), 超时即判反馈过期并拒绝
         # 新的夹爪命令; 硬件层限制在 [0.05, 2.0].
         self.declare_parameter("gripper_feedback_stale_timeout_sec", 0.15)
-        # grasp_hold_timeout_sec: 抓取保持的最长时间(秒), 到期自动松开, 避免电机在 500 Hz 下
-        # 持续堵转发热; 硬件层限制在 [0.1, 120.0].
-        self.declare_parameter("grasp_hold_timeout_sec", 10.0)
         # arm_namespace: 话题/服务/动作的命名空间前缀, 首尾斜杠会被去掉.
         self.declare_parameter("arm_namespace", "rebotarm")
         # cmd_arbitration: 轨迹运行期间收到单关节透传指令时的仲裁策略:
@@ -136,7 +132,7 @@ class reBotArmController(Node):
         gripper_config = self.get_parameter("gripper_config").value or None
         channel = str(self.get_parameter("channel").value or "")
         self.arm_namespace = str(self.get_parameter("arm_namespace").value or "rebotarm").strip("/")
-        joint_state_rate = float(self.get_parameter("joint_state_rate").value)
+        joint_state_rate = validated_publish_rate(self.get_parameter("joint_state_rate").value)
         hardware_feedback_rate_hz = float(
             self.get_parameter("hardware_feedback_rate_hz").value
         )
@@ -151,9 +147,6 @@ class reBotArmController(Node):
         )
         gripper_feedback_stale_timeout_sec = float(
             self.get_parameter("gripper_feedback_stale_timeout_sec").value
-        )
-        grasp_hold_timeout_sec = float(
-            self.get_parameter("grasp_hold_timeout_sec").value
         )
         cmd_arbitration = str(self.get_parameter("cmd_arbitration").value or "reject")
         # 非法仲裁值回退到 "reject": 拒绝透传指令始终是安全的一侧.
@@ -179,14 +172,14 @@ class reBotArmController(Node):
             gripper_position_max_speed_rad_s=gripper_position_max_speed_rad_s,
             gripper_position_timeout_margin_sec=gripper_position_timeout_margin_sec,
             gripper_feedback_stale_timeout_sec=gripper_feedback_stale_timeout_sec,
-            grasp_hold_timeout_sec=grasp_hold_timeout_sec,
         )
         # 连接失败时硬件层会尽力失能和清理, 但不能仅凭异常断言失能已验证; 这里上抛,
         # 不允许在"半连接"状态下继续对外提供服务.
         try:
             self.hardware.lifecycle.connect()
         except Exception as exc:
-            self.get_logger().error(f"hardware connect failed; disabled before exit: {exc}")
+            # 连接失败不等于失能已验证; 清理结果可能仍有未释放资源, 如实上报原因.
+            self.get_logger().error(f"hardware connect failed; disable confirmation not guaranteed: {exc}")
             raise
         self.joint_state_publisher = JointStatePublisher(
             self,
@@ -205,7 +198,6 @@ class reBotArmController(Node):
             self, self.arm_namespace, runtime=self.hardware.runtime,
             lifecycle=self.hardware.lifecycle, feedback=self.hardware.feedback,
             arm=self.hardware.arm, gripper=self.hardware.gripper,
-            trajectory_execution_mode=self.get_parameter("trajectory_execution_mode").value,
         )
         self.motor_passthrough = MotorPassthrough(
             self,

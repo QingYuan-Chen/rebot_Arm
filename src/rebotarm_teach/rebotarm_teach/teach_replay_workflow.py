@@ -132,7 +132,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         publish_status: Callable[[str, dict], None],
         collision_defaults: Callable[[tuple[str, ...]], tuple[tuple[str, float], ...]],
         action_client, trajectory_stop_client, request_stop: Callable[..., bool],
-        trajectory_capability=None, retime_trajectory=None,
+        trajectory_capability, retime_trajectory,
     ):
         self.get_parameter = node.get_parameter
         self.create_client = node.create_client
@@ -153,8 +153,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             ee_frame_id="end_link",
             frame_id="base_link",
             planning_service=str(self.get_parameter("moveit_planning_service").value),
-            planning_pipeline=('ompl_reference' if str(self.get_parameter('trajectory_execution_mode').value)
-                == 'prepared_v1' else str(self.get_parameter("moveit_planning_pipeline").value)),
+            planning_pipeline='ompl_reference',
             planner_id=str(self.get_parameter("moveit_planner_id").value),
             planning_time=float(self.get_parameter("moveit_planning_time").value),
             num_attempts=int(self.get_parameter("moveit_num_planning_attempts").value),
@@ -432,6 +431,8 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         凭该令牌才允许下发；令牌绑定记录路径、预处理风险等级与设置，防止"用 A 记录演练、
         下发 B 记录"或"演练后偷改速度"。本方法只发布状态，不发送 Action。
         """
+        # 每次新的 dry-run 都撤销旧令牌，输入校验失败也不能沿用上次结果。
+        self._last_teach_dry_run = None
         record_path = payload.get("record_path")
         info_payload = self.record_info(str(record_path) if record_path else None)
         settings = self._teach_replay_settings_from_payload(
@@ -487,7 +488,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             target_runtime=self._target_runtime(),
             compact_payload=self._compact_replay_payload,
         )
-        # 令牌只在成功时生效，并被清空于失败；这是 execute 的唯一凭据。
+        # 服务端保存成功检查的凭据；execute 还会用当前反馈重新生成曲线并核对质量与碰撞。
         if result['accepted'] and samples_for_precheck and any(s.format_version >= 2 for s in samples_for_precheck):
             result['capability_revision'] = self._trajectory_capability()['revision']
         self._last_teach_dry_run = result if result["accepted"] else None
@@ -510,7 +511,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         # quality 是原始记录的质量报告，prepared_quality 是预处理后的报告（后续覆盖）。
         quality = info_payload.get("quality") if isinstance(info_payload.get("quality"), dict) else {}
         prepared_payload = {}
-        prepared_quality = {}
+        prepared_quality = None
         prepared_record_path = ""
         collision_precheck = {"state": "not_checked", "message": "完整轨迹尚未生成，碰撞未检查"}
         preparation = {"state": "not_checked", "message": "轨迹未准备"}
@@ -519,14 +520,14 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         try:
             source_samples = load_teach_samples(str(info_payload.get("path", "")))
             if source_samples and any(s.format_version >= 2 for s in source_samples):
-                if (self._trajectory_capability is None or self._last_teach_dry_run is None
+                if (self._last_teach_dry_run is None
                         or self._last_teach_dry_run.get('capability_revision') != self._trajectory_capability()['revision']):
                     raise ValueError('teach planning capability changed; dry-run again')
             prepared = self._prepare_teach_replay_samples(source_samples, settings)
             prepared_record_path = str(write_prepared_teach_record(str(info_payload.get("path", "")), prepared))
             prepared_payload = prepared_teach_replay_to_dict(prepared)
             # 放行判定使用"预处理后"的质量等级：原始记录的质量只作参考。
-            prepared_quality = prepared_payload.get("after_quality") if isinstance(prepared_payload.get("after_quality"), dict) else {}
+            prepared_quality = prepared_payload["after_quality"]
             # execute 前只做轻量对齐评估（plan=False），真正规划留给轨迹构建阶段。
             moveit_align = self._moveit_align_summary(info_payload, source_samples, plan=False)
         except Exception as exc:
@@ -724,7 +725,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             ),
             moveit_start_alignment=self._append_moveit_start_alignment,
         )
-        # 两种后端都预检同一条分级参考；完整拼接后再核验模型限位及示教动态限值。
+        # 完整拼接后核验模型限位及示教动态限值，再绑定后端规划起点。
         from ament_index_python.packages import get_package_share_directory
         from pathlib import Path
         from rebotarm_motion.coordinated_trajectory import curve_message
@@ -743,11 +744,9 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             speeds,float(self.get_parameter('max_replay_acceleration_rad_s2').value),
             float(self.get_parameter('max_replay_jerk_rad_s3').value))
         final = curve_message(curve,trajectory_factory=JointTrajectory,point_factory=JointTrajectoryPoint)
-        if self._trajectory_capability is not None and self._retime_trajectory is not None:
-            capability = self._trajectory_capability()
-            if capability['mode'] == 'prepared_v1':
-                final = self._retime_trajectory(final,capability,False,
-                    float(self.get_parameter('max_replay_velocity_rad_s').value))
+        capability = self._trajectory_capability()
+        final = self._retime_trajectory(final,capability,False,
+            float(self.get_parameter('max_replay_velocity_rad_s').value))
         duration = final.points[-1].time_from_start.sec + final.points[-1].time_from_start.nanosec*1e-9
         # 服务返回后仅复核、不改时间；纳秒编码后的整条实际曲线也必须满足示教限值。
         final_curve, _ = finalize_teach_curve(final.joint_names,tuple(TrajectoryPoint(

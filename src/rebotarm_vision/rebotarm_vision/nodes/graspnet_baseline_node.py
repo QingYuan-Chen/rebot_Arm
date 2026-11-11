@@ -26,8 +26,7 @@
 
 安全与失败语义
 --------------
-- **失败即闭合（fail closed）**：后端未配置、推理抛异常、或后端报告不可用时，一律只发布
-  `best_index = -1` 的空候选数组，绝不给出可能被误执行的位姿。
+- 后端初始化失败时节点启动失败；单帧推理异常时发布 `best_index = -1` 的空候选数组。
 - 本节点只产生候选，不做规划、不校验可达性、不接触硬件；是否执行由下游运动校验与执行门控决定。
 
 单帧只取一个目标
@@ -87,7 +86,7 @@ class GraspNetBaselineNode(Node):
 
     生命周期：构造时读取参数、创建发布/订阅并尝试加载进程内推理后端；`rclpy.spin` 期间全部
     逻辑在**单线程执行器**上以回调方式串行运行，因此各回调之间无需加锁。
-    后端在构造后不再重建：模型路径配置错误只在启动日志里报错，并以"发布空候选"体现，
+    后端在构造后不再重建：模型路径配置错误使启动失败，
     不会让节点崩溃。
 
     `source_mode` 固定为 `in_process`，仅用于日志中标识候选来源，并与后端适配器返回载荷里的
@@ -198,7 +197,7 @@ class GraspNetBaselineNode(Node):
         )
 
     def _create_inprocess_backend(self) -> InProcessGraspNetBackend:
-        """构造进程内 GraspNet 后端；构造失败不抛异常，只把后端置为不可用。
+        """构造进程内 GraspNet 后端；模型或依赖失败时终止初始化。
 
         `max_points` 至少取 1，避免误配 0 或负数导致后端采样阶段出现空点云或除零。
         """
@@ -211,11 +210,7 @@ class GraspNetBaselineNode(Node):
             num_point=max(1, int(self.get_parameter("max_points").value)),
         )
         if not backend.available:
-            # 模型配置缺失只降级为"发布空候选"：节点与话题链路保持存活，便于现场排障。
-            self.get_logger().error(
-                "GraspNet in-process backend unavailable; candidates will fail closed: "
-                f"{backend.backend_error}"
-            )
+            raise RuntimeError(f"GraspNet in-process backend unavailable: {backend.backend_error}")
         return backend
 
     def _on_color(self, msg: Image) -> None:
@@ -272,7 +267,7 @@ class GraspNetBaselineNode(Node):
         self._on_inprocess_detections(msg)
 
     def _on_inprocess_detections(self, msg: Detection2DArray) -> None:
-        # 只缓存不立即处理：等 _try_process 在数据齐备时统一推进，保证"每帧最多一次推理"。
+        # 覆盖尚未处理的检测并立即尝试配帧；缺少图像时由后续回调继续推进最新一帧。
         self.pending_inprocess_detections = msg
         self._try_process_inprocess_detection()
 
@@ -329,7 +324,7 @@ class GraspNetBaselineNode(Node):
             return
         self.pending_inprocess_detections = None
         self.last_inprocess_detection_timestamp_ns = detection_timestamp_ns
-        # 单帧只处理置信度最高的一个目标，其余检测丢弃（多目标抓取由上游分帧驱动）。
+        # 单帧只为置信度最高的一个目标生成候选，当前节点没有多目标轮询状态。
         detection = max(msg.detections, key=lambda item: float(item.confidence))
         if not self.backend.available:
             self._publish_empty(timestamp_ns=depth_timestamp_ns, frame_id=depth_frame_id)
@@ -344,9 +339,7 @@ class GraspNetBaselineNode(Node):
             "class_name": str(detection.class_name),
         }
         # 掩膜多边形至少需要 3 个顶点（6 个浮点数）才有效；否则后端退回使用矩形框裁剪点云。
-        if bool(getattr(detection, "has_mask", False)) and len(
-            getattr(detection, "mask_polygon_xy", [])
-        ) >= 6:
+        if detection.has_mask and len(detection.mask_polygon_xy) >= 6:
             detection_payload["mask_polygon_xy"] = [
                 float(value) for value in detection.mask_polygon_xy
             ]
@@ -366,25 +359,24 @@ class GraspNetBaselineNode(Node):
                 min_depth_m=float(self.get_parameter("min_depth_m").value),
                 max_depth_m=float(self.get_parameter("max_depth_m").value),
             )
+            candidates = payload_to_candidate_array(
+                payload,
+                fallback_frame_id=depth_frame_id,
+                max_candidates=int(self.get_parameter("max_grasps").value),
+            )
+            self._log_stage_counts(
+                timestamp_ns=depth_timestamp_ns,
+                frame_id=depth_frame_id,
+                class_name=str(detection.class_name),
+                candidates=payload["candidates"],
+            )
         except Exception as exc:
-            # 推理异常（显存不足、模型报错等）绝不向上抛：发布空候选并等下一帧。
+            # 推理和载荷转换失败均清空当前帧候选，并保留原因供排查。
             self.get_logger().warn(
                 f"GraspNet in-process inference failed: {type(exc).__name__}: {exc}"
             )
             self._publish_empty(timestamp_ns=depth_timestamp_ns, frame_id=depth_frame_id)
             return
-        self._log_stage_counts(
-            timestamp_ns=depth_timestamp_ns,
-            frame_id=depth_frame_id,
-            class_name=str(detection.class_name),
-            candidates=payload.get("candidates", []),
-        )
-        # 载荷里可能带后端自定义字段，这里统一转成本站点定义的候选数组消息再发布。
-        candidates = payload_to_candidate_array(
-            payload,
-            fallback_frame_id=depth_frame_id,
-            max_candidates=int(self.get_parameter("max_grasps").value),
-        )
         self.candidates_pub.publish(candidates)
 
     def _log_stage_counts(

@@ -8,6 +8,7 @@ from copy import deepcopy
 import rclpy
 from geometry_msgs.msg import PoseStamped
 from moveit_msgs.srv import GetPositionIK, GetStateValidity
+from tf2_ros import TransformException
 
 
 def _pose_from_target(target):
@@ -57,19 +58,22 @@ class CandidateIkGateway:
         return solution
 
     def lookup_transform(self, target_frame: str, source_frame: str, stamp=None):
-        stamp_ns = 0 if stamp is None else int(getattr(stamp, "sec", 0)) * 1_000_000_000 + int(getattr(stamp, "nanosec", 0))
+        stamp_ns = 0 if stamp is None else int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
         if stamp_ns <= 0:
-            raise RuntimeError("candidate has no sensor timestamp for TF lookup")
+            raise TransformException("candidate has no sensor timestamp for TF lookup")
         key = (target_frame, source_frame, stamp_ns)
         if key in self._transform_cache:
             return self._transform_cache[key]
         query_time = rclpy.time.Time.from_msg(stamp)
-        result = self.tf_buffer.lookup_transform(
-            target_frame,
-            source_frame,
-            query_time,
-            timeout=rclpy.duration.Duration(seconds=0.2),
-        )
+        try:
+            result = self.tf_buffer.lookup_transform(
+                target_frame,
+                source_frame,
+                query_time,
+                timeout=rclpy.duration.Duration(seconds=0.2),
+            )
+        except RuntimeError as exc:
+            raise TransformException(str(exc)) from exc
         self._transform_cache[key] = result
         return result
 
@@ -104,10 +108,10 @@ class CandidateIkGateway:
             self.logger.warn(f"candidate IK filter IK timed out for {label}")
             return None
         result = future.result()
-        if result is None or int(getattr(getattr(result, "error_code", None), "val", 99999)) != 1:
+        if result is None or int(result.error_code.val) != 1:
             self.logger.warn(f"candidate IK filter IK failed for {label}")
             return None
-        return getattr(result, "solution", None)
+        return result.solution
 
     def check_state_validity(self, robot_state, label: str) -> bool:
         config = self.config
@@ -133,7 +137,7 @@ class CandidateIkGateway:
         if result is None:
             self.logger.warn(f"candidate IK filter state validity timed out for {label}")
             return False
-        valid = bool(getattr(result, "valid", False))
+        valid = bool(result.valid)
         if not valid:
             self.logger.warn(f"candidate IK filter state validity failed for {label}: state invalid")
         return valid

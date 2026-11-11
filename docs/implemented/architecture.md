@@ -4,7 +4,7 @@
 
 ## 当前部署范围
 
-当前支持的视觉路线是 Ubuntu 24.04 / ROS 2 Jazzy：原生 Gemini 2、本地 YOLO、ROS RGB-D/CameraInfo/检测结果，以及本机进程内 GraspNet。Windows、HTTP、MJPEG、远程 JSON 和独立 GraspNet 服务路线已经废弃，不得恢复。
+当前支持的视觉路线是 Ubuntu 24.04 / ROS 2 Jazzy：原生 D405、本地 YOLO、ROS RGB-D/CameraInfo/检测结果，以及本机进程内 GraspNet。Windows、HTTP、MJPEG、远程 JSON 和独立 GraspNet 服务路线已经废弃，不得恢复。
 
 本仓库由分层 ROS2 包组成。新代码必须遵守以下职责边界。
 
@@ -14,12 +14,12 @@
 
 `rebotarm_trajectory` 是 `ament_python` 纯数值库，无节点、ROS、NumPy、SDK、
 物理引擎、线程和时钟依赖，模块平铺包根目录。它拥有不可变轨迹点和分段系数、
-结构/维度/有限性/时间校验、已检查系数解码、旧阶梯索引、线性采样和 q/v/a/jerk 求值。
+结构/维度/有限性/时间校验、已检查系数解码、离线位置记录线性采样和 q/v/a/jerk 求值。
 motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查；控制器保留发送回执、
 执行代次、任务与资源占用；仿真保留物理时间、模式与生命周期。
 三者单向依赖共享包，控制器及仿真不导入 motion 实现。
 
-`PrepareArmTrajectory` 属于内部准备接口。公共 FJT 只执行完整六轴；网页 prepared_v1
+`PrepareArmTrajectory` 属于内部准备接口。公共 FJT 只执行完整六轴；网页 continuous
 通过 `ExecuteTeleopMotion` 提交六轴轨迹和可选的独立夹爪目标。
 后端先预留机械臂与夹爪，motion 在 MoveItPy 同一只读场景锁内完成采样检查，
 后端原子复核会话、代次、已发送保持目标、新鲜反馈、夹爪起始状态与场景版本后使用原系数；
@@ -32,19 +32,21 @@ motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查
 `GetArmPlanningState` 由后端所有者只读复制会话、六轴代次和已发送保持目标；
 共享内核 `planning.py` 编码快照、最终纳秒曲线摘要及执行/参考/失能预览用途，不读取时钟。
 最终计划先规范化起点再统一重定时；执行预约与准备复核绑定，不能再改节点或时间。
-普通 OMPL 生成最终计划，`ompl_reference` 保留虚拟起点，示教拼接和视觉实际阶段再最终绑定。
+普通 OMPL 生成最终计划，`ompl_reference` 保留虚拟起点，示教拼接后再最终绑定。
 motion 在规划阶段重定时，
 C++ MoveIt 响应插件调用独立 Python 纯计算服务；执行准备不改时间。MoveIt 保留 `arm`
 和 `gripper` 两个独立组；后者通过薄 GripperCommand 适配将左指 m 转换为双指总开口 m。
 控制器 `runtime/coordinated_trajectory.py` 持有网页组合任务，在同一设备周期登记原六轴
 轨迹与独立夹爪目标；夹爪复用原限速、到位、超时及中性释放，不参与 FJT 采样或重定时。
+`CoordinatedTrajectory` 采用组合关系，句柄只保存六轴子任务、夹爪代次、整体结果和事件；
+六轴期限、容差及游标继续归原执行器。`ArmController` 通过所有者接口查询、登记失败和收尾。
 整体成功等待两侧完成和清理，不承诺同时到达或总线原子同步。MuJoCo 用物理时间执行六轴
 曲线，并按实际反馈确认独立夹爪到位。网页碰撞计算副本固定闭合双指，其他 FJT/示教/视觉
 冻结新鲜真实开度；策略和真实快照分别绑定，不修改公共场景或实际反馈。关节状态桥按机械臂
 和夹爪各自源时间发布，旧夹爪不能因新机械臂帧变为新鲜。
 场景摘要仍按原频率观察，仅变化时发布持久化版本，避免重复值占用设备请求队列。
-示教仅回放六轴，夹爪记录保留查看。视觉先独立预张爪完成，再用实际开度规划和执行
-接触前六轴运动；不将位置跟踪异常解释为接触或抓取成功。
+示教仅回放六轴，夹爪记录保留查看。视觉使用关节状态、TF 和 MoveIt 查询筛选候选，
+输出筛选结果及标记；运动和夹爪执行由操作者通过各自的通用入口发起。
 
 ### 硬件职责（Hardware ownership）
 
@@ -72,15 +74,17 @@ ROS 适配器直接接收职责组件的提交、取消和只读查询端口，�
 联合预约；任务收尾按当前执行代次归属，稳定位置保持才可沿用原目标。量化导数、同步审计及待实机验证的策略见
 [量化反馈判定](features/quantized_feedback_safety.md)。
 停止请求等待时，运行时继续处理失能请求，旧代次的续体不能发送命令。
-重力补偿状态与计算归 `gravity_control.py`，启停、模式交接与诊断归
-`gravity_controller.py`。`controller_cycle.py` 分发采集和执行，
+重力补偿模型、控制状态与计算归独立 `rebotarm_force_control` 包，
+`gravity/gravity_controller.py` 保留设备适配、启停、模式交接与诊断。
+`controller_cycle.py` 分发采集和执行，
 `controller_protection.py` 协调设备故障清理及一次保护失能。
 模块按一层职责子目录组织：`contracts/` 声明数据与能力接口，`hardware/` 负责通信与反馈，
-`runtime/` 负责设备线程、生命周期与安全协调，`arm/`、`gripper/`、`gravity/` 保留各自执行状态，
+`runtime/` 负责设备线程、生命周期与安全协调，`arm/`、`gripper/` 保留执行状态，
+`gravity/` 负责将力控算法接入唯一硬件周期，
 `ros/` 负责协议与消息适配。根目录只保留节点入口、装配、配置和参数模块，`examples/` 保留原路径。
 子包不汇总导入，旧平铺模块不保留转发；Python 调用方使用新路径，ROS 名称与入口不变。
-目录整理保留既有模块依赖，公共数值函数归位及核心层 ROS 依赖清理另行规划。C++ 后续归属见
-[拆分规划](../design/controller_refactor_plan.md)。
+目录整理保留既有模块依赖，公共数值函数归位及核心层 ROS 依赖清理另行规划。控制器结构整理记录见
+[控制器说明](../design/controller_refactor_plan.md)。
 
 `command_guard.py` 已接管透传准入与故障保护锁存，位置边界统一读取规范 URDF。
 `HardwareManager` 只有构造函数，创建唯一运行时、生命周期及六个职责组件并接线，
@@ -115,6 +119,21 @@ ROS 适配器直接接收职责组件的提交、取消和只读查询端口，�
 - 视觉抓取策略
 - MoveIt 规划策略
 - 面向用户的工作流状态
+
+### 力控职责（Force control ownership）
+
+`rebotarm_force_control` 拥有重力补偿模型、补偿状态、MIT 输出约束及关节阻抗控制律。
+模型和六轴限位读取规范 URDF；纯计算接口接收关节状态、前馈与实际周期，返回有界力矩。
+本包无 ROS 节点、设备句柄、线程或 MuJoCo 运行时依赖。硬件和仿真单向调用本包；
+反馈采集、时钟、模式生命周期、执行互斥和最终发送分别由各后端拥有。
+
+首版关节阻抗采用静态平衡点：`tau = g(q) + K*(q_ref-q) - D*q_dot`，
+六轴刚度和阻尼分别以 N·m/rad、N·m·s/rad 表示；总力矩与每周期变化率受限。
+MuJoCo 以独立零速度动力学数据求纯重力项，并在既定控制拍推进；命令续期仅更新参数和期限。
+超时或显式退出切回当前位置保持，沿用上一拍实际力矩。仿真专用 ROS 服务与本地 API/CLI
+提供入口；已有六轴轨迹与阻抗模式互斥。使用和验证步骤见
+[MuJoCo 使用说明](../../src/rebotarm_simulation/README_mujoco.md)。
+关节阻抗当前执行入口位于仿真后端；真机重力补偿沿用原设备适配与显式使能流程。
 
 ### 运动职责（Motion ownership）
 
@@ -229,19 +248,10 @@ Action 等待到位。迟到接纳仍跟踪并取消，停止确认前不接新�
 - 深度融合
 - 抓取候选生成
 - 抓取位姿评分
-- 视觉抓取执行器集成点
+- 候选 IK、碰撞与工作空间筛选
+- 候选和 TCP 标记显示
 
-不得绕过运动校验或控制器安全机制。视觉抓取必须经过规划、碰撞检查和执行安全门。
-
-抓取执行节点的计划、候选与 TF 由本包 `grasp_input_receiver.py` 独立单线程接收；
-有界邮箱保留空候选撤销，业务侧通过窄交接回调更新执行输入，接收路径不调用下游服务。
-
-视觉工作流可以通过 `rebotarm_motion` 的公开运动接口调用规划、受控轨迹和停止确认，
-本地正式单瓶执行保留该依赖。视觉层不得直接访问硬件 SDK，也不得复制运动安全实现。
-通用视觉停止先等待旧请求排空和运动层新鲜静止反馈确认，失败时继续阻断新的执行；
-健康机械臂保持使能，受控回基线和失能仍遵守本地硬件安全约定。
-
-固定观察位运动工具已移除；视觉抓取从当前姿态规划。视觉包不再提供旧的顶层 Python 兼容模块；console script 统一指向 `nodes/`、`diagnostics/` 等 canonical 子包。bringup 直接启动运动职责包的所有者。
+视觉包使用 MoveIt 查询服务完成候选检查，发布筛选结果和标记。离线组合使用被动关节状态和 MoveIt 查询；外部组合复用现有机器人环境。视觉包不直接访问硬件 SDK，通用运动与夹爪位置控制由各自的职责包管理。
 
 ### 仿真职责
 
@@ -268,21 +278,20 @@ ROS 与离线轨迹执行共用 `TrajectorySampler`；模型和配置统一通�
 位置阶跃通过正式控制器执行；抓取试验必须指定目标、双指和执行过程，
 以目标双指接触和抬升共同判定。ROS 协议适配仍由 `ros/mujoco_ros_node.py` 持有；目标收敛、轨迹准入、反馈限流、单目标状态、命令闸门、异常清理和仿真访问串行化分别归入 `execution/trajectory_state.py`、`goal_policy.py`、`feedback_timing.py`、`simulation_access.py`；ROS消息转换与时间戳归 `ros/message_codec.py`。
 
-### 轻量预演职责
+P005 准备预约、规划代次、上下文复核、六轴采样、组合终态及停止确认归
+`execution/trajectory_execution.py`；独立夹爪的任务、限速、到位、超时和中性释放归
+`execution/gripper_execution.py`。准备与活动曲线采用具名数据对象，节点只做消息转换、
+服务 Future 等待、Action 反馈/终态映射和物理调度。执行组件复用活动目标及命令闸门，
+锁序保持目标锁→仿真锁，准备期限用单调时间，参考采样用仿真时间。
+执行状态只有一个写入所有者，诊断与记录读取快照。维护整理的验证结果见
+[P005 代码和文档审查](features/p005_prepared_trajectory.md#代码和文档审查2026-11-04)。
 
-`rebotarm_preview` 负责不加载物理引擎的 ROS/RViz 流程预演后端。
+### 无硬件执行与 RViz
 
-负责：
-
-- 轻量 `FollowJointTrajectory` 插值执行
-- RViz 关节状态发布
-- 预演用停止、safe home 和夹爪状态接口
-
-它不负责 MuJoCo 物理、动力学、接触、碰撞或真实硬件。`rebotarm_bringup` 根据
-`use_hardware` 和入口类型选择 `rebotarm_preview` 或 `rebotarm_simulation`，同一命名空间
-只能启动一个轨迹执行 Action server。
-
-不得导入或调用真实电机 SDK。仿真 launch 不得启动 `rebotarmcontroller`、打开硬件通道，或以相同名称暴露第二个活动 `FollowJointTrajectory` server。
+无硬件键盘、RViz 拖动和网页执行统一由 `rebotarm_simulation` 的 MuJoCo 后端提供
+continuous 执行，复用完整 MoveIt 场景、准备服务和同一仿真时钟。
+同一命名空间保持唯一轨迹 Action server、关节状态源与时钟源。
+只查看模型或进行视觉候选查询时，可使用被动状态与禁用执行的 MoveIt 组合。
 
 ### 独立强化学习工作区
 
@@ -326,6 +335,9 @@ ROS 与离线轨迹执行共用 `TrajectorySampler`；模型和配置统一通�
 
 手眼采集通过本包 `capture_input_receiver.py` 独立单线程接收图像、内参与 TF；
 服务回调读取复制快照并执行检测、稳定性检查及落盘，话题切换在接收线程内按代次完成。
+`observation` 只读服务使用独立回调组，复用同步图像/内参与 ArUco 质量检查来估测相机到
+标记中心的距离；快照携带话题身份，跨会话话题不匹配时可见失败。Dashboard 仅转发
+该服务并显示结果，距离查询保留原有采集请求状态和会话内容。
 
 视觉和运动层应通过配置或 TF 使用标定输出，不得把输出复制到 Dashboard 或控制器代码中。
 
@@ -342,11 +354,11 @@ rebotarm_dashboard
 
 rebotarm_teach -> rebotarm_motion
 rebotarm_motion / rebotarmcontroller / rebotarm_simulation -> rebotarm_trajectory
-rebotarm_teleop -> 使用旧 interactive preview 辅助工具时依赖 rebotarm_motion
-rebotarm_vision -> 为验证和执行依赖 rebotarm_motion / MoveIt 接口
+rebotarmcontroller / rebotarm_simulation -> rebotarm_force_control（模型与力控数值计算）
+rebotarm_teleop -> rebotarm_motion（点到点轨迹与网页组合曲线生成）
+rebotarm_vision -> MoveIt 查询接口（候选 IK 与碰撞筛选）
 rebotarm_bringup -> 仅依赖各包的 launch 入口和配置
 rebotarm_simulation -> rebotarm_teach（仅复用示教记录读取与轨迹准备）、ROS 消息和仿真执行库
-rebotarm_bringup -> rebotarm_preview（仅启动轻量预演后端）
 ```
 
 已退役的 MuJoCo ROS adapter 不再随活动包发布；`rebotarm_simulation` 不得导入或声明对 `rebotarm_motion` 的依赖。Launch 解释器必须通过 launch 参数或环境变量按进程显式选择，不能探测工作区虚拟环境目录，也不能把视觉 site-packages 注入整个 launch group。参见 [launch Python 配置](../setup/launch_python_configuration.md)。
@@ -373,14 +385,14 @@ rebotarm_bringup -> 各包的实现内部
 | 包 | 可直接向硬件下命令 | 可调用控制器 ROS service/action | 可调用 MoveIt | 可拥有文件/UI | 可发布操作员目标 |
 | --- | --- | --- | --- | --- | --- |
 | `rebotarmcontroller` | 是 | 拥有这些接口 | 否 | 否 | 否 |
+| `rebotarm_force_control` | 否 | 否 | 否 | 仅力控配置，读取规范 URDF | 否 |
 | `rebotarm_motion` | 否 | 是 | 是 | 否 | 否 |
 | `rebotarm_teach` | 否 | 是，通过回放/录制工作流 | 是，通过运动辅助工具 | 仅示教记录 | 否 |
 | `rebotarm_teleop` | 否 | 是 | 仅通过运动辅助工具 | 否 | 是 |
 | `rebotarm_dashboard` | 否 | 是 | 无直接规划逻辑 | 仅 Dashboard 资源 | 通过 teleop 适配器 |
 | `rebotarm_moveit_config` | 否 | 否 | 仅配置 | 仅模型/配置文件 | 否 |
-| `rebotarm_vision` | 否 | 仅通过规划执行接口 | 是，用于验证/执行门控 | 仅感知资源/模型 | 否 |
+| `rebotarm_vision` | 否 | 否 | 是，用于候选 IK 与碰撞查询 | 仅感知资源/模型 | 否 |
 | `rebotarm_simulation` | MuJoCo 仿真后端 | 拥有物理仿真等价接口 | 无直接规划策略 | 仅生成的仿真产物 | 否 |
-| `rebotarm_preview` | 轻量 RViz/ROS 预演后端 | 拥有非物理预演接口 | 无直接规划策略 | 无 | 否 |
 | `rebotarm_bringup` | 否 | 无业务逻辑 | 无业务逻辑 | 仅 launch/配置 | 否 |
 | `rebotarm_calibration` | 否 | 否，显式验证工具除外 | 否，验证工具除外 | 仅标定输出 | 否 |
 
@@ -450,7 +462,6 @@ RViz 拖动控制现在采用原生 MoveIt MotionPlanning 工作流。不再使�
 | New URDF/SRDF/collision/planning group config | `rebotarm_moveit_config` |
 | New detection/depth/grasp candidate logic | `rebotarm_vision` |
 | New MuJoCo model, simulated controller, physics metric, or contact feedback | `rebotarm_simulation` |
-| New lightweight RViz/ROS preview backend | `rebotarm_preview` |
 | New launch composition or mutually exclusive backend selection | `rebotarm_bringup` |
 | New hand-eye/TCP/TF check tool | `rebotarm_calibration` |
 

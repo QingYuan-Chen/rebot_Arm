@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from controller_trajectory_helpers import curve
 
 from rebotarmcontroller.arm.arm_execution import ArmExecution
 from rebotarmcontroller.arm.arm_position_control import ArmPositionControl
@@ -19,6 +20,25 @@ from test_controller_local_runtime import make_driver, make_local_manager, wait_
 from test_lifecycle_transactions import lifecycle
 
 DATA = json.loads((Path(__file__).parent / 'fixtures/controller_reference_v1.json').read_text())
+
+
+def test_home_requires_full_write_and_subsequent_fresh_feedback():
+    execution = ArmExecution()
+    execution.running = True
+    clock = [10.]
+    trajectory = ArmTrajectory(execution, clock=lambda: clock[0])
+    target = (.1, -.1, -.1, 0., 0., 0.)
+    task = trajectory.submit_home(target, (.3,)*6, 1.)
+    trajectory.update(target, 10.)
+    clock[0] = 10.1
+    trajectory.update(target, 10.1)
+    assert not task.event.is_set() and task.sent_at is None
+    execution.acknowledge(execution.sample(10.1))
+    trajectory.update(target, 10.1)
+    assert not task.event.is_set()
+    clock[0] = 10.2
+    assert trajectory.update(target, 10.2) == target
+    assert task.result.state == 'succeeded'
 
 
 @pytest.mark.parametrize('velocity', [[0.] * 6, [-.1] * 6, [.1] * 5,
@@ -35,7 +55,7 @@ def test_rejected_velocity_preserves_hold_and_allows_valid_retry(velocity):
     points = [[0.] * 6, [.01, 0., 0., 0., 0., 0.]]
     try:
         with pytest.raises(ValueError, match='velocity override'):
-            trajectory.submit(points, [0., 1.], np.zeros(6), velocity=velocity)
+            trajectory.submit_home(points[-1], velocity, 1.)
         assert trajectory.task is None and not execution.moving
         assert execution.generation == generation
         # 即使已过被拒轨迹的末点, 发送也必须沿用旧保持目标与速度覆盖.
@@ -43,7 +63,7 @@ def test_rejected_velocity_preserves_hold_and_allows_valid_retry(velocity):
         driver.send_positions(command)
         assert command.positions == (0.,) * 6 and command.velocity_limits == (.1,) * 6
         assert all(args[0] == 0. for _, method, args in bus.events if method == 'position')
-        task = trajectory.submit(points, [0., 1.], np.zeros(6), velocity=[.2] * 6)
+        task = trajectory.submit_home(points[-1], [.2] * 6, 1.)
         target = execution.sample(11.)
         assert target.positions == tuple(points[-1]) and target.velocity_override == (.2,) * 6
         assert task.generation == target.generation == generation + 1
@@ -61,8 +81,7 @@ def test_rejected_trajectory_never_reaches_fake_device_and_valid_retry_completes
         goal[0] += .01
         generation = manager.runtime.target_generation
         with pytest.raises(ValueError, match='velocity override'):
-            manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-                [current, goal], [0., .01], velocity=[0.] * 6)
+            manager.arm.submit_home(goal, [0.] * 6, 1.)
         assert manager.runtime.target_generation == generation
         assert manager.arm._arm_trajectory.task is None
         # 经过被拒请求的末点后, 唯一运行时仍只能发送原保持目标.
@@ -70,8 +89,7 @@ def test_rejected_trajectory_never_reaches_fake_device_and_valid_retry_completes
         wait_until(lambda: manager.feedback.get_cached_joint_sample()[-1] > after)
         assert all(args[0] == current[0] for number, method, args in opened[0].events
                    if number == 1 and method == 'position')
-        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [current, goal], [0., .01], velocity=[.2] * 6)
+        task = manager.arm.submit_home(goal, [.2] * 6, 1.)
         assert task.event.wait(1.)
         assert manager.arm.arm_execution_status(task).state == 'succeeded'
         assert opened[0].motors[0].state.pos == goal[0]
@@ -90,7 +108,8 @@ def test_arm_request_command_receipt_feedback_result(case):
     execution.running = True
     trajectory = ArmTrajectory(execution, clock=lambda: clock[0])
     control = ArmPositionControl(j.vlim for j in driver.config.joints)
-    task = trajectory.submit([[0.] * 6, case['goal']], [0., 1.], np.zeros(6))
+    prepared = curve([0.] * 6, case['goal'])
+    task = trajectory.submit_prepared(prepared, execution.generation)
     try:
         for step in case['steps']:
             clock[0] = step['time']
@@ -99,7 +118,7 @@ def test_arm_request_command_receipt_feedback_result(case):
             receipt = driver.send_positions(command)
             assert receipt.success and receipt.sent == tuple(j.name for j in driver.config.joints)
             np.testing.assert_allclose(command.positions,
-                [0.] * 6 if clock[0] < 1 else case['goal'], atol=DATA['absolute_tolerance'], rtol=0)
+                prepared.sample(clock[0])[0], atol=DATA['absolute_tolerance'], rtol=0)
             assert command.generation == task.generation
             execution.acknowledge(target)
             hold = trajectory.update(step['feedback'], step['observed_at'])
@@ -119,8 +138,8 @@ def test_partial_send_retains_cursor_and_protection_decision():
     driver.connect()
     execution = ArmExecution()
     execution.running = True
-    execution.submit([case['goal']], [0.], execution.generation, now=0.)
-    target = execution.sample(0.)
+    execution.submit_prepared(curve([0.] * 6, case['goal']), execution.generation, now=0.)
+    target = execution.sample(1.)
     command = ArmPositionControl(j.vlim for j in driver.config.joints).command(target)
     bus.failure = (case['failure_motor'], 'position')
     try:

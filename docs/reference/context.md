@@ -5,7 +5,7 @@
 Supported deployment is Ubuntu 24.04 / ROS 2 Jazzy:
 
 ```text
-Gemini 2 -> YOLO -> ROS RGB-D/CameraInfo/detections -> local GraspNet
+D405 -> YOLO -> ROS RGB-D/CameraInfo/detections -> local GraspNet
 ```
 
 Retired Windows, HTTP, MJPEG, remote-JSON, and standalone GraspNet service
@@ -54,9 +54,8 @@ not own motion planning, teach replay algorithms, or motor SDK calls.
 The maintained vision path is native Ubuntu only:
 
 ```text
-Gemini 2 SDK -> YOLO -> ROS Image/CameraInfo/detections
--> local GraspNet -> candidate IK/collision gates -> MoveIt
--> lightweight RViz preview or explicitly enabled hardware
+D405 / RealSense SDK -> YOLO -> ROS Image/CameraInfo/detections
+-> local GraspNet -> candidate IK/collision queries -> filtered results / RViz markers
 ```
 
 Windows/HTTP/MJPEG/remote JSON and standalone GraspNet service paths are retired.
@@ -64,10 +63,17 @@ Dashboard HTTP is local UI, not vision transport. `connected` means feedback
 communication, `enabled` means holding torque, and `ready_for_motion` requires
 both plus a healthy lifecycle. Motor feedback sequence counters are independent.
 
-`rebotarm_preview` owns lightweight trajectory interpolation without physics.
-MuJoCo remains a separate backend owned by `rebotarm_simulation`; neither backend
-opens real hardware. The teach package owns record preparation and replay policy,
+`rebotarm_simulation` owns the MuJoCo backend used by every no-hardware execution
+entrypoint, including keyboard and RViz. It uses the same continuous execution
+contract as the hardware backend, with its own simulation clock. The teach package owns record preparation and replay policy,
 while MuJoCo teach-preview execution and Viewer lifecycle belong to simulation.
+
+`rebotarm_force_control` owns gravity compensation models, numerical state and joint
+impedance torque computation. Hardware retains feedback verification, mode handover,
+the single device writer and protection. MuJoCo owns the initial joint impedance runtime:
+static joint references, per-axis stiffness/damping, bounded torque and slew rate,
+simulation-time expiry to Hold, and mutual exclusion with trajectory execution.
+The force-control package has no hardware, ROS node or simulation runtime dependency.
 
 FollowJointTrajectory accepts exactly the six arm joints (rad); finger and seven-axis
 goals are rejected. Prepared web operations use ExecuteTeleopMotion for the arm curve
@@ -76,14 +82,13 @@ full-scene collision checks; backends own reservations and the overall result, w
 for both independent executors. Web checks use closed fingers only in a calculation
 copy; other arm requests freeze fresh actual opening. Feedback and the public scene
 always remain real, with separate arm/gripper source timestamps. MoveIt arm and gripper
-execute independently; teach replay is six-axis and vision opens the gripper before planning. Real
-hardware stays disabled by default and uses legacy until user field validation.
+execute independently; teach replay is six-axis. Real
+hardware stays disabled by default. Continuous is the only trajectory execution path;
+the mode topic is read-only and no mode parameter is exposed.
 See [P005 coordination](../implemented/features/p005_prepared_trajectory.md#修订协同接口).
 
-The general visual-grasp entrypoint waits for an explicit execute request.
-Stopping drains old requests and requires fresh stationary feedback before new
-execution is allowed. A healthy real arm keeps enabled hold after a recoverable
-failure, or returns under guard to the captured baseline and verifies it before
-disable. Stop confirmation alone does not authorize disable or a new motion.
-The local single-bottle workflow retains its guarded motion interface and baseline
-recovery; vision never accesses motor SDKs directly.
+The visual entrypoint owns perception, candidate filtering and display. Offline mode
+uses passive robot state and MoveIt queries; external mode reuses an existing robot
+environment. D405 hand-eye calibration is supplied explicitly; the default camera-only
+launch leaves the arm-to-camera TF unpublished. The old Gemini2 calibration is retained
+for provenance. Vision never submits motion targets or accesses motor SDKs directly.

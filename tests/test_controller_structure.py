@@ -232,7 +232,7 @@ def test_request_entries_use_one_component_layer_and_the_central_policy():
         assert entry.request_policy is REQUEST_POLICIES[key]
         assert hasattr(entry, '__wrapped__') and not hasattr(entry.__wrapped__, '__wrapped__'), key
     # 同步编排不能占住唯一设备线程等待自身周期或停止/失能请求。
-    for owner, name in (('ArmController', 'safe_home'), ('GripperController', 'grasp_gripper'),
+    for owner, name in (('ArmController', 'safe_home'),
                         ('GripperController', 'set_gripper_position'), ('GripperController', 'wait_gripper_target')):
         assert f'{owner}.{name}' not in found
 

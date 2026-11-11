@@ -1,7 +1,7 @@
-"""Compatibility exports for teach recording and replay helpers.
+"""示教录制与回放工具的兼容导出入口。
 
-Implementations live in focused modules. Existing imports from this module are
-preserved while callers migrate to the owning modules.
+数据契约、文件读写、准备、质量分析和门控由各职责模块实现；此处保留现有导入路径，
+供调用方逐步迁往对应所有者，模块本身只汇总符号。
 """
 
 from __future__ import annotations

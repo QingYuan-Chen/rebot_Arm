@@ -15,7 +15,7 @@ from rebotarmcontroller.ros.ros_actions import ArmActions, GoalResponse
 import rebotarmcontroller.ros.ros_actions as action_module
 from rebotarmcontroller.ros.ros_publishers import JointStatePublisher
 from rebotarmcontroller.ros.ros_services import ArmServices
-from test_controller_local_runtime import make_local_manager
+from test_controller_local_runtime import make_local_manager, wait_until
 from test_device_request_arbitration import motor_command
 
 
@@ -31,6 +31,9 @@ class RegistrationNode:
     def create_service(self, kind, name, callback, **kwargs):
         self.services[name] = callback
         return callback
+
+    def create_client(self, kind, name, **kwargs):
+        return SimpleNamespace(service_is_ready=lambda: False)
 
     def create_subscription(self, kind, name, callback, *args, **kwargs):
         self.subscriptions[name] = callback
@@ -107,7 +110,7 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
     node.publish_arm_status = publisher.publish_status
     ArmServices(node, 'ports', lifecycle=assembly.lifecycle, arm=assembly.arm,
                 gripper=assembly.gripper, gravity=assembly.gravity)
-    ArmActions(node, 'ports', runtime=assembly.runtime, lifecycle=assembly.lifecycle,
+    actions = ArmActions(node, 'ports', runtime=assembly.runtime, lifecycle=assembly.lifecycle,
                feedback=assembly.feedback, arm=assembly.arm, gripper=assembly.gripper)
     MotorPassthrough(node, 'ports', 'reject', runtime=assembly.runtime,
                      arm=assembly.arm, gripper=assembly.gripper)
@@ -150,7 +153,9 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
         trigger('enable')
         assert observed == [dict(resource='device', priority=5, ttl=5., invalidate=('device',))]
         assert node.publishers['/ports/arm_status'][-1].enabled
-        assert gripper.goal_callback(None) == trajectory.goal_callback(arm_request) == GoalResponse.ACCEPT
+        assert gripper.goal_callback(None) == GoalResponse.ACCEPT
+        assert trajectory.goal_callback(arm_request) == GoalResponse.REJECT
+        assert any('preparation service unavailable' in message for message in node.messages)
         observed.clear()
         trigger('trajectory_stop')
         assert observed == [dict(resource='device', priority=0, ttl=5., invalidate=())]
@@ -174,7 +179,13 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
         end[0] += .01
         request.trajectory.points = [JointTrajectoryPoint(positions=start), JointTrajectoryPoint(positions=end)]
         request.trajectory.points[-1].time_from_start.sec = 3
+        assembly.arm.update_trajectory_scene('scene-a')
+        wait_until(lambda: assembly.arm.admission_snapshot()['ready'])
+        actions._prepare_client = SimpleNamespace(service_is_ready=lambda: True)
+        assert trajectory.goal_callback(request) == GoalResponse.ACCEPT
         goal = CancelAfterSubmission(request)
+        # 模拟取消在服务派发前到达；仍由正式取消路径释放本请求预约并确认保持。
+        goal.checks = 1
         trajectory.execute_callback(goal)
         assert goal.state == 'canceled' and assembly.lifecycle.enabled
         assert assembly.runtime.control_loop_active
@@ -195,3 +206,30 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
         if assembly.lifecycle.enabled:
             assembly.lifecycle.disable()
         assembly.lifecycle.shutdown()
+
+
+@pytest.mark.parametrize('rate', [0., -1., float('nan'), float('inf'), -float('inf'), 1e-320, 1e20])
+def test_invalid_joint_state_rate_fails_before_hardware_construction(monkeypatch, rate):
+    import rebotarmcontroller.rebotarm_controller as module
+
+    values = {}
+    monkeypatch.setattr(module.Node, '__init__', lambda self, name: None)
+    monkeypatch.setattr(module.Node, 'declare_parameter',
+                        lambda self, name, default, **kwargs: values.setdefault(name, default))
+    monkeypatch.setattr(module.Node, 'get_parameter',
+                        lambda self, name: SimpleNamespace(value=rate if name == 'joint_state_rate' else values[name]))
+    monkeypatch.setattr(module, 'HardwareManager', lambda **kwargs: pytest.fail('hardware constructed'))
+    with pytest.raises(ValueError, match='joint_state_rate'):
+        module.reBotArmController()
+
+
+def test_fractional_publish_rate_is_preserved():
+    node = RegistrationNode()
+    periods = []
+    node.create_timer = lambda period, callback, **kwargs: periods.append(period)
+    runtime = SimpleNamespace(joint_names=[], mode='pos_vel', control_loop_active=False)
+    lifecycle = SimpleNamespace(enabled=False, execution='IDLE')
+    feedback = SimpleNamespace(get_feedback_status=lambda: ([], []))
+    JointStatePublisher(node, 'ports', .5, runtime=runtime, lifecycle=lifecycle,
+                        feedback=feedback, gripper=SimpleNamespace(has_gripper=False))
+    assert periods == [2.0]

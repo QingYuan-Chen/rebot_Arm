@@ -11,6 +11,7 @@ import tty
 from types import SimpleNamespace
 
 import pytest
+from controller_trajectory_helpers import submit_curve
 
 from test_controller_local_runtime import make_local_manager, wait_until
 
@@ -181,6 +182,7 @@ def test_installed_sdk_seven_motor_startup_on_virtual_serial(through_relay):
     if motorbridge.__version__ != '0.4.7+rebotarm.1':
         pytest.skip('requires the verified MotorBridge wheel')
     from rebotarmcontroller.hardware.feedback_acquisition import FeedbackAcquisition
+    from rebotarmcontroller.hardware.sdk_driver import BusPort, MotorPort
     from test_motorbridge_transport_safety import packet
     master, slave = os.openpty()
     tty.setraw(slave)
@@ -213,19 +215,31 @@ def test_installed_sdk_seven_motor_startup_on_virtual_serial(through_relay):
         controller = motorbridge.Controller.from_dm_serial(relay.channel if relay else os.ttyname(slave), 921600)
         motors = [controller.add_damiao_motor(i, 0x10+i, '4340P' if i <= 3 else '4310') for i in range(1, 8)]
         labels = [f'joint{i}' for i in range(1, 7)]+['gripper']
+        lock = threading.RLock()
+        bus = BusPort(controller, lock)
+        ports = [MotorPort(label, motor, lock) for label, motor in zip(labels, motors)]
+        requested = [0]
+        for port in ports:
+            send = port.request_feedback
+            def counted_request(send=send):
+                send()
+                requested[0] += 1
+            port.request_feedback = counted_request
         feedback = FeedbackAcquisition(
-            groups=lambda: [(controller, list(zip(labels, motors)))], joint_names=lambda: labels[:6],
-            gripper_motor=lambda: motors[-1],
+            groups=lambda: [(bus, list(zip(labels, ports)))], joint_names=lambda: labels[:6],
+            gripper_motor=lambda: ports[-1],
             gripper_values=lambda state: (state.pos, state.vel, state.torq, state.status_code),
             gripper_sample=lambda *args, **kwargs: None, gripper_error=lambda reason: None,
             period=lambda: .02, stale_timeout=lambda: .15,
-            backend=lambda: SimpleNamespace(control_thread=None), loop_active=lambda: False,
+            backend=lambda: SimpleNamespace(control_thread=None, writer_active=False), loop_active=lambda: False,
         )
         feedback._force_feedback_refresh()
         assert set(feedback._verified_feedback_by_label) == set(labels)
         assert all(sample.sequence > 0 and sample.state.status_code == 0
                    for sample in feedback._verified_feedback_by_label.values())
         assert not feedback._feedback_error_by_label
+        # 验证在途请求全部送达虚拟设备, 再关闭代理并核对未发送审计.
+        wait_until(lambda: len(commands) == requested[0], timeout=1.)
     finally:
         for motor in motors:
             motor.close()
@@ -279,8 +293,7 @@ def test_duplicate_stop_joins_one_transaction_and_moving_cancel_retargets(monkey
     workers = [threading.Thread(target=stop) for _ in range(2)]
     try:
         # 正在运动的轨迹不能保留远处目标。
-        task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-            [(0.,)*6, (.1, -.1, -.1, 0., 0., 0.)], [0., 10.])
+        task = submit_curve(manager, (.1, -.1, -.1, 0., 0., 0.), 10.)
         for motor in opened[0].motors[:6]:
             motor.state.vel = .2
         workers[0].start()

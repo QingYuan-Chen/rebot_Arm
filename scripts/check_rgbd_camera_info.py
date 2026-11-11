@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Read-only RGB-D metadata audit; never starts a camera or hardware controller.
+"""订阅现有 RGB-D 话题，只读核对同时间戳 Image/CameraInfo 的元数据。
 
-Checks paired Image/CameraInfo dimensions, headers and calibration validity.
-It does not measure optical calibration accuracy or prove distortion correction.
+检查尺寸、坐标系、内参有限性和数据长度；相机由外部启动，光学精度需另做实测。
+等待期限采用单调时间，彩色与深度各自按消息时间戳配对并去重。
 """
 import argparse
 import json

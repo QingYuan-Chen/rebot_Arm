@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
-import types
 
 import rebotarmcontroller.ros.ros_actions as ros_actions_module
 from rebotarmcontroller.ros.ros_actions import ArmActions
@@ -40,13 +38,6 @@ class _LongMoveHardware:
 
     def gripper_reached_target(self) -> bool:
         return self._clock[0] >= 8.0
-
-    def wait_gripper_target(self, timeout: float | None = None) -> bool:
-        del timeout
-        if not self.gripper_reached_target():
-            return False
-        self.active = False
-        return True
 
     def cancel_gripper_position_command(self, _reason: str, *, expected_generation=None) -> bool:
         return False
@@ -101,13 +92,19 @@ class _GoalHandle:
 
 
 class _Logger:
-    def error(self, _message: str) -> None:
-        return None
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def error(self, message: str) -> None:
+        self.errors.append(message)
 
 
 class _Node:
+    def __init__(self) -> None:
+        self.logger = _Logger()
+
     def get_logger(self):
-        return _Logger()
+        return self.logger
 
 
 def test_gripper_action_uses_distance_related_hardware_timeout(monkeypatch) -> None:
@@ -151,6 +148,35 @@ def test_gripper_action_aborts_immediately_on_feedback_failure(monkeypatch) -> N
     assert result.reached_goal is False
     assert goal_handle.state == "aborted"
     assert clock[0] < 0.1
+
+
+class _CleanupFailureHardware:
+    def set_gripper_target(self, _position: float, _max_effort: float):
+        return 7
+
+    def gripper_execution_status(self, generation):
+        assert generation == 7
+        raise RuntimeError("status query failed")
+
+    def cancel_gripper_position_command(self, _reason: str, *, expected_generation=None) -> bool:
+        assert expected_generation == 7
+        raise RuntimeError("cleanup query failed")
+
+
+def test_gripper_action_reports_original_and_cleanup_failure(monkeypatch) -> None:
+    """清理取消失败不得吞掉原 Action 失败原因。"""
+    actions = ArmActions.__new__(ArmActions)
+    actions._gripper = _CleanupFailureHardware()
+    actions._node = _Node()
+    goal_handle = _GoalHandle()
+
+    result = actions.execute_gripper_command(goal_handle)
+
+    assert result.reached_goal is False
+    assert goal_handle.state == "aborted"
+    message = actions._node.get_logger().errors[-1]
+    assert "status query failed" in message
+    assert "cleanup query failed" in message
 
 
 def test_gripper_action_timeout_stops_active_hardware_command(monkeypatch) -> None:

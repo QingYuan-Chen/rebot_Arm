@@ -1,16 +1,15 @@
-# Ubuntu 原生 Gemini2 与 YOLO 环境
+# Ubuntu 原生 D405 与 YOLO 环境
 
-> 状态：SETUP；类型：Ubuntu 视觉环境和启动说明；适用范围：Gemini 2、YOLO、GraspNet；真实设备结论需看最新证据。
+> 状态：SETUP；类型：Ubuntu 视觉环境和启动说明；适用范围：D405、YOLO、GraspNet；真实设备结论需看最新证据。
 
-> 当前状态：Ubuntu原生Gemini2、YOLO和同进程GraspNet已集成到
-> `visual_grasp_system.launch.py` 的 `vision_profile:=ubuntu_native`。
-> P0-P6已按当前范围关闭；新设备仍需复核相机、模型、手眼标定和现场条件，
-> 历史验收不构成新一轮真机动作授权。
+> 2026-11-05：腕部相机切换为 D405，视觉总入口保留感知、筛选与显示。
+> 默认手眼外参为空，完成 D405 重标定后显式传入。真实设备已完成出图检查，深度精度和标定待现场验收，
+> 软件检查结果统一记录于[项目状态](../reference/project_status.md)。
 
 本机方案不再依赖 Windows HTTP 服务，数据链路为：
 
 ```text
-Gemini2 USB -> pyorbbecsdk -> rebotarm_vision_node
+D405 USB -> pyrealsense2 -> rebotarm_vision_node
              -> Ultralytics YOLO/CUDA -> ROS 2 topics
 ```
 
@@ -27,26 +26,31 @@ Windows 服务及远端 HTTP 输入已删除。Ubuntu 原生链路使用 `camera
 ```
 
 脚本创建 `.venv-vision`，固定安装 PyTorch `2.11.0+cu128`、torchvision
-`0.26.0+cu128`、Ultralytics、TensorRT和Orbbec Python SDK，并检查导入。
+`0.26.0+cu128`、Ultralytics、TensorRT 和 RealSense Python SDK，并检查导入。
 它不构建ROS包、不下载模型、不导出engine、不连接相机或控制器。
 所有ROS包统一用系统Python构建，运行时再按节点指定解释器。
 
-这里固定 `numpy==1.26.4` 和 `pyorbbecsdk2==2.0.18`。不要直接升级到
-`pyorbbecsdk2==2.1.1`，它在 Python 3.12 上要求 NumPy 2，与 ROS 2 Jazzy
-系统包中的 `cv_bridge` ABI 不兼容。
+这里固定 `numpy==1.26.4` 以兼容 ROS 2 Jazzy 的 `cv_bridge`，
+相机 SDK 为 `pyrealsense2==2.59.1.11053`。完整版本由[视觉依赖清单](dependencies/vision.md)管理。
+已有视觉环境仅补装相机 SDK 时可执行：
+
+```bash
+.venv-vision/bin/python -m pip install --no-deps pyrealsense2==2.59.1.11053
+```
 
 ## 2. 相机权限
 
-接入 Gemini2 后执行一次：
+按 [RealSense Linux 安装说明](https://github.com/realsenseai/librealsense/blob/master/doc/distribution_linux.md)
+配置 SDK apt 源后，安装 USB 规则与枚举工具：
 
 ```bash
-./scripts/install_orbbec_udev_rules.sh
+sudo apt install librealsense2-udev-rules librealsense2-utils
 ```
 
 该步骤需要输入 sudo 密码。完成后拔插相机，并检查：
 
 ```bash
-lsusb | grep -i -E "orbbec|2bc5"
+rs-enumerate-devices -s
 ```
 
 ## 3. 启动
@@ -65,12 +69,41 @@ lsusb | grep -i -E "orbbec|2bc5"
 
 当前相机配置：
 
-- Gemini2 彩色流 `640x480 @ 30 FPS`
-- Gemini2 深度原始流 `640x400 @ 30 FPS`，硬件对齐到彩色图
-- 硬件深度对齐
+- D405 彩色流 `640x480 @ 30 FPS`，SDK 输出 BGR8
+- D405 深度原始流 `640x480 @ 30 FPS`，Z16 按实际比例尺转为毫米 uint16
+- RealSense SDK 将深度对齐到彩色光学系，对齐深度使用彩色内参
 - NVIDIA GPU `device=0`
 - 检测发布 `/grasp/detections`
 - 标注图发布 `/camera/color/annotated`
+
+相机档位是请求值，SDK 在设备不支持时直接报错。驱动使用同步 frameset，
+缺流或超时保留空检测；实际 USB 带宽、精度和帧率由现场核查确认。
+
+### D405 手眼重标定
+
+独立相机入口默认只发布相机内部光学帧及 TCP 帧，机器人到相机的外参需显式提供。
+`config/handeye.yaml` 保留旧 Gemini2 原始数值用于追溯。用现有
+[标定入口](../reference/commands/calibration_web.md)重新采集 D405 数据：
+彩色图与内参的话题保持默认，`camera_frame` 选 `camera_color_frame`。
+将核验后的求解结果整理为以下已有格式（数值使用实际结果）：
+
+```yaml
+handeye:
+  parent_frame: end_link
+  child_frame: camera_color_frame
+  translation: {x: <米>, y: <米>, z: <米>}
+  rotation: {x: <qx>, y: <qy>, z: <qz>, w: <qw>}
+```
+
+独立相机入口通过 `handeye_config:=<路径>/d405_handeye.yaml` 加载；
+总入口使用 `vision_handeye_config:=<路径>/d405_handeye.yaml`。
+本次上游方法结果已写入包配置 `src/rebotarm_vision/config/d405_handeye.yaml`，
+安装后位于 `install/rebotarm_vision/share/rebotarm_vision/config/d405_handeye.yaml`；
+默认仍为空，需显式加载，避免未完成现场精度验收的外参自动生效。
+对齐后的 `camera_color_frame` 与 `camera_depth_frame` 表示同一光学系，
+launch 将两者连接为同位姿；手眼文件也可使用 `camera_depth_frame`。
+URDF 的 `d405_link` 为 CAD 装配帧，光学外参使用实测标定。
+手眼参数为空时保留相机、YOLO 和相机系候选显示，机器人系筛选因缺 TF 拒绝候选。
 
 ### 可选：部署目标机器的TensorRT engine
 
@@ -112,16 +145,22 @@ ros2 topic echo /camera/depth/camera_info --once
 - 实际 RGB/depth profile 与格式；
 - SDK intrinsics、distortion、extrinsics 和 depth scale；
 - 深度中心点及多个已知距离样本的误差；
-- 硬件对齐后 RGB 与 depth 是否对应同一像素坐标系。
+- SDK 对齐后 RGB 与 depth 是否对应同一像素坐标系。
 
-在驱动尚未提供 SDK 标定信息前，`CameraInfo` 出现并不等于标定正确。原始深度也不能默认视为毫米，必须先确认设备 `depth_scale`。
+驱动从实际流 profile 读取内参、畸变及出厂外参，深度比例尺读取设备和每帧 SDK 数据。
+现场仍须核对 CameraInfo 尺寸、已知距离误差与对齐效果。
+
+深度探针 `rebotarm_grasp_depth_probe` 默认订阅 `/grasp/graspnet_candidates`，
+诊断区间按 [D405 产品规格](https://www.intel.com/content/www/us/en/products/sku/229218/intel-realsense-depth-camera-d405/specifications.html)
+取 0.07–0.50 m；现场按测量结果调整诊断阈值。正式 GraspNet 深度裁剪和候选策略保留现有参数，
+该统计结果用于诊断查看。
 
 如果启动时报找不到相机，优先检查 USB 枚举和 udev 规则。如果 CUDA 不可用，
 检查 `nvidia-smi`，不要先安装系统级 CUDA Toolkit；PyTorch wheel 已包含运行时。
 
-该入口只覆盖 Gemini 2 + YOLO，不代表 Ubuntu 本地 GraspNet、hand-eye 标定或完整抓取执行已经完成。
+该入口覆盖 D405 + YOLO；本地 GraspNet 与机器人系候选筛选按下节及总入口分别验证。
 
-## 5. 查看 Gemini 2 点云
+## 5. 查看 D405 点云
 
 首次使用安装 ROS 2 深度图转点云组件：
 
@@ -146,7 +185,7 @@ CameraInfo 使用相同 QoS，避免 `depth_image_proc` 因 reliability 不兼�
 同步内参。该路径只读取相机，不启动机械臂控制器。
 
 如需查看候选，请直接订阅 `/grasp/graspnet_candidates` 或使用 RViz 的 ROS
-可视化节点；该路径不属于 Ubuntu 抓取执行链路。
+可视化节点；该路径用于独立可视化诊断。
 
 ## 6. P4 Ubuntu 本地 GraspNet 环境
 
@@ -182,14 +221,15 @@ ros2 run --prefix "$GRASPNET_PYTHON" rebotarm_vision rebotarm_graspnet_baseline_
 该node直接将时间匹配的aligned RGB、米制depth、CameraInfo intrinsics、YOLO mask/bbox、
 timestamp和`camera_depth_frame`交给同进程GraspNet runner，再把结果发布到
 `/grasp/graspnet_candidates`。它保留完整场景collision cloud、目标mask/depth分离、
-确定性20,000点采样、projection filter与jaw-width filter。RGB/depth skew超限、模型未配置
-或推理异常时只发布空候选，不复用旧结果。
+确定性20,000点采样、projection filter与jaw-width filter。模型、权重、NMS 或启用的
+碰撞过滤依赖加载失败时节点启动失败；推理或候选解析失败时发布空候选，清除旧结果。
+RGB/depth 时间偏差超限时等待匹配的新帧。
 
 新部署的依赖导入或旧service liveness通过不等于真实推理通过；必须核实自己的模型资产，
 并验证当前输入下的候选输出。模型代码、pointnet2扩展、graspnetAPI和checkpoint需
 与所选GraspNet版本匹配，环境安装脚本不负责提供这些第三方资产。
 
-## 7. 完整视觉链路（无真机、仿真执行）
+## 7. 完整视觉候选链路（离线筛选）
 
 先设置上节的GraspNet模型根目录和checkpoint。
 在没有其他相机/仿真节点运行时执行；不要与第3节的相机入口重复启动：
@@ -200,12 +240,9 @@ source install/setup.bash
 export REBOTARM_VISION_PYTHON="$PWD/.venv-vision/bin/python"
 export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
 ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
-  vision_profile:=ubuntu_native use_hardware:=false \
+  robot_context:=offline \
+  vision_handeye_config:="$PWD/install/rebotarm_vision/share/rebotarm_vision/config/d405_handeye.yaml" \
   vision_yolo_model_path:="$PWD/src/rebotarm_vision/models/yolo26s-seg.pt"
 ```
 
-这会使用真实相机和RViz-only运动学后端，不启动MuJoCo物理仿真或真机控制器；
-真实相机相对模拟机器人TF是否有物理意义需自行核验，候选规划不代表实机可执行。
-独立的“真实感知 + MuJoCo 执行”组合入口已删除；当前只保留本节的
-真实感知与仿真轨迹执行验证以及独立的 MuJoCo 离线仿真入口。
-真实执行另见功能手册和现场授权边界。
+这会使用真实相机、被动关节状态和 MoveIt 查询；先核验 D405 手眼结果。接入已有 MuJoCo 环境时使用 `robot_context:=external use_sim_time:=true`。详细命令见[视觉候选命令](../reference/commands/visual_grasp_commands.md)。

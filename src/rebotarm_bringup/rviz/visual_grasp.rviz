@@ -11,21 +11,6 @@ Panels:
 Visualization Manager:
   Class: ""
   Displays:
-    # 仅播放 /display_planned_path 的虚拟轨迹；Trajectory 插件没有 MotionPlanning
-    # 面板的 Plan/Execute 操作，不会提供绕过视觉执行器的真机执行入口。
-    - Class: moveit_rviz_plugin/Trajectory
-      Enabled: true
-      Name: Plan-only Trajectory Preview
-      Trajectory Topic: /display_planned_path
-      Interrupt Display: false
-      Loop Animation: false
-      Robot Alpha: 0.55
-      Robot Color: 150; 50; 150
-      Show Robot Visual: true
-      Show Robot Collision: false
-      # 约 33 Hz 的状态插值显示；只影响动画，不改变规划轨迹。
-      State Display Time: 0.03 s
-      Use Sim Time: false
     # 地面网格：提供尺度参照。Reference Frame 必须与全局 Fixed Frame 一致。
     - Class: rviz_default_plugins/Grid
       Enabled: true

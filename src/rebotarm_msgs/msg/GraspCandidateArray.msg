@@ -1,5 +1,5 @@
 # 同一帧/同一次规划产生的全部抓取候选，按得分从高到低排序。
-# 发布在 /grasp/candidates 一类话题上，供抓取执行器与调试工具消费。
+# 发布在 /grasp/candidates 一类话题上，供候选筛选和显示工具消费。
 
 # 时间戳与坐标系。frame_id 是所有候选 pose 的公共参考系。
 std_msgs/Header header

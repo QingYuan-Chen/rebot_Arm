@@ -92,3 +92,37 @@ def test_candidate_gate_policy_rejects_workspace_outliers_and_object_center_outl
     assert "outside workspace" in outside_workspace.reason
     assert not far_from_object.accepted
     assert far_from_object.reason == "grasp too far from object center (0.300m)"
+
+
+def test_preserve_input_safety_gate_allows_low_grasp_when_width_is_valid():
+    from rebotarm_vision.policies.candidate_ik_policy import CandidateIkPolicy
+    from rebotarm_msgs.msg import GraspCandidate
+    from rebotarm_vision.candidate_pose import PoseTarget
+
+    class NodeForGate:
+        _config = type("Config", (), {"values": {
+            "candidate_workspace_gate_enabled": False,
+            "candidate_min_jaw_width_m": 0.006,
+            "candidate_max_jaw_width_m": 0.082,
+            "candidate_min_grasp_z_m": 0.0,
+        }})()
+
+        def get_parameter(self, name):
+            values = {
+                "candidate_min_jaw_width_m": 0.006,
+                "candidate_max_jaw_width_m": 0.082,
+                "candidate_min_grasp_z_m": 0.0,
+            }
+            return type("Param", (), {"value": values[name]})()
+
+        def get_logger(self):
+            return type("Logger", (), {"warn": lambda self, message: None})()
+
+    candidate = GraspCandidate()
+    candidate.jaw_width = 0.04
+    low_grasp = PoseTarget(position=(0.38, 0.0, 0.035), orientation=(0.0, 0.0, 0.0, 1.0))
+    safe_grasp = PoseTarget(position=(0.38, 0.0, 0.18), orientation=(0.0, 0.0, 0.0, 1.0))
+    node = NodeForGate()
+
+    assert CandidateIkPolicy._candidate_gate_allows(node, candidate, grasp=low_grasp) is True
+    assert CandidateIkPolicy._candidate_gate_allows(node, candidate, grasp=safe_grasp) is True

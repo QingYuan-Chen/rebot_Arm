@@ -1,5 +1,6 @@
 """不构造硬件管理器，验证反馈组件及可供跨语言复用的固定样本。"""
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +19,7 @@ def component():
         gripper_values=lambda state: (state.pos, state.vel, state.torq, state.status_code),
         gripper_sample=lambda *args, **kwargs: None, gripper_error=lambda reason: None,
         period=lambda: .02, stale_timeout=lambda: .15,
-        backend=lambda: SimpleNamespace(control_thread=None), loop_active=lambda: False,
+        backend=lambda: SimpleNamespace(control_thread=None, writer_active=False), loop_active=lambda: False,
     )
 
 
@@ -86,7 +87,7 @@ def test_force_refresh_waits_for_last_request_inside_existing_deadline(monkeypat
             due = .001 if index != 3 else reply_at
             if due is not None and clock[0] >= due:
                 motor.sequence = index+1
-    controller = SimpleNamespace(poll_feedback_once=poll)
+    controller = SimpleNamespace(poll_feedback_once=poll, bus_lock=threading.RLock())
     labels = [f'joint{i}' for i in range(1, 7)]+['gripper']
     feedback._feedback_controller_groups = lambda: [(controller, list(zip(labels, motors)))]
     feedback._joint_names = lambda: labels[:6]
@@ -101,3 +102,22 @@ def test_force_refresh_waits_for_last_request_inside_existing_deadline(monkeypat
         assert 'joint4' in feedback._feedback_error_by_label
     assert all(motor.requests == 3 for motor in motors)
     assert clock[0] <= (.16 if oversleep else .15) + 1e-9
+
+
+def test_cached_snapshot_uses_validated_copy_without_revalidation(monkeypatch):
+    feedback = component()
+    source = SimpleNamespace(pos=0., vel=0., torq=0., status_code=0)
+    feedback._record_verified_feedback('joint1', source, 1, 1.)
+    source.pos = float('nan')
+    monkeypatch.setattr(feedback, '_validate_feedback_sample',
+                        lambda *args: pytest.fail('cached sample revalidated'))
+    result = feedback._cached_motor_feedback_locked('joint1', now=1.)
+    assert result.values == (0., 0., 0.) and result.status_code == 0
+
+
+def test_periodic_refresh_propagates_internal_errors(monkeypatch):
+    feedback = component()
+    monkeypatch.setattr(feedback, '_refresh_feedback_batch',
+                        lambda **kwargs: (_ for _ in ()).throw(AttributeError('broken contract')))
+    with pytest.raises(AttributeError, match='broken contract'):
+        feedback.refresh_feedback_if_due(now=1.)

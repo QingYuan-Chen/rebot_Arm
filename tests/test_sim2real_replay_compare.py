@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from dataclasses import replace
 
 from rebotarm_simulation.sim2real.replay_compare import (
     ComparisonThresholds,
@@ -61,6 +62,7 @@ def test_compare_trajectories_computes_metrics_and_threshold_result():
     )
     assert failed.ok is False
     assert "joint_position_max" in failed.validation_errors
+    assert failed.to_dict()["metrics"]["joint_position_max"] == pytest.approx(0.1)
 
 
 def test_compare_trajectories_reports_structural_mismatch():
@@ -71,7 +73,22 @@ def test_compare_trajectories_reports_structural_mismatch():
 
     assert report.ok is False
     assert report.sample_count == 0
+    assert report.metrics is None
+    assert report.to_dict()["metrics"] is None
     assert any("step_index" in error or "simulation_time" in error for error in report.validation_errors)
+
+
+@pytest.mark.parametrize("reference,candidate,error", [
+    ([], [], "no samples"),
+    ([_sample()], [], "sample_count"),
+    ([_sample()], [replace(_sample(), action=(0.,) * 6)], "action_shape"),
+])
+def test_comparison_with_incompatible_samples_has_no_metrics(reference, candidate, error):
+    report = compare_trajectories(reference, candidate)
+    assert report.ok is False
+    assert report.sample_count == 0
+    assert report.to_dict()["metrics"] is None
+    assert any(error in item for item in report.validation_errors)
 
 
 class FakeReplayEnv:

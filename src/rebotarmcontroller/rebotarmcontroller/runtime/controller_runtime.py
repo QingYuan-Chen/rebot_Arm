@@ -191,7 +191,13 @@ class ControllerRuntime:
         因而这是带设备副作用的释放入口, 不能用于未知使能状态的只读探测收尾.
         """
         self.stop_control_loop()
-        self.driver.close()
+        # 句柄释放后不能在 shutdown 等待中重入反馈采集; 失败时恢复等待状态.
+        waiting = self._waiting
+        self._waiting = True
+        try:
+            self.driver.close()
+        finally:
+            self._waiting = waiting
         self._closing = True
         self.requests.close()
         self._wake.set()
@@ -336,6 +342,7 @@ class ControllerRuntime:
                     else:
                         if isinstance(value, CycleResult):
                             # 事务已接纳, 等待者仍等自己的事件; 写入线程继续服务周期和紧急请求.
+                            # 操作本身可能已作废旧代次；续体绑定操作完成后的代次，后续交接再使其失效。
                             with self.requests.lock:
                                 generations = tuple((name, self.requests.generations[name])
                                                     for name, _ in request.generations)
@@ -363,7 +370,11 @@ class ControllerRuntime:
                                 self.on_error(exc)
                             except Exception as protection_error:
                                 self.last_error += f'; protection failed: {protection_error}'
-                    deadline = time.monotonic() + self._period
+                    # 回调耗时计入本周期；错过下一拍时重新排期，避免追赶积压输出。
+                    deadline += self._period
+                    finished = time.monotonic()
+                    if deadline <= finished:
+                        deadline = finished + self._period
                 # 停止证据以续体逐拍推进, 避免在唯一设备线程内睡眠等静止而阻塞显式失能.
                 self._advance_deferred()
                 self._wake.wait(max(0., deadline-time.monotonic()))
@@ -382,6 +393,7 @@ class ControllerRuntime:
                                    for name, generation in generations)
                 if closing or obsolete:
                     raise RequestRejected('deferred execution superseded or runtime closed')
+                # 在队列锁外推进续体，其他线程可继续提交停止或失能请求。
                 done, result = value.advance()
                 if not done:
                     continue

@@ -22,9 +22,7 @@ class CandidateIkRuntime:
         self.logger = logger
 
     def filter_frame(self, msg) -> dict[str, int]:
-        begin_frame = getattr(self.gateway, "begin_frame", None)
-        if begin_frame is not None:
-            begin_frame()
+        self.gateway.begin_frame()
         if not msg.candidates:
             self.gateway.publish_empty(msg)
             return {"input_candidates": 0, "precheck_passed": 0, "geometry_variants_passed": 0, "ranked": 0}
@@ -70,7 +68,7 @@ class CandidateIkRuntime:
                         f"candidate IK filter accepted candidate={original_index} {label}: "
                         f"score={score_value:.2f}, {motion_reason}"
                     )
-            except (TransformException, RuntimeError, ValueError) as exc:
+            except TransformException as exc:
                 self.logger.warn(f"candidate IK filter rejected candidate: {exc}")
         self.gateway.publish_ranked(msg, ranked)
         return {

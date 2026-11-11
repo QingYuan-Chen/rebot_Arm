@@ -17,8 +17,8 @@ scipy==1.11.4
 opencv-python==4.11.0.86
 ultralytics==8.4.66
 
-# 2.1.1 requires NumPy 2 on Python 3.12, which conflicts with cv_bridge.
-pyorbbecsdk2==2.0.18
+# D405 / RealSense SDK; CPython 3.12 Linux wheel.
+pyrealsense2==2.59.1.11053
 ```
 
 ## 安装入口

@@ -1,10 +1,10 @@
-"""在 MuJoCo 虚拟 RGB 图像流上跑 YOLO，完全不接触真实硬件。
+"""订阅外部或回放 RGB 图像并运行本地 YOLO。
 
 定位与数据流
 ------------
 本节点是「纯软件」的 YOLO 适配器：订阅 RGB 图像 → 调用检测器推理 →
 转换成统一检测消息 → 分流发布。它属于离线/仿真感知链路，不做任何抓取决策，
-也不下发运动指令，因此可以随时启停而不影响真机安全。
+也不下发运动指令；图像来源由发布端与输入话题配置决定。
 
 话题一览
 --------
@@ -20,8 +20,8 @@
 两路检测输出都使用传感器数据 QoS，保证与图像时间戳同步。类别门是**显式白名单**
 （allow-list）：白名单为空表示「拒绝一切检测」而不是「放行一切」。
 任一帧在解码、推理或转换阶段抛异常时，本节点立刻在两路话题上各发布一条空数组
-（保留原时间戳与 frame_id），使下游看到「本帧无目标」而不是沿用上一帧的陈旧结果，
-这就是 fail-closed 行为。
+（保留原时间戳与 frame_id），清除下游的陈旧结果；日志给出本帧处理失败的原因。
+标注绘制错误向执行器传播，已发布的检测消息保持该帧原语义。
 
 由于 Ultralytics 只在真正需要推理时才导入，纯图像/过滤逻辑的单元测试无需安装它。
 """
@@ -40,14 +40,14 @@ from rebotarm_msgs.msg import Detection2DArray
 from ..converters.detection_msgs import result_to_detection_array_msg
 from ..converters.image_msgs import color_to_msg
 from ..offline_yolo import decode_image_to_bgr, filter_detection_array, parse_target_classes
+from ..utils.visualization import draw_detections
 
 
 class OfflineYoloNode(Node):
     """带显式目标类别门控的纯软件 YOLO 适配器。
 
     模型原始输出单独发布一路用于诊断；只有落在 ``target_classes`` 白名单里的
-    检测才会进入过滤后的输出。标准 MuJoCo 场景使用 ``bottle`` 目标，
-    它存在于官方 COCO 标签集中（即无需开放词表提示词即可检出）。
+    检测才会进入过滤后的输出。类别名须与所选模型的标签或开放词表提示匹配。
 
     生命周期：构造时声明并校验参数、加载检测器、建立发布/订阅；
     之后完全由图像回调驱动，单线程执行器下无并发问题。
@@ -59,7 +59,7 @@ class OfflineYoloNode(Node):
         self._load_parameters()
 
         # 延迟导入：让纯图像/过滤逻辑的测试不必安装 Ultralytics。
-        from .detector.yolo_detector import YoloDetector
+        from ..detector.yolo_detector import YoloDetector
 
         self._detector = YoloDetector(
             model_path=self.model_path,
@@ -93,7 +93,7 @@ class OfflineYoloNode(Node):
         )
 
     def _declare_parameters(self) -> None:
-        # 输入彩色图像话题，需与虚拟相机发布的话题一致。
+        # 输入彩色图像话题，需与外部图像发布端或回放话题一致。
         self.declare_parameter("offline_yolo.input_topic", "/camera/color/image_raw")
         # 未过滤的模型原始输出话题，仅用于诊断。
         self.declare_parameter(
@@ -197,23 +197,14 @@ class OfflineYoloNode(Node):
                 f"target={len(filtered.detections)}"
             )
         if self._annotated_pub is not None:
-            try:
-                from .utils.visualization import draw_detections
-
-                annotated = draw_detections(image_bgr, raw)
-                self._annotated_pub.publish(color_to_msg(annotated, stamp, frame_id))
-            except Exception as exc:
-                # 仅可视化失败：检测结果已经正常发布，不改变本帧语义、也不补发空消息，
-                # 只借用同一个闩锁保证该警告不会逐帧刷屏。
-                if not self._failure_latched:
-                    self.get_logger().warning(
-                        f"offline YOLO annotation disabled for this frame: {type(exc).__name__}: {exc}"
-                    )
+            # 检测已发布；绘图或发布故障交给执行器，避免用检测失败闩锁掩盖内部错误。
+            annotated = draw_detections(image_bgr, raw)
+            self._annotated_pub.publish(color_to_msg(annotated, stamp, frame_id))
 
     def _publish_empty(self, stamp, frame_id: str) -> None:
         """在两路检测话题上各发一条空数组，保留原时间戳与坐标系。
 
-        空数组的语义是「本帧确认没有目标」；下游据此判空而不是回退到上一次结果。
+        空数组表示「本帧没有可供下游使用的检测」；处理故障的具体原因由日志说明。
         """
         raw = Detection2DArray()
         raw.header.stamp = stamp

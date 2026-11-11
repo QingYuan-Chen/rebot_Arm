@@ -10,6 +10,7 @@ import time
 
 import numpy as np
 import pytest
+from controller_trajectory_helpers import curve
 
 from rebotarmcontroller.configuration import load_configuration
 from rebotarmcontroller.contracts.controller_contracts import PositionCommand
@@ -123,6 +124,17 @@ def test_partial_construction_releases_all_acquired_handles():
     with pytest.raises(RuntimeError,match='add failure'): driver.connect()
     assert not driver.connected and len(bus.motors)==3
     assert bus.closed and all(m.closed for m in bus.motors)
+
+
+def test_driver_rejects_missing_sequence_interface_before_open(monkeypatch):
+    class Controller:
+        @staticmethod
+        def from_dm_serial(*args):
+            pytest.fail('device was opened before capability validation')
+    monkeypatch.setitem(sys.modules, 'motorbridge',
+                        SimpleNamespace(Controller=Controller, Motor=SimpleNamespace()))
+    with pytest.raises(RuntimeError, match='get_state_with_sequence'):
+        SdkMotorDriver._open_controller('/dev/tty-test', 921600)
 
 
 def test_failed_position_batch_has_receipt_and_stops_remaining_writes():
@@ -385,12 +397,12 @@ def test_zero_rejects_stale_disabled_cache_before_zero_packet():
 def test_execution_cancel_rejects_inflight_plan_and_old_samples():
     execution=ArmExecution();execution.running=True
     generation=execution.generation
-    assert execution.submit([(0.,)*6,(.1,-.1,-.1,.1,.1,.1)],[0.,1.],generation,now=10.)
+    assert execution.submit_prepared(curve((0.,)*6,(.1,-.1,-.1,.1,.1,.1)),generation,now=10.)
     target=execution.sample(10.)
     execution.acknowledge(target)
     assert execution.progress==.5
     execution.cancel()
-    assert not execution.submit([(0.,)*6],[0.],generation,now=10.)
+    assert not execution.submit_prepared(curve((0.,)*6,(0.,)*6),generation,now=10.)
     execution.acknowledge(target)
     assert not execution.moving
     assert execution.target()==pytest.approx((0.,)*6)
@@ -404,7 +416,7 @@ def test_target_is_copied_and_trajectory_advances_only_after_send_ack():
     source=np.zeros(6);execution.set_target(source);source[0]=99
     assert execution.target()[0]==0
     generation=execution.generation
-    assert execution.submit([(0.,)*6,(.1,-.1,-.1,.1,.1,.1)],[0.,.1],generation,now=10.)
+    assert execution.submit_prepared(curve((0.,)*6,(.1,-.1,-.1,.1,.1,.1),.1),generation,now=10.)
     target=execution.sample(10.2)
     assert execution.moving and execution.progress==0.
     execution.acknowledge(target)
@@ -436,6 +448,72 @@ def test_runtime_self_stop_and_bounded_queue_never_start_second_writer():
         release.set()
         runtime.stop_control_loop()
         runtime.close_worker()
+
+
+@pytest.mark.parametrize('durations,intervals,faulted', [
+    ([.006] * 5, [.01] * 4, False),
+    ([.012] * 5, [.022] * 4, True),
+    ([.006, .035, .006, .006, .006], [.01, .045, .01, .01], False),
+])
+def test_runtime_cycle_budget_includes_callback_without_catchup(
+        monkeypatch, durations, intervals, faulted):
+    """真实调度器按 100 Hz 排期，超时后跳过旧拍且保留重力超时判据。"""
+    from rebotarmcontroller.runtime import controller_runtime
+    from rebotarm_force_control.gravity_control import LoopTiming
+
+    clock = SimpleNamespace(now=0.)
+    monkeypatch.setattr(controller_runtime, 'time',
+                        SimpleNamespace(monotonic=lambda: clock.now))
+    config = replace(load_configuration(), rate=100.)
+    runtime = ControllerRuntime(config, None, driver=SimpleNamespace(connected=False))
+    runtime._wake = SimpleNamespace(
+        clear=lambda: None,
+        wait=lambda duration: setattr(clock, 'now', clock.now + duration))
+    timing, starts = LoopTiming(config.rate), []
+
+    def tick(_runtime, dt):
+        assert dt == pytest.approx(.01)
+        starts.append(clock.now)
+        timing.begin(clock.now)
+        clock.now += durations[len(starts) - 1]
+        timing.finish(clock.now)
+        if len(starts) == len(durations):
+            runtime._closing = True
+
+    runtime._callback = tick
+    runtime._run()
+    assert runtime.last_error is None
+    assert np.diff(starts) == pytest.approx(intervals)
+    assert timing.faulted is faulted
+
+
+def test_disabled_release_does_not_poll_after_motor_handles_are_closed(monkeypatch):
+    manager, buses = make_local_manager(monkeypatch)
+    manager.runtime.driver._sleep = manager.runtime.device_wait
+    manager.lifecycle.connect()
+    bus = buses[0]
+    idle = manager.runtime.idle_callback
+    def guarded_idle():
+        assert not any(motor.closed for motor in bus.motors), 'feedback polled during release'
+        idle()
+    manager.runtime.idle_callback = guarded_idle
+    manager.lifecycle.shutdown()
+    assert bus.closed and all(motor.closed for motor in bus.motors)
+    assert not manager.runtime.writer_active and manager.runtime.last_error is None
+
+
+def test_failed_disabled_release_restores_wait_state(monkeypatch):
+    manager, _ = make_local_manager(monkeypatch)
+    manager.lifecycle.connect()
+    close = manager.runtime.driver.close
+    monkeypatch.setattr(manager.runtime.driver, 'close',
+                        lambda: (_ for _ in ()).throw(RuntimeError('release failure')))
+    with pytest.raises(RuntimeError, match='release failure'):
+        manager.lifecycle.shutdown()
+    assert manager.lifecycle.connected and not manager.runtime._waiting
+    assert manager.runtime.driver.connected
+    monkeypatch.setattr(manager.runtime.driver, 'close', close)
+    manager.lifecycle.shutdown()
 
 
 def test_real_manager_local_path_default_disabled_enable_recover_reconnect(monkeypatch):
@@ -549,8 +627,8 @@ def test_invalid_passthrough_cannot_preempt_active_task(monkeypatch, resource, f
     setattr(command, field, value)
     try:
         if resource == 'arm':
-            task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-                [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., 10.])
+            monkeypatch.setattr(bus.motors[0], 'send_pos_vel', lambda *_: None)
+            task = manager.arm.submit_home((.1,-.1,-.1,0.,0.,0.), (.3,)*6, 10.)
             generation = manager.runtime.target_generation
             count = len(bus.events)
             with pytest.raises(ValueError):
@@ -573,8 +651,12 @@ def test_valid_passthrough_preempt_uses_feedback_after_stop_confirmation(monkeyp
     manager, opened = make_local_manager(monkeypatch)
     manager.lifecycle.connect(); manager.lifecycle.enable()
     bus = opened[0]
-    task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-        [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., 10.])
+    send = bus.motors[0].send_pos_vel
+    def delayed_position(*args):
+        send(*args)
+        bus.motors[0].state.pos = 0.
+    monkeypatch.setattr(bus.motors[0], 'send_pos_vel', delayed_position)
+    task = manager.arm.submit_home((.1,-.1,-.1,0.,0.,0.), (.3,)*6, 10.)
     command = SimpleNamespace(mode=1,
         **{f'use_{key}': False for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')})
     from rebotarmcontroller.arm.arm_stop import ArmStop
@@ -743,6 +825,27 @@ def test_disable_writer_stop_failure_keeps_enabled_state(monkeypatch):
     manager.lifecycle.disable(); manager.lifecycle.shutdown()
 
 
+def test_safe_home_requires_valid_feedback_before_changing_target_or_task(monkeypatch):
+    manager, _ = make_local_manager(monkeypatch)
+    manager.lifecycle.connect(); manager.lifecycle.enable()
+    try:
+        execution = manager.runtime.execution
+        before = (execution.generation, tuple(execution.target()),
+                  manager.arm._arm_trajectory.task, manager.lifecycle.execution)
+        def fail_feedback():
+            raise RuntimeError('fresh valid feedback required')
+        with monkeypatch.context() as patch:
+            patch.setattr(manager.arm, 'feedback',
+                          replace(manager.arm.feedback, get_joint_state=fail_feedback))
+            with pytest.raises(RuntimeError, match='fresh valid feedback required'):
+                manager.arm.submit_home((.1, -.1, -.1, 0., 0., 0.), (.3,) * 6, 1.)
+        assert (execution.generation, tuple(execution.target()),
+                manager.arm._arm_trajectory.task, manager.lifecycle.execution) == before
+        assert manager.lifecycle.enabled
+    finally:
+        manager.lifecycle.disable(); manager.lifecycle.shutdown()
+
+
 def test_safe_home_completion_switches_to_hold_and_clears_task_speed(monkeypatch):
     manager, _ = make_local_manager(monkeypatch)
     manager.lifecycle.connect(); manager.lifecycle.enable()
@@ -753,14 +856,28 @@ def test_safe_home_completion_switches_to_hold_and_clears_task_speed(monkeypatch
     manager.lifecycle.disable(); manager.lifecycle.shutdown()
 
 
+def test_safe_home_timeout_holds_feedback_and_retains_enable(monkeypatch):
+    manager, opened = make_local_manager(monkeypatch)
+    manager.lifecycle.connect(); manager.lifecycle.enable()
+    monkeypatch.setattr(opened[0].motors[0], 'send_pos_vel', lambda *_: None)
+    try:
+        with pytest.raises(RuntimeError, match='not reached'):
+            manager.arm.safe_home((.1,0.,0.,0.,0.,0.), timeout_sec=.03)
+        wait_until(lambda: manager.lifecycle.execution == 'IDLE')
+        assert manager.arm.joint_target()[0] == 0.
+        assert manager.runtime.execution.sample(time.monotonic()).velocity_override is None
+        assert manager.lifecycle.enabled and opened[0].disables == 0
+    finally:
+        manager.lifecycle.disable(); manager.lifecycle.shutdown()
+
+
 def test_safe_home_supersession_does_not_rewrite_new_target(monkeypatch):
     manager, opened = make_local_manager(monkeypatch)
     manager.lifecycle.connect(); manager.lifecycle.enable()
     successor = (0.2, -0.2, -0.2, 0., 0., 0.)
     # 假电机不跟随，确保原任务仍在等待；替换目标后只允许新目标保留。
     monkeypatch.setattr(opened[0].motors[0], 'send_pos_vel', lambda *_: None)
-    task = manager.arm.submit_arm_trajectory(manager.runtime.joint_names,
-        [(0.,)*6, (.1,-.1,-.1,0.,0.,0.)], [0., .02])
+    task = manager.arm.submit_home((.1,-.1,-.1,0.,0.,0.), (.3,)*6, 1.)
     manager.arm.set_joint_target(successor)
     assert task.event.wait(1.)
     assert manager.arm.arm_execution_status(task).state == 'aborted'

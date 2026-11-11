@@ -1,40 +1,13 @@
-# 视觉抓取规划与执行编排
+# 视觉候选生成与筛选
 
-> 状态：IMPLEMENTED；类型：视觉抓取功能说明；适用范围：候选过滤、规划门和阶段编排；不宣称真实抓取成功。
+> 状态：IMPLEMENTED；类型：视觉候选功能说明；适用范围：候选生成、筛选和显示。
 
-## 功能概述
+D405 的 RGB-D/CameraInfo 与 YOLO 检测结果输入本地 GraspNet。候选经过置信度、开度、传感器时间 TF、工作空间、IK、碰撞和关节行程检查，发布 `/grasp/filtered_candidates`、`/grasp/filtered_plan` 和 RViz Marker。缺失有效输入或查询依赖时按筛选规则拒绝候选。
 
-在 Ubuntu 原生 RGB-D/YOLO/GraspNet 链路上，系统生成候选并依次执行坐标、工作空间、IK、碰撞、夹爪和新鲜度检查，再交给运动层规划。
+显式启用的 YOLO 开放词表及 GraspNet 模型、权重、NMS、启用的碰撞过滤依赖在启动时加载；加载失败时报告原因。推理产物损坏时清空该帧候选及显示，正常空候选保持原有语义。
 
-## 当前实现
+D405 通过 RealSense SDK 采集，深度按实际比例尺转为毫米并对齐彩色图。手眼外参默认为空；机器人坐标下的筛选需显式传入新标定文件，配置和步骤见[视觉环境](../../setup/ubuntu_vision_setup_zh.md)。
 
-- 候选深度、TF、时间戳和置信度检查；
-- 工作空间、姿态、夹爪宽度和关节变化约束；
-- IK 与 MoveIt 状态有效性/碰撞门；
-- pregrasp、approach、grasp、verification、retreat 阶段编排；
-- 主入口固定执行流程，由 use_hardware 选择仿真或真机；启动不自动使能或抓取；
-- 节点内部保留规划预检和纯规划能力；公共 launch 不再提供 plan-only 切换；
-- 失败、过期候选和无候选时 fail-closed。
-- 停止确认门控：`/visual_grasp/stop` 停止并保持当前位置，只有旧执行请求退出、动作终态及新鲜静止反馈确认后才重新开放 execute；确认失败继续阻断，排查后重试 stop。普通流程不再提供 reset，也不自动回 safe_home。
+`visual_grasp_system.launch.py` 的 `robot_context:=offline` 使用被动关节状态与 MoveIt 查询服务；`robot_context:=external` 接入已有的模型、TF、关节状态和 MoveIt 环境。使用 MuJoCo 时需设置 `use_sim_time:=true`。两种组合均用于感知、筛选与显示。
 
-`prepared_v1` 本批只执行接触前流程：独立预张爪完成并取得新鲜反馈 → 用实际开度规划到
-预抓取点 → 保持开度执行接近，到接触边界结束；不自动闭合、验证夹持、搬运、放置或撤退。
-预览返回六轴规划轨迹，夹爪不参与 FJT，也不叠加独立动画冒充受检曲线。
-虚拟连续阶段用 `ompl_reference` 保留上一阶段的计划末点；每一实际阶段在前段完成后
-重新取得后端快照并生成最终绑定曲线，准备不再修改起点。参考预览不能直接下发执行。
-原 legacy 抓取流程保留，不能抢占活动网页组合任务。
-本批验证边界见 [P005 协同接口](p005_prepared_trajectory.md#修订协同接口)，不代表视觉工作流或实机抓取全项验收。
-
-## 验证结果
-
-视觉只读、候选过滤、Marker/Open3D、规划预检和仿真 benchmark 已有软件或仿真验证。完整数据流和命令见 [视觉抓取命令](../../reference/commands/visual_grasp_commands.md)。
-
-## 边界与未完成
-
-候选、规划或仿真接触通过不等于真实抓取成功；真实 approach、lift、retreat、放置和结果分类仍需单独分级验收和授权。
-
-重复抓取从当前反馈姿态规划，不强制回观察位。新过期输入会撤销旧缓存，execute 在缓存缺失/过期时有界等待有效计划并保留具体拒收原因。
-
-本地正式[单瓶抓取工作流](../../single_bottle_grasp_zh.md)继续保留，通过运动层公开接口
-执行并按本轮捕获的安全基线受控恢复。健康机械臂的可恢复失败应保持使能；只有回到
-已验证基线并停稳后才可失能，停止确认和仿真测试都不能替代该现场验收。
+筛选继续使用现有策略 profile 的有效值。独立夹爪位置控制、通用运动、RViz 可视化和 MuJoCo 入口保持各自职责。操作命令见 [视觉候选命令](../../reference/commands/visual_grasp_commands.md)，项目验证进度见[项目状态](../../reference/project_status.md)。

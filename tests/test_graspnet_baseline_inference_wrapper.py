@@ -17,6 +17,26 @@ def _load_wrapper():
     return module
 
 
+def test_enabled_filter_dependencies_are_required_at_startup(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+    module = _load_wrapper()
+    runner = object.__new__(module.GraspNetBaselineInference)
+    runner.model_root = str(tmp_path)
+    runner.collision_thresh = .01
+    monkeypatch.setitem(sys.modules, 'torch', SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'graspnet', SimpleNamespace(GraspNet=object, pred_decode=object()))
+    monkeypatch.setattr(module, 'install_training_knn_fallback', lambda: None)
+    monkeypatch.setattr(module, 'load_grasp_group', lambda: object)
+    monkeypatch.setitem(sys.modules, 'grasp_nms', None)
+    with pytest.raises(ModuleNotFoundError, match='grasp_nms'):
+        runner._load_network()
+    monkeypatch.setitem(sys.modules, 'grasp_nms', SimpleNamespace(nms_grasp=object()))
+    monkeypatch.setitem(sys.modules, 'collision_detector', None)
+    with pytest.raises(ModuleNotFoundError, match='collision_detector'):
+        runner._load_network()
+
+
 def test_graspnet_wrapper_converts_graspnet_array_rows_to_json_candidates():
     module = _load_wrapper()
     row = np.array(
@@ -53,6 +73,16 @@ def test_graspnet_wrapper_converts_graspnet_array_rows_to_json_candidates():
     assert candidates[0]["width_m"] == pytest.approx(0.042)
     assert candidates[0]["translation_xyz"] == pytest.approx([0.10, -0.02, 0.35])
     assert np.asarray(candidates[0]["rotation_matrix"]) == pytest.approx(np.eye(3))
+
+
+def test_graspnet_wrapper_rejects_corrupt_rows_before_filtering():
+    module = _load_wrapper()
+    good = np.array([.9, .04, .02, .03, *np.eye(3).ravel(), .1, -.02, .35], dtype=np.float32)
+    for bad in (np.array([.9, .04]), np.where(np.arange(16) == 0, np.nan, good),
+                np.concatenate((good[:4], np.zeros(9), good[13:]))):
+        with pytest.raises(ValueError, match='invalid GraspNet'):
+            module.graspnet_array_to_candidates(bad, class_name='cup', max_grasps=1, max_jaw_width_m=.08)
+    assert module.graspnet_array_to_candidates([], class_name='cup', max_grasps=1) == []
 
 
 def test_graspnet_wrapper_builds_scene_cloud_from_full_depth_image():

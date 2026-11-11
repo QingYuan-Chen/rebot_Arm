@@ -20,6 +20,15 @@
 MoveIt 预检与 Action 生命周期由专用辅助模块处理，`TeachReplayWorkflow` 继续统一
 dry-run token、对齐、执行和停止状态，Dashboard 不复制回放实现。
 
+六轴回放重定时统一归 `rebotarm_motion.trajectory_time_parameterization`，输入为规范
+`joint1..joint6`、共享数值点、限值和倍速；`retime_teach_samples` 仅做录制格式适配。
+少关节记录保留读取、查看和通用质量分析，进入回放重定时时明确拒绝。
+历史 `time_parameterization_method` 继续可读并保留请求值，实际方法按字段等级报告
+`c0/c1/c2_waypoint_retime`；请求 `ruckig` 时同时说明当前未提供 waypoint 适配器。
+旧局部维度差分重定时、反向注入回调和未实现 Ruckig 分支已删除。位置处理、源节点、
+统一缩放及完整曲线的解析限值/碰撞复核继续沿用现有流程。 维护整改后使用现有 306 行原始记录完成
+MuJoCo C1 对齐、完整碰撞检查、取消和再次回放；证据见 [P005 维护整改验收](p005_prepared_trajectory.md#维护整改验收2026-11-04)。
+
 录制格式保留夹爪总开口、源时间和有效性供查看；回放只按关节名称提取完整六轴，
 页面明确提示“夹爪不参与回放”。旧六轴记录与含第七轴的记录均不覆盖原始文件，
 派生六轴格式为 `.prepared.v5.jsonl`，保存执行用 q/v 或 q/v/a，以及原输入等级、参考等级、
@@ -104,7 +113,8 @@ ROS_DOMAIN_ID=74 python3 scripts/validate_p005_simulation.py --ros \
 `isolated_imports.json`、`acceptance_delivery/teach_web_preview.json`、
 对应 dry-run/execute/终态和反馈报告、`simulation_delivery.log`。
 未运行完整 pytest、重认 P005 单步物理指标或进行实机操作；未扩展处理已有退出协程警告。
-此前 C2/v4 仅保留历史证据。实机默认 legacy、默认失能不变，网页需重新加载并重新检查。
+此前 C2/v4 仅保留历史证据。当时实机默认 legacy、默认失能，网页需重新加载并重新检查。
+当前入口默认模式见 [P005 执行接入](p005_prepared_trajectory.md)。
 
 ### 缺少加速度记录修复验收（2026-11-04）
 

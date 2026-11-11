@@ -33,47 +33,6 @@ def _vector(values: Mapping[str, object], name: str, size: int) -> None:
         _finite(item, f"{name}[{index}]")
 
 
-def validate_visual_parameters(values: Mapping[str, object]) -> None:
-    validate_parameter_geometry(values)
-    for name in (
-        "service_timeout_sec", "motion_result_timeout_sec", "max_plan_age_sec",
-        "plan_only_stage_pause_sec", "base_pregrasp_distance_m", "safe_retreat_distance_m",
-        "approach_visual_servo_max_step_m", "approach_visual_servo_position_tolerance_m",
-        "gripper_grasp_min_close_time_sec", "gripper_grasp_velocity_threshold",
-        "gripper_grasp_min_closure_distance_m", "grasp_verification_min_closure_distance_m",
-        "open_position_m", "close_position_m", "open_clearance_m", "close_margin_m",
-        "close_max_effort", "min_gripper_effort", "max_gripper_effort",
-        "gripper_grasp_close_force", "max_allowed_grasp_width_m",
-        "place_open_position_m", "place_open_max_effort", "place_retreat_z_m",
-        "pregrasp_wait_sec", "approach_wait_sec", "gripper_wait_sec", "retreat_wait_sec",
-        "refresh_plan_timeout_sec", "gripper_grasp_timeout_sec",
-    ):
-        _range(values, name, minimum=0.0)
-    for name in (
-        "move_velocity_scaling", "approach_velocity_scaling", "retreat_velocity_scaling",
-        "acceleration_scaling",
-    ):
-        _range(values, name, minimum=0.0, maximum=1.0)
-    for name in ("min_open_position_m", "max_open_position_m", "min_close_position_m", "max_close_position_m"):
-        _range(values, name, minimum=0.0)
-    if "min_open_position_m" in values and "max_open_position_m" in values and float(values["min_open_position_m"]) > float(values["max_open_position_m"]):
-        raise ValueError("min_open_position_m must be <= max_open_position_m")
-    if "min_close_position_m" in values and "max_close_position_m" in values and float(values["min_close_position_m"]) > float(values["max_close_position_m"]):
-        raise ValueError("min_close_position_m must be <= max_close_position_m")
-    if "min_gripper_effort" in values and "max_gripper_effort" in values and float(values["min_gripper_effort"]) > float(values["max_gripper_effort"]):
-        raise ValueError("min_gripper_effort must be <= max_gripper_effort")
-    if "approach_visual_servo_max_iterations" in values and int(values["approach_visual_servo_max_iterations"]) < 1:
-        raise ValueError("approach_visual_servo_max_iterations must be >= 1")
-    if "auto_retry_max_attempts" in values and int(values["auto_retry_max_attempts"]) < 1:
-        raise ValueError("auto_retry_max_attempts must be >= 1")
-    for name, size in (
-        ("tcp_offset_xyz", 3), ("target_base_offset_xyz", 3),
-        ("fixed_grasp_orientation_xyzw", 4), ("place_position_xyz", 3),
-        ("place_orientation_xyzw", 4),
-    ):
-        _vector(values, name, size)
-
-
 def validate_candidate_parameters(values: Mapping[str, object]) -> None:
     validate_parameter_geometry(values)
     _range(values, "service_timeout_sec", minimum=0.0)

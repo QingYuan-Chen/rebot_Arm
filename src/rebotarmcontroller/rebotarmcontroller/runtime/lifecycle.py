@@ -215,20 +215,47 @@ class ControllerLifecycle:
                 self.enabled = False
                 self.ports.confirm_disabled()
                 self.set_state("CONNECTED_DISABLED")
-            except Exception:
-                self.disconnect_failed_connect()
+            except Exception as exc:
+                cleanup_error = self.disconnect_failed_connect()
+                if cleanup_error is not None:
+                    raise RuntimeError(
+                        f"connect failed: {exc}; cleanup failed: {cleanup_error}"
+                    ) from exc
                 raise
 
     def disconnect_failed_connect(self):
-        """连接失败后逐步尽力清理; 保留原始连接错误."""
-        for operation in (self.ports.stop_gripper, self.ports.stop_control,
-                          self.disable_all, self.ports.device.disconnect):
+        """连接失败后逐步尽力清理并返回清理失败摘要.
+
+        释放未确认时保留连接引用且不发布 DISCONNECTED; 调用方必须把原连接错误
+        与清理错误一并上报, 不能把"已尝试断开"当作设备已释放.
+        """
+        errors = []
+        release_error = None
+        for label, operation in (("stop gripper", self.ports.stop_gripper),
+                                 ("stop control", self.ports.stop_control),
+                                 ("disable", self.disable_all),
+                                 ("disconnect", self.ports.device.disconnect)):
             try:
                 operation()
-            except Exception:
-                pass
-        self.connected = self.enabled = False
-        self.set_state("DISCONNECTED")
+            except Exception as exc:
+                errors.append(f"{label}: {exc}")
+                if label == "disconnect":
+                    release_error = exc
+        self.enabled = False
+        if not errors:
+            self.connected = False
+            self.set_state("DISCONNECTED")
+            return None
+        message = "; ".join(errors)
+        self.errors.append(f"CONNECT_CLEANUP_FAILED: {message}")
+        if release_error is not None:
+            # 释放未确认时保留连接引用, 不发布 DISCONNECTED, 由调用方显式处理.
+            self.set_state("DISABLING")
+        else:
+            # 释放已确认, 失能结果仍保留在错误原因中, 供启动日志准确报告.
+            self.connected = False
+            self.set_state("DISCONNECTED")
+        return message
 
     @device_request
     def enable(self):
@@ -313,6 +340,7 @@ class ControllerLifecycle:
         """
         with self.lock:
             self.require_connected()
+            # 先关闭运动准入，再进入含握手等待的失能事务；等待期间发布端仍可观察过渡状态。
             self.set_state("DISABLING")
             was_enabled = self.enabled
             self.enabled = False
@@ -413,6 +441,7 @@ class ControllerLifecycle:
             except Exception as exc:
                 self.errors.append(f"SHUTDOWN_RELEASE_FAILED: {exc}")
                 raise RuntimeError(f"shutdown release: {exc}") from exc
+            # 只有设备释放返回成功才撤销连接身份，释放失败时保留后续处置所需的会话。
             self.connected = False
             self.set_state("DISCONNECTED")
 

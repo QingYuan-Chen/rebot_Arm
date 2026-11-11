@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from controller_trajectory_helpers import curve
 
 from rebotarmcontroller.arm.arm_execution import ArmExecution
 from rebotarmcontroller.runtime.lifecycle import ControllerLifecycle, shutdown_policy
@@ -83,7 +84,7 @@ def test_new_trajectory_revokes_scoped_override():
     arm = ArmExecution()
     arm.running = True
     home = arm.begin_scoped_target((0.,)*6, (.3,)*6)
-    assert arm.submit([(0.,)*6], [0.], home, now=0.)
+    assert arm.submit_prepared(curve((0.,)*6,(0.,)*6), home, now=0.)
     assert arm.generation != home
     assert arm.sample(0.).velocity_override is None
     assert not arm.finish_scoped_target(home, np.zeros(6))
@@ -125,7 +126,7 @@ def test_signal_shutdown_keeps_executor_running_after_refusal(monkeypatch):
 def test_gravity_and_lifecycle_fixed_vectors():
     import json
     from pathlib import Path
-    from rebotarmcontroller.gravity.gravity_control import GravityExecutionState
+    from rebotarm_force_control.gravity_control import GravityExecutionState
     vectors = json.loads((Path(__file__).parent / 'fixtures/controller_arm_vectors.json').read_text())
     for case in vectors['gravity_steps']:
         gravity = GravityExecutionState()

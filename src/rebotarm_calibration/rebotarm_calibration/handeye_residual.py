@@ -41,6 +41,11 @@ import numpy as np
 SCHEMA_VERSION = 1
 
 
+def robot_pose_key(transform):
+    """采集与求解共用已有八位小数精度的机器人姿态重复判定。"""
+    return tuple(round(float(value), 8) for value in transform_matrix(transform).ravel())
+
+
 def transform_matrix(transform: Mapping[str, object]) -> np.ndarray:
     """把 ``{"translation", "rotation_xyzw"}`` 表示的变换转成 4x4 齐次矩阵。
 
@@ -357,10 +362,10 @@ def _matrix_quaternion(rotation: np.ndarray) -> np.ndarray:
 
 
 def rotation_observability(transforms, *, maximum_condition_number=100.0):
-    """Relative rotation constraints must constrain all translation directions.
+    """核对相对旋转是否对三个平移方向都提供足够约束。
 
-    Stacking R_i.T R_j - I exposes the common-axis nullspace. This is an
-    excitation gate, not a claim of absolute calibration accuracy.
+    堆叠 R_i.T R_j - I 后，公共旋转轴会形成零空间；秩和条件数检查用于采样激励门，
+    绝对精度另由残差及物理测量评估。
     """
     if not math.isfinite(maximum_condition_number) or maximum_condition_number <= 1:
         raise ValueError("maximum_condition_number must be finite and greater than one")

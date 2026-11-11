@@ -93,6 +93,7 @@ class ControllerCycle:
             self._expire_passthrough()
             # 夹爪几何绑定在本周期输出之前复核；失效时先交给六轴停止保持事务接管。
             self.arm.check_prepared_context()
+            # 组合所有者先核验两侧任务；实际六轴发送和夹爪推进仍由各自执行器完成。
             coordinated = self.arm.coordinated_tick()
             if not coordinated and not self.arm.passthrough_active():
                 arm_callback(arm, dt)

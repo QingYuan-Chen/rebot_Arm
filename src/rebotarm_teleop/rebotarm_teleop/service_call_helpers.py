@@ -20,8 +20,7 @@ def call_trigger_service(client, *, timeout_sec: float) -> tuple[bool, str]:
       避免操作者按下停止后长时间无响应；
     - 发出请求后再等到 ``timeout_sec`` 截止，期间每 20 ms 轮询一次 future，
       保证调用方（通常是单线程 executor 的一个回调）不会被永久阻塞。
-    任何异常都被转换成 ``(False, 异常文本)`` 返回，绝不向调用方抛出；
-    响应缺少 ``success`` / ``message`` 字段时按失败与空消息处理。
+    任何异常都被转换成 ``(False, 异常文本)`` 返回，绝不向调用方抛出。
     """
     try:
         if not client.wait_for_service(timeout_sec=min(float(timeout_sec), 0.5)):
@@ -33,6 +32,6 @@ def call_trigger_service(client, *, timeout_sec: float) -> tuple[bool, str]:
         if not future.done():
             return False, "service timeout"
         response = future.result()
-        return bool(getattr(response, "success", False)), str(getattr(response, "message", ""))
+        return bool(response.success), str(response.message)
     except Exception as exc:
         return False, str(exc)

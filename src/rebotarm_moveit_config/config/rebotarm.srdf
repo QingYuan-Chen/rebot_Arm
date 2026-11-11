@@ -30,18 +30,14 @@
        （rebotarm_simulation/models/rebotarm/scene.xml）中的 keyframe 保持一致，使同一个姿态名在仿真与真机上
        含义相同。
 
-       这里刻意不提供全零命名状态：joint3 的原点在 x 方向为 -0.264 m，joint4 的原点为
-       +0.2426 m，当 joint2~joint5 都接近 0 时前臂会折回贴上上臂，link2 与 link5 间距
-       只剩约 1.6 mm。此时 MoveIt 会在 CheckStartStateCollision 阶段拒绝所有规划请求
-       （报 "1 contact(s) detected : link2 - link5"），即全零姿态是被堵死的终点：
-       可以运动过去，却无法从那里规划出来。
+       本文件提供 safe_home 和 home 两个机械臂命名状态。零位附近的碰撞对关节角敏感，
+       使用实际反馈和当前场景完成起点及路径检查；现场对照记录见 docs/reference/project_status.md。
 
-       仿真侧另外保留一个本文件没有对应项的 "zero" keyframe，它是仿真复位用的初始状态
-       （该姿态下间距已有 201.8 mm），由 mujoco_adapter_core.reset() 消费，
-       属于复位状态而不是可规划的命名目标。 -->
+       仿真另外提供 "zero" keyframe，供 RebotArmMujoco.reset() 按配置选择复位状态；
+       该 keyframe 的具体关节值以 MuJoCo 场景文件为准。 -->
   <!-- safe_home：安全停机/复位姿态，单位弧度。仅 joint3 = -0.017453292519943295（即 -1°）
-       非零，其余全为 0；这 1° 偏置把前臂从上臂旁让开，保证自碰撞检查可以通过。
-       驱动侧安全停机默认值、Web 侧安全姿态与仿真 keyframe 都与此一致。 -->
+       非零，其余全为 0。驱动侧停靠默认值、Web 侧安全姿态与仿真 keyframe 均沿用此值；
+       从实际起点到该目标的运动仍需按当前场景检查。 -->
   <group_state name="safe_home" group="arm">
     <joint name="joint1" value="0.0" />
     <joint name="joint2" value="0.0" />
@@ -77,7 +73,7 @@
 
   <!-- 自碰撞禁用矩阵：相邻 link 在结构上本就贴在一起（关节处必然接触），
        若不禁用会产生大量假碰撞导致规划全部失败，因此统一以 reason="Adjacent" 禁用。
-       这里并未禁用 link2-link5 等真正会相撞的组合，所以 safe_home 的 1° 偏置仍然必要。 -->
+       link2-link4、link2-link5 保持参与检查，按每次请求的关节状态计算。 -->
   <disable_collisions link1="base_link" link2="link1" reason="Adjacent" />
   <disable_collisions link1="link1" link2="link2" reason="Adjacent" />
   <disable_collisions link1="link2" link2="link3" reason="Adjacent" />
@@ -90,7 +86,7 @@
   <!-- 左右手指互碰：两指沿同一轴线相向运动，夹持时必然接近或接触，属结构性接触，
        因此用 reason="Never"（永不检查）禁用。 -->
   <disable_collisions link1="left_finger_link" link2="right_finger_link" reason="Never" />
-  <!-- Fixed wrist assembly mating surfaces; camera remains collidable with the rest of the robot. -->
+  <!-- 固定腕部装配接合面按下列规则排除；相机与其余机械臂部件继续参与碰撞检查。 -->
   <disable_collisions link1="end_link" link2="d405_mount_link" reason="Adjacent" />
   <disable_collisions link1="link6" link2="d405_mount_link" reason="Adjacent" />
   <disable_collisions link1="d405_mount_link" link2="d405_link" reason="Adjacent" />

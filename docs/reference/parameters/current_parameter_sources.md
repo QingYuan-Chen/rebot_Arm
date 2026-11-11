@@ -19,9 +19,9 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 | URDF/SRDF、关节限位、规划器 | `src/rebotarm_moveit_config/config/` | `rebotarm_moveit_config` |
 | 真机设备配置、安全增益和时序 | `rebotarmcontroller/config/arm.yaml`、`gripper.yaml`、`configuration.ProtocolTiming`；bringup 显式覆盖 `rebotarm_bringup/config/` 的配置 | `rebotarmcontroller` |
 | 真机反馈和夹爪运行参数 | `hardware_controller.launch.py`、`rebotarmcontroller` 参数 | `rebotarmcontroller` |
-| 轨迹安全、视觉运动规划与停止确认 | `src/rebotarm_motion/config/` | `rebotarm_motion` |
-| 视觉节点组合和后端选择 | `src/rebotarm_bringup/launch/includes/`、`src/rebotarm_bringup/config/visual_backend_profile.yaml` | `rebotarm_bringup` |
-| Gemini 2、YOLO、GraspNet | `src/rebotarm_vision/config/` | `rebotarm_vision` |
+| 轨迹安全和运动规划 | `rebotarm_motion` 与各组合参数 | `rebotarm_motion` |
+| 视觉节点组合和后端选择 | `src/rebotarm_bringup/launch/visual_grasp_system.launch.py` 及 `launch/includes/` | `rebotarm_bringup` |
+| D405、YOLO、GraspNet | `src/rebotarm_vision/config/` | `rebotarm_vision`；新手眼结果显式传入 |
 | 视觉抓取跨节点接口 | `src/rebotarm_bringup/config/visual_grasp_interfaces.yaml` | `rebotarm_bringup` |
 | MuJoCo 模型、动力学和 CPU RL | `src/rebotarm_simulation/config/`、`docs/setup/dependencies/mujoco.md`、`docs/setup/dependencies/rl.md` | `rebotarm_simulation` |
 | 标定会话和手眼输入 | `src/rebotarm_vision/config/handeye.yaml`、标定 launch 参数 | `rebotarm_calibration` |
@@ -33,12 +33,11 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 
 | 入口 | 用途 | 参数范围 |
 |---|---|---|
-| `visual_grasp_system.launch.py` | 唯一视觉入口 | 仿真／真机后端、显示开关与配置文件；固定执行流程 |
+| `visual_grasp_system.launch.py` | 唯一视觉入口 | `robot_context:=offline|external`、显示开关与配置文件 |
 
 维护规则：新 topic/frame/service/action 先加入 `visual_grasp_interfaces.yaml`；
 视觉策略归 rebotarm_vision/config，运动策略归 rebotarm_motion/config。
-必需执行节点由主入口统一启动，不再由模式包装文件复制默认值。
-策略 profile 与 reusable policy YAML 的既有覆盖关系仍保留，本轮未改变抓取调参。
+筛选策略继续使用 `visual_strategy_profile.yaml` 的有效参数；Marker 输入与 `filtered_plan_topic` 一致。
 
 CPU Reach 工具仍归 `rebotarm_simulation`；MJLab 任务与训练参数归现有独立工程
 `/home/a/project/rebot_Arm_rl/MJLab/`，见[独立工程入口](../commands/mjlab_rl.md)。

@@ -1,4 +1,4 @@
-"""Pure replay start classification and request gate decisions."""
+"""示教起点分档、请求门控与设置归一化的纯函数；反馈和轨迹由调用方提供。"""
 
 from __future__ import annotations
 

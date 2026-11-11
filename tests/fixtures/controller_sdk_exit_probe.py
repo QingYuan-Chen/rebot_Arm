@@ -19,26 +19,27 @@ class BlockDevices(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockDevices())
 import rebotarmcontroller.hardware_manager as hardware
 import rebotarm_motion.pose_kinematics as motion
+import rebotarm_force_control.gravity_control as force_control
 from rebotarmcontroller.configuration import default_config
-from rebotarmcontroller.gravity.gravity_control import package_file
-from rebotarm_motion.pose_preview_solver import PosePreviewSolver
+from rebotarm_force_control.gravity_control import package_file
 from rebotarm_motion.cartesian_trajectory import plan_cartesian
 from rebotarm_motion.pose_compat_node import PoseCompatNode
 
 manager = hardware.HardwareManager()
 assert not manager.lifecycle.connected
 assert manager.runtime.control_thread is None
-solver = PosePreviewSolver()
+solver = motion.PoseKinematics()
 q = (0., -1., -1., 0., .3, 0.)
-target = solver.kinematics.pose(q)
-assert solver.kinematics.solve(target, q).success
-assert plan_cartesian(solver.kinematics, q, target, .1)[0]
+target = solver.pose(q)
+assert solver.solve(target, q).success
+assert plan_cartesian(solver, q, target, .1)[0]
 paths = {
     'controller_module': Path(hardware.__file__).resolve(),
     'motion_module': Path(motion.__file__).resolve(),
+    'force_control_module': Path(force_control.__file__).resolve(),
     'arm_yaml': default_config('arm').resolve(),
     'gripper_yaml': default_config('gripper').resolve(),
-    'gravity_yaml': package_file('rebotarmcontroller', 'config/gravity_compensation.yaml').resolve(),
+    'gravity_yaml': package_file('rebotarm_force_control', 'config/gravity_compensation.yaml').resolve(),
     'controller_model': package_file('rebotarm_moveit_config', 'config/rebotarm.urdf').resolve(),
     'motion_model': motion.model_resource('config/rebotarm.urdf').resolve(),
 }

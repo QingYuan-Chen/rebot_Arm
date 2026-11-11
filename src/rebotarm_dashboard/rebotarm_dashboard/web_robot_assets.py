@@ -7,7 +7,7 @@
     1. 夹爪开度换算：把请求位置钳制到限位区间，并换算成左右指棱柱关节的位移；
     2. 资源改写：把 URDF 里的网格包 URI 改写成面板自身的 HTTP 路由；
     3. 取文件安全：网格文件名经过防路径穿越校验后才允许读取；
-    4. 限位合并：优先使用模型/配置中读到的限位，缺失时退回调用方给的默认值。
+    4. 读取模型中的完整关节限位。
 
 单位约定
     长度一律为米（m），关节角为弧度（rad），速度限位为 rad/s。
@@ -16,10 +16,8 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+import math
 from pathlib import Path
-from typing import Any
-
-import yaml
 
 
 # 历史开口接口默认范围（米）：0 对应关节零位，0.09 对应双侧总行程。
@@ -96,10 +94,7 @@ def safe_mesh_path(mesh_dir: Path, requested_name: str) -> Path | None:
 def load_urdf_joint_limits(urdf_path: Path, joint_names: tuple[str, ...]) -> dict[str, tuple[float, float]]:
     """从 URDF 中读取指定关节的 lower/upper 位置限位。
 
-    单位是弧度（旋转关节）或米（棱柱关节），由关节类型决定。只返回 joint_names 中列出、
-    且 <limit> 同时带 lower 与 upper 的关节；缺少 limit 元素或限位属性不全的关节会被跳过，
-    由调用方用默认值补齐。上下限写反时会自动交换。
-    文件不存在或 XML 非法会直接抛异常——模型缺失属于必须暴露的部署错误，不静默降级。
+    每个请求的关节都必须存在且具有有效上下限。
     """
     root = ET.fromstring(urdf_path.read_text(encoding="utf-8"))
     wanted = set(joint_names)
@@ -109,113 +104,14 @@ def load_urdf_joint_limits(urdf_path: Path, joint_names: tuple[str, ...]) -> dic
         if name not in wanted:
             continue
         limit = joint.find("limit")
-        if limit is None:
-            continue
-        if "lower" not in limit.attrib or "upper" not in limit.attrib:
-            continue
+        if limit is None or "lower" not in limit.attrib or "upper" not in limit.attrib:
+            raise ValueError(f"URDF joint limits missing: {name}")
         lower = float(limit.attrib["lower"])
         upper = float(limit.attrib["upper"])
-        if upper < lower:
-            lower, upper = upper, lower
+        if not math.isfinite(lower) or not math.isfinite(upper) or upper < lower:
+            raise ValueError(f"invalid URDF joint limits: {name}")
         limits[name] = (lower, upper)
+    missing = wanted - limits.keys()
+    if missing:
+        raise ValueError(f"URDF joint limits missing: {', '.join(sorted(missing))}")
     return limits
-
-
-def merge_joint_limits(
-    *,
-    joint_names: tuple[str, ...],
-    fallback_limits: dict[str, tuple[float, float]],
-    preferred_limits: dict[str, tuple[float, float]],
-) -> dict[str, tuple[float, float]]:
-    """按关节名合并位置限位：优先用 preferred_limits，缺失的关节退回 fallback_limits。
-
-    fallback_limits 必须覆盖 joint_names 里的每一个名字，否则会 KeyError——"每个关节都有
-    可用限位"由调用方保证，这里不做静默兜底，避免把配置错误掩盖成默认行为。
-    preferred_limits 通常是 URDF 中读到的限位，fallback 则是面板参数给的粗限位。
-    """
-    merged: dict[str, tuple[float, float]] = {}
-    for name in joint_names:
-        merged[name] = preferred_limits.get(name, fallback_limits[name])
-    return merged
-
-
-def load_gripper_limits(config: dict[str, Any] | None) -> tuple[float, float]:
-    """从配置字典中解析夹爪开度限位（米），兼容多套历史键名。
-
-    依次尝试三组键名：(min_position_m, max_position_m)、(min_opening_m, max_opening_m)、
-    (closed_position_m, open_position_m)，命中第一组即返回；上下限写反会自动交换。
-    若配置给出的是 gripper 列表，则用首个元素递归解析，但只有结果不同于默认值时才采纳，
-    以免把递归兜底得到的默认值误当成显式配置。
-    任何缺失、类型不符或键不完整的配置都退回 DEFAULT_GRIPPER_LIMITS_M。
-    """
-    if not isinstance(config, dict):
-        return DEFAULT_GRIPPER_LIMITS_M
-
-    candidates = (
-        ("min_position_m", "max_position_m"),
-        ("min_opening_m", "max_opening_m"),
-        ("closed_position_m", "open_position_m"),
-    )
-    for lower_key, upper_key in candidates:
-        if lower_key in config and upper_key in config:
-            lower = float(config[lower_key])
-            upper = float(config[upper_key])
-            if upper < lower:
-                lower, upper = upper, lower
-            return lower, upper
-
-    gripper_items = config.get("gripper")
-    if isinstance(gripper_items, list) and gripper_items:
-        first = gripper_items[0]
-        if isinstance(first, dict):
-            nested = load_gripper_limits(first)
-            if nested != DEFAULT_GRIPPER_LIMITS_M:
-                return nested
-
-    return DEFAULT_GRIPPER_LIMITS_M
-
-
-def load_moveit_velocity_limits(path: Path, joint_names: tuple[str, ...]) -> dict[str, float]:
-    """从运动规划配置的关节限位 YAML 中读取每个关节的最大速度（rad/s）。
-
-    只接受同时满足三点的条目：has_velocity_limits 为真、max_velocity 能转成 float、
-    且取值大于 0。文件不存在、内容为空、键缺失或类型异常都会跳过该关节——返回的是
-    "能确认的部分"，其余关节由 merge_velocity_limits 填默认值。
-    注意：YAML 根节点必须是映射，否则随后的取值会抛 AttributeError；当前调用方传入的
-    都是本仓自带的受控配置文件。
-    """
-    if not path.is_file():
-        return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    joint_limits = data.get("joint_limits", {})
-    limits: dict[str, float] = {}
-    for name in joint_names:
-        entry = joint_limits.get(name, {})
-        if not isinstance(entry, dict):
-            continue
-        if not bool(entry.get("has_velocity_limits", False)):
-            continue
-        try:
-            value = float(entry["max_velocity"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if value > 0.0:
-            limits[name] = value
-    return limits
-
-
-def merge_velocity_limits(
-    *,
-    joint_names: tuple[str, ...],
-    default_limit: float,
-    preferred_limits: dict[str, float],
-) -> dict[str, float]:
-    """按关节名合并速度限位：优先生效 preferred_limits，缺失时用 default_limit。
-
-    default_limit 来自面板参数中的最大关节速度（rad/s）；返回值一定是每个关节都有
-    正上限的完整表，下游可直接按关节名取用。
-    """
-    return {
-        name: float(preferred_limits.get(name, default_limit))
-        for name in joint_names
-    }

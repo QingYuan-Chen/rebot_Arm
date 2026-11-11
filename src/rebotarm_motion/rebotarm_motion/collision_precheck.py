@@ -145,7 +145,16 @@ class CollisionPrechecker:
         if not joint_names or not positions_list:
             # 没有可检查的内容(空关节名或空轨迹), 不能当成"无碰撞".
             return {"state": "unknown", "message": "no trajectory samples to check"}
-        if not self._service_available():
+        try:
+            available = self._client.service_is_ready() or self._client.wait_for_service(timeout_sec=0.0)
+        except Exception as exc:
+            return {
+                "state": "unknown",
+                "message": f"MoveIt state validity service discovery failed: {exc}",
+                "service": str(config.service),
+                "checked_samples": 0,
+            }
+        if not available:
             # 服务不可用时同样不给结论, 避免把"没查"误当成"没问题".
             return {
                 "state": "unknown",
@@ -173,14 +182,13 @@ class CollisionPrechecker:
             # 完整关节值作为场景差量，保留已存在的附着物；不能用空附着物列表清空场景状态。
             request.robot_state.is_diff = True
             request.robot_state.joint_state.position = [float(v) for v in positions]
-            future = self._client.call_async(request)
-            # 不持有 executor；1 ms 轮询避免大量短查询把固定总预算耗在休眠上。
-            while not future.done() and self._monotonic() < deadline:
-                self._sleep(0.001)
-            if not future.done():
-                # 到截止时间仍未返回: 跳出循环, 后面按"检查不完整"归为 unknown.
-                break
             try:
+                future = self._client.call_async(request)
+                # 不持有 executor；1 ms 轮询避免大量短查询把固定总预算耗在休眠上。
+                while not future.done() and self._monotonic() < deadline:
+                    self._sleep(0.001)
+                if not future.done():
+                    break
                 response = future.result()
             except Exception as exc:
                 # 服务调用抛异常(例如服务端中途退出)必须降级为 unknown, 而不是放行.
@@ -193,11 +201,11 @@ class CollisionPrechecker:
                 }
             # 先计数再判定, 保证 collision 结果里的 checked_samples 包含碰撞样本本身.
             checked += 1
-            if not bool(getattr(response, "valid", False)):
+            if not response.valid:
                 collisions.append(
                     {
                         "sample": sample_index,
-                        "contacts": self._contacts_to_dicts(getattr(response, "contacts", [])),
+                        "contacts": self._contacts_to_dicts(response.contacts),
                     }
                 )
                 # 首个碰撞样本即短路: 后面的样本再查也不会改变"不可执行"的结论.
@@ -229,21 +237,6 @@ class CollisionPrechecker:
             "added_default_joints": added_defaults,
         }
 
-    def _service_available(self) -> bool:
-        """判断状态有效性服务当前是否可调用.
-
-        先查 ``service_is_ready``, 再退化为 0 超时的 ``wait_for_service``: 服务刚被发现时前者
-        可能仍返回 False, 用一次不阻塞的等待再确认. 任何异常都视为不可用; 宁可返回
-        ``unknown``, 也不要在服务状态不明时继续检查.
-        """
-        try:
-            available = bool(self._client.service_is_ready())
-            if not available:
-                available = bool(self._client.wait_for_service(timeout_sec=0.0))
-            return available
-        except Exception:
-            return False
-
     @staticmethod
     def _contacts_to_dicts(contacts) -> list[dict[str, str]]:
         """把服务返回的碰撞接触信息压缩成最多 5 组 ``{body_1, body_2}`` 字典.
@@ -255,8 +248,8 @@ class CollisionPrechecker:
         for contact in list(contacts)[:5]:
             result.append(
                 {
-                    "body_1": str(getattr(contact, "contact_body_1", "")),
-                    "body_2": str(getattr(contact, "contact_body_2", "")),
+                    "body_1": str(contact.contact_body_1),
+                    "body_2": str(contact.contact_body_2),
                 }
             )
         return result

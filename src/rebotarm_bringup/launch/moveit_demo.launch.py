@@ -23,7 +23,8 @@ launch 参数（由上层启动组合包传入，命名必须与控制器/驱动
 - use_fake_joint_states：true 时用 joint_state_publisher 造假的六轴关节角；接真机或
   接仿真时上层传 false，改为消费真实反馈；
 - use_sim_time：是否使用 /clock 仿真时间，接仿真时必须为 true。
-- prepare_trajectories：是否提供 prepared_v1 内部准备服务，默认 false；不切换后端模式。
+- allow_trajectory_execution：是否启用执行，默认随 use_fake_joint_states 取反；
+- prepare_trajectories：是否提供 continuous 内部准备服务，默认跟随执行开关，执行后端共用同一场景。
 
 安全约束：本文件不下发任何轨迹执行目标，也不启用硬件；执行权限由控制器与上层启动
 组合包掌握。这里的轨迹执行容差只用于判断规划结果能否被执行器接受，不放宽硬件保护。
@@ -67,9 +68,8 @@ def load_yaml(package_name, relative_path):
 def generate_launch_description():
     """构造 MoveIt 演示的启动描述。
 
-    返回值：launch.LaunchDescription，包含 4 个 launch 参数声明、一条规划参数日志、
-    以及 6 个节点（静态 TF、夹爪可视化关节桥、可选假关节状态源、机器人姿态发布器、
-    move_group、可选 rviz2）。
+    返回值：launch.LaunchDescription，包含运行参数、规划参数日志及静态 TF、夹爪可视化桥、
+    可选假关节状态源、机器人姿态发布器、move_group、可选准备服务与 RViz。
 
     副作用：会读取本包 config/ 下的 YAML（OMPL 规划参数）并在启动时打印规划插件概要；
     所有配置均以只读方式加载，不写回文件。
@@ -77,9 +77,8 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     arm_namespace = LaunchConfiguration("arm_namespace")
     use_fake_joint_states = LaunchConfiguration("use_fake_joint_states")
+    allow_trajectory_execution = LaunchConfiguration("allow_trajectory_execution")
     use_sim_time = LaunchConfiguration("use_sim_time")
-    trajectory_mode = LaunchConfiguration('trajectory_execution_mode')
-    prepared_mode = PythonExpression(["'", trajectory_mode, "' == 'prepared_v1'"])
     # Jazzy 2.12.4 的 TEM 先卸载控制器插件，再释放节点回调组；弱引用的析构代码仍在
     # 插件中，会访问已卸载地址。仅为这两个进程保留插件映射至进程退出，对象照常析构。
     # shortcut: 待配套 MoveIt 修复插件/回调组销毁顺序并通过退出回归后移除此兼容处理。
@@ -124,26 +123,23 @@ def generate_launch_description():
     ompl_planning_yaml = load_yaml(
         "rebotarm_moveit_config", "config/ompl_planning.yaml"
     )
-    legacy_adapters = ompl_planning_yaml['response_adapters']
-    prepared_adapters = list(legacy_adapters)
+    planning_adapters = ompl_planning_yaml['response_adapters']
+    prepared_adapters = list(planning_adapters)
     prepared_adapters.insert(prepared_adapters.index('default_planning_response_adapters/ValidateSolution'),
         'rebotarm_motion/RetimeExecutionCurve')
     execution_adapters = {
         'arm_namespace': arm_namespace,
-        # 参考管线复用 OMPL 参数，只保留调用方指定的虚拟起点，不能直接执行。
-        'planning_pipelines': ParameterValue(PythonExpression([
-            repr(['ompl', 'ompl_reference']), ' if ', prepared_mode, ' else ', repr(['ompl'])])),
+        # 参考管线保留虚拟起点；执行管线绑定后端当前保持状态。
+        'planning_pipelines': ['ompl', 'ompl_reference'],
         'ompl_reference': dict(ompl_planning_yaml, response_adapters=prepared_adapters,
             execution_reference=True),
         'ompl.execution_reference': False,
-        # 默认 0.001 同时作用于 rad/m，会吞掉亚毫米夹爪路径；新模式明确保留其节点。
-        'ompl.totg.min_angle_change': ParameterValue(PythonExpression([
-            '1e-7 if ', prepared_mode, ' else 0.001']), value_type=float),
+        'ompl.totg.min_angle_change': 1e-7,
+        # 被动模型查询没有执行后端；只有可执行计划需要后端能力和起点绑定。
         'ompl.response_adapters': ParameterValue(PythonExpression([
-            repr(prepared_adapters), ' if ', prepared_mode, ' else ', repr(legacy_adapters)])),
-        'moveit_controller_manager': ParameterValue(PythonExpression([
-            repr('rebotarm_motion/BoundSimpleControllerManager'), ' if ', prepared_mode, ' else ',
-            repr('moveit_simple_controller_manager/MoveItSimpleControllerManager')]), value_type=str),
+            repr(prepared_adapters), " if '", allow_trajectory_execution,
+            "'.lower() == 'true' else ", repr(planning_adapters)])),
+        'moveit_controller_manager': 'rebotarm_motion/BoundSimpleControllerManager',
     }
 
     # 3D 传感器占位配置：列表里只放一个占位名，且 sensor_plugin 写成 "~"（无插件），
@@ -191,14 +187,14 @@ def generate_launch_description():
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),
             DeclareLaunchArgument("use_fake_joint_states", default_value="true"),
+            DeclareLaunchArgument("allow_trajectory_execution", default_value=PythonExpression([
+                "'false' if '", use_fake_joint_states, "'.lower() == 'true' else 'true'"])),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             # 准备节点读取同一规范模型和场景；服务存在不等于任何后端获得执行许可。
-            DeclareLaunchArgument('prepare_trajectories', default_value='false'),
+            DeclareLaunchArgument('prepare_trajectories', default_value=allow_trajectory_execution),
             DeclareLaunchArgument('planning_trace_path', default_value=''),
-            DeclareLaunchArgument('trajectory_execution_mode', default_value='legacy',
-                choices=['legacy', 'prepared_v1']),
             Node(package='rebotarm_motion', executable='TrajectoryRetimingNode',
-                name='trajectory_retiming', output='screen', condition=IfCondition(prepared_mode),
+                name='trajectory_retiming', output='screen',
                 parameters=[{'arm_namespace': arm_namespace,
                     'planning_trace_path': LaunchConfiguration('planning_trace_path')}]),
             Node(
@@ -273,6 +269,7 @@ def generate_launch_description():
                     trajectory_execution,
                     sensors_3d,
                     execution_adapters,
+                    {"allow_trajectory_execution": ParameterValue(allow_trajectory_execution, value_type=bool)},
                     {"use_sim_time": use_sim_time},
                 ],
             ),

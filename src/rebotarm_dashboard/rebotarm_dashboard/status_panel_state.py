@@ -6,13 +6,14 @@ HTTP 的 /api/status 与 /events 再从存储取一份快照。本模块只做"�
 
 线程模型
     存储内部用一把互斥锁保护三类字典；所有写入方法与 snapshot() 都会加锁，
-    调用方拿到的是逐层拷贝的快照，外部后续改动不会影响存储内容。
+    snapshot 复制关节条目和 arm/teleop 顶层字典；嵌套列表及状态 payload 仍共享，
+    写入方和读取方均按只读数据交接，后续更新应提交新对象。
 
 数据形状（键名为对外接口，保持英文）
     joints：{关节名: {"position": float, "velocity": float, "torque": float,
                       "status_code": int}}
         position 单位弧度（夹爪为米），velocity 单位 rad/s（夹爪为 m/s），
-        torque 为力矩反馈（夹爪为夹持力），status_code 为底层电机状态码。
+        torque 沿用电机力矩反馈 N·m，status_code 为底层电机状态码。
     arm：{"mode": str, "enabled": bool, "state_machine": str, "error_codes": [str]}
     teleop：{"status": ..., "recording": ..., "replay": ...}，具体取值由上层写入。
 """
@@ -30,8 +31,8 @@ from typing import Any
 class StatusSnapshot:
     """一次加锁读取得到的状态快照。
 
-    三个字段彼此独立，且都是存储内部的拷贝，因此可以安全地跨线程传递与序列化：
-    joints 为关节名到状态字典的映射，arm 为整臂状态，teleop 为遥操作/示教状态。
+    joints 为逐条复制的关节表，arm 为整臂状态，teleop 为遥操作/示教状态。
+    arm/teleop 的嵌套内容共享原对象，跨线程消费时保持只读。
     """
 
     joints: dict[str, dict[str, float | int]]
@@ -142,7 +143,7 @@ class TeleopStatusStore:
             self._teleop[key] = value
 
     def snapshot(self) -> StatusSnapshot:
-        """加锁读取三类状态的深拷贝快照；调用方修改返回值不会影响后续快照。"""
+        """加锁复制关节条目及 arm/teleop 顶层；调用方保持嵌套 payload 只读。"""
         with self._lock:
             return StatusSnapshot(
                 joints={name: dict(data) for name, data in self._joints.items()},

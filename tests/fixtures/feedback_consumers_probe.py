@@ -16,7 +16,7 @@ class BlockDevices(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockDevices())
 
 import rclpy
-from rclpy.executors import MultiThreadedExecutor, ExternalShutdownException
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.action import ActionServer
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
@@ -25,16 +25,13 @@ from rclpy.qos import qos_profile_sensor_data
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import JointState, Image, CameraInfo
 from geometry_msgs.msg import TransformStamped
-from rebotarm_msgs.msg import ArmStatus, JointMotorState, GraspPlan, GraspCandidateArray
+from rebotarm_msgs.msg import ArmStatus, JointMotorState
 from std_srvs.srv import Trigger
-from rebotarm_msgs.srv import MoveToPoseIK, ExecutePose
+from rebotarm_msgs.srv import MoveToPoseIK
 from control_msgs.action import FollowJointTrajectory
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from tf2_ros import TransformBroadcaster
 from rebotarm_motion.feedback_receiver import MotionFeedbackReceiver, stamp_ns
 from rebotarm_motion.pose_compat_node import PoseCompatNode, PoseRun
-from rebotarm_motion.pose_execution_node import PoseExecutionNode
-from rebotarm_vision.nodes.visual_grasp_executor_node import VisualGraspExecutorNode
 from rebotarm_calibration.handeye_capture_node import HandeyeCaptureNode
 
 
@@ -65,8 +62,8 @@ publisher_thread = None
 worker = None
 executor = MultiThreadedExecutor(num_threads=6)
 try:
-    compat, motion, visual, calibration = PoseCompatNode(), PoseExecutionNode(), VisualGraspExecutorNode(), HandeyeCaptureNode()
-    nodes = [compat, motion, visual, calibration]
+    compat, calibration = PoseCompatNode(), HandeyeCaptureNode()
+    nodes = [compat, calibration]
     for node in [source] + nodes:
         executor.add_node(node)
     worker = threading.Thread(target=executor.spin, daemon=True)
@@ -75,12 +72,10 @@ try:
         ('joints', JointState, '/probe_remapped/joints', qos_profile_sensor_data),
         ('status', ArmStatus, '/feedback_probe/arm_status', 10),
         ('gripper', JointMotorState, '/feedback_probe/gripper/state', qos_profile_sensor_data),
-        ('plan', GraspPlan, '/grasp/filtered_plan', 10),
-        ('candidates', GraspCandidateArray, '/grasp/filtered_candidates', 10),
-        ('image', Image, '/camera/color/image_raw', qos_profile_sensor_data),
-        ('info', CameraInfo, '/camera/color/camera_info', qos_profile_sensor_data),
-        ('alternate', Image, '/alternate/image', qos_profile_sensor_data),
-        ('alternate_info', CameraInfo, '/alternate/info', qos_profile_sensor_data),
+        ('image', Image, '/camera/color/image_raw', 10),
+        ('info', CameraInfo, '/camera/color/camera_info', 10),
+        ('alternate', Image, '/alternate/image', 10),
+        ('alternate_info', CameraInfo, '/alternate/info', 10),
     )
     publishers = {key: source.create_publisher(kind, topic, qos) for key, kind, topic, qos in specs}
     tf = TransformBroadcaster(source)
@@ -105,12 +100,6 @@ try:
             gripper = JointMotorState()
             gripper.header.stamp, gripper.position, gripper.status_code = stamp, .046, 1
             publishers['gripper'].publish(gripper)
-            plan = GraspPlan()
-            plan.header.stamp, plan.valid = stamp, True
-            publishers['plan'].publish(plan)
-            candidates = GraspCandidateArray()
-            candidates.header.stamp = stamp
-            publishers['candidates'].publish(candidates)
             for key, info_key, frame in (('image', 'info', 'optical'),
                                          ('alternate', 'alternate_info', 'alternate')):
                 image = Image()
@@ -128,15 +117,14 @@ try:
     publisher_thread = threading.Thread(target=publish, daemon=True)
     publisher_thread.start()
     until(lambda: compat._feedback_receiver.snapshot().gripper is not None
-          and motion._feedback_receiver.snapshot().status is not None
           and calibration._inputs.snapshot().image is not None
-          and visual._tf_buffer.can_transform('base', 'end', rclpy.time.Time()))
+)
     # 真正的 ROS 同步服务回调持业务锁等待，独立接收不得随它停顿。
     entered = threading.Event()
     wait_returned = threading.Event()
     hold_sec = float(sys.argv[2]) if len(sys.argv) > 2 else .65
     def wait_service(request, response):
-        with compat.lock, motion._motion_lock, visual._state.lock:
+        with compat.lock:
             entered.set()
             release.wait(timeout=hold_sec + 5.)
         wait_returned.set()
@@ -147,19 +135,16 @@ try:
     assert client.wait_for_service(timeout_sec=3.)
     future = client.call_async(Trigger.Request())
     assert entered.wait(3.)
-    first_sequence = visual._input_receiver.mailbox.sequence
     observed = []
     end = time.monotonic() + hold_sec
     while time.monotonic() < end:
         now_ns = source.get_clock().now().nanoseconds
-        a, b = compat._feedback_receiver.snapshot(), motion._feedback_receiver.snapshot()
+        a = compat._feedback_receiver.snapshot()
         camera = calibration._inputs.snapshot().image
-        transform = visual._tf_buffer.lookup_transform('base', 'end', rclpy.time.Time())
-        stamps = (stamp_ns(a.joints), stamp_ns(b.joints), stamp_ns(camera), stamp_ns(transform))
+        stamps = (stamp_ns(a.joints), stamp_ns(camera))
         observed.append(max((now_ns-stamp)/1e9 for stamp in stamps))
         time.sleep(.005)
     assert max(observed) <= .15, max(observed)
-    assert visual._input_receiver.mailbox.sequence - first_sequence >= 20
     assert not wait_returned.is_set(), 'business locks released before observation ended'
     release.set()
     until(future.done)
@@ -178,8 +163,7 @@ try:
                               execute_callback=execute_fake, callback_group=ReentrantCallbackGroup())
     compat.checker = NS(check_positions=lambda **_: dict(state='pass', message='in-memory probe'))
     ik_client = source.create_client(MoveToPoseIK, '/feedback_probe/move_to_pose_ik')
-    pose_client = source.create_client(ExecutePose, '/feedback_probe/motion_execution/execute_pose')
-    assert ik_client.wait_for_service(timeout_sec=3.) and pose_client.wait_for_service(timeout_sec=3.)
+    assert ik_client.wait_for_service(timeout_sec=3.)
     with compat.lock:
         compat._ready()
         target = compat._pose_message()
@@ -187,15 +171,7 @@ try:
     until(pending.done)
     assert pending.result().success, pending.result()
     until(lambda: compat.active is None)
-    trajectory = JointTrajectory(joint_names=[f'joint{i}' for i in range(1, 7)])
-    point = JointTrajectoryPoint(positions=[0., -1., -1., 0., .3, 0.])
-    point.time_from_start.nanosec = 200_000_000
-    trajectory.points = [point]
-    motion._planner = NS(plan_pose=lambda *a, **kw: NS(success=True, trajectory=trajectory, message='fake plan'))
-    pending = pose_client.call_async(ExecutePose.Request(execute=True, timeout_sec=3.))
-    until(pending.done)
-    assert pending.result().success, pending.result()
-    assert len(fake_goals) == 2
+    assert len(fake_goals) == 1
     fake_action.destroy()
     # 暂停源，独立轮询统计空档；恢复后的新帧不能抹去计数或旧任务失效。
     with compat.lock:
@@ -230,7 +206,9 @@ try:
     old_image = Image()
     old_image.header.frame_id = 'obsolete'
     old_callback(old_image)
+    # 图像与内参由独立回调接收，分别等到新代次数据后再验证。
     until(lambda: calibration._inputs.snapshot().image is not None)
+    until(lambda: calibration._inputs.snapshot().infos)
     assert calibration._inputs.snapshot().image.header.frame_id == 'alternate'
     assert calibration._inputs.generation == old_generation+1
     assert calibration._inputs.snapshot().infos
@@ -299,7 +277,7 @@ finally:
     receiver_threads = []
     for node in nodes:
         receiver = (node._inputs if isinstance(node, HandeyeCaptureNode) else
-                    node._input_receiver if isinstance(node, VisualGraspExecutorNode) else node._feedback_receiver)
+                    node._feedback_receiver)
         receiver_threads.append(receiver.thread)
         node.destroy_node()
     source.destroy_node()

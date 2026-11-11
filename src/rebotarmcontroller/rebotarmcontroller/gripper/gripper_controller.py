@@ -4,7 +4,7 @@
     夹爪设备映射, 坐标, 反馈健康和请求准入; 执行状态由 GripperExecution 持有.
 
 对外接口
-    set_gripper_target 返回代次; submit_grasp 返回事件记录; 状态查询读缓存;
+    set_gripper_target 返回代次; 状态查询读缓存;
     set_zero 仅供生命周期在失能时调用并以置零后的连续新帧验证.
 
 安全与并发约束
@@ -29,14 +29,6 @@ from .gripper_control import _G_KP_MOVE, _G_KD_MOVE
 from .gripper_control import _G_CLOSED_FEEDBACK_TOL_RAD
 from .gripper_control import _G_COORDINATE_TOL_RAD
 from .gripper_control import _G_DEFAULT_FORCE
-from .gripper_control import _G_GRASP_CLOSE_FORCE_DEFAULT
-from .gripper_control import _G_GRASP_CLOSE_FORCE_MAX
-from .gripper_control import _G_GRASP_HOLD_FORCE_DEFAULT
-from .gripper_control import _G_GRASP_HOLD_TIMEOUT_MAX_SEC
-from .gripper_control import _G_GRASP_MIN_CLOSE_TIME
-from .gripper_control import _G_GRASP_MIN_CLOSURE_M
-from .gripper_control import _G_GRASP_TIMEOUT
-from .gripper_control import _G_GRASP_VEL_THRESHOLD
 from .gripper_control import _G_LARGE_MOVE_MAX_TAU_NM
 from .gripper_control import _G_MAX_DIST_M
 from .gripper_control import _G_TAU_MAX
@@ -109,7 +101,6 @@ class GripperController:
             self._gripper_execution._gripper_active = False
             self._gripper_execution._gripper_mode = "idle"
             self._gripper_execution._gripper_neutral_pending = None
-            self._gripper_execution._gripper_hold_deadline = None
             self._gripper_execution._gripper_target_deadline_monotonic = None
             self._gripper_transport_error = None
 
@@ -521,77 +512,7 @@ class GripperController:
         reached = self.wait_gripper_target(generation=generation)
         return reached, self.gripper_position_m()
 
-    @device_request
-    def submit_grasp(
-        self,
-        close_force: float = _G_GRASP_CLOSE_FORCE_DEFAULT,
-        hold_force: float = _G_GRASP_HOLD_FORCE_DEFAULT,
-        close_timeout_sec: float = _G_GRASP_TIMEOUT,
-        min_close_time_sec: float = _G_GRASP_MIN_CLOSE_TIME,
-        velocity_threshold: float = _G_GRASP_VEL_THRESHOLD,
-        min_closure_distance_m: float = _G_GRASP_MIN_CLOSURE_M,
-        hold_timeout_sec: float | None = None,
-    ) -> tuple[bool, bool, float, float, float, str]:
-        """闭合抓取: 检测"堵转"即认为接触, 随后进入有界保持.
 
-        判据(三者同时满足才算抓住): 已过 ``min_close_time_sec``, 闭合行程
-        >= ``min_closure_distance_m``, 速度绝对值 <= ``velocity_threshold``.
-        这里没有力传感器, 因此这些条件表示"闭合推进 + 速度堵转", 即堵转检测,
-        而不是实测接触力.
-        提交返回本请求的事件记录(event/result); 周期完成后 result 保存
-        (是否检测到堵转, 是否进入保持, 接触位置 m, 当前位置 m, 保持力矩 N.m, 说明).
-        保持阶段有时限(``hold_timeout_sec``, 默认取配置值, 上限
-        ``_G_GRASP_HOLD_TIMEOUT_MAX_SEC``), 到时或超时路径都会中性释放,
-        释放是否生效仍取决于发送及设备状态, 不能单凭计时结束证明卸力.
-        """
-        self._lifecycle.require_enabled()
-        if self._backend.arm_resource_reserved:
-            raise RuntimeError('gripper reserved by prepared arm trajectory')
-        if not self._backend.control_loop_active:
-            raise RuntimeError(
-                "gripper grasp requires the unified hardware control loop"
-            )
-        if self._gripper_mot is None:
-            raise RuntimeError("gripper is not initialized")
-        with self._gripper_execution._gripper_lock:
-            feedback_failure = self._gripper_feedback_failure_reason_locked()
-        if feedback_failure is not None:
-            raise RuntimeError(feedback_failure)
-
-        if self._gripper_passthrough_until is not None:
-            raise RuntimeError('gripper resource owned by passthrough')
-        # 抓取保持必须有界; 无界保持会让电机在控制循环中持续加载且没有退出路径.
-        requested_hold = (
-            self.settings.grasp_hold_timeout_sec
-            if hold_timeout_sec is None
-            else float(hold_timeout_sec)
-        )
-        # NaN 会绕过期限比较, Inf 会形成无界等待; 必须在接替旧任务前拒绝所有非有限参数.
-        if not np.isfinite([close_force, hold_force, close_timeout_sec, min_close_time_sec,
-                            velocity_threshold, min_closure_distance_m, requested_hold]).all():
-            raise ValueError('gripper grasp parameters must be finite')
-        close_effort = float(np.clip(close_force, 0.05, _G_GRASP_CLOSE_FORCE_MAX))
-        hold_effort = float(np.clip(hold_force, 0.05, _G_TAU_MAX))
-        hold_timeout = float(np.clip(requested_hold, 0.1, _G_GRASP_HOLD_TIMEOUT_MAX_SEC))
-        timeout = max(float(close_timeout_sec), 0.1)
-        min_time = max(float(min_close_time_sec), 0.0)
-        velocity_limit = max(float(velocity_threshold), 0.0)
-        min_closure = max(float(min_closure_distance_m), 0.0)
-        start_position_m = self.gripper_position_m()
-        start = time.monotonic()
-        request = self._gripper_execution.start_grasp(
-            close_force=close_effort, hold_force=hold_effort, timeout=timeout,
-            min_time=min_time, velocity_limit=velocity_limit, min_closure=min_closure,
-            hold_timeout=hold_timeout, start_position=start_position_m, now=start,
-        )
-        self._start_gripper_loop()
-        return request
-
-    def grasp_gripper(self, **kwargs):
-        """同步兼容入口: 提交后只等待周期执行器的完成事件."""
-        request = self.submit_grasp(**kwargs)
-        request['event'].wait()
-        return request['result']
 
     def _cached_gripper_feedback(self, *, now: float | None = None) -> _CachedMotorFeedback:
         """按反馈 -> 夹爪锁顺序取得同一快照, 叠加坐标错误而不改写样本时间."""
@@ -624,7 +545,7 @@ class GripperController:
         """
         with self.feedback.transaction(), self._gripper_execution._gripper_lock:
             feedback = self._cached_gripper_feedback()
-            values = feedback.values or (self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel, self._gripper_execution._gripper_torque)
+            values = feedback.values or (float("nan"), float("nan"), float("nan"))
             distance = float("nan") if feedback.failure_reason is not None else float(
                 np.clip(values[0] / _G_ANGLE_OPEN * _G_MAX_DIST_M, 0.0, _G_MAX_DIST_M)
             )
@@ -639,15 +560,12 @@ class GripperController:
         """返回同一缓存快照的 (位置 rad, 速度 rad/s, 力矩 N.m, 状态码).
 
         与关节共用可用性判定; 可信反馈返回电机原码, 否则派生 255.
-        读取不刷新总线, 不登记错误, 不改变反馈时间. 无样本时沿用最后缓存数值,
-        这些回退数值必须结合 255 解读, 不能视为当前有效反馈.
+        读取不刷新总线, 不登记错误, 不改变反馈时间. 无可用样本时三个数值返回 NaN,
+        调用方必须结合 255 判断其不可用, 不能把控制镜像当作反馈.
         """
         with self.feedback.transaction():
             feedback = self._cached_gripper_feedback()
-            values = feedback.values
-            if values is None:
-                with self._gripper_execution._gripper_lock:
-                    values = (self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel, self._gripper_execution._gripper_torque)
+            values = feedback.values or (float("nan"), float("nan"), float("nan"))
             return (*values, feedback.status_code)
 
     def gripper_position_m(self) -> float:
@@ -677,7 +595,7 @@ class GripperController:
     def send_gripper_motor_cmd(self, cmd, arbitration="reject") -> None:
         """低层夹爪直通命令(JointMotorCmd): 未给出的字段回落到反馈或配置增益.
 
-        直通后夹爪状态机被置为 idle, 避免与高层位置/抓取命令互相干扰.
+        直通后夹爪状态机被置为 idle, 避免与高层位置命令互相干扰.
         mode: 0 = MIT, 1 = 位置-速度, 2 = 速度.
         """
         self._lifecycle.require_enabled()
@@ -690,8 +608,8 @@ class GripperController:
         if feedback_failure is not None:
             raise RuntimeError(feedback_failure)
         state = self.feedback.verified_sample("gripper").state
-        pos = float(cmd.pos) if cmd.use_pos else float(state.pos if state is not None else 0.0)
-        vel = float(cmd.vel) if cmd.use_vel else float(state.vel if state is not None else 0.0)
+        pos = float(cmd.pos) if cmd.use_pos else float(state.pos)
+        vel = float(cmd.vel) if cmd.use_vel else float(state.vel)
         kp = float(cmd.kp) if cmd.use_kp else float(self._gripper_cfg.kp)
         kd = float(cmd.kd) if cmd.use_kd else float(self._gripper_cfg.kd)
         tau = float(cmd.tau) if cmd.use_tau else 0.0
@@ -700,8 +618,6 @@ class GripperController:
         mode = int(cmd.mode)
         if mode not in (0, 1, 2):
             raise ValueError(f"unsupported JointMotorCmd mode: {cmd.mode}")
-        if mode == 2 and not hasattr(self._gripper_mot, "send_vel"):
-            raise RuntimeError("gripper does not support send_vel")
         passthrough_decision(pos, vel, kp, kd, tau, vlim,
             (_G_ANGLE_OPEN, 0.), self._gripper_cfg.vlim, _G_TAU_MAX, mode).require_allowed()
         with self._gripper_execution._gripper_lock:
@@ -752,12 +668,8 @@ class GripperController:
         pos_cmd, vel, kp, kd, tau_safe = GripperControl.bounded_mit(
             pos, vel, kp, kd, tau_ff, tau_limit, self._gripper_execution._gripper_pos, self._gripper_execution._gripper_vel,
         )
-        lock = getattr(self._gripper_ctrl, "bus_lock", None)
         try:
-            if lock:
-                with lock:
-                    self._gripper_mot.send_mit(pos_cmd, vel, kp, kd, tau_safe)
-            else:
+            with self._gripper_ctrl.bus_lock:
                 self._gripper_mot.send_mit(pos_cmd, vel, kp, kd, tau_safe)
         except Exception as exc:
             if isinstance(exc,CommandTransportError):
@@ -794,33 +706,9 @@ class GripperController:
         """持锁复用目标所有权与到位检查, 不允许旧收尾释放接替命令."""
         return self._gripper_execution._release_gripper_position_target_locked(*args, **kwargs)
 
-    def _grasp_hold_expired_locked(self, *args, **kwargs):
-        """在执行锁内查询抓取保持期限是否到达."""
-        return self._gripper_execution._grasp_hold_expired_locked(*args, **kwargs)
 
-    def _release_grasp_hold_locked(self, *args, **kwargs):
-        """持锁终结抓取/保持并排队中性输出, 不立即宣告设备释放成功."""
-        return self._gripper_execution._release_grasp_hold_locked(*args, **kwargs)
 
-    @device_request
-    def release_grasp_hold(self, *args, **kwargs):
-        """通过设备请求结束显式抓取保持，并使旧夹爪代次失效。
 
-        保护性释放不受六轴预约的普通运动门禁阻塞；释放改变固定几何时，
-        通过夹爪代次让六轴周期撤销旧碰撞检查结果并进入停止保持。
-        """
-        owner = self._gripper_execution
-        released = owner.release_grasp_hold(*args, **kwargs)
-        if self._backend.arm_resource_reserved:
-            # 空闲夹爪的显式保护性释放也撤销固定状态绑定，六轴周期随后受控停止。
-            with self._gripper_execution._gripper_lock:
-                self._gripper_execution.supersede_locked()
-        return released
-
-    @property
-    def grasp_hold_release_reason(self):
-        """返回执行器保存的抓取释放原因, 不查询设备."""
-        return self._gripper_execution.grasp_hold_release_reason
 
     def _gripper_tick(self, *args, **kwargs):
         """委托独立执行器推进一拍夹爪状态, 调用方必须是统一设备周期."""
@@ -847,7 +735,6 @@ class GripperController:
             self._gripper_execution._gripper_mode = "idle"
             self._gripper_execution._gripper_position_result = "failed"
             self._gripper_execution._gripper_neutral_pending = None
-            self._gripper_execution._gripper_hold_deadline = None
             self._gripper_execution._gripper_target_deadline_monotonic = None
             self._gripper_loop_running = False
             self._gripper_passthrough_until = None
