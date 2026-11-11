@@ -26,7 +26,7 @@ import math
 import threading
 import time
 import numpy as np
-from ..gravity.gravity_control import vector, POSITION_LIMITS
+from rebotarm_force_control.gravity_control import vector, POSITION_LIMITS
 from rebotarm_trajectory.sampling import step_index, validate_samples
 
 

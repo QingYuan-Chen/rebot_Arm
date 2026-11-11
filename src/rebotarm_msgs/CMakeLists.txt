@@ -35,6 +35,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmStatus.msg"
   "srv/PlanGraspForLabel.srv"
   "srv/SetMode.srv"
+  "srv/SetJointImpedance.srv"
   "srv/CalibrationCommand.srv"
   "srv/SetZero.srv"
   "srv/SetTeachRecordPath.srv"

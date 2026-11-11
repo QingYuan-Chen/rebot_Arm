@@ -1,3 +1,9 @@
+"""职责：MuJoCo 模型、物理状态与控制运行时的生命周期。
+
+对外接口：状态查询、步进、位置/关节阻抗命令、快照及本地诊断。
+安全约束：只访问仿真实例；阻抗重力使用独立零速度数据，保留物理状态与控制节拍。
+文件结构：构造与资源、命令入口、步进与观测、快照及关闭。
+"""
 from __future__ import annotations
 
 import hashlib
@@ -32,7 +38,7 @@ from rebotarm_simulation.core.validation import finite_vector as _finite_vector
 ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
 FINGER_JOINT_NAMES = ("left_finger_joint", "right_finger_joint")
 JOINT_NAMES = ARM_JOINT_NAMES + FINGER_JOINT_NAMES
-CONTROL_MODES = ("position", "hold", "gravity_comp", "raw_torque")
+CONTROL_MODES = ("position", "hold", "gravity_comp", "raw_torque", "joint_impedance")
 _CONTROL_MODE_ALIASES = {"pos_vel": "position"}
 
 
@@ -90,6 +96,7 @@ class RebotArmMujoco:
             self._model.geom_contype[:] = 0
             self._model.geom_conaffinity[:] = 0
         self._data = self._mj.MjData(self._model)
+        self._gravity_data = self._mj.MjData(self._model)
         self._closed = False
         # 复现用随机数发生器；reset(seed=...) 会按给定种子重建它。
         self._rng = np.random.default_rng()
@@ -109,7 +116,8 @@ class RebotArmMujoco:
             self._name_id(self._mj.mjtObj.mjOBJ_ACTUATOR, actuator_name_for_joint(name))
             for name in JOINT_NAMES
         )
-        self._control = SimControlRuntime(motor_parameters, float(self._model.opt.timestep), self._joint_ids, self._actuator_ids)
+        self._control = SimControlRuntime(motor_parameters, float(self._model.opt.timestep),
+            self._joint_ids, self._actuator_ids, self._joint_gravity_torque)
         # 末端执行器参考点（site）用于输出 TCP 位置与姿态。
         self._ee_site_id = self._name_id(self._mj.mjtObj.mjOBJ_SITE, "ee_site")
         # 场景中带自由关节的物体（被操作物），用于读写物体位姿。
@@ -297,6 +305,10 @@ class RebotArmMujoco:
         self._control._raw_torque_command.fill(0.0)
         self._control._raw_torque_requested.fill(0.0)
         self._control._raw_torque_deadline = None
+        self._control._impedance_command = None
+        self._control._impedance_deadline = None
+        self._control._impedance_handoff = False
+        self._control._last_control_time = float(self._data.time)
         self._control._requested_arm_torque.fill(0.0)
         self._control._applied_arm_torque.fill(0.0)
         self._control._arm_torque_saturated.fill(False)
@@ -328,6 +340,20 @@ class RebotArmMujoco:
         self._ensure_open()
         return self._control.command_joint_torques(self._model, self._data, torques, timeout_s)
 
+    def command_joint_impedance(self, targets: Sequence[float], stiffness: Sequence[float],
+                                damping: Sequence[float], timeout_s: float = 0.1) -> tuple[float, ...]:
+        """接纳六轴静态平衡点；刚度 N·m/rad、阻尼 N·m·s/rad，期限按仿真时间。"""
+        self._ensure_open()
+        return self._control.command_joint_impedance(self._model, self._data,
+            targets, stiffness, damping, timeout_s)
+
+    def _joint_gravity_torque(self, qvel_addresses, data) -> np.ndarray:
+        """在独立零速度数据上计算 g(q)，避免混入科氏项或改写当前物理状态。"""
+        self._gravity_data.qpos[:] = data.qpos
+        self._gravity_data.qvel[:] = 0.0
+        self._mj.mj_forward(self._model, self._gravity_data)
+        return np.asarray(self._gravity_data.qfrc_bias[qvel_addresses], dtype=float)
+
     def command_gripper_width(self, width_m: float, max_force_n: float | None = None) -> float:
         self._ensure_open()
         return self._control.command_gripper_width(self._model, self._data, width_m, max_force_n)
@@ -353,6 +379,8 @@ class RebotArmMujoco:
     ) -> SimulationState:
         """Kinematically synchronize arm state while preserving free objects."""
         self._ensure_open()
+        if self.control_mode == "joint_impedance":
+            raise RuntimeError("joint impedance active; enter hold before mirroring state")
         position_values = _finite_vector(positions, len(ARM_JOINT_NAMES), "joint positions")
         velocity_values = (
             (0.0,) * len(ARM_JOINT_NAMES)
@@ -533,6 +561,7 @@ class RebotArmMujoco:
             return
         self._closed = True
         self._data = None
+        self._gravity_data = None
         self._model = None
 
 

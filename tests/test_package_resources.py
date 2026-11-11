@@ -165,7 +165,7 @@ def test_hardware_has_no_teach_file_or_workflow_dependency():
 
 def test_package_file_reports_selected_install_path_when_resource_missing(tmp_path, monkeypatch):
     """已选安装位置缺文件时报告实际路径, 不回退到源码目录.\n"""
-    from rebotarmcontroller.gravity import gravity_control
+    from rebotarm_force_control import gravity_control
 
     share = tmp_path / "install" / "rebotarmcontroller"
     share.mkdir(parents=True)

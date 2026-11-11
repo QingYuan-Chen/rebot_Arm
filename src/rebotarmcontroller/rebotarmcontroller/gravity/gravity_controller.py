@@ -1,7 +1,8 @@
-"""重力补偿启停, 模式交接, 周期计算与诊断.
+"""重力补偿硬件适配: 受门控启停、模式交接、周期发送与诊断.
 
 职责与位置
-    重力补偿业务所有者, 协调生命周期模式, 模型计算和周期发送.
+    设备侧适配所有者, 调用 rebotarm_force_control 的模型和控制状态,
+    持有设备事务门控、反馈准入、唯一写入线程调度和发送确认.
 
 对外接口
     start/stop_gravity_compensation 显式交接; target 和 diagnostics 提供副本与诊断.
@@ -13,30 +14,28 @@
     故障保持需显式退出或确认失能后解除；交接失败继续保留锁存。
 
 文件结构(按定义顺序)
-    GravityController: 重力补偿模式交接与周期计算所有者, 持有补偿状态, 模型缓存和诊断.
+    GravityController: 装配共享算法状态并适配设备交接、回执与硬件诊断.
 """
 
 from __future__ import annotations
 from ..contracts.component_ports import ArmGravityPort, CyclePort, GravityFeedbackPort, ProtectionPort
 from ..runtime.command_guard import failure_decision
 from ..hardware.sdk_driver import CommandTransportError
-from .gravity_control import GravityExecutionState
-from .gravity_control import LoopTiming
-from .gravity_control import bounded_mit_command
+from rebotarm_force_control.gravity_control import (
+    GravityExecutionState, LoopTiming, bounded_mit_command,
+    vector, apply_gravity_compensation_tau_scale,
+)
 from ..runtime.device_requests import device_request
 import numpy as np
 import time
-from .gravity_control import vector
-from ..controller_parameters import (
-    GravityCommandError, _LOG, apply_gravity_compensation_tau_scale
-)
+from ..controller_parameters import GravityCommandError, _LOG
 
 
 class GravityController:
-    """重力补偿模式交接与周期计算所有者, 持有补偿状态, 模型缓存和诊断."""
+    """共享重力算法的硬件适配器, 统一设备门控、模式交接和命令确认."""
 
     def __init__(self, runtime, lifecycle, settings, model):
-        """保存规范动力学模型与参数, 创建本组件补偿状态及独立雅可比计算缓存."""
+        """绑定共享模型计算并创建独立执行状态; 模型缓存由唯一设备周期串行使用."""
         self._backend = runtime
         self._lifecycle = lifecycle
         self.settings = settings
@@ -44,11 +43,8 @@ class GravityController:
         self._gravity_model = model
         self._gc_settings = model.settings
         self._gc_torque_limits = model.effort
-        self._gc_model = model.model
-        self._gc_data = self._gc_model.createData()
-        self._gc_ee_frame_id = model.frame_id
         self._gc_compute_generalized_gravity = model.gravity
-        self._gc_pin = model.pin
+        self._gc_jacobian = model.jacobian
         self._gravity_execution = GravityExecutionState()
         self._gravity_timing = None
         self._gravity_feedback_metrics = {}
@@ -288,12 +284,7 @@ class GravityController:
         tau_g = vector(self._gc_compute_generalized_gravity(q=q), 6, 'gravity torque')
         tau_g = apply_gravity_compensation_tau_scale(tau_g)
 
-        self._gc_pin.computeJointJacobians(self._gc_model, self._gc_data, q)
-        self._gc_pin.updateFramePlacements(self._gc_model, self._gc_data)
-        jacobian = self._gc_pin.getFrameJacobian(
-            self._gc_model, self._gc_data, self._gc_ee_frame_id,
-            self._gc_pin.ReferenceFrame.LOCAL_WORLD_ALIGNED,
-        )
+        jacobian = self._gc_jacobian(q)
         # 计算状态不直接写设备; 发送成功后才更新上一周期总力矩.
         feedforward = self._gravity_execution.step(
             q, dt, tau_g, jacobian @ qd, self._gc_settings,

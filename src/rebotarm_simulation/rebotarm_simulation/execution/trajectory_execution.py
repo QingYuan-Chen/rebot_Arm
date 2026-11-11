@@ -3,7 +3,8 @@
 文件职责：拥有规划代次、准备上下文及已接纳曲线；复用活动目标、命令闸门和
     仿真访问锁，协调六轴与独立夹爪的整体终态。
 对外接口：planning_snapshot/reserve/admit；observe/complete/step；stop/poll_stop/cleanup；
-    status_snapshot 供 ROS 诊断读取。输入输出均为普通 Python 数据。
+    change_mode/command_joint_impedance 协调控制模式；status_snapshot 供 ROS 诊断读取。
+    输入输出均为普通 Python 数据。
 安全约束：锁序固定为目标锁→仿真锁。组件不接收 Node、GoalHandle、ROS 消息，
     不等待服务或自主睡眠；准备/停止期限用单调时间，参考曲线用仿真时间。
     终态通知先于释放预约，迟到操作只作用于原 token；停止未确认保留执行权。
@@ -188,6 +189,10 @@ class TrajectoryExecution:
 
     def admit_legacy(self, token, sampler):
         with self.lock:
+            # 旧 FJT 也遵循模式所有权，提前拒绝，避免首个位置采样覆盖阻抗状态。
+            mode = self.access.run(lambda sim: sim.control_mode)
+            if mode not in ('position', 'hold'):
+                raise RuntimeError(f'mode={mode}, required=position/hold')
             if self.gripper.busy or not self.active.try_start(token):
                 raise RuntimeError('arm/gripper resources reserved')
             self.pending_sampler = sampler
@@ -373,9 +378,20 @@ class TrajectoryExecution:
 
     def change_mode(self, mode):
         with self.lock:
-            if self.active.busy or self.gripper.busy:
-                raise RuntimeError('trajectory active; stop or cancel it before changing mode')
+            if self.active.busy or self.gripper.busy or self.stop_unconfirmed:
+                raise RuntimeError('trajectory active or stop unconfirmed; complete stop before changing mode')
             result = self.access.run(lambda _sim: self.control.set_mode(mode))
+            self.planning_generation += 1
+            return result
+
+    def command_joint_impedance(self, positions, stiffness, damping, *, timeout_s):
+        """在目标锁→仿真锁内原子接纳；参数失败保留旧模式与规划代次。"""
+        with self.lock:
+            if self.active.busy or self.gripper.busy or self.stop_unconfirmed:
+                raise RuntimeError('arm/gripper resources reserved or stop unconfirmed')
+            result = self.access.run(lambda _sim: self.control.command_joint_impedance(
+                positions, stiffness, damping, timeout_s=timeout_s))
+            # 与显式模式切换一致，每个成功命令作废此前生成的规划起点绑定。
             self.planning_generation += 1
             return result
 

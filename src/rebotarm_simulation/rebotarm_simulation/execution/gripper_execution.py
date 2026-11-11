@@ -42,6 +42,8 @@ class GripperExecution:
         return self.reservation is not None or self.task is not None and self.task.state in ('active', 'releasing')
 
     def reserve(self, owner):
+        if self._sim.control_mode == 'joint_impedance':
+            raise RuntimeError('joint impedance active; enter hold before gripper tasks')
         if self._active.busy or self.busy:
             raise RuntimeError('gripper resources reserved')
         self.reservation = owner
@@ -52,6 +54,8 @@ class GripperExecution:
 
     def start(self, owner, width, effort):
         """输入已由协议适配层校验；内部目标仍受启动配置限速、限力矩。"""
+        if self._sim.control_mode == 'joint_impedance':
+            raise RuntimeError('joint impedance active; enter hold before gripper tasks')
         if self._active.busy and self._active.token is not owner:
             raise RuntimeError('gripper reserved by arm task')
         if self.reservation is not None and self.reservation is not owner:

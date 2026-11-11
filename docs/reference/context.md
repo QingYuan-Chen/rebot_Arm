@@ -68,6 +68,13 @@ MuJoCo remains a separate backend owned by `rebotarm_simulation`; neither backen
 opens real hardware. The teach package owns record preparation and replay policy,
 while MuJoCo teach-preview execution and Viewer lifecycle belong to simulation.
 
+`rebotarm_force_control` owns gravity compensation models, numerical state and joint
+impedance torque computation. Hardware retains feedback verification, mode handover,
+the single device writer and protection. MuJoCo owns the initial joint impedance runtime:
+static joint references, per-axis stiffness/damping, bounded torque and slew rate,
+simulation-time expiry to Hold, and mutual exclusion with trajectory execution.
+The force-control package has no hardware, ROS node or simulation runtime dependency.
+
 FollowJointTrajectory accepts exactly the six arm joints (rad); finger and seven-axis
 goals are rejected. Prepared web operations use ExecuteTeleopMotion for the arm curve
 and an optional independent gripper opening. Motion owns arm generation, retiming and

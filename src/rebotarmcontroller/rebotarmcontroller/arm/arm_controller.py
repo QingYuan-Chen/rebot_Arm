@@ -50,7 +50,7 @@ class ArmController:
         self.settings = settings
         self._bound = False
         import secrets
-        from ..gravity.gravity_control import package_file
+        from rebotarm_force_control.gravity_control import package_file
         from rebotarm_trajectory.capability import constraint_revision
         self._limits_revision = constraint_revision(*(package_file('rebotarm_moveit_config', 'config/'+name).read_bytes()
             for name in ('rebotarm.urdf','joint_limits.yaml')))

@@ -14,7 +14,7 @@ ROS 节点在 `/diagnostics` 发布仿真控制与接触告警。
 rebotarm_simulation/
 ├── rebotarm_simulation/
 │   ├── core/          # MuJoCo入口、状态类型、模型命名契约、资源定位
-│   ├── control/       # 纯控制算法、控制参数加载、夹爪映射
+│   ├── control/       # 仿真控制周期、控制参数、夹爪映射；调用共享力控算法
 │   ├── execution/     # 轨迹采样、离线执行、ROS执行状态与并发闸门
 │   ├── ros/           # ROS节点、消息转换与诊断
 │   ├── model_tools/   # URDF→MJCF与相机载荷生成
@@ -34,6 +34,7 @@ MuJoCo + MoveIt、无头和桌面组合入口位于 `rebotarm_bringup/launch`。
 |---|---|---|---|
 | 模型与场景 | URDF→MJCF 生成、模型一致性检查、机器人本体、空桌面场景、Reach 场景 | `model_tools/urdf_to_mjcf.py`、`model_tools/d405_payload.py`、`models/rebotarm/` | 已接入软指与 D405 腕部装配；`robot.xml` 是机器人本体，`scene.xml` 是桌面物理场景，`reach_scene.xml` 是 Reach 训练场景 |
 | CPU MuJoCo 物理核心 | 物理步进、关节/夹爪控制、状态、接触、保存恢复、瓶子位姿 | `core/mujoco_sim.py`、`control/motor_control.py`、`core/mujoco_types.py`、`control/sim_gripper.py` | 当前 CPU 正确性和轨迹基准 |
+| 关节阻抗 | 静态平衡点、重力前馈、逐轴刚度/阻尼、限矩/变化率与超时保持 | `control/sim_control_runtime.py`、共享 `rebotarm_force_control`；[API、CLI 与 ROS 用法](README_mujoco.md#六轴静态关节阻抗) | 在 MuJoCo 中执行，和轨迹及 ROS 夹爪任务互斥 |
 | ROS / MoveIt 执行 | FollowJointTrajectory、关节/夹爪状态、仿真时钟、停止、容差和诊断 | `ros/mujoco_ros_node.py`、`execution/trajectory_sampler.py`、`ros_diagnostics.py` | 已接入 MuJoCo 组合 launch |
 | CLI / Viewer 交互 | 无头 CLI、桌面 MuJoCo Viewer、键盘关节和夹爪操作 | `apps/mujoco_cli.py`、`apps/mujoco_viewer.py` | 已接入，属于人工调试/观察入口 |
 | 示教轨迹预演 | 示教记录质量检查、准备、MuJoCo 轨迹执行和接触统计 | `apps/teach_preview.py`、`offline_trajectory.py` | 已接入，属于离线软件仿真 |

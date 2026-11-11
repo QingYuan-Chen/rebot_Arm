@@ -18,7 +18,7 @@
 
 ## 工程结构
 
-- `src/`：12 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属。
+- `src/`：14 个分层 ROS 2 包，硬件、规划、示教、交互、视觉和仿真分别归属；共享轨迹数值契约归 `rebotarm_trajectory`，重力补偿与关节阻抗算法归 [`rebotarm_force_control`](src/rebotarm_force_control/README.md)。
 - `docs/setup/dependencies/`：分环境的 Markdown 依赖版本清单与安装说明。
 - `scripts/`：环境安装、验证和离线工具。
 - `tests/`：软件回归与架构检查。

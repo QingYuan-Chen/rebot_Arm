@@ -22,7 +22,7 @@ import time
 from typing import Sequence
 import numpy as np
 from types import MappingProxyType
-from ..gravity.gravity_control import JOINT_NAMES, POSITION_LIMITS
+from rebotarm_force_control.gravity_control import JOINT_NAMES, POSITION_LIMITS
 from ..contracts.controller_contracts import MotorFeedback, VerifiedFeedbackSample as _VerifiedFeedbackSample, CachedMotorFeedback as _CachedMotorFeedback
 
 _LOG = logging.getLogger('rebotarmcontroller.hardware_manager')

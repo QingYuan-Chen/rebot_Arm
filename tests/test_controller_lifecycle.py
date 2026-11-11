@@ -125,7 +125,7 @@ def test_signal_shutdown_keeps_executor_running_after_refusal(monkeypatch):
 def test_gravity_and_lifecycle_fixed_vectors():
     import json
     from pathlib import Path
-    from rebotarmcontroller.gravity.gravity_control import GravityExecutionState
+    from rebotarm_force_control.gravity_control import GravityExecutionState
     vectors = json.loads((Path(__file__).parent / 'fixtures/controller_arm_vectors.json').read_text())
     for case in vectors['gravity_steps']:
         gravity = GravityExecutionState()

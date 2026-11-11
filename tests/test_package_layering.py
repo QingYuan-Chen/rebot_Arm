@@ -427,3 +427,26 @@ def test_shared_trajectory_is_flat_pure_numeric_and_dependencies_are_one_way():
     for path in (ROOT/'src/rebotarmcontroller/rebotarmcontroller').rglob('*.py'):
         assert 'from rebotarm_motion' not in path.read_text(), path
         assert 'import rebotarm_motion' not in path.read_text(), path
+
+
+def test_force_control_owns_algorithms_without_device_or_simulation_runtime():
+    package = ROOT / 'src/rebotarm_force_control'
+    forbidden = {'rebotarmcontroller', 'rebotarm_simulation', 'rebotarm_motion',
+                 'rclpy', 'motorbridge', 'mujoco', 'threading', 'asyncio'}
+    for source in (package / 'rebotarm_force_control').rglob('*.py'):
+        for node in ast.walk(ast.parse(source.read_text())):
+            if isinstance(node, ast.Import):
+                imports = [alias.name.split('.')[0] for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                imports = [(node.module or '').split('.')[0]]
+            else:
+                continue
+            assert not forbidden.intersection(imports), source
+    manifest = ET.parse(package / 'package.xml').getroot()
+    assert not forbidden.intersection(child.text for child in manifest)
+    assert (package / 'rebotarm_force_control/gravity_control.py').is_file()
+    assert (package / 'rebotarm_force_control/joint_impedance.py').is_file()
+    assert not (ROOT / 'src/rebotarmcontroller/rebotarmcontroller/gravity/gravity_control.py').exists()
+    for name in ('rebotarmcontroller', 'rebotarm_simulation'):
+        manifest = ET.parse(ROOT / 'src' / name / 'package.xml').getroot()
+        assert any(child.text == 'rebotarm_force_control' for child in manifest), name

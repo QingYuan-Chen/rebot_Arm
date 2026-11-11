@@ -261,35 +261,14 @@ def configure_gravity_compensation_test(
     manager.test_arm.mode_mit = lambda **_kwargs: True
     mit_commands: list[dict[str, object]] = []
     manager.gravity._send_gravity_mit = lambda **kwargs: mit_commands.append(dict(kwargs))
-    from rebotarmcontroller.gravity.gravity_control import GravitySettings
+    from rebotarm_force_control.gravity_control import GravitySettings
     manager.gravity._gc_settings = GravitySettings()
     manager.gravity._gc_torque_limits = np.array([27., 27., 27., 7., 7., 7.])
     manager.gravity._gravity_execution.last_total = np.zeros(6)
     manager.gravity._gravity_execution.fault = None
     manager.gravity._gravity_execution.hold_feedforward = None
     manager.gravity._gc_compute_generalized_gravity = lambda q: np.zeros_like(q)
-    manager.gravity._gc_model = object()
-    manager.gravity._gc_data = object()
-    manager.gravity._gc_ee_frame_id = 0
-
-    class FakePin:
-        class ReferenceFrame:
-            WORLD = object()
-            LOCAL_WORLD_ALIGNED = object()
-
-        @staticmethod
-        def computeJointJacobians(_model, _data, _q) -> None:
-            return None
-
-        @staticmethod
-        def updateFramePlacements(_model, _data) -> None:
-            return None
-
-        @staticmethod
-        def getFrameJacobian(_model, _data, _frame_id, _reference):
-            return np.zeros((6, 6), dtype=np.float64)
-
-    manager.gravity._gc_pin = FakePin
+    manager.gravity._gc_jacobian = lambda q: np.zeros((6, 6), dtype=np.float64)
     return mit_commands
 
 
@@ -367,7 +346,7 @@ def test_gravity_deadline_fault_keeps_healthy_arm_enabled(monkeypatch):
     q = np.array([.2, -.3, -.4, .1, .2, -.1])
     configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
     manager.gravity.start_gravity_compensation()
-    from rebotarmcontroller.gravity.gravity_control import LoopTiming
+    from rebotarm_force_control.gravity_control import LoopTiming
     manager.gravity._gravity_timing = LoopTiming(100.)
     inject_feedback_refresh(monkeypatch, manager, lambda **kwargs: False)
     for i in range(4):

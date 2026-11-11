@@ -74,11 +74,13 @@ ROS 适配器直接接收职责组件的提交、取消和只读查询端口，�
 联合预约；任务收尾按当前执行代次归属，稳定位置保持才可沿用原目标。量化导数、同步审计及待实机验证的策略见
 [量化反馈判定](features/quantized_feedback_safety.md)。
 停止请求等待时，运行时继续处理失能请求，旧代次的续体不能发送命令。
-重力补偿状态与计算归 `gravity_control.py`，启停、模式交接与诊断归
-`gravity_controller.py`。`controller_cycle.py` 分发采集和执行，
+重力补偿模型、控制状态与计算归独立 `rebotarm_force_control` 包，
+`gravity/gravity_controller.py` 保留设备适配、启停、模式交接与诊断。
+`controller_cycle.py` 分发采集和执行，
 `controller_protection.py` 协调设备故障清理及一次保护失能。
 模块按一层职责子目录组织：`contracts/` 声明数据与能力接口，`hardware/` 负责通信与反馈，
-`runtime/` 负责设备线程、生命周期与安全协调，`arm/`、`gripper/`、`gravity/` 保留各自执行状态，
+`runtime/` 负责设备线程、生命周期与安全协调，`arm/`、`gripper/` 保留执行状态，
+`gravity/` 负责将力控算法接入唯一硬件周期，
 `ros/` 负责协议与消息适配。根目录只保留节点入口、装配、配置和参数模块，`examples/` 保留原路径。
 子包不汇总导入，旧平铺模块不保留转发；Python 调用方使用新路径，ROS 名称与入口不变。
 目录整理保留既有模块依赖，公共数值函数归位及核心层 ROS 依赖清理另行规划。控制器结构整理记录见
@@ -117,6 +119,21 @@ ROS 适配器直接接收职责组件的提交、取消和只读查询端口，�
 - 视觉抓取策略
 - MoveIt 规划策略
 - 面向用户的工作流状态
+
+### 力控职责（Force control ownership）
+
+`rebotarm_force_control` 拥有重力补偿模型、补偿状态、MIT 输出约束及关节阻抗控制律。
+模型和六轴限位读取规范 URDF；纯计算接口接收关节状态、前馈与实际周期，返回有界力矩。
+本包无 ROS 节点、设备句柄、线程或 MuJoCo 运行时依赖。硬件和仿真单向调用本包；
+反馈采集、时钟、模式生命周期、执行互斥和最终发送分别由各后端拥有。
+
+首版关节阻抗采用静态平衡点：`tau = g(q) + K*(q_ref-q) - D*q_dot`，
+六轴刚度和阻尼分别以 N·m/rad、N·m·s/rad 表示；总力矩与每周期变化率受限。
+MuJoCo 以独立零速度动力学数据求纯重力项，并在既定控制拍推进；命令续期仅更新参数和期限。
+超时或显式退出切回当前位置保持，沿用上一拍实际力矩。仿真专用 ROS 服务与本地 API/CLI
+提供入口；已有六轴轨迹与阻抗模式互斥。使用和验证步骤见
+[MuJoCo 使用说明](../../src/rebotarm_simulation/README_mujoco.md)。
+关节阻抗当前执行入口位于仿真后端；真机重力补偿沿用原设备适配与显式使能流程。
 
 ### 运动职责（Motion ownership）
 
@@ -346,6 +363,7 @@ rebotarm_dashboard
 
 rebotarm_teach -> rebotarm_motion
 rebotarm_motion / rebotarmcontroller / rebotarm_simulation -> rebotarm_trajectory
+rebotarmcontroller / rebotarm_simulation -> rebotarm_force_control（模型与力控数值计算）
 rebotarm_teleop -> 使用旧 interactive preview 辅助工具时依赖 rebotarm_motion
 rebotarm_vision -> 为验证和执行依赖 rebotarm_motion / MoveIt 接口
 rebotarm_bringup -> 仅依赖各包的 launch 入口和配置
@@ -377,6 +395,7 @@ rebotarm_bringup -> 各包的实现内部
 | 包 | 可直接向硬件下命令 | 可调用控制器 ROS service/action | 可调用 MoveIt | 可拥有文件/UI | 可发布操作员目标 |
 | --- | --- | --- | --- | --- | --- |
 | `rebotarmcontroller` | 是 | 拥有这些接口 | 否 | 否 | 否 |
+| `rebotarm_force_control` | 否 | 否 | 否 | 仅力控配置，读取规范 URDF | 否 |
 | `rebotarm_motion` | 否 | 是 | 是 | 否 | 否 |
 | `rebotarm_teach` | 否 | 是，通过回放/录制工作流 | 是，通过运动辅助工具 | 仅示教记录 | 否 |
 | `rebotarm_teleop` | 否 | 是 | 仅通过运动辅助工具 | 否 | 是 |

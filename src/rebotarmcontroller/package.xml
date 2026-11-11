@@ -48,6 +48,8 @@
 
   <!-- 导出构建类型，供 ament/colcon 识别本包的安装方式 -->
   <exec_depend>rebotarm_trajectory</exec_depend>
+  <!-- 共享力控算法、重力模型与补偿配置；设备事务仍归本包。 -->
+  <exec_depend>rebotarm_force_control</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>
