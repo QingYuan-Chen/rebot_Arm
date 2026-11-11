@@ -18,11 +18,11 @@ from enum import Enum, auto
 
 
 class ActiveTrajectory:
-    """线程安全的"单目标准入 + 协作式取消"状态。
+    """线程安全的“单目标准入 + 协作式取消”状态。
 
     仿真一次只允许执行一条轨迹。`_token` 就是被准入的目标对象（当前实现里是
     目标请求），为 None 表示空闲；所有读取与迁移都在同一把可重入锁下完成，
-    使"取消"与"开始下一个目标"不会交错。取消采用协作式：这里只置标志，
+    使“取消”与“开始下一个目标”不会交错。取消采用协作式：这里只置标志，
     真正的停止与保持由持有仿真锁的命令闸门完成。
     """
 
@@ -95,7 +95,7 @@ class GateOutcome(Enum):
 def terminal_disposition(outcome: GateOutcome, action_cancel_requested: bool) -> str:
     """把闸门裁决映射为动作终态字符串。
 
-    只有"闸门判为取消"且客户端确实请求过取消时才算 canceled；停止服务或目标
+    只有“闸门判为取消”且客户端确实请求过取消时才算 canceled；停止服务或目标
     被替换等情况一律 aborted，避免把服务停止误报成用户取消。
     """
     if outcome is GateOutcome.ACTION_CANCEL and bool(action_cancel_requested):
@@ -105,10 +105,10 @@ def terminal_disposition(outcome: GateOutcome, action_cancel_requested: bool) ->
 
 
 class TrajectoryCommandGate:
-    """在持锁状态下原子仲裁"继续下发轨迹"与"停止/保持"两类操作。
+    """在持锁状态下原子仲裁“继续下发轨迹”与“停止/保持”两类操作。
 
     设计要点：所有钩子（apply/hold/succeed 以及取消回调）都在可重入锁内执行，
-    因此"取消到达"与"成功收敛"只会有一个赢家；执行循环每轮都必须经过本闸门，
+    因此“取消到达”与“成功收敛”只会有一个赢家；执行循环每轮都必须经过本闸门，
     一旦 token 失效或出现取消请求就立刻停手并保持当前位置，绝不再下发新目标。
     """
 
@@ -155,7 +155,7 @@ class TrajectoryCommandGate:
         ) is GateOutcome.SUCCEEDED
 
     def complete_with_reason(self, token, action_cancel_requested, hold, succeed) -> GateOutcome:
-        """把"取消"与"成功终态迁移"线性化，保证二者互斥。"""
+        """把“取消”与“成功终态迁移”线性化，保证二者互斥。"""
         with self._active._lock:
             # 先执行外部回调再重新读取内部状态：取消回调可能通过可重入的测试
             # 钩子置位，也可能刚好在进入临界区之前完成，因此必须以锁内的

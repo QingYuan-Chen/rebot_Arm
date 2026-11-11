@@ -51,7 +51,7 @@ def load_yaml(package_name, relative_path):
 
     参数：
     - package_name：包名，只用于向 ament 索引查询安装目录（不是路径）；
-    - relative_path：相对该包 share 目录的路径，例如 "config/ompl_planning.yaml"。
+    - relative_path：相对该包 share 目录的路径，例如“config/ompl_planning.yaml”。
 
     返回值：`yaml.safe_load` 的结果，通常是 dict；文件缺失或 YAML 语法错误会直接抛异常，
     属于启动期配置错误，应当让启动失败而不是静默降级。
@@ -142,7 +142,7 @@ def generate_launch_description():
         'moveit_controller_manager': 'rebotarm_motion/BoundSimpleControllerManager',
     }
 
-    # 3D 传感器占位配置：列表里只放一个占位名，且 sensor_plugin 写成 "~"（无插件），
+    # 3D 传感器占位配置：列表里只放一个占位名，且 sensor_plugin 写成“~”（无插件），
     # 等价于「已声明 3D 传感器配置但实际不接深度相机」，避免 move_group 因缺少该参数报错。
     sensors_3d = {
         "sensors": ["no_depth_sensor"],

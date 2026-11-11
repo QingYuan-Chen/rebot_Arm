@@ -6,7 +6,7 @@
 
 资源安装策略
     ``install_resources`` 把 ``models/`` 下的 XML 模型、STL 网格、
-    ``config/*.yaml`` 与保留的 ``launch/*.launch.py`` 按"源目录 → 同名安装目录"归并后
+    ``config/*.yaml`` 与保留的 ``launch/*.launch.py`` 按“源目录 → 同名安装目录”归并后
     安装到 ``share/<包名>/<原相对目录>``。运行期通过 ament 资源索引按相对路径定位，
     因此模型/网格必须与代码同版本安装，否则会加载到旧模型或找不到网格。
 

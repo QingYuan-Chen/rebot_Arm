@@ -5,7 +5,7 @@
 - 有活动回放目标：先请求取消该目标，再用很短超时（0.2 s）尽力请求控制器轨迹停止；
   取消 future 交给调用方挂回调，本模块不等待其完成。
 - 没有活动回放目标：不取消任何目标，但仍请求控制器 ``trajectory_stop``（0.8 s 超时），
-  用于清除可能的残留运动；成功时同样视为"已请求停止"。
+  用于清除可能的残留运动；成功时同样视为“已请求停止”。
 
 返回值中的 ``cancel_future`` 是内部字段，不能直接放进状态 payload；
 ``state`` / ``message`` 等键名是对外接口。
@@ -32,7 +32,7 @@ class TeachReplayClient:
         """
         decision = validate_teach_replay_stop_request(goal_handle is not None)
         if not decision.accepted:
-            # 没有活动目标也要清残留运动：这是"停止"语义的兜底，不代表门控被放行。
+            # 没有活动目标也要清残留运动：这是“停止”语义的兜底，不代表门控被放行。
             stop_requested, _message = call_trigger_service(
                 trajectory_stop_client,
                 timeout_sec=0.8,

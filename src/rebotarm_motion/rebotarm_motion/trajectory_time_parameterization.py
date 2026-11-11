@@ -5,8 +5,8 @@
     不负责录制文件、界面、执行或碰撞场景；输入为共享数值点，输出为同等级六轴曲线。
 
 对外接口
-    parameterize_teach_samples 返回 TimeParameterizationResult.
-    requested_method 与 used_method 分别记录请求方法和实际方法.
+    parameterize_teach_samples 返回 TimeParameterizationResult。
+    requested_method 与 used_method 分别记录请求方法和实际方法。
     teach_input_grade 校验原始字段；prepare_teach_reference 保持等级生成参考约束；
     parameterize_teach_waypoints 生成六轴候选；
     finalize_teach_curve 检查模型及示教限值，并复核纳秒编码后的实际曲线。
@@ -15,10 +15,10 @@
     不对中间点一律补零，不静默删除已有 MoveIt 导数。滤波/重建可能改变节点间路径，
     调用者须检查实际生成曲线的碰撞；时间缩放不能修复位置越界。这里只生成数据，不执行。
 
-文件结构(按定义顺序)
+文件结构（按定义顺序）
     输入分级与参考导数 → 六轴重定时 → 完整曲线复核 → 方法记录。
-    normalize_time_parameterization_method: 把外部传入的方法名归一化为三种合法取值之一.
-    parameterize_teach_samples: 按策略选择时间参数化方法并产出轨迹点.
+    normalize_time_parameterization_method：把外部传入的方法名归一化为三种合法取值之一。
+    parameterize_teach_samples：按策略选择时间参数化方法并产出轨迹点。
 """
 
 from __future__ import annotations
@@ -150,7 +150,7 @@ def teach_curve_analysis(curve):
 
 @dataclass(frozen=True)
 class TimeParameterizationResult:
-    """时间参数化结果与"请求/实际"方法记录.
+    """时间参数化结果与“请求/实际”方法记录。
 
     - ``points``：共享 TrajectoryPoint 数值点；时间单位秒。
     - ``requested_method``：保留归一化的历史配置请求值。
@@ -165,7 +165,7 @@ class TimeParameterizationResult:
 
 
 def normalize_time_parameterization_method(method: str | None) -> str:
-    """把外部传入的方法名归一化为三种合法取值之一.
+    """把外部传入的方法名归一化为三种合法取值之一。
 
     ``None``/空串/``"default"`` 使用 ``"auto"``；未知方法名显式报错。
     比较前去掉首尾空白并转小写。

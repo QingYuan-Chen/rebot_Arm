@@ -38,7 +38,7 @@ MAX_AGE = .15
 
 
 def load_reference_limits(config_directory, joint_names=JOINT_NAMES):
-    """直接读取规范 URDF 和现有动态 YAML; 不加载物理或电机库."""
+    """直接读取规范 URDF 和现有动态 YAML；不加载物理或电机库。"""
     directory = Path(config_directory)
     root = ET.parse(directory / 'rebotarm.urdf').getroot()
     joints = {joint.get('name'): joint.find('limit') for joint in root.findall('joint')}
@@ -81,7 +81,7 @@ class PreparationContext:
 
 
 def normalize_boundaries(joint_names, points, context, *, now):
-    """校验前明确调整起止边界; 其后不得再改点或时间."""
+    """校验前明确调整起止边界；其后不得再改点或时间。"""
     context.require_ready(now)
     points = list(ordered_points(joint_names, points))
     names = canonical_names(joint_names)
@@ -108,7 +108,7 @@ def normalize_boundaries(joint_names, points, context, *, now):
 
 
 def point_to_point(start, target, duration=.4):
-    """完整静止到静止五次约束; 不重定时, 不生成密集位置点."""
+    """完整静止到静止五次约束；不重定时，不生成密集位置点。"""
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError('positive finite point-to-point duration required')
     start = finite_vector(start)
@@ -119,7 +119,7 @@ def point_to_point(start, target, duration=.4):
 
 
 def minimum_point_to_point_duration(start, target, limits):
-    """用解析峰值给出最低时长提示; 不自动改变请求."""
+    """用解析峰值给出最低时长提示；不自动改变请求。"""
     start, target = vector6(start), vector6(target)
     required = 0.
     for name, a, b in zip(JOINT_NAMES, start, target):
@@ -136,7 +136,7 @@ def minimum_point_to_point_duration(start, target, limits):
 
 
 def check_curve(curve, lower, upper, limits):
-    """以解析导数的实根检查全部段内极值; 浮点求解失败由调用方记为未知."""
+    """以解析导数的实根检查全部段内极值；浮点求解失败由调用方记为未知。"""
     names = curve.joint_names
     lower, upper = finite_vector(lower, len(names)), finite_vector(upper, len(names))
     if any(a > b for a, b in zip(lower, upper)):
@@ -177,7 +177,7 @@ def check_curve(curve, lower, upper, limits):
 
 
 def compare_reference(curve, source, *, period=.002, max_samples=100_000):
-    """对照原有到点更新与连续参考; 时间栅格仅用于分析, 不充当限位或碰撞证明."""
+    """对照原有到点更新与连续参考；时间栅格仅用于分析，不充当限位或碰撞证明。"""
     if not math.isfinite(period) or period <= 0:
         raise ValueError('positive finite analysis period required')
     count = max(1, math.ceil(curve.duration / period))
@@ -238,10 +238,10 @@ class PreparedTrajectory:
 def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=None,
                        now=0., collision_check=None, include_reference_comparison=True,
                        preserve_points=False):
-    """返回候选与可审计报告; 只有完整覆盖的碰撞 pass 才产生候选.
+    """返回候选与可审计报告；只有完整覆盖的碰撞 pass 才产生候选。
 
-    collision_check(names, positions) 由调用者注入, 应绑定其记录的规划场景与完整
-    夹爪状态. 无检查器、异常、超时或样本数不足都不能生成候选.
+    collision_check(names, positions) 由调用者注入，应绑定其记录的规划场景与完整
+    夹爪状态。 无检查器、异常、超时或样本数不足都不能生成候选。
     include_reference_comparison 仅控制离线阶梯对照统计，不影响极值或碰撞检查。
     """
     source = ordered_points(joint_names, points)

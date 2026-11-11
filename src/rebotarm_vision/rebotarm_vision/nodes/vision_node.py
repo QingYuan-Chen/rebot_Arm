@@ -18,7 +18,7 @@
 
 关键流程（单线程定时器循环，无额外工作线程）
 --------------------------------------------
-每次 ``_on_timer`` 依次执行：取帧 -> 判断本帧是否"完整" -> 生成时间戳 -> 发布图像与内参
+每次 ``_on_timer`` 依次执行：取帧 -> 判断本帧是否“完整” -> 生成时间戳 -> 发布图像与内参
 -> （可选）YOLO 推理并发布检测结果 -> （可选）刷新本地预览窗口。
 
 正常检测周期发布本帧结果；缺帧、内参缺失和损坏掩膜发布空数组，清除下游的陈旧检测。
@@ -162,7 +162,7 @@ class RebotArmVisionNode(Node):
         self._detection_failure_latched = False
         self._detection_log_countdown = 0
         # 预览窗口是无头服务器上最容易失败的一环：没有 DISPLAY 或 OpenCV 建窗失败都只降级为
-        # "不预览"，不影响任何话题发布。
+        # “不预览”，不影响任何话题发布。
         if self.show_preview:
             display_env = os.environ.get("DISPLAY", "").strip()
             if not display_env:
@@ -276,7 +276,7 @@ class RebotArmVisionNode(Node):
         """把参数读入实例属性并做启动期校验。
 
         所有取值都显式做类型转换（YAML 覆盖后类型可能变化）；校验失败一律抛异常终止启动，
-        不在运行期做"猜测性"回退。``use_sim_time`` 是 ROS 运行时的内置参数，这里读取它是
+        不在运行期做“猜测性”回退。``use_sim_time`` 是 ROS 运行时的内置参数，这里读取它是
         为了决定帧时间戳使用相机硬件时间还是节点时钟（见 ``_frame_stamp``）。
         """
         self.camera_type = str(self.get_parameter("camera.type").value)
@@ -312,14 +312,14 @@ class RebotArmVisionNode(Node):
         self.enable_detection = bool(self.get_parameter("ros.enable_detection").value)
         self.ros_use_sim_time = bool(self.get_parameter("use_sim_time").value)
 
-        # 只接受两个已知取值，写错时不静默退回默认策略，避免出现"以为可靠其实不可靠"。
+        # 只接受两个已知取值，写错时不静默退回默认策略，避免出现“以为可靠其实不可靠”。
         if self.image_reliability not in {"best_effort", "reliable"}:
             raise RuntimeError(
                 "ros.image_reliability must be 'best_effort' or 'reliable'"
             )
 
         # 启用检测就必须给出可用权重：路径为空或文件不存在都直接失败（fail closed），
-        # 不允许"先起来再等模型"。
+        # 不允许“先起来再等模型”。
         if self.enable_detection:
             if not self.model_path:
                 raise RuntimeError("yolo.model_path must not be empty")
@@ -346,7 +346,7 @@ class RebotArmVisionNode(Node):
         )
 
     def _on_timer(self) -> None:
-        """定时器回调：完成"取帧 -> 发布 -> 检测 -> 预览"的一个完整周期。
+        """定时器回调：完成“取帧 -> 发布 -> 检测 -> 预览”的一个完整周期。
 
         缺帧、残帧或损坏掩膜发布本帧空检测后返回；只有转换完整成功才发布检测数组。
         捕获仅负责已识别的输入故障，推理和其他内部异常继续向执行器传播。
@@ -367,7 +367,7 @@ class RebotArmVisionNode(Node):
             return
 
         depth_expected = self.enable_depth
-        # "完整帧"的定义：必须有彩色图；启用深度时还必须有深度图。启用深度却缺深度时宁可
+        # “完整帧”的定义：必须有彩色图；启用深度时还必须有深度图。启用深度却缺深度时宁可
         # 不发布检测结果，也不用陈旧深度融合出可能被下游执行的抓取位姿。
         frame_complete = color_bgr is not None and (not depth_expected or depth_mm is not None)
         if not frame_complete:

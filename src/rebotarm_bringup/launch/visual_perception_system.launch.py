@@ -26,8 +26,8 @@ def _prepare_stages(context):
         "graspnet_python_executable": os.environ.get("GRASPNET_PYTHON", "python3"),
         "vision_yolo_model_path": PathJoinSubstitution([FindPackageShare("rebotarm_vision"), "models", "yolo26s-seg.pt"]).perform(context),
     }
-    # GraspNet 资源只接受部署环境显式提供, 不沿工作区父目录猜测第三方位置;
-    # 未设置时由启用后的推理节点在加载阶段明确失败.
+    # GraspNet 资源只接受部署环境显式提供，不沿工作区父目录猜测第三方位置；
+    # 未设置时由启用后的推理节点在加载阶段明确失败。
     for name, env in (("graspnet_model_root", "GRASPNET_MODEL_ROOT"),
                       ("graspnet_checkpoint_path", "GRASPNET_CHECKPOINT_PATH")):
         defaults[name] = os.environ.get(env, "").strip()

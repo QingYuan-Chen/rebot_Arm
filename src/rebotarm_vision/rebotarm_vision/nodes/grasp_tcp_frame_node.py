@@ -1,6 +1,6 @@
 """抓取 TCP（工具中心点）静态坐标系的广播节点。
 
-职责：把操作员实测的"末端连杆坐标系 -> 抓取 TCP 坐标系"的固定平移
+职责：把操作员实测的“末端连杆坐标系 -> 抓取 TCP 坐标系”的固定平移
 以静态变换的形式发布，供下游抓取链（位姿换算、RViz 显示、手眼链路）
 通过坐标变换查询得到真实夹爪闭合中心。
 
@@ -8,11 +8,11 @@
 （即两个坐标系轴向平行）。offset 单位为米，沿父坐标系轴向表达。
 
 参数（节点名 rebotarm_grasp_tcp_frame）：
-    parent_frame:   父坐标系，默认 end_link（机械臂末端连杆）
-    child_frame:    子坐标系，默认 grasp_tcp（抓取 TCP）
-    tcp_offset_xyz: 三元素平移，默认 [0.0, 0.0, 0.0]，单位米
+    parent_frame：父坐标系，默认 end_link（机械臂末端连杆）
+    child_frame：子坐标系，默认 grasp_tcp（抓取 TCP）
+    tcp_offset_xyz：三元素平移，默认 [0.0, 0.0, 0.0]，单位米
 
-安全语义：本节点只发布静态变换，不下发任何运动指令；但它决定了"抓取点在哪"，
+安全语义：本节点只发布静态变换，不下发任何运动指令；但它决定了“抓取点在哪”，
 配错 offset 会让所有抓取位姿整体偏移，因此真实机械臂上的取值必须来自实测，
 不能直接套用仿真模型里的等效偏移。
 """
@@ -34,11 +34,11 @@ def build_grasp_tcp_transform(
 ) -> TransformStamped:
     """构造一条静态平移变换消息。
 
-    参数:
-        parent_frame: 父坐标系名。
-        child_frame: 子坐标系名。
-        tcp_offset_xyz: 子坐标系原点在父坐标系中的平移 (x, y, z)，单位米。
-    返回:
+    参数：
+        parent_frame：父坐标系名。
+        child_frame：子坐标系名。
+        tcp_offset_xyz：子坐标系原点在父坐标系中的平移 (x, y, z)，单位米。
+    返回：
         TransformStamped，旋转为单位四元数 (0, 0, 0, 1)，header.stamp 保持零值
         （静态广播器会忽略时间戳，TF 树中视为永久有效）。
     """

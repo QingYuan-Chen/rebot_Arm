@@ -89,17 +89,17 @@ class TrajectorySampler:
         """校验并规范化一条具名轨迹。
 
         参数：
-            joint_names: 本条轨迹涉及的关节名（允许是六个规范关节的子集），不得为空、不得重复，
+            joint_names：本条轨迹涉及的关节名（允许是六个规范关节的子集），不得为空、不得重复，
                 且每个名字都必须属于 ``ARM_JOINT_NAMES``。
-            points: 具名轨迹点序列，至少一个；时间必须严格递增，位置个数必须与 ``joint_names`` 一致。
-            initial_positions: 未出现在 ``joint_names`` 中的关节的初始角（rad）。可以是规范顺序的
+            points：具名轨迹点序列，至少一个；时间必须严格递增，位置个数必须与 ``joint_names`` 一致。
+            initial_positions：未出现在 ``joint_names`` 中的关节的初始角（rad）。可以是规范顺序的
                 六元序列，也可以是“关节名 -> 角度”的映射；当 ``joint_names`` 已是完整六关节时可省略，
                 省略时按全零位处理。
 
         异常：
-            ValueError: 关节名非法/重复、点数为空、时间为负或非递增、位置个数不匹配、
+            ValueError：关节名非法/重复、点数为空、时间为负或非递增、位置个数不匹配、
                 ``initial_positions`` 未恰好覆盖六个规范关节等。
-            TypeError: ``points`` 中存在非 ``NamedTrajectoryPoint`` 记录。
+            TypeError：``points`` 中存在非 ``NamedTrajectoryPoint`` 记录。
 
         本方法只做校验与预计算，不修改传入的 ``points``，也不产生任何副作用。
         """

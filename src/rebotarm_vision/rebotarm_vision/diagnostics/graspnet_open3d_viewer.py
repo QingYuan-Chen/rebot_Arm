@@ -2,7 +2,7 @@
 
 职责与位置
 ----------
-本节点把"彩色图 + 深度图 + 相机内参 + 检测框/掩膜 + GraspNet 候选"在同一时刻拼成一幅
+本节点把“彩色图 + 深度图 + 相机内参 + 检测框/掩膜 + GraspNet 候选”在同一时刻拼成一幅
 三维场景：RGB-D 反投影得到的彩色点云，加上前若干名候选的简化夹爪位姿，显示在独立的
 Open3D 窗口中。它是**纯只读调试工具**：只订阅话题，不发布任何消息，不提供 RViz、运动规划
 或硬件接口，因此可以随时打开/关闭而不影响抓取执行链路。
@@ -65,7 +65,7 @@ def _color_array(msg: Image) -> np.ndarray:
 
 
 def _depth_array(msg: Image) -> np.ndarray:
-    """把深度图像消息转成 uint16 的"毫米"数组（形状 HxW），不做任何缩放。
+    """把深度图像消息转成 uint16 的“毫米”数组（形状 HxW），不做任何缩放。
 
     只接受 16 位单通道深度（`16UC1` / `mono16`）。米制换算留给 `_scene_cloud`，
     以便与推理侧的 depth_scale 参数保持一致的处理顺序。
@@ -314,7 +314,7 @@ class GraspNetOpen3DViewer(Node):
         self.detection = max(detections, key=lambda item: float(item.confidence)) if detections else None
 
     def _on_candidates(self, message):
-        # 空候选视为"清屏"信号：把 pending 置空，主线程不会再去渲染上一帧的夹爪。
+        # 空候选视为“清屏”信号：把 pending 置空，主线程不会再去渲染上一帧的夹爪。
         if not message.candidates:
             with self.lock:
                 self.pending = None

@@ -68,7 +68,7 @@ def build_replay_start_soft_points(
     align_steps: int = 30,
     first_hold_sec: float = 0.3,
 ) -> list[RetimedTeachPoint]:
-    """构造回放开始前的"保持 → 对齐 → 再保持"引导段（位置单位 rad，时间单位秒）。
+    """构造回放开始前的“保持 → 对齐 → 再保持”引导段（位置单位 rad，时间单位秒）。
 
     段结构（合成点的 ``source_sample`` 一律为 -1，便于与真实示教帧区分）：
       1. 起始保持段：时长 ``start_hold_sec``，停在当前位姿，给控制器和操作者一个缓冲；
@@ -99,7 +99,7 @@ def build_replay_start_soft_points(
         )
     band = str(start_band or "").strip().lower()
     if band == ReplayStartBand.ALIGN.value:
-        # 真正的"回起始点"对齐：用更长的时长和更多的点，避免对齐本身产生速度冲击。
+        # 真正的“回起始点”对齐：用更长的时长和更多的点，避免对齐本身产生速度冲击。
         duration = max(float(align_duration), 0.0)
         steps = int(align_steps)
     else:
@@ -159,9 +159,9 @@ def _motion_scope(samples: list[TeachSample]) -> tuple[float, float]:
     """统计轨迹运动规模，返回 ``(单关节最大行程, 全轨迹总运动量)``，单位均为 rad。
 
     单关节最大行程 = 每个关节位置极差（最大减最小）中的最大值；
-    总运动量 = 相邻帧之间所有关节增量绝对值之和（反映"走了多远的折线距离"）。
+    总运动量 = 相邻帧之间所有关节增量绝对值之和（反映“走了多远的折线距离”）。
     样本为空、关节数为 0 或某帧位置长度与首帧不一致时返回 ``(inf, inf)``——长度不一致属于
-    结构性异常，返回无穷大可以让上层按"大幅度运动"从严处理，而不是低估风险。
+    结构性异常，返回无穷大可以让上层按“大幅度运动”从严处理，而不是低估风险。
     """
     if not samples:
         return 0.0, 0.0
@@ -432,7 +432,7 @@ def prepare_teach_replay_samples(
       ``large_motion_max_speed``                     大幅度运动时的最大倍速（下限 0.01；当前实现
                                                      只回填该值，未用它改写 ``effective_speed``）。
     安全语义：真实回放决策必须基于 ``after_quality``（重定时后的质量，等于 ``retimed_quality``）；
-    ``before_quality`` 只用于展示"处理前有多差"。
+    ``before_quality`` 只用于展示“处理前有多差”。
     """
     from .teach_record_io import arm_replay_samples
     from rebotarm_motion.polynomial_trajectory import TrajectoryPoint
@@ -498,7 +498,7 @@ def prepare_teach_replay_samples(
     six_axis = bool(samples) and samples[0].joint_names == tuple(f'joint{i}' for i in range(1,7))
     if resample_enabled and len(prepared) > 1 and not six_axis:
         prepared = resample_teach_samples(prepared, rate_hz=resample_rate_hz)
-        # 以"样本数是否变化"判定重采样是否真的生效（等间隔记录可能点数不变）。
+        # 以“样本数是否变化”判定重采样是否真的生效（等间隔记录可能点数不变）。
         resample_applied = len(prepared) != len(samples)
     retimed_points: list[RetimedTeachPoint] = []
     if retime_enabled and path_samples and not _has_structural_teach_anomaly(filtered_quality):
@@ -549,7 +549,7 @@ def prepare_teach_replay_samples(
             for t in ((curve.duration*i/count for i in range(count+1)) if count else (0.,))
             for q,v,a,_ in (curve.sample(t),)]
         resample_applied = bool(resample_enabled) and len(retimed_samples) != len(samples)
-    # 没有重定点时退回评估预处理样本本身，保证 after_quality 始终反映"将要执行的东西"。
+    # 没有重定点时退回评估预处理样本本身，保证 after_quality 始终反映“将要执行的东西”。
     retimed_quality = analyze_teach_trajectory(
         retimed_samples if retimed_samples else prepared,
         max_velocity_rad_s=max_velocity_rad_s,
@@ -573,7 +573,7 @@ def prepare_teach_replay_samples(
         filter_applied=filter_applied,
         resample_applied=resample_applied,
         retime_applied=retime_applied,
-        # 以下参数一律回填"夹紧之后的实际值"，与真正参与计算的值保持一致。
+        # 以下参数一律回填“夹紧之后的实际值”，与真正参与计算的值保持一致。
         smoothing_window=max(int(smoothing_window), 1),
         filter_cutoff_hz=max(float(filter_cutoff_hz), 0.01),
         filter_sample_rate_hz=max(float(filter_sample_rate_hz), 1.0),
@@ -652,7 +652,7 @@ def teach_trajectory_preview_to_dict(
 
     点数超过 ``max_points``（下限 1）时按 ``round(i * (n-1) / (limit-1))`` 均匀抽取，
     并用集合去重后排序，因此首末点一定包含、下标严格递增；实际使用的抽样步长以
-    ``downsample_step`` 回填，便于界面说明"这是抽样后的曲线"。
+    ``downsample_step`` 回填，便于界面说明“这是抽样后的曲线”。
     每个点的时间 ``t`` 是相对首帧的秒数（负数被夹到 0），位置按关节名成字典输出（rad）。
     ``sample`` 保留原始下标，便于把质量事件里的 ``sample`` 直接映射到曲线位置。
     样本为空时返回空结构（但仍带回一份 red 质量结果）。
@@ -682,7 +682,7 @@ def teach_trajectory_preview_to_dict(
             "events": [],
         }
     limit = max(int(max_points), 1)
-    # 向上取整的采样步长，仅用于展示"原始点 → 抽样点"的稀疏程度。
+    # 向上取整的采样步长，仅用于展示“原始点 → 抽样点”的稀疏程度。
     step = max(1, (len(samples) + limit - 1) // limit)
     first_stamp = float(samples[0].stamp)
     if len(samples) <= limit:

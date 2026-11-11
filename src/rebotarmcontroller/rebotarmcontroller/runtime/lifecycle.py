@@ -1,21 +1,21 @@
-"""控制器生命周期与关闭时的安全协调.
+"""控制器生命周期与关闭时的安全协调。
 
 职责与位置
-    连接, 使能回滚, 失能验证, 模式交接和关闭事务的状态所有者.
+    连接，使能回滚，失能验证，模式交接和关闭事务的状态所有者。
 
 对外接口
-    LifecycleDevice 描述设备能力, LifecyclePorts 注入其他所有者能力;
-    ControllerLifecycle 接纳显式事务, shutdown_policy 处理节点退出.
+    LifecycleDevice 描述设备能力，LifecyclePorts 注入其他所有者能力；
+    ControllerLifecycle 接纳显式事务，shutdown_policy 处理节点退出。
 
 安全与并发约束
-    连接会检查并在需要时尝试失能, 不能当作严格只读操作. 失败不能伪报安全状态.
-    健康任务失败保持使能; 关闭仅释放已通过新帧确认失能的设备, 不凭退出意图自动失能.
+    连接会检查并在需要时尝试失能，不能当作严格只读操作。 失败不能伪报安全状态。
+    健康任务失败保持使能；关闭仅释放已通过新帧确认失能的设备，不凭退出意图自动失能。
 
-文件结构(按定义顺序)
-    LifecycleDevice: 事务使用的设备能力; 真实和离线实现遵守同一接口.
-    LifecyclePorts: 生命周期与其他所有者之间的窄接口; 回调不保存第二份业务状态.
-    ControllerLifecycle: 保存一个设备会话的生命周期和公开执行状态.
-    shutdown_policy: 仅在已确认失能时释放硬件; 使能时保留控制以等待人工恢复.
+文件结构（按定义顺序）
+    LifecycleDevice：事务使用的设备能力；真实和离线实现遵守同一接口。
+    LifecyclePorts：生命周期与其他所有者之间的窄接口；回调不保存第二份业务状态。
+    ControllerLifecycle：保存一个设备会话的生命周期和公开执行状态。
+    shutdown_policy：仅在已确认失能时释放硬件；使能时保留控制以等待人工恢复。
 """
 
 from __future__ import annotations
@@ -29,59 +29,59 @@ from ..contracts.ros_ports import ArmCommandPort, GravityCommandPort, LifecycleC
 
 
 class LifecycleDevice(Protocol):
-    """事务使用的设备能力; 真实和离线实现遵守同一接口."""
+    """事务使用的设备能力；真实和离线实现遵守同一接口。"""
 
     mode: str
     control_loop_active: bool
 
     def connect(self):
-        """声明设备会话连接能力, 不隐含使能."""
+        """声明设备会话连接能力，不隐含使能。"""
         ...
 
     def disconnect(self):
-        """声明驱动级失能和释放能力, 不能代替生命周期确认."""
+        """声明驱动级失能和释放能力，不能代替生命周期确认。"""
         ...
 
     def release_disabled(self):
-        """声明已确认失能后的释放能力; 真实驱动释放仍可能追加失能帧."""
+        """声明已确认失能后的释放能力；真实驱动释放仍可能追加失能帧。"""
         ...
 
     def set_target(self, positions):
-        """声明写入六轴数值目标的能力, 位置单位 rad."""
+        """声明写入六轴数值目标的能力，位置单位 rad。"""
         ...
 
     def enable(self):
-        """声明驱动级使能事务, 完整失败回滚由生命周期协调."""
+        """声明驱动级使能事务，完整失败回滚由生命周期协调。"""
         ...
 
     def disable(self):
-        """声明驱动级失能事务, 七路新帧确认由生命周期协调."""
+        """声明驱动级失能事务，七路新帧确认由生命周期协调。"""
         ...
 
     def mode_pos_vel(self):
-        """声明六轴位置速度模式切换能力."""
+        """声明六轴位置速度模式切换能力。"""
         ...
 
     def mode_mit(self):
-        """声明六轴 MIT 模式切换能力."""
+        """声明六轴 MIT 模式切换能力。"""
         ...
 
     def mode_vel(self):
-        """声明六轴速度模式切换能力."""
+        """声明六轴速度模式切换能力。"""
         ...
 
     def set_zero(self):
-        """声明六轴置零能力, 前置失能条件由生命周期检查."""
+        """声明六轴置零能力，前置失能条件由生命周期检查。"""
         ...
 
     def set_zero_single(self, name):
-        """声明指定六轴关节的置零能力, 不负责夹爪标定."""
+        """声明指定六轴关节的置零能力，不负责夹爪标定。"""
         ...
 
 
 @dataclass(frozen=True)
 class LifecyclePorts:
-    """生命周期与其他所有者之间的窄接口; 回调不保存第二份业务状态."""
+    """生命周期与其他所有者之间的窄接口；回调不保存第二份业务状态。"""
 
     device: LifecycleDevice
     joint_feedback: Callable
@@ -112,10 +112,10 @@ EXECUTION_STATES = frozenset({'IDLE', 'TRAJ_PREPARING', 'TRAJ_RUNNING', 'LOWLEVE
 
 
 class ControllerLifecycle:
-    """保存一个设备会话的生命周期和公开执行状态."""
+    """保存一个设备会话的生命周期和公开执行状态。"""
 
     def __init__(self, runtime: RequestRuntime, ports: LifecyclePorts | None = None):
-        """保存唯一请求运行时与端口, 初始化失联, 未使能和空闲状态; 不连接硬件."""
+        """保存唯一请求运行时与端口，初始化失联，未使能和空闲状态；不连接硬件。"""
         self._backend = runtime
         self.ports = ports
         self.lock = threading.RLock()
@@ -127,18 +127,18 @@ class ControllerLifecycle:
 
     @property
     def ready_for_motion(self):
-        """只有明确处于使能保持/轨迹状态才能接纳运动."""
+        """只有明确处于使能保持/轨迹状态才能接纳运动。"""
         return bool(self.connected and self.enabled
                     and self.state in ("ENABLED_HOLD", "TRAJECTORY_RUNNING"))
 
     def set_state(self, state):
-        """校验生命周期枚举后写入; 调用方负责设备线程串行化和事务锁."""
+        """校验生命周期枚举后写入；调用方负责设备线程串行化和事务锁。"""
         if state not in LIFECYCLE_STATES:
             raise ValueError(f'unsupported lifecycle state: {state}')
         self.state = state
 
     def set_execution(self, state, *, enabled):
-        """校验执行枚举并同步派生生命周期状态, DISABLING 期间不伪报重新就绪."""
+        """校验执行枚举并同步派生生命周期状态，DISABLING 期间不伪报重新就绪。"""
         if state not in EXECUTION_STATES:
             raise ValueError(f'unsupported state machine value: {state}')
         self.execution = state
@@ -149,16 +149,16 @@ class ControllerLifecycle:
                 self.state = 'ENABLED_HOLD'
 
     def set_execution_state(self, state):
-        """执行器通过本入口同步状态, 不直接覆盖生命周期状态字段."""
+        """执行器通过本入口同步状态，不直接覆盖生命周期状态字段。"""
         self.set_execution(state, enabled=self.enabled)
 
     def require_connected(self):
-        """未建立已确认设备会话时拒绝后续事务."""
+        """未建立已确认设备会话时拒绝后续事务。"""
         if not self.connected:
             raise RuntimeError("hardware is not connected")
 
     def require_enabled(self):
-        """所有运动入口共享的使能准入, 状态未知时必须先验证失能."""
+        """所有运动入口共享的使能准入，状态未知时必须先验证失能。"""
         self.require_connected()
         if self.state == "DISABLING":
             raise RuntimeError("hardware state is unconfirmed; verify disable before enabling again")
@@ -166,16 +166,16 @@ class ControllerLifecycle:
             raise RuntimeError("hardware is disabled; call explicit /rebotarm/enable first")
 
     def _idle(self):
-        """按当前使能状态归并执行空闲, 保留失能确认尚未完成的生命周期."""
+        """按当前使能状态归并执行空闲，保留失能确认尚未完成的生命周期。"""
         self.set_execution("IDLE", enabled=self.enabled)
 
     def _verify_disabled(self):
-        """通过注入端口确认六轴及夹爪失能; 新帧刷新由对应反馈端口保证."""
+        """通过注入端口确认六轴及夹爪失能；新帧刷新由对应反馈端口保证。"""
         self.ports.joint_feedback(expected_status=0)
         self.ports.gripper_status(0)
 
     def disable_all(self):
-        """分别尝试六轴与夹爪失能; 一侧失败不跳过另一侧."""
+        """分别尝试六轴与夹爪失能；一侧失败不跳过另一侧。"""
         errors = []
         try:
             self.ports.device.disable()
@@ -192,10 +192,10 @@ class ControllerLifecycle:
 
     @device_request
     def connect(self):
-        """建立会话并确认默认失能; 必要时会发送失能命令, 不是只读探测.
+        """建立会话并确认默认失能；必要时会发送失能命令，不是只读探测。
 
-        请求在唯一设备线程执行, 生命周期锁覆盖连接, 反馈绑定和状态确认.
-        调用前须完成现场安全检查; 失败仅尽力清理, 不能以软件已断开证明电机已失能.
+        请求在唯一设备线程执行，生命周期锁覆盖连接，反馈绑定和状态确认。
+        调用前须完成现场安全检查；失败仅尽力清理，不能以软件已断开证明电机已失能。
         """
         with self.lock:
             if self.connected:
@@ -207,7 +207,7 @@ class ControllerLifecycle:
                 self.connected = True
                 self.ports.initialize_gripper()
                 _, _, _, statuses = self.ports.joint_feedback()
-                # 连接后的原始状态可为使能; 先确认实际状态, 再按既有连接策略失能.
+                # 连接后的原始状态可为使能；先确认实际状态，再按既有连接策略失能。
                 gripper_status = self.ports.gripper_feedback_status()
                 if any(status != 0 for status in statuses) or gripper_status not in (None, 0):
                     self.disable_all()
@@ -224,10 +224,10 @@ class ControllerLifecycle:
                 raise
 
     def disconnect_failed_connect(self):
-        """连接失败后逐步尽力清理并返回清理失败摘要.
+        """连接失败后逐步尽力清理并返回清理失败摘要。
 
-        释放未确认时保留连接引用且不发布 DISCONNECTED; 调用方必须把原连接错误
-        与清理错误一并上报, 不能把"已尝试断开"当作设备已释放.
+        释放未确认时保留连接引用且不发布 DISCONNECTED；调用方必须把原连接错误
+        与清理错误一并上报，不能把“已尝试断开”当作设备已释放。
         """
         errors = []
         release_error = None
@@ -249,21 +249,21 @@ class ControllerLifecycle:
         message = "; ".join(errors)
         self.errors.append(f"CONNECT_CLEANUP_FAILED: {message}")
         if release_error is not None:
-            # 释放未确认时保留连接引用, 不发布 DISCONNECTED, 由调用方显式处理.
+            # 释放未确认时保留连接引用，不发布 DISCONNECTED，由调用方显式处理。
             self.set_state("DISABLING")
         else:
-            # 释放已确认, 失能结果仍保留在错误原因中, 供启动日志准确报告.
+            # 释放已确认，失能结果仍保留在错误原因中，供启动日志准确报告。
             self.connected = False
             self.set_state("DISCONNECTED")
         return message
 
     @device_request
     def enable(self):
-        """显式使能并开始位置保持; 首次使能失败时验证回滚结果.
+        """显式使能并开始位置保持；首次使能失败时验证回滚结果。
 
-        首次调用以新鲜失能反馈建立目标, 切换模式后使能六轴和夹爪, 再用新帧确认.
-        已使能时再次调用会重新请求当前位置保持; 它不只是状态查询.
-        回滚未确认失能时保留 DISABLING, 阻断运动, 不能报告安全关闭.
+        首次调用以新鲜失能反馈建立目标，切换模式后使能六轴和夹爪，再用新帧确认。
+        已使能时再次调用会重新请求当前位置保持；它不只是状态查询。
+        回滚未确认失能时保留 DISABLING，阻断运动，不能报告安全关闭。
         """
         with self.lock:
             self.require_connected()
@@ -280,7 +280,7 @@ class ControllerLifecycle:
                 failure = self.ports.gripper_coordinate_failure()
                 if failure is not None:
                     raise RuntimeError(failure)
-                # 用使能前验证的失能位置建立保持目标, 防止沿用上一会话目标在使能后突然追赶.
+                # 用使能前验证的失能位置建立保持目标，防止沿用上一会话目标在使能后突然追赶。
                 self.ports.device.set_target(positions)
                 if self.ports.device.mode_pos_vel() is False:
                     raise RuntimeError("failed to enter position-velocity control mode")
@@ -305,7 +305,7 @@ class ControllerLifecycle:
                 raise RuntimeError(f"enable failed and was rolled back: {exc}") from exc
 
     def rollback_enable(self):
-        """回滚各步骤独立尝试; 未确认失能时禁止谎报安全状态."""
+        """回滚各步骤独立尝试；未确认失能时禁止谎报安全状态。"""
         errors = []
         for label, operation in (("stop gripper loop", self.ports.stop_gripper),
                                  ("stop arm loop", self.ports.stop_control),
@@ -320,7 +320,7 @@ class ControllerLifecycle:
             except Exception as exc:
                 errors.append(f"disabled feedback: {exc}")
         self.execution = "IDLE"
-        # 回滚不明时用保守使能标志及 DISABLING 阻断恢复, 不能因命令已尝试就声称可释放.
+        # 回滚不明时用保守使能标志及 DISABLING 阻断恢复，不能因命令已尝试就声称可释放。
         if errors:
             self.enabled = True
             self.errors.append("ENABLE_ROLLBACK_FAILED")
@@ -333,10 +333,10 @@ class ControllerLifecycle:
 
     @device_request
     def disable(self):
-        """停止输出, 发送失能并用七路新反馈确认; 不在此检查现场安全基线.
+        """停止输出，发送失能并用七路新反馈确认；不在此检查现场安全基线。
 
-        正常卸力前的现场支撑和基线验证由调用方负责. 验证失败保留 DISABLING 和错误,
-        恢复原使能标志, 不以命令已发送或服务已返回代替失能证据.
+        正常卸力前的现场支撑和基线验证由调用方负责。 验证失败保留 DISABLING 和错误，
+        恢复原使能标志，不以命令已发送或服务已返回代替失能证据。
         """
         with self.lock:
             self.require_connected()
@@ -362,7 +362,7 @@ class ControllerLifecycle:
 
     @device_request
     def set_mode(self, mode):
-        """模式事务保持原有交接顺序; 设备传输失败进入保护路径."""
+        """模式事务保持原有交接顺序；设备传输失败进入保护路径。"""
         with self.lock:
             self.require_connected()
             if self.state == "DISABLING":
@@ -396,7 +396,7 @@ class ControllerLifecycle:
 
     @device_request
     def set_zero(self, joint_name=""):
-        """仅失能时允许置零; 夹爪的新帧连续验证交由专属接口执行."""
+        """仅失能时允许置零；夹爪的新帧连续验证交由专属接口执行。"""
         with self.lock:
             self.require_connected()
             if self.enabled:
@@ -416,10 +416,10 @@ class ControllerLifecycle:
 
     @device_request
     def shutdown(self):
-        """仅在未使能且七路新帧确认失能后释放设备会话.
+        """仅在未使能且七路新帧确认失能后释放设备会话。
 
-        使能时拒绝关闭; 确认失败保留连接并标记 DISABLING, 供显式恢复.
-        底层释放仍可能追加失能帧, 因此不能用于未知状态下的只读探测收尾.
+        使能时拒绝关闭；确认失败保留连接并标记 DISABLING，供显式恢复。
+        底层释放仍可能追加失能帧，因此不能用于未知状态下的只读探测收尾。
         """
         with self.lock:
             if not self.connected:
@@ -448,11 +448,11 @@ class ControllerLifecycle:
 
 def shutdown_policy(lifecycle: LifecycleCommandPort, *, arm: ArmCommandPort,
                     gravity: GravityCommandPort, safe_home, logger):
-    """仅在已确认失能时释放硬件; 使能时保留控制以等待人工恢复.
+    """仅在已确认失能时释放硬件；使能时保留控制以等待人工恢复。
 
-    可选停靠成功也不等同于验证本轮安全基线; 操作员需确认现场并显式失能.
-    失败后尝试停止并保持, 若设备或反馈故障则由硬件保护路径处置.
-    返回 False 时调用方必须保留节点, 执行器和设备连接.
+    可选停靠成功也不等同于验证本轮安全基线；操作员需确认现场并显式失能。
+    失败后尝试停止并保持，若设备或反馈故障则由硬件保护路径处置。
+    返回 False 时调用方必须保留节点，执行器和设备连接。
     """
     if lifecycle.connected and lifecycle.enabled:
         if safe_home is not None:

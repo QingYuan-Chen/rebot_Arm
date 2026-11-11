@@ -32,13 +32,13 @@ class YoloDetector:
         """加载权重并尝试启用开放词表。
 
         参数：
-            model_path: 权重文件路径（本地 ``.pt``）。文件名含 world/yoloe 时
+            model_path：权重文件路径（本地 ``.pt``）。文件名含 world/yoloe 时
                 会被视为开放词表的显式开关，见下方注释。
-            device: 推理设备字符串，原样透传给推理后端，如 "cpu"、"cuda:0"。
-            conf_threshold: 置信度阈值 [0, 1]，低于它的检测框被丢弃；调高更保守。
-            iou_threshold: 非极大值抑制的 IoU 阈值 [0, 1]，越小越激进地抑制重叠框。
-            use_world: 启动参数显式要求开放词表模式。
-            custom_classes: 开放词表的文本提示类别名序列；为空表示不启用。
+            device：推理设备字符串，原样透传给推理后端，如 "cpu"、"cuda:0"。
+            conf_threshold：置信度阈值 [0, 1]，低于它的检测框被丢弃；调高更保守。
+            iou_threshold：非极大值抑制的 IoU 阈值 [0, 1]，越小越激进地抑制重叠框。
+            use_world：启动参数显式要求开放词表模式。
+            custom_classes：开放词表的文本提示类别名序列；为空表示不启用。
         """
 
         self._model = YOLO(model_path)

@@ -1,7 +1,7 @@
-"""从"新的且时间对齐"的反馈中构造示教样本。
+"""从“新的且时间对齐”的反馈中构造示教样本。
 
 示教数据的唯一来源是硬件反馈：关节状态提供位置/速度/力矩，电机状态提供健康码，
-两者必须属于同一反馈批次，否则本模块拒绝该帧。返回 ``None`` 表示"这帧不算数但不算错误"
+两者必须属于同一反馈批次，否则本模块拒绝该帧。返回 ``None`` 表示“这帧不算数但不算错误”
 （重复帧或录制开始前的旧帧）；抛出 ``ValueError`` 表示反馈本身不可信，调用方应当等待下一帧。
 """
 
@@ -78,7 +78,7 @@ def feedback_teach_sample(
     indices = [names.index(name) for name in joint_names]
 
     if require_motor_status:
-        # 时间戳必须与关节状态完全一致，才能保证"位置"与"健康状态"属于同一帧反馈。
+        # 时间戳必须与关节状态完全一致，才能保证“位置”与“健康状态”属于同一帧反馈。
         if any(motor_stamps.get(name) != stamp for name in joint_names):
             raise ValueError("waiting for motor status from the same feedback batch")
         # 0=未使能，1=已使能；其余值（例如 255）表示未知或故障。

@@ -129,7 +129,7 @@ class WebTeleopClient:
 
         参数：
         - ``payload``：Web 请求体，须含 ``confirm="EXECUTE"`` 与 ``joint_positions``
-          （关节名 → 目标角度 rad）；可选 ``duration``(s)、``max_delta_rad``(rad)、
+          （关节名 → 目标角度 rad）；可选 ``duration``（s）、``max_delta_rad``（rad）、
           ``max_joint_speed_rad_s``(rad/s)；
         - ``current_positions``：当前实测关节角（rad），用于计算增量并作为插值起点；
         - ``max_delta_rad``：单关节最大允许增量（rad）的全局上限；

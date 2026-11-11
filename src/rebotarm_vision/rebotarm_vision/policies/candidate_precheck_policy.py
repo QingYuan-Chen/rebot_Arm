@@ -44,9 +44,9 @@ def evaluate_candidate_precheck(
     """按「有限性 → 置信度 → 有限性 → 开口区间」的顺序短路判定。
 
     参数：
-        confidence: 候选置信度，期望落在 [0, 1]。
-        jaw_width_m: 候选所需的夹爪开口，单位米。
-        config: 预筛阈值。
+        confidence：候选置信度，期望落在 [0, 1]。
+        jaw_width_m：候选所需的夹爪开口，单位米。
+        config：预筛阈值。
 
     返回：
         CandidatePrecheckResult。NaN/Inf 一律显式拒绝：NaN 参与大小比较恒为

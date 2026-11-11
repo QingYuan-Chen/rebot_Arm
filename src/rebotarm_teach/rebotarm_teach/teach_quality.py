@@ -63,7 +63,7 @@ def analyze_teach_trajectory(
       - 增量在 ``green_jump_rad`` 与 ``yellow_jump_rad`` 之间记 ``yellow`` 事件；
       - 速度 / 加速度 / 加加速度超过各自上限各记一条 ``yellow`` 异常；
       - 关节名不一致、位置向量长度不一致、时间戳非单调（``dt <= 0``）记结构性异常并直接
-        判 ``red``：这类记录连差分都不可信，不能靠重定时"抢救"。
+        判 ``red``：这类记录连差分都不可信，不能靠重定时“抢救”。
     风险等级只升不降（已经 red 不会被后续 yellow 覆盖）。速度/加速度/加加速度用相邻帧差分，
     因此对采集噪声敏感，这也是后续要做滤波与重采样的原因。
     ``samples`` 为空时返回 red 且 ``replay_policy`` 为 "record contains no samples"。
@@ -103,7 +103,7 @@ def analyze_teach_trajectory(
     expected_len = len(expected_joints)
     velocity_limits = _velocity_limits_for_joints(max_velocity_rad_s, expected_joints)
     previous = samples[0]
-    # 首帧没有前一帧，差分初值取零：首帧速度按 0 处理，避免伪造出一个"跳跃起步"。
+    # 首帧没有前一帧，差分初值取零：首帧速度按 0 处理，避免伪造出一个“跳跃起步”。
     previous_velocities = tuple(0.0 for _ in range(expected_len))
     previous_accelerations = tuple(0.0 for _ in range(expected_len))
     if len(previous.positions) != expected_len:
@@ -124,7 +124,7 @@ def analyze_teach_trajectory(
         current_velocities = tuple(0.0 for _ in range(expected_len))
         current_accelerations = tuple(0.0 for _ in range(expected_len))
         if dt > 0.0 and len(sample.positions) == expected_len and len(previous.positions) == expected_len:
-            # 一阶差分得速度 (rad/s)，再对速度一阶差分得加速度 (rad/s^2)。
+            # 一阶差分得速度 （rad/s），再对速度一阶差分得加速度 (rad/s^2)。
             current_velocities = tuple(
                 (float(current) - float(last)) / dt
                 for current, last in zip(sample.positions, previous.positions)
@@ -136,7 +136,7 @@ def analyze_teach_trajectory(
         for joint_index, (joint_name, current, last) in enumerate(zip(expected_joints, sample.positions, previous.positions)):
             delta = abs(float(current) - float(last))
             velocity = abs(current_velocities[joint_index]) if dt > 0.0 else None
-            # 只记录"更差"的极值，用于回填 worst_joint / worst_sample（最大单帧跳变点）。
+            # 只记录“更差”的极值，用于回填 worst_joint / worst_sample（最大单帧跳变点）。
             if delta > max_jump:
                 max_jump = delta
                 worst_joint = joint_name
@@ -280,7 +280,7 @@ def detect_teach_record_anomalies(
     """文件巡检用的轻量异常扫描：只看跳变、速度、关节名与时间戳单调性。
 
     与 :func:`analyze_teach_trajectory` 的区别是阈值更宽松（默认跳变 0.75 rad、速度
-    2.0 rad/s）且只返回文本清单，用于"文件是否值得拿来用"的粗筛；质量分档以
+    2.0 rad/s）且只返回文本清单，用于“文件是否值得拿来用”的粗筛；质量分档以
     :func:`analyze_teach_trajectory` 的结果为准。
     """
     anomalies: list[str] = []
@@ -320,7 +320,7 @@ def inspect_teach_record(
                            结果中 ``start_band`` 为 ``unknown``；
     ``direct_threshold`` / ``align_threshold`` 起点分档阈值（rad），透传给
                            :func:`classify_replay_start`。
-    一切异常都转成结构化的"坏结果"而不是抛异常：
+    一切异常都转成结构化的“坏结果”而不是抛异常：
       文件不存在 → ``start_band="missing"``；解析失败 → ``"invalid"``（异常文本进 message
       与 anomalies）；没有样本 → ``"empty"``；缺少记录里的某些关节 → ``"unknown"`` 并在
       message 里列出缺失关节名。
@@ -430,7 +430,7 @@ def inspect_teach_record(
 def teach_record_info_to_dict(info: TeachRecordInfo) -> dict:
     """把巡检结果转成 JSON 可序列化的字典（键名为对外 payload 接口，不可改动）。
 
-    ``start_positions`` / ``end_positions`` 在这里从与关节名对齐的元组转成"关节名 → 位置"的
+    ``start_positions`` / ``end_positions`` 在这里从与关节名对齐的元组转成“关节名 → 位置”的
     字典（rad）；``quality`` 只在有质量结果时出现（文件缺失/损坏时没有该键）。
     """
     payload = {

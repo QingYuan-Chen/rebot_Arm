@@ -1,4 +1,4 @@
-"""整臂命令的服务客户端门面：把面板的"使能/失能/回原点"命令落到控制器服务上。
+"""整臂命令的服务客户端门面：把面板的“使能/失能/回原点”命令落到控制器服务上。
 
 面板节点为每条整臂命令各准备一个 Trigger 服务客户端，本模块负责按统一顺序调用它们：
     1. 先用命令白名单校验入参，未知命令直接拒绝，不触发任何服务调用；
@@ -75,7 +75,7 @@ class ArmControlClient:
         stop_requested = False
         stop_message = ""
         if should_stop_trajectory_before_arm_command(normalized):
-            # 固定 2 s：停轨迹只是"让路"，失败不阻止主命令，但结果会附加到 message 里。
+            # 固定 2 s：停轨迹只是“让路”，失败不阻止主命令，但结果会附加到 message 里。
             stop_requested, stop_message = self.call_trigger_service(
                 self._trajectory_stop_client,
                 timeout_sec=2.0,
@@ -85,7 +85,7 @@ class ArmControlClient:
             timeout_sec=arm_command_timeout_sec(normalized),
         )
         if stop_message:
-            # 把停轨迹的结果拼进消息，便于前端区分"主命令失败"与"停轨迹失败"。
+            # 把停轨迹的结果拼进消息，便于前端区分“主命令失败”与“停轨迹失败”。
             message = f"{message}; trajectory_stop: {stop_message}" if message else f"trajectory_stop: {stop_message}"
         return {
             "accepted": ok,

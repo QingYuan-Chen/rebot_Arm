@@ -1,21 +1,21 @@
-"""反馈, 夹爪接纳与执行查询的跨组件值契约.
+"""反馈，夹爪接纳与执行查询的跨组件值契约。
 
 职责与位置
-    跨组件交接只读数值, 隔离执行器内部的数组, 锁和任务对象.
+    跨组件交接只读数值，隔离执行器内部的数组，锁和任务对象。
 
 对外接口
-    JointSnapshot, GripperTarget, GripperResult 分别用于反馈, 目标接纳和代次查询.
+    JointSnapshot，GripperTarget，GripperResult 分别用于反馈，目标接纳和代次查询。
     ArmPreparation 绑定准备资源身份；PreparedArmHandoff 携带已解码曲线与返回的绑定。
 
 安全与并发约束
-    反馈批次时间取六轴最旧观测时间; 目标接纳与释放完成分开表达.
+    反馈批次时间取六轴最旧观测时间；目标接纳与释放完成分开表达。
 
-文件结构(按定义顺序)
-    PreparedArmHandoff: 不可变数值交接，解码在线程外完成，接纳在设备所有者事务内完成。
-    ArmPreparation: 六轴所有者颁发的预约令牌，保存六轴、夹爪、场景及单调期限。
-    JointSnapshot: 同一次缓存锁内复制的六轴反馈; 观测时间为本批最旧源时间.
-    GripperTarget: 准入完成后的夹爪位置目标; 超时是相对接纳时间的秒数.
-    GripperResult: 只属于指定代次的结果; 释放中不提前报告成功.
+文件结构（按定义顺序）
+    PreparedArmHandoff：不可变数值交接，解码在线程外完成，接纳在设备所有者事务内完成。
+    ArmPreparation：六轴所有者颁发的预约令牌，保存六轴、夹爪、场景及单调期限。
+    JointSnapshot：同一次缓存锁内复制的六轴反馈；观测时间为本批最旧源时间。
+    GripperTarget：准入完成后的夹爪位置目标；超时是相对接纳时间的秒数。
+    GripperResult：只属于指定代次的结果；释放中不提前报告成功。
 """
 
 from dataclasses import dataclass
@@ -70,7 +70,7 @@ class ArmPreparation:
 
 @dataclass(frozen=True)
 class JointSnapshot:
-    """同一次缓存锁内复制的六轴反馈; 观测时间为本批最旧源时间."""
+    """同一次缓存锁内复制的六轴反馈；观测时间为本批最旧源时间。"""
 
     positions: tuple[float, ...]
     velocities: tuple[float, ...]
@@ -82,7 +82,7 @@ class JointSnapshot:
 
 @dataclass(frozen=True)
 class GripperTarget:
-    """准入完成后的夹爪位置目标; 超时是相对接纳时间的秒数."""
+    """准入完成后的夹爪位置目标；超时是相对接纳时间的秒数。"""
 
     start_angle: float
     goal_angle: float
@@ -92,7 +92,7 @@ class GripperTarget:
 
 @dataclass(frozen=True)
 class GripperResult:
-    """只属于指定代次的结果; 释放中不提前报告成功."""
+    """只属于指定代次的结果；释放中不提前报告成功。"""
 
     generation: int
     state: str

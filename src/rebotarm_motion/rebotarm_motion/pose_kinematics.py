@@ -1,25 +1,25 @@
-"""规范六轴模型及位姿纯计算, 供预览和旧位姿协议共用.
+"""规范六轴模型及位姿纯计算，供预览和旧位姿协议共用。
 
 职责与位置
-    规范六轴模型的 FK/IK 纯计算, 供预览与位姿兼容入口共用.
+    规范六轴模型的 FK/IK 纯计算，供预览与位姿兼容入口共用。
 
 对外接口
-    model_resource 定位模型; vector6 / pose_target 转换数值; PoseKinematics 返回 FK 或 IKResult.
+    model_resource 定位模型；vector6 / pose_target 转换数值；PoseKinematics 返回 FK 或 IKResult。
 
 安全与并发约束
-    只锁定模型中的双手指关节; 每次求解创建独立 Data. 失败结果可含最佳角度, 但 success=False 时不得执
-    行.
-    IK 收敛仅表示模型误差达标, 不证明路径连续, 无碰撞或可在硬件上安全执行.
+    只锁定模型中的双手指关节；每次求解创建独立 Data。 失败结果可含最佳角度，但 success=False 时不得执
+    行。
+    IK 收敛仅表示模型误差达标，不证明路径连续，无碰撞或可在硬件上安全执行。
 
 统一约定
-    joint1..joint6 为 rad, 位置 m, RPY rad; SE(3) 目标相对模型基座.
+    joint1..joint6 为 rad，位置 m，RPY rad；SE(3) 目标相对模型基座。
 
-文件结构(按定义顺序)
-    model_resource: 定位规范配置包资源: 优先安装索引, 再回退源码布局, 缺失时拒绝.
-    vector6: 将输入校验为六个有限浮点值并返回数组副本; 本函数不检查关节限位.
-    pose_target: 把 xyz(m)和固定轴 RPY(rad)六元组转换为相对模型基座的 SE(3).
-    IKResult: IK 的收敛标志, 最佳关节解, SE(3) 残差范数与迭代记录; 失败角度不得下发.
-    PoseKinematics: 规范六轴模型的 FK 与有界重试 IK, 求解过程中不共享可变 Data.
+文件结构（按定义顺序）
+    model_resource：定位规范配置包资源：优先安装索引，再回退源码布局，缺失时拒绝。
+    vector6：将输入校验为六个有限浮点值并返回数组副本；本函数不检查关节限位。
+    pose_target：把 xyz(m)和固定轴 RPY(rad)六元组转换为相对模型基座的 SE(3)。
+    IKResult: IK 的收敛标志，最佳关节解，SE(3) 残差范数与迭代记录；失败角度不得下发。
+    PoseKinematics：规范六轴模型的 FK 与有界重试 IK，求解过程中不共享可变 Data。
 """
 
 from dataclasses import dataclass
@@ -31,7 +31,7 @@ JOINT_NAMES = tuple(f'joint{i}' for i in range(1, 7))
 
 
 def model_resource(relative):
-    """定位规范配置包资源: 优先安装索引, 再回退源码布局, 缺失时拒绝."""
+    """定位规范配置包资源：优先安装索引，再回退源码布局，缺失时拒绝。"""
     try:
         from ament_index_python.packages import get_package_share_directory
         path = Path(get_package_share_directory('rebotarm_moveit_config')) / relative
@@ -46,7 +46,7 @@ def model_resource(relative):
 
 
 def vector6(values):
-    """将输入校验为六个有限浮点值并返回数组副本; 本函数不检查关节限位."""
+    """将输入校验为六个有限浮点值并返回数组副本；本函数不检查关节限位。"""
     q = np.asarray(values, dtype=float)
     if q.shape != (6,) or not np.isfinite(q).all():
         raise ValueError('six finite joint/pose values required')
@@ -54,14 +54,14 @@ def vector6(values):
 
 
 def pose_target(values):
-    """把 xyz(m)和固定轴 RPY(rad)六元组转换为相对模型基座的 SE(3)."""
+    """把 xyz(m)和固定轴 RPY(rad)六元组转换为相对模型基座的 SE(3)。"""
     values = vector6(values)
     return pin.SE3(pin.rpy.rpyToMatrix(*values[3:]), values[:3])
 
 
 @dataclass(frozen=True)
 class IKResult:
-    """IK 的收敛标志, 最佳关节解, SE(3) 残差范数与迭代记录; 失败角度不得下发."""
+    """IK 的收敛标志，最佳关节解，SE(3) 残差范数与迭代记录；失败角度不得下发。"""
 
     success: bool
     q: np.ndarray
@@ -70,10 +70,10 @@ class IKResult:
 
 
 class PoseKinematics:
-    """规范六轴模型的 FK 与有界重试 IK, 求解过程中不共享可变 Data."""
+    """规范六轴模型的 FK 与有界重试 IK，求解过程中不共享可变 Data。"""
 
     def __init__(self, path=None, end_frame='end_link', *, model=None):
-        """加载或接收规范模型, 仅约化双手指并核对六轴顺序, 自由度和末端帧."""
+        """加载或接收规范模型，仅约化双手指并核对六轴顺序，自由度和末端帧。"""
         if model is None:
             full = pin.buildModelFromUrdf(str(path or model_resource('config/rebotarm.urdf')))
             extras = [name for name in list(full.names)[1:] if name not in JOINT_NAMES]
@@ -90,25 +90,25 @@ class PoseKinematics:
         self.upper = model.upperPositionLimit.copy()
 
     def joints(self, values):
-        """检查六轴有限值与规范位置上下限, 返回可独立使用的数组."""
+        """检查六轴有限值与规范位置上下限，返回可独立使用的数组。"""
         q = vector6(values)
         if (q < self.lower).any() or (q > self.upper).any():
             raise ValueError('joint positions outside canonical limits')
         return q
 
     def pose(self, values):
-        """创建本次 Data, 用合法六轴关节角计算并复制末端 SE(3)."""
+        """创建本次 Data，用合法六轴关节角计算并复制末端 SE(3)。"""
         data = self.model.createData()
         pin.framesForwardKinematics(self.model, data, self.joints(values))
         return data.oMf[self.frame_id].copy()
 
     def solve(self, target, seed, *, retries=0, rng=None, max_iter=200,
               tolerance=1e-4, step_size=.5, damping=1e-6):
-        """以 seed 为起点求解目标 SE(3), 返回收敛结果或最佳失败残差.
+        """以 seed 为起点求解目标 SE(3)，返回收敛结果或最佳失败残差。
 
-        先校验刚体变换与算法参数, 再使用局部误差, 阻尼伪逆及回溯下降.
-        每步投影到规范限位; retries 允许有限次随机种子, 默认随机源固定以便复测.
-        不检查碰撞, 也不保证不同种子解之间的路径连续性; 调用方必须检查 success.
+        先校验刚体变换与算法参数，再使用局部误差，阻尼伪逆及回溯下降。
+        每步投影到规范限位；retries 允许有限次随机种子，默认随机源固定以便复测。
+        不检查碰撞，也不保证不同种子解之间的路径连续性；调用方必须检查 success。
         """
         if (not np.isfinite(target.homogeneous).all()
                 or not np.allclose(target.rotation.T @ target.rotation, np.eye(3), atol=1e-7)
@@ -133,12 +133,12 @@ class PoseKinematics:
                 if norm <= tolerance:
                     return best
                 jacobian = pin.computeFrameJacobian(self.model, data, q, self.frame_id, pin.LOCAL)
-                # d log(T(q)^-1 Td) / dq; 负号由右侧下降方向抵消.
+                # d log(T(q)^-1 Td) / dq；负号由右侧下降方向抵消。
                 jacobian = -pin.Jlog6(delta.inverse()) @ jacobian
                 increment = -jacobian.T @ np.linalg.solve(
                     jacobian @ jacobian.T + damping*np.eye(6), error)
                 accepted = False
-                # 回溯只接受残差下降的候选, 避免投影到关节边界后仍沿错误方向迭代.
+                # 回溯只接受残差下降的候选，避免投影到关节边界后仍沿错误方向迭代。
                 for scale in (step_size, step_size/2, step_size/4, step_size/8, step_size/16):
                     candidate = np.clip(pin.integrate(self.model, q, increment*scale),
                                         self.lower, self.upper)

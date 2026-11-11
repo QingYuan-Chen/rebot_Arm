@@ -7,7 +7,7 @@ from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES
 
 @dataclass(frozen=True)
 class GoalSettlingPolicy:
-    """节点级"到位判定"策略：轨迹走完后判断仿真是否已稳定停住。
+    """节点级“到位判定”策略：轨迹走完后判断仿真是否已稳定停住。
 
     三个阈值都是不可被单次目标请求覆盖的节点级默认值（构造节点时由参数注入）。
     只做判定，不发命令；`evaluate` 是纯函数，便于离线测试。
@@ -30,10 +30,10 @@ class GoalSettlingPolicy:
         """判定当前是否到位。
 
         参数：
-            desired: 目标关节角，单位 rad，必须是 6 个手臂关节值；
-            actual: 当前关节角，单位 rad，长度同上；
-            velocities: 当前关节角速度，单位 rad/s，长度同上；
-            settle_elapsed: 轨迹走完后已等待的时间，单位 s，必须非负。
+            desired：目标关节角，单位 rad，必须是 6 个手臂关节值；
+            actual：当前关节角，单位 rad，长度同上；
+            velocities：当前关节角速度，单位 rad/s，长度同上；
+            settle_elapsed：轨迹走完后已等待的时间，单位 s，必须非负。
 
         返回三态字符串（调用方据此决定继续等待/成功/超时）：
             "succeeded" —— 最大位置误差与最大速度都在阈值内；
@@ -49,7 +49,7 @@ class GoalSettlingPolicy:
             raise ValueError("goal state must be finite")
         if elapsed < 0.0:
             raise ValueError("settling time must be non-negative")
-        # 位置与速度都用"最差关节"（各轴绝对值取最大）作为判据，任一轴不达标即未稳定。
+        # 位置与速度都用“最差关节”（各轴绝对值取最大）作为判据，任一轴不达标即未稳定。
         position_error = max(abs(target - reached) for target, reached in zip(numeric[0], numeric[1]))
         max_velocity = max(abs(value) for value in numeric[2])
         # 先判成功再判超时：恰好同时满足时按成功处理，避免边界抖动导致误报超时。

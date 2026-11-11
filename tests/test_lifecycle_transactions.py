@@ -175,7 +175,7 @@ def test_failed_connect_cleans_all_resources_without_enabling():
 
 
 def test_failed_connect_reports_cleanup_failure_and_retains_unreleased_resource():
-    """清理释放未确认时保留连接引用, 不发布 DISCONNECTED, 并汇总原错误."""
+    """清理释放未确认时保留连接引用，不发布 DISCONNECTED，并汇总原错误。"""
     owner, device = lifecycle()
     device.failures = {"init_gripper", "disconnect"}
     with pytest.raises(RuntimeError, match="init_gripper.*cleanup failed.*disconnect"):

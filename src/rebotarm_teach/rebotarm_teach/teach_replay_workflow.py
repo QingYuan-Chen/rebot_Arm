@@ -1,8 +1,8 @@
 """示教回放工作流：从示教记录文件到实际回放的完整生命周期。
 
 职责与位置
-    本模块只做"回放编排"，不做 HTTP、不做界面、不做底层电机访问：它从示教记录文件读取原始
-    样本，调用本包的预处理能力生成"预处理轨迹"（滤波/重采样/重定时/校验），在真正下发
+    本模块只做“回放编排”，不做 HTTP、不做界面、不做底层电机访问：它从示教记录文件读取原始
+    样本，调用本包的预处理能力生成“预处理轨迹”（滤波/重采样/重定时/校验），在真正下发
     Action 之前依次经过三道安全门（文件检查+质量分级、MoveIt 起始对齐评估、碰撞预检），
     最后通过 FollowJointTrajectory 动作把轨迹交给轨迹控制器，并在回放过程中做跟踪误差
     监控与安全停止。上层界面节点只负责把命令 payload 传进来、把状态 payload 广播出去。
@@ -22,7 +22,7 @@
 安全约束（顺序不可颠倒）
     1. ``execute`` 必须携带一次成功且参数一致的 ``dry_run`` 令牌，否则一律拒绝下发；
     2. 预处理质量分级为 red、或预处理后跳变/加速度/急动度超限时直接阻断；
-    3. MoveIt 起始对齐状态为 failed/unavailable/unknown 时按"不可放行"处理；
+    3. MoveIt 起始对齐状态为 failed/unavailable/unknown 时按“不可放行”处理；
     4. 碰撞预检只有 ``pass`` 才放行，``collision`` 与 ``unknown`` 都阻断；
     5. 回放中跟踪误差或实时速度超限并持续超过宽限时间时，主动请求控制器停止并取消目标。
 
@@ -82,7 +82,7 @@ class ReplaySnapshot(Protocol):
     ``joints``  关节名 -> 反馈字典，至少含 ``position`` 键（单位 rad），
                 用于计算与记录起点的误差、构造轨迹首点与运行时跟踪监控；
     ``teleop``  操作状态字典，其中 ``recording`` / ``replay`` 子字典提供当前记录文件
-                路径与最近一次回放状态，实现"未显式指定记录文件时沿用当前选择"。
+                路径与最近一次回放状态，实现“未显式指定记录文件时沿用当前选择”。
     """
 
     joints: Mapping[str, dict]
@@ -123,7 +123,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
 
     线程/回调模型
         状态发布与 ROS 回调可能来自不同线程，活动回放状态统一用 ``_teach_replay_lock``
-        保护；本类不创建 timer，状态推送即"当前快照"，不保证按序送达。
+        保护；本类不创建 timer，状态推送即“当前快照”，不保证按序送达。
     """
 
     def __init__(
@@ -157,7 +157,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             planner_id=str(self.get_parameter("moveit_planner_id").value),
             planning_time=float(self.get_parameter("moveit_planning_time").value),
             num_attempts=int(self.get_parameter("moveit_num_planning_attempts").value),
-            # 这里的两个容差是"无参数可调"的硬编码值：位置 0.005 m、姿态 0.02 rad，
+            # 这里的两个容差是“无参数可调”的硬编码值：位置 0.005 m、姿态 0.02 rad，
             # 仅用于起始对齐这一段关节空间规划，不参与示教轨迹本身的重定时。
             goal_position_tolerance=0.005,
             goal_orientation_tolerance=0.02,
@@ -173,7 +173,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             request_factory=GetStateValidity.Request,
         )
         # 以下四个协作对象都是无状态工具：回放客户端负责取消防抖与急停兜底，
-        # 协调器集中所有放行门，轨迹构建器拼接"起始对齐段 + 录制段 + 末尾保持"。
+        # 协调器集中所有放行门，轨迹构建器拼接“起始对齐段 + 录制段 + 末尾保持”。
         self._teach_replay_client = TeachReplayClient()
         self._teach_replay_coordinator = TeachReplayCoordinator()
         self._teach_replay_trajectory_builder = TeachReplayTrajectoryBuilder(
@@ -187,7 +187,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         self._moveit_start_align_prechecker = MoveItStartAlignPrechecker(
             planner=self._moveit_planner,
         )
-        # 回放设置提供者：把"速度/对齐时长/对齐步数"等参数与本次请求 payload 合并成
+        # 回放设置提供者：把“速度/对齐时长/对齐步数”等参数与本次请求 payload 合并成
         # 规范化设置；align_duration_auto 打开时对齐时长由起始误差自动推算。
         self._teach_replay_settings_provider = TeachReplaySettingsProvider(
             replay_speed=float(self.get_parameter("replay_speed").value),
@@ -216,7 +216,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
     def record_info(self, record_path: str | None = None) -> dict:
         """检查示教记录文件并返回紧凑状态 payload（记录检查是回放的第一道门）。
 
-        ``record_path`` 为 None 时按"当前操作状态里选中的记录文件"解析，其次退回节点参数
+        ``record_path`` 为 None 时按“当前操作状态里选中的记录文件”解析，其次退回节点参数
         ``record_path``；起始误差用当前关节反馈与记录首样本比较，按 ``direct_threshold`` /
         ``align_threshold`` 分级为 direct / align / reject；reject 且开启 MoveIt 起始对齐
         且误差可用时，分级改写为 moveit_align（由规划代偿过大的起始偏差）。
@@ -224,14 +224,14 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         """
         snapshot = self._snapshot()
         path = record_path or str(self.get_parameter("record_path").value)
-        # 显式传入的路径优先；未指定时才沿用"当前正在录制/上一次回放"的记忆路径。
+        # 显式传入的路径优先；未指定时才沿用“当前正在录制/上一次回放”的记忆路径。
         for key in ("recording", "replay"):
             value = snapshot.teleop.get(key)
             if record_path is None and isinstance(value, dict) and value.get("record_path"):
                 path = str(value["record_path"])
                 break
         # 只取本机受控关节的当前位置（rad）；快照缺失关节位置时整体传 None，
-        # 记录检查会退化为"当前关节状态不可用"，而不是用 0 冒充真实反馈。
+        # 记录检查会退化为“当前关节状态不可用”，而不是用 0 冒充真实反馈。
         current_positions = {
             name: float(data["position"])
             for name, data in snapshot.joints.items()
@@ -253,7 +253,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         ):
             payload["start_band"] = ReplayStartBand.MOVEIT_ALIGN.value
             payload["message"] = "start error requires MoveIt start alignment"
-        # 阈值一并回传，便于界面显示"当前误差相对哪条界线"。
+        # 阈值一并回传，便于界面显示“当前误差相对哪条界线”。
         payload["direct_threshold"] = float(self.get_parameter("direct_threshold").value)
         payload["align_threshold"] = float(self.get_parameter("align_threshold").value)
         return self._compact_replay_payload(payload)
@@ -269,7 +269,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         """压缩一份质量字典：事件与异常各保留前 ``limit`` 条，并补总数与截断标记。
 
         质量明细会随状态 payload 周期性广播，条目数可能上百，必须限长；截断后仍保留
-        ``*_total`` 与 ``*_truncated`` 字段，界面据此提示"还有更多未展示"。
+        ``*_total`` 与 ``*_truncated`` 字段，界面据此提示“还有更多未展示”。
         """
         compact = dict(quality)
         if isinstance(compact.get("events"), list):
@@ -313,7 +313,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
 
         逐关节列表（单位 rad/s）允许大关节与小关节使用不同上限；长度与关节序列不匹配
         说明配置与机型不符，此时退回参数 ``max_replay_velocity_rad_s`` 的标量值，
-        不猜测"哪个值对应哪个关节"的映射关系（该标量值是否偏保守取决于配置）。
+        不猜测“哪个值对应哪个关节”的映射关系（该标量值是否偏保守取决于配置）。
         """
         scalar_limit = float(self.get_parameter("max_replay_velocity_rad_s").value)
         values = self.get_parameter("max_replay_velocity_rad_s_by_joint").value
@@ -324,7 +324,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
     def _prepare_teach_replay_samples(self, samples, settings: dict[str, float | int] | None = None):
         """把原始示教样本预处理成可用于回放的样本序列（滤波/重采样/重定时）。
 
-        处理链为"平滑 -> 低通滤波 -> 源节点 C2 重建/整体重定时"，重采样用于质量和显示。
+        处理链为“平滑 -> 低通滤波 -> 源节点 C2 重建/整体重定时”，重采样用于质量和显示。
         开关与参数
         全部来自节点参数；``settings`` 提供本次请求的规范化设置（速度、对齐参数），
         缺省时用参数里的 ``replay_speed``。``retime_enabled`` 恒为 True：回放一律使用
@@ -376,7 +376,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
     def trajectory_preview(self, record_path: str | None = None, max_points: int = 500) -> dict:
         """生成预处理轨迹的可视化预览（曲线数据 + 预处理报告 + 碰撞预检）。
 
-        预览曲线取自"预处理后的记录文件"而非原始记录：界面看到的就是回放真正会走的轨迹。
+        预览曲线取自“预处理后的记录文件”而非原始记录：界面看到的就是回放真正会走的轨迹。
         预处理结果写入 ``<记录名>.prepared.v5.jsonl``（重复生成另加序号，不覆盖旧派生），
         并排除在记录列举之外；``max_points`` 限制返回给界面的采样点数（默认为 500）。
         读取失败不抛异常，返回 ``accepted=False`` 与失败原因。
@@ -400,7 +400,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         payload["prepared_replay"] = prepared_teach_replay_to_dict(prepared)
         payload["collision_precheck"] = self._collision_precheck(preview_samples)
         payload["accepted"] = True
-        # 明确标注曲线来源是预处理轨迹，界面可据此提示"原始数据仅作输入"。
+        # 明确标注曲线来源是预处理轨迹，界面可据此提示“原始数据仅作输入”。
         payload["curve_source"] = "prepared"
         payload["path"] = str(prepared_path)
         payload["raw_record_path"] = str(path)
@@ -429,7 +429,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         ``payload`` 可含 ``record_path`` 与 ``settings``（回放速度、对齐时长/步数）。
         只有本次演练被接受时才写入 dry-run 令牌（``_last_teach_dry_run``），execute 必须
         凭该令牌才允许下发；令牌绑定记录路径、预处理风险等级与设置，防止"用 A 记录演练、
-        下发 B 记录"或"演练后偷改速度"。本方法只发布状态，不发送 Action。
+        下发 B 记录“或”演练后偷改速度"。本方法只发布状态，不发送 Action。
         """
         # 每次新的 dry-run 都撤销旧令牌，输入校验失败也不能沿用上次结果。
         self._last_teach_dry_run = None
@@ -454,7 +454,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             prepared_payload = prepared_teach_replay_to_dict(prepared)
             # 只有 dry-run 本身被接受时才真的调用规划服务（plan=True），避免为必然
             # 被拒的请求浪费规划时间；对齐状态是 failed/unavailable/unknown 时不再
-            # 构造轨迹，直接让协调器按"门未通过"给出 blocked 结论。
+            # 构造轨迹，直接让协调器按“门未通过”给出 blocked 结论。
             moveit_align = self._moveit_align_summary(info_payload, samples_for_precheck, plan=decision.accepted)
             if decision.accepted and str(moveit_align.get("state", "")).lower() not in ("failed", "unavailable", "unknown"):
                 trajectory = self._build_teach_replay_trajectory(
@@ -526,7 +526,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             prepared = self._prepare_teach_replay_samples(source_samples, settings)
             prepared_record_path = str(write_prepared_teach_record(str(info_payload.get("path", "")), prepared))
             prepared_payload = prepared_teach_replay_to_dict(prepared)
-            # 放行判定使用"预处理后"的质量等级：原始记录的质量只作参考。
+            # 放行判定使用“预处理后”的质量等级：原始记录的质量只作参考。
             prepared_quality = prepared_payload["after_quality"]
             # execute 前只做轻量对齐评估（plan=False），真正规划留给轨迹构建阶段。
             moveit_align = self._moveit_align_summary(info_payload, source_samples, plan=False)
@@ -543,7 +543,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             yellow_max_speed=float(self.get_parameter("yellow_max_speed").value),
             align_duration_auto=self._teach_replay_settings_provider.align_duration_auto,
         )
-        # 第二道门：起始对齐不可用或结论不明时按"不可放行"处理。
+        # 第二道门：起始对齐不可用或结论不明时按“不可放行”处理。
         moveit_state = str(moveit_align.get("state", "")).lower()
         if decision.accepted and moveit_state in ("failed", "unavailable", "unknown"):
             decision = type(decision)(
@@ -568,7 +568,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
                     collision_precheck = {"state": "unknown", "message": f"collision precheck failed: {exc}"}
         prepared_payload['trajectory_preparation'] = preparation
         # 第三道门：碰撞预检必须明确 pass；检测到碰撞或结论不明（服务不可用/超时/异常）
-        # 都要阻断，绝不允许把"没查成功"当成"没有碰撞"。
+        # 都要阻断，绝不允许把“没查成功”当成“没有碰撞”。
         precheck_state = str(collision_precheck.get("state", "")).lower()
         if decision.accepted and precheck_state != 'pass':
             decision = type(decision)(
@@ -593,7 +593,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
             )
             self._publish_status("replay", result)
             return result
-        # 动作服务不可用属于"环境问题"而非"安全拒绝"，单独报 unavailable；
+        # 动作服务不可用属于“环境问题”而非“安全拒绝”，单独报 unavailable；
         # 0.1 s 只是探测，不阻塞调用线程。
         if not self._action_client.wait_for_server(timeout_sec=0.1):
             message = "follow_joint_trajectory action unavailable"
@@ -688,7 +688,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
     def _build_teach_replay_trajectory(self, samples, start_band: str, settings: dict[str, float | int]) -> JointTrajectory:
         """由原始样本构建最终下发的关节轨迹（预处理 + 起始段 + 录制段 + 末尾保持）。
 
-        起始段有两种策略：开启 MoveIt 起始对齐时由规划器生成"当前位置 -> 记录首点"的
+        起始段有两种策略：开启 MoveIt 起始对齐时由规划器生成“当前位置 -> 记录首点”的
         过渡（失败即抛异常，不会静默降级）；关闭时用插值软启动。构建前会缓存预处理报告，
         供状态 payload 使用。当前位置取快照中的关节反馈（rad），与记录首点同序对齐。
         """
@@ -764,7 +764,7 @@ class TeachReplayWorkflow(ReplayMoveItPrecheckMixin, ReplayActionLifecycleMixin)
         return final
 
     def _append_final_hold(self, trajectory: JointTrajectory, *, final_hold_sec: float) -> None:
-        # 在轨迹末尾追加一个"保持当前位置"的点，保证回放结束后动作正常收尾。
+        # 在轨迹末尾追加一个“保持当前位置”的点，保证回放结束后动作正常收尾。
         self._teach_replay_trajectory_builder.append_final_hold(
             trajectory,
             final_hold_sec=final_hold_sec,

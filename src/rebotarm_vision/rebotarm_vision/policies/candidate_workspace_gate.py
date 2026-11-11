@@ -46,10 +46,10 @@ def candidate_workspace_gate(
     """判定抓取点是否落在允许的工作空间盒内、且足够靠近物体中心。
 
     参数：
-        grasp_position_xyz: 抓取点位置 (x, y, z)，单位米，基座系。
-        object_center_xyz: 物体中心位置，单位米；为 None 时跳过距离检查
+        grasp_position_xyz：抓取点位置 (x, y, z)，单位米，基座系。
+        object_center_xyz：物体中心位置，单位米；为 None 时跳过距离检查
             （例如上游没有给出物体中心）。
-        config: 门控参数；``enabled`` 为 False 时立即接受。
+        config：门控参数；``enabled`` 为 False 时立即接受。
 
     返回：
         CandidateWorkspaceGateResult。拒绝时 ``reason`` 带上原始坐标/距离，
@@ -69,7 +69,7 @@ def candidate_workspace_gate(
             f"grasp outside workspace ({x:.3f}, {y:.3f}, {z:.3f})",
         )
 
-    # 距离检查只在拿到物体中心、且阈值 > 0 时生效，避免把"阈值 0"误解为要求重合。
+    # 距离检查只在拿到物体中心、且阈值 > 0 时生效，避免把“阈值 0”误解为要求重合。
     if object_center_xyz is not None and float(config.max_grasp_to_object_center_m) > 0.0:
         ox, oy, oz = (
             float(object_center_xyz[0]),

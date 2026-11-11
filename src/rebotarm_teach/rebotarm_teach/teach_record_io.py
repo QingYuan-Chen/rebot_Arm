@@ -36,7 +36,7 @@ def arm_replay_samples(samples):
 
 
 def is_quit_key(key: str | None, *, quit_key: str = "q") -> bool:
-    """判断键盘输入是否等同于"退出示教采集"。
+    """判断键盘输入是否等同于“退出示教采集”。
 
     忽略大小写与首尾空白；``key`` 为 None（例如非阻塞读取没读到按键）时返回 False。
     只做纯字符串比较，不读取键盘。
@@ -122,7 +122,7 @@ def load_teach_samples(path: str | Path) -> list[TeachSample]:
 
 
 def prepared_record_path(raw_path: str | Path) -> Path:
-    """由原始记录路径推导"预处理记录"的落盘路径。
+    """由原始记录路径推导“预处理记录”的落盘路径。
 
     规则：在扩展名前插入 ``.prepared``（``a.jsonl`` → ``a.prepared.jsonl``）；
     没有扩展名时直接追加 ``.prepared.jsonl``。这样预处理结果与原始记录同目录、同名前缀，

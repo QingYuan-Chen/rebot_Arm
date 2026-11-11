@@ -2169,7 +2169,7 @@ def test_arm_and_gripper_report_original_status_from_verified_cache(status) -> N
 
 
 def test_gripper_cached_sample_without_verified_feedback_reports_nan_and_empty_identity() -> None:
-    """无已验证样本时不得用控制镜像冒充反馈数值, 也不得伪造样本身份。"""
+    """无已验证样本时不得用控制镜像冒充反馈数值，也不得伪造样本身份。"""
     manager = make_manager()
     manager.gripper._gripper_mot = FakeMotor(position=-1.0)
     manager.gripper._gripper_execution._gripper_pos = -4.0

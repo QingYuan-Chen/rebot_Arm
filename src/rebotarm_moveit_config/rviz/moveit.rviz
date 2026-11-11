@@ -47,7 +47,7 @@ Visualization Manager:
       Reference Frame: base_link
       Value: true
     # ---- 机器人模型（URDF 可视化） ----------------------------------------
-    # 模型文本从 /robot_description 话题订阅（Description Source: Topic），
+    # 模型文本从 /robot_description 话题订阅（Description Source：Topic），
     # 因此不需要在 RViz 里配置 Description File，模型始终与 move_group 实际加载的一致。
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
@@ -388,7 +388,7 @@ Visualization Manager:
       Class: rviz_default_plugins/TF
   Value: true
   # 当前视图：Orbit（轨道）相机。
-  # Distance=1.807 m 为相机到焦点的距离，Focal Point 为焦点（原点）,
+  # Distance=1.807 m 为相机到焦点的距离，Focal Point 为焦点（原点），
   # Pitch/Yaw 为俯仰/偏航角（弧度），Near Clip Distance=0.01 m 为近裁剪面；
   # Focal Shape Size 为焦点标记尺寸（米）。
   Views:

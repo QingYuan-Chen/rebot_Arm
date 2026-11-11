@@ -15,7 +15,7 @@
 # 参数来源与安全默认值：
 #   - arm_config / gripper_config 默认指向启动组合包 config/ 下的 YAML；
 #   - channel 为空串表示沿用配置文件里的通道，不在这里硬编码设备名；
-#   - cmd_arbitration 默认 "reject"：轨迹运行期间收到单关节透传指令时直接拒绝，是安全优先的一侧；只有明确需要抢占时才改成 "preempt"；
+#   - cmd_arbitration 默认“reject”：轨迹运行期间收到单关节透传指令时直接拒绝，是安全优先的一侧；只有明确需要抢占时才改成“preempt”；
 #   - use_rviz 默认 false，不带可视化也能跑；
 #   - 真机上电后控制器处于失能态，必须显式调用 enable 服务才会运动，本文件不做任何自动使能。
 
@@ -55,7 +55,7 @@ def generate_launch_description():
             DeclareLaunchArgument("channel", default_value=""),
             # joint_state_rate（Hz）：状态发布频率，默认 100 Hz；设备采集周期由控制器配置独立管理。
             DeclareLaunchArgument("joint_state_rate", default_value="100.0"),
-            # cmd_arbitration：轨迹运行期间收到单关节透传指令时的仲裁策略。默认 "reject"直接拒绝（安全优先）；"preempt" 会先停下轨迹再执行透传指令。
+            # cmd_arbitration：轨迹运行期间收到单关节透传指令时的仲裁策略。默认“reject”直接拒绝（安全优先）；“preempt”会先停下轨迹再执行透传指令。
             DeclareLaunchArgument("cmd_arbitration", default_value="reject"),
             # arm_namespace：话题/服务/动作命名空间段，去首尾斜杠后拼成 /{ns}/...。
             DeclareLaunchArgument("arm_namespace", default_value="rebotarm"),

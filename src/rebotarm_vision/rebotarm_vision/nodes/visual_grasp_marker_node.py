@@ -2,7 +2,7 @@
 
 职责与位置：本模块位于视觉链路的显示末端，只负责把上层选出的抓取计划（默认来自
 ``/grasp/plan`` 一类话题，实际由启动组合指向过滤后的计划话题）画成标记，供操作者确认
-"末端去哪里抓、以什么姿态抓、夹爪张开多宽"。它是纯显示通道：不发布任何运动或夹爪
+“末端去哪里抓、以什么姿态抓、夹爪张开多宽”。它是纯显示通道：不发布任何运动或夹爪
 指令，也不做限位、碰撞与可达性判断，因此关闭标记不会影响抓取流程本身。
 
 对外接口：
@@ -101,7 +101,7 @@ def identity_orientation(pose: Pose) -> Pose:
 def object_diameter(jaw_width: float, minimum: float) -> float:
     """由夹爪开口宽度估算目标圆柱直径并做钳制，单位 m。
 
-    被夹持目标的直径通常与夹爪开口同量级，这里按 1.8 倍开口作为"能把目标包住"的视觉
+    被夹持目标的直径通常与夹爪开口同量级，这里按 1.8 倍开口作为“能把目标包住”的视觉
     估计；上限 0.16 m，防止异常大的开口把标记画得过分夸张；下限取 ``minimum``（默认
     0.06 m），保证很小的目标仍看得见；负的开口按 0 处理。
     """
@@ -134,7 +134,7 @@ def _rotate_vector_by_quaternion(
         return x, y, z
     qx, qy, qz, qw = qx / norm, qy / norm, qz / norm, qw / norm
 
-    # 四元数向量旋转的展开式：v' = v + 2*w*(q_vec × v) + 2*(q_vec × (q_vec × v))，
+    # 四元数向量旋转的展开式：v' = v + 2*w*(q_vec × v) + 2*（q_vec × (q_vec × v)），
     # 下面的 t 即 2*(q_vec × v)，最后三行按分量组合出结果。
     tx = 2.0 * (qy * z - qz * y)
     ty = 2.0 * (qz * x - qx * z)
@@ -176,7 +176,7 @@ class VisualGraspMarkerBuilder:
 
     本类不持有订阅/发布对象，也不查询 TF：坐标系换算由调用方完成后把 ``frame_id`` 传
     进来，因此可以在测试中直接实例化并断言标记内容。标记的名称空间(ns)与编号(id)是
-    RViz 端的稳定标识，二者成对决定"新标记覆盖哪一个旧标记"，不要随意改动。
+    RViz 端的稳定标识，二者成对决定“新标记覆盖哪一个旧标记”，不要随意改动。
     """
 
     def __init__(
@@ -232,7 +232,7 @@ class VisualGraspMarkerBuilder:
         - ``plan``：抓取计划消息；``valid`` 为假时只返回一个删除标记（见 ``_delete_all``），
           让 RViz 清空旧画面；
         - ``frame_id``：所有标记的参考坐标系，应为已与计划对齐的目标坐标系；
-        - ``stamp``：写入标记头的时间戳；节点侧传零时刻，表示"始终按最新可用变换显示"。
+        - ``stamp``：写入标记头的时间戳；节点侧传零时刻，表示“始终按最新可用变换显示”。
 
         标记清单：可选 ``visual_object`` 示意圆柱、``visual_object_center`` 候选位置、
         ``visual_pregrasp``/``visual_grasp`` 计划给出的接近点与抓取点、
@@ -483,7 +483,7 @@ class VisualGraspMarkerNode(Node):
     """订阅抓取计划并发布标记数组的节点（可执行入口 ``rebotarm_visual_grasp_markers``）。
 
     生命周期：构造时声明参数、建立 TF 监听器、发布者与订阅，之后由 ``main`` 自旋直至进程
-    退出。回调 ``_on_plan`` 在订阅回调线程内同步完成"坐标系换算 → 生成标记 → 发布"，不做
+    退出。回调 ``_on_plan`` 在订阅回调线程内同步完成“坐标系换算 → 生成标记 → 发布”，不做
     耗时计算，因此不需要额外线程或工作队列。
     """
 
@@ -508,7 +508,7 @@ class VisualGraspMarkerNode(Node):
         self.declare_parameter("show_approach_arrow", True)
         self.declare_parameter("show_gripper_open_axis", True)
         # 计划无效时是否也发一个删除标记：默认 True，让画面立刻清空；置 False 则保留上一次
-        # 的有效标记，便于对照排查"这次为什么没有计划"。
+        # 的有效标记，便于对照排查“这次为什么没有计划”。
         self.declare_parameter("publish_invalid_delete", True)
 
         self._input_topic = str(self.get_parameter("input_topic").value)
@@ -552,10 +552,10 @@ class VisualGraspMarkerNode(Node):
     def _on_plan(self, plan: GraspPlan) -> None:
         """计划回调：换算坐标系后生成并发布标记数组。
 
-        标记时间戳固定取零时刻（``Time()`` 的默认值）：RViz 对零时间戳按"使用最新可用变换"
+        标记时间戳固定取零时刻（``Time()`` 的默认值）：RViz 对零时间戳按“使用最新可用变换”
         处理，可避免计划时间戳与 TF 缓存时间不一致时出现外推报错或标记闪烁。
         计划无效且 ``publish_invalid_delete`` 为假时直接返回，保留画面上的既有标记；否则由
-        Builder 产生删除标记并发布，实现"无效即清屏"。
+        Builder 产生删除标记并发布，实现“无效即清屏”。
         """
         marker_stamp = rclpy.time.Time().to_msg()
         if not plan.valid and not self._publish_invalid_delete:

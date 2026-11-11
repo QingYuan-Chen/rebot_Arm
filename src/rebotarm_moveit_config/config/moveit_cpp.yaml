@@ -18,5 +18,5 @@ planning_scene_monitor_options:
   # 监视场景话题：move_group 发布增量更新（几何、状态、TF 等），RViz 用它保持显示同步。
   monitored_planning_scene_topic: /monitored_planning_scene
   # 启动时等待首个关节状态的最长时间，单位 s。10.0 给真机反馈留出充足时间；
-  # 调小会让 move_group 在没有反馈时更早进入"无当前状态"的运行态，调大则启动更慢。
+  # 调小会让 move_group 在没有反馈时更早进入“无当前状态”的运行态，调大则启动更慢。
   wait_for_initial_state_timeout: 10.0

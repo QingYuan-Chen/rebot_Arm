@@ -11,7 +11,7 @@
                固定在空间同一处；由解算模块联合求解 TCP 偏移与基座系下的固定 pivot 位置。
     ``manual`` 参考点已知：操作者给出基座系下的参考位置（``tcp_reference_position``，米），
                每次采样按 ``R^T (p_ref - p_end)`` 反算该姿态下的 TCP 局部偏移再做统计。
-    ``aruco``  参考点由视觉测得：先对 ArUco 标定板做 PnP，把板中心在基座系下的位置"冻结"
+    ``aruco``  参考点由视觉测得：先对 ArUco 标定板做 PnP，把板中心在基座系下的位置“冻结”
                为参考点，之后按 manual 的方式采样。
 
 对外接口
@@ -235,7 +235,7 @@ class TcpCalibrationNode(Node):
             self.get_parameter("tcp_reference_position").value,
             "tcp_reference_position",
         )
-        # 至少保留 1 次采样：配成 0 会让采样循环被静默跳过，最后报"样本不足"
+        # 至少保留 1 次采样：配成 0 会让采样循环被静默跳过，最后报“样本不足”
         self.sample_count = max(1, int(self.get_parameter("sample_count").value))
         self.preflight_only = bool(self.get_parameter("preflight_only").value)
         self.lookup_timeout_sec = max(0.05, float(self.get_parameter("lookup_timeout_sec").value))
@@ -293,7 +293,7 @@ class TcpCalibrationNode(Node):
         self.latest_image = message
 
     def _camera_info_callback(self, message: CameraInfo) -> None:
-        # 内参与图像分别缓存，采样时各取"当前最新"
+        # 内参与图像分别缓存，采样时各取“当前最新”
         self.latest_camera_info = message
 
     def _lookup(self, target: str, source: str, stamp=None):
@@ -333,7 +333,7 @@ class TcpCalibrationNode(Node):
         """
         if self.reference_mode == "pivot":
             self.reference_capture = {
-                # 记录"参考点未知"这一事实，随结果 JSON 一起落盘备查
+                # 记录“参考点未知”这一事实，随结果 JSON 一起落盘备查
                 "mode": "classic_tcp_pivot_unknown_reference",
                 # instruction 是给现场操作者的硬性要求：每次采样维持同一物理尖点
                 "instruction": "keep one physical pivot point fixed for every sample",
@@ -369,7 +369,7 @@ class TcpCalibrationNode(Node):
             if image is None or info is None:
                 continue
             stamp = (int(image.header.stamp.sec), int(image.header.stamp.nanosec))
-            # 用 (sec, nanosec) 去重：同一帧被反复使用会让"帧数达标"变成假象
+            # 用 (sec, nanosec) 去重：同一帧被反复使用会让“帧数达标”变成假象
             if stamp == last_stamp:
                 continue
             last_stamp = stamp

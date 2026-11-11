@@ -46,7 +46,7 @@ def canonical_names(names):
 
 
 def vector6(values):
-    """复制六个有限数值; 返回不可变元组."""
+    """复制六个有限数值；返回不可变元组。"""
     result = tuple(float(v) for v in values)
     if len(result) != 6 or not all(math.isfinite(v) for v in result):
         raise ValueError('six finite joint values required')
@@ -74,7 +74,7 @@ class TrajectoryPoint:
 
 
 def ordered_points(joint_names, points):
-    """按规范顺序复制所有位置及导数; 混合缺失不能默默降级."""
+    """按规范顺序复制所有位置及导数；混合缺失不能默默降级。"""
     names = tuple(joint_names)
     canonical = canonical_names(names)
     source = tuple(points)
@@ -179,7 +179,7 @@ class PolynomialTrajectory:
         return self.points[-1].time
 
     def sample(self, elapsed):
-        """按实际经过时间求 q/v/a/j; 区间外保持端点, 不外推."""
+        """按实际经过时间求 q/v/a/j；区间外保持端点，不外推。"""
         elapsed = float(elapsed)
         if not math.isfinite(elapsed):
             raise ValueError('finite sample time required')

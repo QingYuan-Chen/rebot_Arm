@@ -1,18 +1,18 @@
-"""夹爪坐标, 零位验证, 目标接纳与安全发送.
+"""夹爪坐标，零位验证，目标接纳与安全发送。
 
 职责与位置
-    夹爪设备映射, 坐标, 反馈健康和请求准入; 执行状态由 GripperExecution 持有.
+    夹爪设备映射，坐标，反馈健康和请求准入；执行状态由 GripperExecution 持有。
 
 对外接口
-    set_gripper_target 返回代次; 状态查询读缓存;
-    set_zero 仅供生命周期在失能时调用并以置零后的连续新帧验证.
+    set_gripper_target 返回代次；状态查询读缓存；
+    set_zero 仅供生命周期在失能时调用并以置零后的连续新帧验证。
 
 安全与并发约束
-    七路共享一条总线; 设备操作经唯一运行时. 查询不伪造时间, 释放失败不能报成功.
-    目标开口使用 m, 内部电机角使用 rad; max_effort / force 历史字段实际表示电机力矩 N·m.
+    七路共享一条总线；设备操作经唯一运行时。 查询不伪造时间，释放失败不能报成功。
+    目标开口使用 m，内部电机角使用 rad；max_effort / force 历史字段实际表示电机力矩 N·m。
 
-文件结构(按定义顺序)
-    GripperController: 夹爪坐标, 设备绑定和反馈准入所有者; 独立执行器持有目标代次, 抓取与释放状态.
+文件结构（按定义顺序）
+    GripperController：夹爪坐标，设备绑定和反馈准入所有者；独立执行器持有目标代次，抓取与释放状态。
 """
 
 from __future__ import annotations
@@ -45,54 +45,54 @@ from ..controller_parameters import (
 
 
 class GripperController:
-    """夹爪坐标, 设备绑定和反馈准入所有者; 独立执行器持有目标代次, 抓取与释放状态."""
+    """夹爪坐标，设备绑定和反馈准入所有者；独立执行器持有目标代次，抓取与释放状态。"""
 
     def clear_transport_error(self):
-        """仅在显式使能成功后清除上个会话的发送错误."""
+        """仅在显式使能成功后清除上个会话的发送错误。"""
         self._gripper_transport_error = None
 
     def feedback_transaction(self):
-        """采集锁内查询夹爪的事务上下文; 锁顺序固定为反馈 -> 夹爪."""
+        """采集锁内查询夹爪的事务上下文；锁顺序固定为反馈 -> 夹爪。"""
         return self._gripper_execution._gripper_lock
 
     def feedback_binding(self):
-        """仅供采集/生命周期/保护装配的设备绑定, 不返回可变执行状态."""
+        """仅供采集/生命周期/保护装配的设备绑定，不返回可变执行状态。"""
         return self._gripper_ctrl, self._gripper_mot
 
     def feedback_values(self, state):
-        """校验并拆分原始反馈数值, 供采集器使用同一夹爪规则."""
+        """校验并拆分原始反馈数值，供采集器使用同一夹爪规则。"""
         return self._validated_gripper_feedback_values(state)
 
     def record_feedback(self, state, **options):
-        """由采集事务交接已验证反馈与原观测时间, 不重新锚定时间."""
+        """由采集事务交接已验证反馈与原观测时间，不重新锚定时间。"""
         return self._record_gripper_feedback(state, **options)
 
     def record_feedback_error(self, reason):
-        """登记采集传来的夹爪错误, 保留分类与原因."""
+        """登记采集传来的夹爪错误，保留分类与原因。"""
         return self._record_gripper_feedback_error(reason)
 
     def cached_feedback(self, **options):
-        """查询只读夹爪缓存及可用性; 不刷新总线或登记派生错误."""
+        """查询只读夹爪缓存及可用性；不刷新总线或登记派生错误。"""
         return self._cached_gripper_feedback(**options)
 
     def transport_error(self):
-        """读取本会话发送错误, 供周期协调决定是否保护."""
+        """读取本会话发送错误，供周期协调决定是否保护。"""
         return self._gripper_transport_error
 
     def feedback_status(self):
-        """生命周期使用的新帧状态查询; 无夹爪返回 None, 刷新失败抛异常."""
+        """生命周期使用的新帧状态查询；无夹爪返回 None，刷新失败抛异常。"""
         return None if self._gripper_mot is None else int(self._refresh_gripper_feedback().status_code)
 
     def initialize(self):
-        """使用构造时已经校验的配置建立夹爪绑定."""
+        """使用构造时已经校验的配置建立夹爪绑定。"""
         return self.init_gripper(str(self._gripper_cfg_path))
 
     def clear_passthrough(self):
-        """清除夹爪透传租约标记, 不在此发送中性命令."""
+        """清除夹爪透传租约标记，不在此发送中性命令。"""
         self._gripper_passthrough_until = None
 
     def reset_session(self):
-        """连接前重置反馈时效及执行代次, 唤醒旧会话等待者."""
+        """连接前重置反馈时效及执行代次，唤醒旧会话等待者。"""
         self._gripper_feedback_updated_monotonic = None
         self._gripper_feedback_error = None
         self._stationary.reset()
@@ -105,7 +105,7 @@ class GripperController:
             self._gripper_transport_error = None
 
     def expire_passthrough(self, now):
-        """空载或透传断流均通过中性输出结束, 失败交给周期保护."""
+        """空载或透传断流均通过中性输出结束，失败交给周期保护。"""
         if self._gripper_passthrough_until is not None and now >= self._gripper_passthrough_until:
             self.clear_passthrough()
             from motorbridge import Mode
@@ -116,7 +116,7 @@ class GripperController:
                     raise RuntimeError('passthrough neutral release failed')
 
     def prepare_protection(self, message):
-        """先终止本夹爪任务; 中性输出失败仍须继续执行总线保护失能."""
+        """先终止本夹爪任务；中性输出失败仍须继续执行总线保护失能。"""
         with self._gripper_execution._gripper_lock:
             if self._gripper_execution._gripper_active:
                 self._fail_active_gripper_command_locked(message)
@@ -125,7 +125,7 @@ class GripperController:
                     self._lifecycle.errors.append("FEEDBACK_PROTECTIVE_NEUTRAL_FAILED")
 
     def __init__(self, runtime, lifecycle, settings, configuration, gripper_config):
-        """保存共享运行时和配置, 建立坐标/健康标记并装配独立夹爪执行器; 不连接设备."""
+        """保存共享运行时和配置，建立坐标/健康标记并装配独立夹爪执行器；不连接设备。"""
         self._backend = runtime
         self._lifecycle = lifecycle
         self.settings = settings
@@ -143,7 +143,7 @@ class GripperController:
         self._stationary = StationaryEvidence(joints=1)
 
     def bind(self, *, feedback: GripperFeedbackPort, protection: ProtectionPort):
-        """装配阶段一次注入明确组件接口; 运行后不替换依赖."""
+        """装配阶段一次注入明确组件接口；运行后不替换依赖。"""
         if self._bound:
             raise RuntimeError("component already bound")
         self.feedback = feedback
@@ -151,7 +151,7 @@ class GripperController:
         self._bound = True
 
     def _assemble_execution(self):
-        """构造时一次装配组件, 运行期间不惰性补建状态."""
+        """构造时一次装配组件，运行期间不惰性补建状态。"""
         return GripperExecution(
             motor=lambda: self._gripper_mot,
             verified=lambda: self.feedback.verified_sample('gripper').state,
@@ -166,7 +166,7 @@ class GripperController:
 
     @property
     def has_gripper(self) -> bool:
-        """查询是否已绑定夹爪设备, 不代表反馈健康或已经使能."""
+        """查询是否已绑定夹爪设备，不代表反馈健康或已经使能。"""
         return self._gripper_mot is not None
 
     def preparation_snapshot(self):
@@ -186,7 +186,7 @@ class GripperController:
 
     @property
     def gripper_active(self) -> bool:
-        """在执行锁内查询位置, 抓取或保持是否活动."""
+        """在执行锁内查询位置，抓取或保持是否活动。"""
         with self._gripper_execution._gripper_lock:
             return bool(self._gripper_execution._gripper_active)
 
@@ -201,26 +201,26 @@ class GripperController:
 
     @property
     def gripper_mode(self) -> str:
-        """在执行锁内读取夹爪业务模式, 区别于电机协议模式."""
+        """在执行锁内读取夹爪业务模式，区别于电机协议模式。"""
         with self._gripper_execution._gripper_lock:
             return str(self._gripper_execution._gripper_mode)
 
     def coordinate_failure(self):
-        """查询夹爪坐标或零位锁存错误, 无设备时返回 None."""
+        """查询夹爪坐标或零位锁存错误，无设备时返回 None。"""
         if self._gripper_mot is not None:
             with self._gripper_execution._gripper_lock:
                 return self._gripper_coordinate_failure_reason_locked()
         return None
 
     def prepare_enable(self):
-        """在生命周期显式使能前确保夹爪处于 MIT 模式, 不自行使能."""
+        """在生命周期显式使能前确保夹爪处于 MIT 模式，不自行使能。"""
         if self._gripper_mot is not None:
             from motorbridge import Mode
             self._gripper_mot.ensure_mode(Mode.MIT, 1000)
 
     @staticmethod
     def _validated_gripper_feedback_values(state) -> tuple[float, float, float, int]:
-        """拆出夹爪反馈的 (位置 rad, 速度 rad/s, 力矩 N.m, 状态码), 并做有限性检查."""
+        """拆出夹爪反馈的 (位置 rad, 速度 rad/s, 力矩 N.m, 状态码)，并做有限性检查。"""
         if state is None:
             raise RuntimeError("gripper feedback unavailable")
         position = float(state.pos)
@@ -233,7 +233,7 @@ class GripperController:
         return position, velocity, torque, int(state.status_code)
 
     def _record_gripper_feedback(self, state, *, observed_at: float | None = None) -> None:
-        """校验有限数值并在执行锁内更新反馈镜像, 保留原时刻并登记越界原因."""
+        """校验有限数值并在执行锁内更新反馈镜像，保留原时刻并登记越界原因。"""
         position, velocity, torque, status = self._validated_gripper_feedback_values(state)
         timestamp = time.monotonic() if observed_at is None else float(observed_at)
         with self._gripper_execution._gripper_lock:
@@ -242,7 +242,7 @@ class GripperController:
             self._gripper_execution._gripper_vel = velocity
             self._gripper_execution._gripper_torque = torque
             self._gripper_feedback_updated_monotonic = timestamp
-            # 有限的原始坐标仍保留供显式置零使用, 健康判定和控制入口必须拒绝越限.
+            # 有限的原始坐标仍保留供显式置零使用，健康判定和控制入口必须拒绝越限。
             coordinate_error = self._gripper_coordinate_failure_reason_locked(
                 position=position, check_zero=False,
             )
@@ -266,7 +266,7 @@ class GripperController:
             )
 
     def _record_gripper_feedback_error(self, reason: str) -> None:
-        """持执行锁保存当前反馈错误, 只在原因变化时记录日志."""
+        """持执行锁保存当前反馈错误，只在原因变化时记录日志。"""
         message = str(reason)
         with self._gripper_execution._gripper_lock:
             changed = message != self._gripper_feedback_error
@@ -275,7 +275,7 @@ class GripperController:
             _LOG.error("gripper feedback error: %s", message)
 
     def _gripper_feedback_age_sec(self, *, now: float | None = None) -> float:
-        """用单调时钟计算反馈年龄 s, 尚无样本时返回无穷大."""
+        """用单调时钟计算反馈年龄 s，尚无样本时返回无穷大。"""
         with self._gripper_execution._gripper_lock:
             updated = self._gripper_feedback_updated_monotonic
         if updated is None:
@@ -284,9 +284,9 @@ class GripperController:
         return max(current - updated, 0.0)
 
     def _gripper_feedback_failure_reason_locked(self, *, now: float | None = None) -> str | None:
-        """夹爪反馈失效原因(调用方需持有 ``_gripper_lock``).
+        """夹爪反馈失效原因（调用方需持有 ``_gripper_lock``）。
 
-        依次检查: 显式错误 -> 数据过期 -> 坐标合法性(置零错误或原始角越界).
+        依次检查：显式错误 -> 数据过期 -> 坐标合法性（置零错误或原始角越界）。
         """
         return self.feedback.failure_reason(
             "gripper", error=self._gripper_feedback_error,
@@ -296,11 +296,11 @@ class GripperController:
     def _gripper_coordinate_failure_reason_locked(
         self, *, position: float | None = None, check_zero: bool = True
     ) -> str | None:
-        """夹爪原始角度坐标的合法性检查(调用方需持有 ``_gripper_lock``).
+        """夹爪原始角度坐标的合法性检查（调用方需持有 ``_gripper_lock``）。
 
-        有效区间是 [_G_ANGLE_OPEN - 量化容差, _G_CLOSED_FEEDBACK_TOL_RAD],
-        即"从全开到闭合零点附近". 越界说明零点未标定或编码器异常, 必须拒绝
-        使用该反馈(例如合拢方向越界会让力矩变成前馈而持续顶紧).
+        有效区间是 [_G_ANGLE_OPEN - 量化容差, _G_CLOSED_FEEDBACK_TOL_RAD]，
+        即“从全开到闭合零点附近”。 越界说明零点未标定或编码器异常，必须拒绝
+        使用该反馈（例如合拢方向越界会让力矩变成前馈而持续顶紧）。
         """
         if check_zero and self._gripper_zero_error is not None:
             return f"[ZERO_INVALID] {self._gripper_zero_error}"
@@ -319,14 +319,14 @@ class GripperController:
         return None
 
     def _refresh_gripper_feedback(self):
-        """同步强制刷新并返回夹爪的已验证状态对象(拿不到新帧即报错)."""
+        """同步强制刷新并返回夹爪的已验证状态对象（拿不到新帧即报错）。"""
         if self._gripper_mot is None or self._gripper_ctrl is None:
             raise RuntimeError("gripper feedback unavailable: motor/controller not initialized")
         self.feedback.refresh_feedback_if_due(force=True)
         return self.feedback.verified_sample("gripper").state
 
     def validate_status(self, expected_status: int) -> None:
-        """同步强制刷新夹爪并核对期望状态码; 不能用旧帧确认使能或失能."""
+        """同步强制刷新夹爪并核对期望状态码；不能用旧帧确认使能或失能。"""
         if self._gripper_mot is None:
             return
         state = self._refresh_gripper_feedback()
@@ -337,12 +337,12 @@ class GripperController:
             )
 
     def set_zero(self) -> bool:
-        """夹爪置零并验证: 要求在超时内连续若干帧都接近零位.
+        """夹爪置零并验证：要求在超时内连续若干帧都接近零位。
 
-        验证必须基于"置零之后新到"的帧(``_refresh_gripper_feedback`` 会重建
-        接收序号基线, 置零前的缓存样本无法满足). 校验失败时保留
-        ``_gripper_zero_error``: 仅凭"有新帧"不能证明标定成功, 必须等到下一次
-        显式置零验证通过才清除.
+        验证必须基于“置零之后新到”的帧（``_refresh_gripper_feedback`` 会重建
+        接收序号基线，置零前的缓存样本无法满足）。 校验失败时保留
+        ``_gripper_zero_error``：仅凭“有新帧”不能证明标定成功，必须等到下一次
+        显式置零验证通过才清除。
         """
         if self._gripper_mot is None:
             raise RuntimeError("gripper is not initialized")
@@ -357,8 +357,8 @@ class GripperController:
                 consecutive = 0
                 position = float("nan")
                 while time.monotonic() < deadline:
-                    # 强制刷新会重建接收序号基线; 置零前缓存下来的样本无法满足
-                    # 本次验证请求.
+                    # 强制刷新会重建接收序号基线；置零前缓存下来的样本无法满足
+                    # 本次验证请求。
                     state = self._refresh_gripper_feedback()
                     position, _velocity, _torque, status = (
                         self._validated_gripper_feedback_values(state)
@@ -369,7 +369,7 @@ class GripperController:
                         )
                     if time.monotonic() >= deadline:
                         break
-                    # 必须是"连续"多帧接近零位, 单帧偶然命中不算通过.
+                    # 必须是“连续”多帧接近零位，单帧偶然命中不算通过。
                     consecutive = (
                         consecutive + 1 if abs(position) <= _G_COORDINATE_TOL_RAD else 0
                     )
@@ -388,17 +388,17 @@ class GripperController:
             except Exception as exc:
                 message = f"gripper set_zero failed: {exc}"
                 with self._gripper_execution._gripper_lock:
-                    # 仅凭新帧并不能证明标定失败已消除; 在显式置零验证通过之前
-                    # 一直保留该失败标记.
+                    # 仅凭新帧并不能证明标定失败已消除；在显式置零验证通过之前
+                    # 一直保留该失败标记。
                     self._gripper_zero_error = message
                 raise RuntimeError(message) from exc
 
     def init_gripper(self, cfg_path: str) -> None:
-        """按配置初始化夹爪电机, 并挂到机械臂同一控制器/总线上.
+        """按配置初始化夹爪电机，并挂到机械臂同一控制器/总线上。
 
-        夹爪必须与机械臂共用同一个控制器对象(同一串口), 否则无法保证总线
-        事务的原子性. 本方法只绑定已注册设备; 首次新鲜反馈由生命周期连接事务验证,
-        位置/抓取入口要求统一硬件控制循环已运行, 不另建夹爪线程.
+        夹爪必须与机械臂共用同一个控制器对象（同一串口），否则无法保证总线
+        事务的原子性。 本方法只绑定已注册设备；首次新鲜反馈由生命周期连接事务验证，
+        位置/抓取入口要求统一硬件控制循环已运行，不另建夹爪线程。
         """
         gc=self._configuration.gripper
         self._gripper_cfg=gc
@@ -406,12 +406,12 @@ class GripperController:
 
     @device_request
     def set_gripper_target(self, position_m: float, max_effort: float = 0.0) -> None:
-        """下发夹爪位置目标(异步): 只登记目标, 实际下发由 统一硬件循环完成.
+        """下发夹爪位置目标（异步）：只登记目标，实际下发由 统一硬件循环完成。
 
-        ``position_m``: 0 表示完全闭合, 正值为张开距离(m), 会被夹到
-        [0, _G_VERIFIED_OPEN_LIMIT_M]; ``max_effort`` <= 0 时使用默认力矩
-        ``_G_DEFAULT_FORCE``, 否则夹到 [0.05, 位置力矩上限].
-        超时按"角度行程 / 最大速度 + 余量"估算, 供 ``wait_gripper_target`` 使用.
+        ``position_m``：0 表示完全闭合，正值为张开距离（m），会被夹到
+        [0, _G_VERIFIED_OPEN_LIMIT_M]；``max_effort`` <= 0 时使用默认力矩
+        ``_G_DEFAULT_FORCE``，否则夹到 [0.05, 位置力矩上限]。
+        超时按“角度行程 / 最大速度 + 余量”估算，供 ``wait_gripper_target`` 使用。
         """
         self._lifecycle.require_enabled()
         if self._backend.arm_resource_reserved:
@@ -441,7 +441,7 @@ class GripperController:
         if not np.isfinite([position_m, max_effort]).all():
             raise ValueError('gripper target and effort must be finite')
         distance = float(np.clip(position_m, 0.0, _G_VERIFIED_OPEN_LIMIT_M))
-        # 使用完整标称行程: 90 mm 对应 -5 rad, 不再额外裁到 -4.9 rad.
+        # 使用完整标称行程：90 mm 对应 -5 rad，不再额外裁到 -4.9 rad。
         target = (distance / _G_MAX_DIST_M) * _G_ANGLE_OPEN
         effort = _G_DEFAULT_FORCE if max_effort <= 0.0 else float(max_effort)
         now = time.monotonic()
@@ -450,7 +450,7 @@ class GripperController:
             + self.settings.gripper_position_timeout_margin_sec
         )
         applied_effort = float(np.clip(effort, 0.05, self.settings.gripper_position_torque_cap_nm))
-        # 接纳时同时固定代次与总超时, ROS 等待者只能查询/取消这个代次, 不能改写周期目标.
+        # 接纳时同时固定代次与总超时，ROS 等待者只能查询/取消这个代次，不能改写周期目标。
         generation = self._gripper_execution.accept_position(
             GripperTarget(start_angle, target, applied_effort, target_timeout_sec), now)
         feedback_updated = self._gripper_feedback_updated_monotonic
@@ -471,28 +471,28 @@ class GripperController:
         return generation
 
     def gripper_target_timeout_sec(self) -> float:
-        """在执行锁内读取当前目标的总预算 s, 不重建超时起点."""
+        """在执行锁内读取当前目标的总预算 s，不重建超时起点。"""
         with self._gripper_execution._gripper_lock:
             return float(self._gripper_execution._gripper_target_timeout_sec)
 
     @property
     def gripper_command_error(self) -> str | None:
-        """在执行锁内读取当前命令失败原因, 不修改执行结果."""
+        """在执行锁内读取当前命令失败原因，不修改执行结果。"""
         with self._gripper_execution._gripper_lock:
             return self._gripper_execution._gripper_command_error
 
     @property
     def gripper_feedback_error(self) -> str | None:
-        """当前反馈不可用原因; 查询不写入或锁存派生错误."""
+        """当前反馈不可用原因；查询不写入或锁存派生错误。"""
         return self._cached_gripper_feedback().failure_reason
 
     def gripper_execution_status(self, generation):
-        """返回本目标的状态, 旧代次永远不能读成新目标的成功."""
+        """返回本目标的状态，旧代次永远不能读成新目标的成功。"""
         result = self._gripper_execution.snapshot(generation)
         return result.state, result.message
 
     def wait_gripper_target(self, timeout=None, generation=None) -> bool:
-        """兼容等待入口; 只读快照, 显式超时通过队列取消自己的代次."""
+        """兼容等待入口；只读快照，显式超时通过队列取消自己的代次。"""
         if generation is None:
             generation = self._gripper_execution._generation
         deadline = float('inf') if timeout is None else time.monotonic()+max(0., timeout)
@@ -507,7 +507,7 @@ class GripperController:
             time.sleep(.02)
 
     def set_gripper_position(self, position_m: float, max_effort: float = 0.0) -> tuple[bool, float]:
-        """同步版位置命令: 下发并等待到位, 返回 (是否到位, 实际位置 m)."""
+        """同步版位置命令：下发并等待到位，返回 (是否到位, 实际位置 m)。"""
         generation = self.set_gripper_target(position_m, max_effort)
         reached = self.wait_gripper_target(generation=generation)
         return reached, self.gripper_position_m()
@@ -515,8 +515,8 @@ class GripperController:
 
 
     def _cached_gripper_feedback(self, *, now: float | None = None) -> _CachedMotorFeedback:
-        """按反馈 -> 夹爪锁顺序取得同一快照, 叠加坐标错误而不改写样本时间."""
-        # 采集路径使用反馈锁 -> 夹爪锁; 查询保持相同顺序, 避免与控制循环互锁.
+        """按反馈 -> 夹爪锁顺序取得同一快照，叠加坐标错误而不改写样本时间。"""
+        # 采集路径使用反馈锁 -> 夹爪锁；查询保持相同顺序，避免与控制循环互锁。
         with self.feedback.transaction(), self._gripper_execution._gripper_lock:
             now = time.monotonic() if now is None else now
             sample = self.feedback.cached_motor("gripper", now=now).sample
@@ -539,9 +539,9 @@ class GripperController:
             return feedback
 
     def get_cached_gripper_sample(self):
-        """返回夹爪同一快照的米制开口, 速度, 力矩, 状态, 序号与观测时间.
+        """返回夹爪同一快照的米制开口，速度，力矩，状态，序号与观测时间。
 
-        不可用时开口为 NaN; 保留旧样本身份和时间, 不把错误查询当作新反馈.
+        不可用时开口为 NaN；保留旧样本身份和时间，不把错误查询当作新反馈。
         """
         with self.feedback.transaction(), self._gripper_execution._gripper_lock:
             feedback = self._cached_gripper_feedback()
@@ -557,11 +557,11 @@ class GripperController:
             )
 
     def get_gripper_state(self) -> tuple[float, float, float, int]:
-        """返回同一缓存快照的 (位置 rad, 速度 rad/s, 力矩 N.m, 状态码).
+        """返回同一缓存快照的 (位置 rad, 速度 rad/s, 力矩 N.m, 状态码)。
 
-        与关节共用可用性判定; 可信反馈返回电机原码, 否则派生 255.
-        读取不刷新总线, 不登记错误, 不改变反馈时间. 无可用样本时三个数值返回 NaN,
-        调用方必须结合 255 判断其不可用, 不能把控制镜像当作反馈.
+        与关节共用可用性判定；可信反馈返回电机原码，否则派生 255。
+        读取不刷新总线，不登记错误，不改变反馈时间。 无可用样本时三个数值返回 NaN，
+        调用方必须结合 255 判断其不可用，不能把控制镜像当作反馈。
         """
         with self.feedback.transaction():
             feedback = self._cached_gripper_feedback()
@@ -569,17 +569,17 @@ class GripperController:
             return (*values, feedback.status_code)
 
     def gripper_position_m(self) -> float:
-        """把夹爪原始角度换算为开口距离(m, 0 表示闭合)."""
+        """把夹爪原始角度换算为开口距离(m, 0 表示闭合)。"""
         with self._gripper_execution._gripper_lock:
             if self._gripper_coordinate_failure_reason_locked() is not None:
-                # 坐标非法时返回 NaN, 让上层无法把无效值当距离使用.
+                # 坐标非法时返回 NaN，让上层无法把无效值当距离使用。
                 return float("nan")
             distance = (self._gripper_execution._gripper_pos / _G_ANGLE_OPEN) * _G_MAX_DIST_M
-        # 只有落在已验证反馈容差内的端点越界才会到这里被夹紧.
+        # 只有落在已验证反馈容差内的端点越界才会到这里被夹紧。
         return float(np.clip(distance, 0.0, _G_MAX_DIST_M))
 
     def gripper_reached_target(self) -> bool:
-        """查询位置命令是否已到位且中性释放发送成功."""
+        """查询位置命令是否已到位且中性释放发送成功。"""
         with self._gripper_execution._gripper_lock:
             if self._gripper_execution._gripper_position_result == "succeeded":
                 return True
@@ -593,10 +593,10 @@ class GripperController:
 
     @device_request
     def send_gripper_motor_cmd(self, cmd, arbitration="reject") -> None:
-        """低层夹爪直通命令(JointMotorCmd): 未给出的字段回落到反馈或配置增益.
+        """低层夹爪直通命令(JointMotorCmd)：未给出的字段回落到反馈或配置增益。
 
-        直通后夹爪状态机被置为 idle, 避免与高层位置命令互相干扰.
-        mode: 0 = MIT, 1 = 位置-速度, 2 = 速度.
+        直通后夹爪状态机被置为 idle，避免与高层位置命令互相干扰。
+        mode: 0 = MIT，1 = 位置-速度，2 = 速度。
         """
         self._lifecycle.require_enabled()
         if self._backend.arm_resource_reserved:
@@ -623,7 +623,7 @@ class GripperController:
         with self._gripper_execution._gripper_lock:
             if (self._gripper_execution._gripper_active or self._gripper_execution._gripper_neutral_pending is not None) and arbitration != 'preempt':
                 raise RuntimeError('gripper resource busy')
-            # 先确认旧命令中性化, 再交接透传; 旧等待者不能释放新命令.
+            # 先确认旧命令中性化，再交接透传；旧等待者不能释放新命令。
             if self._gripper_execution._gripper_active:
                 self._queue_gripper_neutral_locked('passthrough preempt', marks_success=False)
             if self._gripper_execution._gripper_neutral_pending is not None:
@@ -657,11 +657,11 @@ class GripperController:
         tau_ff: float = 0.0,
         tau_limit: float = _G_TAU_MAX,
     ) -> None:
-        """按当前反馈估算并约束夹爪 MIT 总力矩, 再发送命令.
+        """按当前反馈估算并约束夹爪 MIT 总力矩，再发送命令。
 
-        位置命令先夹到 [_G_ANGLE_OPEN, 0](不允许命令超过标称全开或越过
-        闭合零点). 力矩处理是"先算位置项, 再把总力矩夹到 +/-limit, 最后反解出
-        等效前馈": 当前反馈下的估算总力矩受 limit 约束, 反馈间隔内实际输出仍需验证.
+        位置命令先夹到 [_G_ANGLE_OPEN, 0]（不允许命令超过标称全开或越过
+        闭合零点）。 力矩处理是"先算位置项，再把总力矩夹到 +/-limit，最后反解出
+        等效前馈"：当前反馈下的估算总力矩受 limit 约束，反馈间隔内实际输出仍需验证。
         """
         if self._gripper_mot is None or self._gripper_ctrl is None:
             raise RuntimeError("gripper motor or controller unavailable")
@@ -678,20 +678,20 @@ class GripperController:
             raise RuntimeError(f"gripper MIT command failed: {exc}") from exc
 
     def _fail_active_gripper_command_locked(self, *args, **kwargs):
-        """将活动目标判为失败并排队中性释放; 调用方持夹爪执行锁."""
+        """将活动目标判为失败并排队中性释放；调用方持夹爪执行锁。"""
         return self._gripper_execution._fail_active_gripper_command_locked(*args, **kwargs)
 
     def _queue_gripper_neutral_locked(self, *args, **kwargs):
-        """委托执行器排队中性输出, 不在排队阶段宣告释放成功."""
+        """委托执行器排队中性输出，不在排队阶段宣告释放成功。"""
         return self._gripper_execution._queue_gripper_neutral_locked(*args, **kwargs)
 
     def _emit_pending_gripper_neutral_locked(self, *args, **kwargs):
-        """仅在设备线程和执行锁内发送待决中性输出, 返回真实发送结果."""
+        """仅在设备线程和执行锁内发送待决中性输出，返回真实发送结果。"""
         return self._gripper_execution._emit_pending_gripper_neutral_locked(*args, **kwargs)
 
     @device_request
     def cancel_gripper_position_command(self, *args, **kwargs):
-        """只取消匹配代次的位置目标, 成功撤销后作废排队夹爪请求."""
+        """只取消匹配代次的位置目标，成功撤销后作废排队夹爪请求。"""
         canceled = self._gripper_execution.cancel_gripper_position_command(*args, **kwargs)
         if canceled:
             self._backend.requests.invalidate('gripper')
@@ -699,11 +699,11 @@ class GripperController:
 
     @device_request
     def _release_gripper_position_target(self, *args, **kwargs):
-        """请求结束匹配目标并排队中性释放, 设备线程入队策略仍适用."""
+        """请求结束匹配目标并排队中性释放，设备线程入队策略仍适用。"""
         return self._gripper_execution._release_gripper_position_target(*args, **kwargs)
 
     def _release_gripper_position_target_locked(self, *args, **kwargs):
-        """持锁复用目标所有权与到位检查, 不允许旧收尾释放接替命令."""
+        """持锁复用目标所有权与到位检查，不允许旧收尾释放接替命令。"""
         return self._gripper_execution._release_gripper_position_target_locked(*args, **kwargs)
 
 
@@ -711,24 +711,24 @@ class GripperController:
 
 
     def _gripper_tick(self, *args, **kwargs):
-        """委托独立执行器推进一拍夹爪状态, 调用方必须是统一设备周期."""
+        """委托独立执行器推进一拍夹爪状态，调用方必须是统一设备周期。"""
         return self._gripper_execution._gripper_tick(*args, **kwargs)
 
     def tick(self):
-        """统一设备周期推进夹爪; 不允许 ROS 等待者调用设备发送."""
+        """统一设备周期推进夹爪；不允许 ROS 等待者调用设备发送。"""
         return self._gripper_tick()
 
     def _start_gripper_loop(self) -> None:
-        """夹爪命令的入口校验: 夹爪没有独立循环, 必须依赖统一硬件循环."""
+        """夹爪命令的入口校验：夹爪没有独立循环，必须依赖统一硬件循环。"""
         if not self._backend.control_loop_active:
             raise RuntimeError(
                 "gripper command requires the unified hardware control loop"
             )
 
     def stop_loop(self) -> None:
-        """作废本会话夹爪任务及等待者, 清待发状态; 不发送设备命令, 生命周期负责后续操作."""
-        # 使能/连接会话结束时使旧目标和等待者失效, 防止重启循环后续发旧命令.
-        # 此处不发送命令; 调用方负责随后停止周期线程并执行生命周期设备操作.
+        """作废本会话夹爪任务及等待者，清待发状态；不发送设备命令，生命周期负责后续操作。"""
+        # 使能/连接会话结束时使旧目标和等待者失效，防止重启循环后续发旧命令。
+        # 此处不发送命令；调用方负责随后停止周期线程并执行生命周期设备操作。
         with self._gripper_execution._gripper_lock:
             self._gripper_execution.supersede_locked()
             self._gripper_execution._gripper_active = False

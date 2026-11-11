@@ -1,27 +1,27 @@
-"""解析并校验控制器配置; 加载过程不打开设备.
+"""解析并校验控制器配置；加载过程不打开设备。
 
 职责与位置
-    配置层在装配前读取共享总线, 七路电机及运行参数, 不持有会话.
+    配置层在装配前读取共享总线，七路电机及运行参数，不持有会话。
 
 对外接口
-    load_configuration 返回 ControllerConfig; HardwareSettings 校验反馈和夹爪参数.
+    load_configuration 返回 ControllerConfig；HardwareSettings 校验反馈和夹爪参数。
 
 主要流程
-    定位资源 -> 解析映射 -> 校验电机及通道 -> 生成冻结配置.
+    定位资源 -> 解析映射 -> 校验电机及通道 -> 生成冻结配置。
 
 安全与并发约束
-    拒绝不支持的型号, 重复标识和不一致的通道; 不改写 YAML, 不隐式打开设备.
+    拒绝不支持的型号，重复标识和不一致的通道；不改写 YAML，不隐式打开设备。
 
-文件结构(按定义顺序)
-    ProtocolTiming: 设备命令等待, 状态确认和线程停止的基线时序.
-    HardwareSettings: 运行时反馈与夹爪参数; 构造时检查数值范围.
-    MotorConfig: 单电机的标识, 型号和两种控制模式参数.
-    ControllerConfig: 共享通道, 六轴, 夹爪与设备时序的完整配置.
-    default_config: 定位 arm 或 gripper 的默认 YAML, 优先采用安装资源并兼容源码布局.
-    _mapping: 读取 YAML 并要求顶层为映射; 结构错误直接失败, 不使用静默默认值.
-    _required: 读取必填字段, 缺失时携带文件与字段位置失败.
-    _motor: 将一项电机映射规范为 MotorConfig; 名称, 标识, 型号, 厂商及两种控制参数全部必填.
-    load_configuration: 解析两份完整配置并校验设备归属; 显式通道覆盖不会改写 YAML.
+文件结构（按定义顺序）
+    ProtocolTiming：设备命令等待，状态确认和线程停止的基线时序。
+    HardwareSettings：运行时反馈与夹爪参数；构造时检查数值范围。
+    MotorConfig：单电机的标识，型号和两种控制模式参数。
+    ControllerConfig：共享通道，六轴，夹爪与设备时序的完整配置。
+    default_config：定位 arm 或 gripper 的默认 YAML，优先采用安装资源并兼容源码布局。
+    _mapping：读取 YAML 并要求顶层为映射；结构错误直接失败，不使用静默默认值。
+    _required：读取必填字段，缺失时携带文件与字段位置失败。
+    _motor：将一项电机映射规范为 MotorConfig；名称，标识，型号，厂商及两种控制参数全部必填。
+    load_configuration：解析两份完整配置并校验设备归属；显式通道覆盖不会改写 YAML。
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ JOINT_NAMES = tuple(f"joint{i}" for i in range(1, 7))
 
 @dataclass(frozen=True)
 class ProtocolTiming:
-    """设备命令等待, 状态确认和线程停止的基线时序."""
+    """设备命令等待，状态确认和线程停止的基线时序。"""
 
     serial_baud: int = 921600
     command_motor_delay: float = .05
@@ -59,7 +59,7 @@ class ProtocolTiming:
 
 @dataclass(frozen=True)
 class HardwareSettings:
-    """运行时反馈与夹爪参数; 构造时检查数值范围."""
+    """运行时反馈与夹爪参数；构造时检查数值范围。"""
 
     hardware_feedback_rate_hz: float = 50.
     gripper_position_torque_cap_nm: float = 1.
@@ -68,7 +68,7 @@ class HardwareSettings:
     gripper_feedback_stale_timeout_sec: float = .15
 
     def __post_init__(self):
-        """将运行参数规范为有限浮点值, 并拒绝超出已评审频率, 速度, 力矩和超时范围的值."""
+        """将运行参数规范为有限浮点值，并拒绝超出已评审频率，速度，力矩和超时范围的值。"""
         for name, lo, hi, unit in (
             ('hardware_feedback_rate_hz',20.,100.,'Hz'),
             ('gripper_position_torque_cap_nm',.05,1.5,'N.m'),
@@ -83,7 +83,7 @@ class HardwareSettings:
 
 @dataclass(frozen=True)
 class MotorConfig:
-    """单电机的标识, 型号和两种控制模式参数."""
+    """单电机的标识，型号和两种控制模式参数。"""
 
     name: str
     motor_id: int
@@ -99,7 +99,7 @@ class MotorConfig:
     vlim: float
 
     def to_mapping(self):
-        """生成包含 MIT 和位置速度参数的普通映射副本, 供兼容配置接口使用."""
+        """生成包含 MIT 和位置速度参数的普通映射副本，供兼容配置接口使用。"""
         return dict(name=self.name,motor_id=self.motor_id,feedback_id=self.feedback_id,
                     model=self.model,vendor=self.vendor,MIT=dict(kp=self.kp,kd=self.kd),
                     POS_VEL={key:getattr(self,key) for key in ('vel_kp','vel_ki','pos_kp','pos_ki','vlim')})
@@ -107,7 +107,7 @@ class MotorConfig:
 
 @dataclass(frozen=True)
 class ControllerConfig:
-    """共享通道, 六轴, 夹爪与设备时序的完整配置."""
+    """共享通道，六轴，夹爪与设备时序的完整配置。"""
 
     name: str
     channel: str
@@ -117,18 +117,18 @@ class ControllerConfig:
     timing: ProtocolTiming = ProtocolTiming()
 
     def arm_mapping(self):
-        """返回六轴配置映射; 夹爪仍由独立配置字段提供, 不复制会话状态."""
+        """返回六轴配置映射；夹爪仍由独立配置字段提供，不复制会话状态。"""
         return dict(name=self.name,channel=self.channel,rate=self.rate,
                     joints=[j.to_mapping() for j in self.joints])
 
 
 def default_config(name: str) -> Path:
-    """定位 arm 或 gripper 的默认 YAML, 优先采用安装资源并兼容源码布局."""
+    """定位 arm 或 gripper 的默认 YAML，优先采用安装资源并兼容源码布局。"""
     return package_file('rebotarmcontroller',f'config/{name}.yaml')
 
 
 def _mapping(path):
-    """读取 YAML 并要求顶层为映射; 结构错误直接失败, 不使用静默默认值."""
+    """读取 YAML 并要求顶层为映射；结构错误直接失败，不使用静默默认值。"""
     with Path(path).expanduser().open(encoding='utf-8') as stream:
         value=yaml.safe_load(stream)
     if not isinstance(value,dict): raise ValueError(f"configuration must be a mapping: {path}")
@@ -136,14 +136,14 @@ def _mapping(path):
 
 
 def _required(item, key, *, path, label):
-    """读取必填字段; 缺失或类型明显不符时带文件与字段位置失败."""
+    """读取必填字段；缺失或类型明显不符时带文件与字段位置失败。"""
     if key not in item:
         raise ValueError(f"{path}: {label}.{key} is required")
     return item[key]
 
 
 def _motor(item, *, path, label):
-    """将一项电机映射规范为 MotorConfig; 所有字段必填并检查型号, 标识与数值范围."""
+    """将一项电机映射规范为 MotorConfig；所有字段必填并检查型号，标识与数值范围。"""
     if not isinstance(item,dict): raise ValueError(f'{path}: {label} must be a mapping')
     name=str(_required(item,'name',path=path,label=label))
     vendor=str(_required(item,'vendor',path=path,label=label)).lower()
@@ -177,7 +177,7 @@ def _motor(item, *, path, label):
 
 
 def load_configuration(arm_path=None,gripper_path=None,channel='') -> ControllerConfig:
-    """解析两份必填完整的配置并校验设备归属; 显式通道覆盖不会改写 YAML."""
+    """解析两份必填完整的配置并校验设备归属；显式通道覆盖不会改写 YAML。"""
     arm_file=Path(arm_path).expanduser() if arm_path else default_config('arm')
     grip_file=Path(gripper_path).expanduser() if gripper_path else default_config('gripper')
     arm=_mapping(arm_file)
@@ -193,7 +193,7 @@ def load_configuration(arm_path=None,gripper_path=None,channel='') -> Controller
     gripper=_motor(items[0],path=grip_file,label='gripper[0]')
     if gripper.name!='gripper': raise ValueError('gripper name must be gripper')
     all_motors=(*joints,gripper)
-    # 两类 ID 分别在七台电机内唯一, 避免同一总线上的设备或反馈混淆.
+    # 两类 ID 分别在七台电机内唯一，避免同一总线上的设备或反馈混淆。
     for key in ('motor_id','feedback_id'):
         if len({getattr(j,key) for j in all_motors})!=len(all_motors):
             raise ValueError(f"duplicate {key} on shared bus")

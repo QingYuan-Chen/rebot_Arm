@@ -57,7 +57,7 @@ def analyze(points=None, **kwargs):
 
 @pytest.mark.parametrize('degree', [1, 3, 5])
 def test_analytic_polynomial_reconstructed_at_all_nodes_and_between(degree):
-    # 用独立已知多项式约束构造, 而非用实现公式计算预期值.
+    # 用独立已知多项式约束构造，而非用实现公式计算预期值。
     p = np.polynomial.Polynomial((.2, -.1, .08, -.02, .003, -.0002)[:degree + 1])
     points = [Point(t, (p(t),) * 6,
         (p.deriv(1)(t),) * 6 if degree >= 3 else (),
@@ -154,7 +154,7 @@ def test_quintic_peaks_and_minimum_duration_match_closed_form():
 
 @pytest.mark.parametrize('kind', ['position', 'velocity', 'acceleration', 'jerk'])
 def test_checks_interior_extrema_not_only_waypoints(kind):
-    # q=4u(1-u), 原节点位置为零、速度绝对值4, 加速度为-8.
+    # q=4u(1-u)，原节点位置为零、速度绝对值4，加速度为-8。
     p = Point(0., ZERO, (4.,) * 6)
     q = Point(1., ZERO, (-4.,) * 6)
     curve = build_curve(JOINT_NAMES, (p, q))
@@ -162,7 +162,7 @@ def test_checks_interior_extrema_not_only_waypoints(kind):
                                      max_jerk=10) for name in JOINT_NAMES}
     upper = (.5,) * 6 if kind == 'position' else UPPER
     if kind != 'position':
-        # 用完整五次曲线得到端点速度/加速度为零, 但内部存在峰值的反例.
+        # 用完整五次曲线得到端点速度/加速度为零，但内部存在峰值的反例。
         curve = build_curve(JOINT_NAMES, point_to_point(ZERO, (.1,) * 6, 1.))
         for name in limits:
             limits[name] = replace(limits[name], **{'max_' + kind: .01})
@@ -178,7 +178,7 @@ def test_collision_subdivision_covers_returning_curve_and_extremum():
     curve = build_curve(JOINT_NAMES, (Point(0, ZERO, (4.,)*6), Point(1, ZERO, (-4.,)*6)))
     times = curve.collision_times()
     assert .5 in times and times[0] == 0 and times[-1] == 1
-    assert len(times) >= 201  # 相同端点不能被误当成零位移.
+    assert len(times) >= 201  # 相同端点不能被误当成零位移。
     for a, b in zip(times, times[1:]):
         assert 4 * (b - a) <= .02000000001
     with pytest.raises(ValueError, match='sample budget'):
@@ -186,7 +186,7 @@ def test_collision_subdivision_covers_returning_curve_and_extremum():
 
 
 def test_jerk_extremum_inside_segment_is_checked_when_endpoints_are_zero():
-    # q'''(t)=t-t², 两端 jerk 为零, 内部 t=.5 达到 .25.
+    # q'''(t)=t-t²，两端 jerk 为零，内部 t=.5 达到 .25。
     p = np.polynomial.Polynomial((0., 0., 0., 0., 1/24, -1/60))
     points = tuple(Point(t, (p(t),)*6, (p.deriv(1)(t),)*6, (p.deriv(2)(t),)*6)
                    for t in (0., 1.))
