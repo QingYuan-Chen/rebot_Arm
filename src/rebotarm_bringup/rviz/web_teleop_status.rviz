@@ -41,7 +41,7 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         # All Enabled=false：默认不显示全部坐标系，只显示下面显式置 true 的两项。
-        # 这里与视觉抓取配置的差别是 base_link 不勾选（避免基座坐标轴挡住模型），
+        # 这里与视觉候选显示配置的差别是 base_link 不勾选（避免基座坐标轴挡住模型），
         # end_link（末端）与 grasp_tcp（抓取工具中心点）勾选。
         All Enabled: false
         base_link:

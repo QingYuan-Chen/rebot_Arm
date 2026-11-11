@@ -1,4 +1,4 @@
-"""视觉感知、候选筛选与显示组合入口。"""
+"""视觉感知、抓取候选生成、筛选与显示组合入口。"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction, IncludeLaunchDescription
@@ -14,42 +14,8 @@ def _prepare_stages(context):
     import json
     from rebotarm_bringup.visual_profiles import read_section
 
-    retired = {
-        "execution_mode", "use_hardware", "channel", "trajectory_execution_mode",
-        "execute_gripper", "backend_profile", "motion_profile", "executor_input_topic",
-        "start_motion_execution", "start_visual_grasp_executor", "start_sim_trajectory_controller",
-        "start_grasp_preview", "pose_mode", "min_target_z_m", "pose_policy", "max_plan_age_sec",
-        "moveit_planning_time", "moveit_num_planning_attempts", "move_velocity_scaling",
-        "approach_velocity_scaling", "retreat_velocity_scaling", "acceleration_scaling",
-        "close_position_m", "close_max_effort", "open_before_approach", "auto_gripper_width",
-        "auto_gripper_effort", "open_clearance_m", "close_margin_m", "min_gripper_effort",
-        "max_gripper_effort", "max_allowed_grasp_width_m", "gripper_grasp_enabled",
-        "gripper_grasp_close_force", "gripper_grasp_timeout_sec", "gripper_grasp_min_close_time_sec",
-        "gripper_grasp_velocity_threshold", "gripper_grasp_min_closure_distance_m",
-        "safe_retreat_enabled", "safe_retreat_distance_m", "safe_home_after_grasp",
-        "plan_only_stage_pause_sec", "approach_visual_servo_enabled", "approach_visual_servo_max_iterations",
-        "approach_visual_servo_max_step_m", "approach_visual_servo_position_tolerance_m",
-        "approach_visual_servo_require_fresh_plan", "auto_retry_enabled", "auto_retry_max_attempts",
-        "safe_retreat_before_retry", "grasp_verification_enabled", "grasp_verification_min_closure_distance_m",
-        "grasp_verification_require_contact", "place_after_grasp_enabled", "place_position_xyz",
-        "place_orientation_xyzw", "place_open_position_m", "place_open_max_effort", "place_retreat_z_m",
-        "trajectory_precheck_enabled", "grasp_hold_timeout_sec", "sim_initial_joint_positions",
-        "shutdown_safe_home", "hardware_feedback_rate_hz", "gripper_position_torque_cap_nm",
-        "gripper_position_max_speed_rad_s", "gripper_position_timeout_margin_sec",
-        "gripper_feedback_stale_timeout_sec",
-    }
-    supplied = sorted(retired.intersection(context.launch_configurations))
-    if supplied:
-        raise RuntimeError(f"Retired visual execution arguments: {', '.join(supplied)}; "
-                           "use robot_context:=offline or robot_context:=external")
-
     for name in ("strategy_profile", "visual_interfaces_config"):
         values = read_section(LaunchConfiguration(name).perform(context), "launch", None)
-        obsolete = sorted(retired.intersection(values))
-        if obsolete:
-            raise RuntimeError(f"Retired visual execution parameters in {name}: "
-                               f"{', '.join(obsolete)}; use robot_context:=offline "
-                               "or robot_context:=external")
         for key, value in values.items():
             if isinstance(value, str):
                 value = value.replace("{arm_namespace}", LaunchConfiguration("arm_namespace").perform(context).strip("/"))

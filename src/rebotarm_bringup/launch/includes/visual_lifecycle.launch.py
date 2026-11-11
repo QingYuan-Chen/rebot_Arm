@@ -1,4 +1,4 @@
-"""视觉处理阶段组合；观察位服务由独立操作员入口启动。"""
+"""依次组合视觉输入、抓取候选生成、筛选和标记显示。"""
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -11,5 +11,5 @@ def generate_launch_description():
         IncludeLaunchDescription(PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare("rebotarm_bringup"), "launch", "includes", name + ".launch.py"
         ])))
-        for name in ("visual_input", "grasp_candidate", "candidate_filter", "grasp_preview")
+        for name in ("visual_input", "grasp_candidate", "candidate_filter", "candidate_markers")
     ])

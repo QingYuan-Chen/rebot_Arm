@@ -190,7 +190,7 @@ os.environ["PWD"] = str(relocated)
 
 files = {
     "rebotarm_simulation": ["mujoco_sim.launch.py"],
-    "rebotarm_bringup": ["visual_grasp_system.launch.py", "mujoco_moveit_sim.launch.py"],
+    "rebotarm_bringup": ["visual_perception_system.launch.py", "mujoco_moveit_sim.launch.py"],
     "rebotarm_vision": ["vision.launch.py", "vision_ubuntu.launch.py"],
 }
 seen = set()
@@ -228,12 +228,12 @@ for package, names in files.items():
                     entity.execute(context)
             if package == "rebotarm_vision":
                 assert context.launch_configurations["handeye_config"] == ""
-            if name == "visual_grasp_system.launch.py":
+            if name == "visual_perception_system.launch.py":
                 assert context.launch_configurations["vision_handeye_config"] == ""
             entities = list(walk(description.entities))
             if name == "vision.launch.py":
                 entities += module._launch_setup(context)
-            if name == "visual_grasp_system.launch.py":
+            if name == "visual_perception_system.launch.py":
                 # Resolve the public profile/default contract, then inspect the
                 # two interpreter-owning stages without executing ROS actions.
                 module._prepare_stages(context)
@@ -270,7 +270,7 @@ for package, names in files.items():
                                 seen.add((name, kind))
 
 assert all(any(filename == name for filename, kind in seen) for names in files.values() for name in names), seen
-assert ("visual_grasp_system.launch.py", "vision") in seen
-assert ("visual_grasp_system.launch.py", "graspnet") in seen
+assert ("visual_perception_system.launch.py", "vision") in seen
+assert ("visual_perception_system.launch.py", "graspnet") in seen
 print("Relocated launch files resolved; no processes started:", mode)
 '''

@@ -2,6 +2,8 @@
 
 > 状态：历史范围清单；类型：结构剔除实施前核查；源码核对：2026-11-05。当前实现及验证以[项目状态](../reference/project_status.md)和[视觉候选说明](../implemented/features/visual_grasp.md)为准。
 
+现行总入口为 `visual_perception_system.launch.py`，筛选结果显示片段为 `includes/candidate_markers.launch.py`；下文保留实施前的文件名称与结构。
+
 ## 当前范围
 
 视觉链路收敛到 Gemini 2 → YOLO → ROS RGB-D/CameraInfo/检测结果 → 本地 GraspNet → 候选筛选 → 结果与标记发布。

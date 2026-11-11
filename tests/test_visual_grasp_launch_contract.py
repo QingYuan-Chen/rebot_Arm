@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch_ros.actions import Node
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCH = ROOT / 'src/rebotarm_bringup/launch'
@@ -21,7 +22,7 @@ def load(name):
 
 
 def prepare(**values):
-    module = load('visual_grasp_system.launch.py')
+    module = load('visual_perception_system.launch.py')
     context = LaunchContext()
     context.launch_configurations.update(values)
     resolver = lambda pkg: str(ROOT / 'src' / pkg)
@@ -43,22 +44,6 @@ def test_entry_prepares_candidate_stages(robot_context):
     assert 'start_visual_grasp_executor' not in context.launch_configurations
 
 
-@pytest.mark.parametrize('name', ['execution_mode', 'use_hardware', 'trajectory_execution_mode',
-                                  'execute_gripper', 'backend_profile', 'motion_profile',
-                                  'gripper_grasp_enabled', 'executor_input_topic', 'sim_initial_joint_positions',
-                                  'shutdown_safe_home', 'hardware_feedback_rate_hz'])
-def test_old_execution_arguments_are_rejected(name):
-    with pytest.raises(RuntimeError, match='Retired visual execution arguments.*robot_context'):
-        prepare(**{name: 'false'})
-
-
-def test_old_execution_parameters_in_strategy_profile_are_rejected(tmp_path):
-    profile = tmp_path / 'old.yaml'
-    profile.write_text('launch:\n  sim_initial_joint_positions: [0, 0, 0, 0, 0, 0]\n')
-    with pytest.raises(RuntimeError, match='Retired visual execution parameters in strategy_profile'):
-        prepare(strategy_profile=str(profile))
-
-
 def test_offline_alone_starts_passive_moveit_environment():
     defaults, _ = prepare()
     assert defaults.launch_configurations['robot_context'] == 'offline'
@@ -76,24 +61,42 @@ def test_offline_alone_starts_passive_moveit_environment():
 
 
 def test_visual_entry_composes_filtering_stages_and_profiles():
-    main = (LAUNCH / 'visual_grasp_system.launch.py').read_text()
+    main = (LAUNCH / 'visual_perception_system.launch.py').read_text()
     assert '"visual_backend", "visual_lifecycle"' in main
     assert '"visual_interfaces_config"' in main
-    text = (LAUNCH / 'includes/visual_lifecycle.launch.py').read_text()
-    for stage in ('visual_input', 'grasp_candidate', 'candidate_filter', 'grasp_preview'):
-        assert f'"{stage}"' in text
-        assert (LAUNCH / 'includes' / f'{stage}.launch.py').is_file()
-    for stage in ('motion_execution', 'grasp_executor'):
-        assert stage not in text
+    context, _ = prepare()
+    lifecycle = load('includes/visual_lifecycle.launch.py').generate_launch_description()
+    resolver = lambda pkg: str(ROOT / 'src' / pkg)
+    with patch('launch_ros.substitutions.find_package.get_package_share_directory', side_effect=resolver):
+        paths = []
+        for action in lifecycle.entities:
+            action.launch_description_source.get_launch_description(context)
+            paths.append(Path(action.launch_description_source.location))
+    assert [path.name for path in paths] == [
+        'visual_input.launch.py', 'grasp_candidate.launch.py',
+        'candidate_filter.launch.py', 'candidate_markers.launch.py',
+    ]
+    assert all(path.is_file() for path in paths)
     assert (ROOT / 'src/rebotarm_vision/config/visual_strategy_profile.yaml').is_file()
     assert (ROOT / 'src/rebotarm_bringup/config/visual_grasp_interfaces.yaml').is_file()
 
 
-def test_marker_consumes_filtered_plan():
-    text = (LAUNCH / 'includes/grasp_preview.launch.py').read_text()
-    assert "'input_topic': filtered_plan_topic" in text
-    assert 'executor_input_topic' not in text
-    assert 'grasp_preview_sender' not in text
+@pytest.mark.parametrize('enabled', ['true', 'false'])
+def test_marker_stage_only_displays_filtered_plan(enabled):
+    context, _ = prepare(start_visual_grasp_markers=enabled, filtered_plan_topic='/test/filtered_plan')
+    module = load('includes/candidate_markers.launch.py')
+    resolver = lambda pkg: str(ROOT / 'src' / pkg)
+    with patch('launch_ros.substitutions.find_package.get_package_share_directory', side_effect=resolver), \
+            patch.object(module, 'Node', wraps=Node) as factory:
+        nodes = module._build(context)
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert isinstance(node, Node)
+    assert node.node_package == 'rebotarm_vision'
+    assert node.node_executable == 'rebotarm_visual_grasp_markers'
+    assert node.condition.evaluate(context) == (enabled == 'true')
+    params, = factory.call_args.kwargs['parameters']
+    assert params['input_topic'].perform(context) == '/test/filtered_plan'
 
 
 def test_moveit_passive_state_disables_execution_but_backend_state_enables_it():
@@ -124,7 +127,8 @@ def test_visual_backend_has_no_execution_nodes():
 
 
 def test_retired_visual_wrappers_are_removed():
-    for name in ('visual_grasp_compact', 'visual_readonly', 'visual_plan_only', 'visual_execute'):
+    for name in ('visual_grasp_system', 'visual_grasp_compact', 'visual_readonly',
+                 'visual_plan_only', 'visual_execute', 'includes/grasp_preview'):
         assert not (LAUNCH / f'{name}.launch.py').exists()
 
 
@@ -139,11 +143,11 @@ def test_visual_ready_tool_is_retired():
 def test_interface_profile_is_documented_as_the_authoritative_connection_contract():
     docs = (ROOT / 'docs/reference/parameters/current_parameter_sources.md').read_text()
     assert 'visual_grasp_interfaces.yaml' in docs
-    assert 'visual_grasp_system.launch.py' in docs
+    assert 'visual_perception_system.launch.py' in docs
 
 
 def test_graspnet_resources_require_explicit_deployment_paths():
-    launch = (LAUNCH / 'visual_grasp_system.launch.py').read_text()
+    launch = (LAUNCH / 'visual_perception_system.launch.py').read_text()
     assert 'for parent in Path(__file__).resolve().parents' not in launch
     assert 'third_party/graspnet-baseline' not in launch
     assert '.local-models/checkpoints' not in launch

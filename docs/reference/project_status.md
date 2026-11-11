@@ -12,6 +12,8 @@ P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控�
 
 ## 当前基线
 
+- 2026-11-11 整合视觉入口重命名与退役参数检查清理：总入口为 `visual_perception_system.launch.py`，筛选结果显示片段为 `includes/candidate_markers.launch.py`；调用、README、命令、参数索引和测试同步。对照 `codex/visual-retired-parameter-cleanup@05b0e614` 逐项迁入清理，删除 `retired` 集合及启动参数、YAML 配置的专用拒绝逻辑，并移除对应的两组测试；原节点、话题、显示参数、感知与候选流程保持，离线 MoveIt 继续禁用轨迹执行。用法见[视觉候选命令](commands/visual_grasp_commands.md)，组合关系见[启动说明](../../src/rebotarm_bringup/launch/README.md)。当前整合版视觉启动契约 **12 passed**、分层 **27 passed**，重命名关联的解释器、原生视觉配置及资源检查 **40 passed**，合计 **79 passed**；规定两组编译、差异和文档链接检查通过。bringup 重建及新入口安装版 `--show-args` 通过，旧 launch 安装残留已清理；清理后入口 AST 与参考提交一致（入口说明保留重命名版本），其余视觉契约测试保留。历史范围清单保留原名称并注明映射；既有标点修改及用户维护待办保留，本次交付范围为视觉重命名与参数清理的本地提交，远端推送另行安排。未运行完整回归或启动相机、推理及真机；重命名阶段证据在 `log/visual_perception_rename_20261111/`，当前整合核对记录在 `log/visual_cleanup_integrate_20261111/`。
+
 - 2026-11-11 按用户授权同步三方整合成果到 `origin/main` 与 `origin/develop`，两分支采用原子推送并在推送后核对远端 HEAD。代码验收基线为 `main@f4e0b52`、`develop@d55910e`，完整回归 **2000 passed / 2 skipped**、13 包构建及隔离仿真结果沿用上次验收；本次仅补充远端发布记录，生产代码、安装资源及原始示教数据保持。同步后的本地/远端提交身份保留在 `log/merge_20261111/remote_sync_receipt.json`。
 
 - 2026-11-11 主工程三方成果整合及本地发布验收通过：保存主工程修复 `ad154ad`、退役分支 `4168e84`、力控分支 `6d17853`，按退役→力控顺序形成独立合并提交；发布范围包含原有 **23 个 develop 提交**。复制时已有差异按来源去重，保留视觉掩膜拒绝/恢复、中文注释、重定时退出修复及 `TrajectoryActionServer`；旧 legacy 清理用例迁移到 continuous 的停止确认和错误结果路径。执行只保留 continuous，删除旧预演包；共享力控及重力配置迁移完整，新增阻抗入口用于仿真，硬件门控、默认失能和唯一写入线程保留。接口与恢复见[MuJoCo 说明](../../src/rebotarm_simulation/README_mujoco.md)及[力控包](../../src/rebotarm_force_control/README.md)。

@@ -12,7 +12,7 @@ def _read(path: str) -> str:
 
 
 def test_visual_grasp_bringup_exposes_explicit_ubuntu_native_profile() -> None:
-    launch = _read("src/rebotarm_bringup/launch/visual_grasp_system.launch.py")
+    launch = _read("src/rebotarm_bringup/launch/visual_perception_system.launch.py")
     strategy = _read("src/rebotarm_vision/config/visual_strategy_profile.yaml")
 
     assert "strategy_profile" in launch
@@ -45,7 +45,7 @@ def test_retired_http_vision_paths_are_not_shipped() -> None:
     for path in (
         "src/rebotarm_vision/rebotarm_vision/nodes/vision_node.py",
         "src/rebotarm_vision/rebotarm_vision/nodes/graspnet_baseline_node.py",
-        "src/rebotarm_bringup/launch/visual_grasp_system.launch.py",
+        "src/rebotarm_bringup/launch/visual_perception_system.launch.py",
     ):
         source = _read(path)
         assert "network_candidates_url" not in source

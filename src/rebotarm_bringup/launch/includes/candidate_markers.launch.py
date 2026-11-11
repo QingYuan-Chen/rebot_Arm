@@ -1,5 +1,6 @@
+"""内部阶段 candidate_markers：显示筛选后的候选，参数由总入口声明。"""
+
 from rebotarm_bringup.visual_profiles import merged_parameters
-"""内部阶段 grasp_preview：参数由总入口声明，不单独启动。"""
 
 import os
 from pathlib import Path

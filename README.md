@@ -1,7 +1,7 @@
 # reBotArm ROS 2
 
 面向 reBot B601 的 ROS 2 Jazzy 工作空间，包含机械臂与夹爪控制、MoveIt 规划、
-网页遥操作、示教、RGB-D 视觉抓取、基于 MuJoCo 的 RViz 预演与物理仿真。
+网页遥操作、示教、RGB-D 感知与抓取候选生成、筛选及显示、基于 MuJoCo 的 RViz 预演与物理仿真。
 
 ## 从这里开始
 

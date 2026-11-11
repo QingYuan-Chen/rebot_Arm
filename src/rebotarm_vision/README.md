@@ -12,7 +12,7 @@ D405 驱动使用 `pyrealsense2`，请求彩色 BGR8 与深度 Z16 `640x480@30`�
 - `diagnostics/`、`offline_yolo.py`：相机、深度、Open3D 和离线检测工具。
 - `config/`：相机、GraspNet、手眼、候选策略配置。
 
-视觉总入口 `visual_grasp_system.launch.py` 支持独立离线筛选和接入已有机器人环境。`vision_ubuntu.launch.py`、`vision.launch.py` 提供感知入口。模型或输入依赖不可用时按节点现有校验规则报错或拒绝候选。
+视觉总入口 `visual_perception_system.launch.py` 支持独立离线筛选和接入已有机器人环境。`vision_ubuntu.launch.py`、`vision.launch.py` 提供感知入口。模型或输入依赖不可用时按节点现有校验规则报错或拒绝候选。
 
 检测模型未提供分割掩膜时保留框检测；已提供的掩膜须包含至少三个有限的二维顶点。
 缺失、索引错误、形状或数值损坏会由共享转换器明确拒绝，节点发布同帧空检测并记录原因，

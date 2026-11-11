@@ -239,7 +239,7 @@ source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 export REBOTARM_VISION_PYTHON="$PWD/.venv-vision/bin/python"
 export GRASPNET_PYTHON="$PWD/.venv-graspnet/bin/python"
-ros2 launch rebotarm_bringup visual_grasp_system.launch.py \
+ros2 launch rebotarm_bringup visual_perception_system.launch.py \
   robot_context:=offline \
   vision_handeye_config:="$PWD/install/rebotarm_vision/share/rebotarm_vision/config/d405_handeye.yaml" \
   vision_yolo_model_path:="$PWD/src/rebotarm_vision/models/yolo26s-seg.pt"

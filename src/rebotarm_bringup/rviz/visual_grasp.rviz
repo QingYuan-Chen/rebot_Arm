@@ -1,4 +1,4 @@
-# 视觉抓取轻量可视化配置（RViz2 保存的 YAML 配置）。
+# 视觉候选轻量可视化配置（RViz2 保存的 YAML 配置）。
 #
 # 用途：显示机器人模型、视觉候选与纯规划轨迹幻影；不加载规划控制面板。
 #
@@ -66,7 +66,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Topic:
-        # 话题名是对外契约：视觉抓取标记节点发布到同一名称，改名会导致显示为空。
+        # 话题名是对外契约：视觉候选标记节点发布到同一名称，改名会导致显示为空。
         Value: /grasp/visual_markers
       Name: Visual Grasp Markers
       # Namespaces：按命名空间过滤标记（空映射 = 全部分命名空间都显示）。

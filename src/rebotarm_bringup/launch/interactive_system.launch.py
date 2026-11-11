@@ -1,6 +1,6 @@
-#RViz 交互与遥操作的共享底层启动文件（真机 / 仿真两种后端二选一）。是rviz_ee_drag_sim、visual_grasp_system 的共享子文件（已测）
+# RViz 交互与遥操作的共享底层启动文件，由 moveit_hardware 入口复用。
 #
-#用途：统一实现状态源、真机控制器、MoveIt 和 RViz 的互斥组合，供 moveit_hardware、仿真末端拖动和视觉抓取入口复用。真实拖动控制使用 MoveIt 原生 MotionPlanning 工作流。
+# 用途：统一实现状态源、真机控制器、MoveIt 和 RViz 的互斥组合；拖动控制使用 MoveIt 原生 MotionPlanning 工作流。视觉离线环境由 moveit_demo 装配，仿真末端拖动复用 mujoco_moveit_sim。
 #
 #后端选择逻辑（互斥，同一条启动里只会生效一个）：
 #

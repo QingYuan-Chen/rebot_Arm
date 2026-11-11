@@ -26,7 +26,7 @@ src/rebotarm_bringup/launch/
 ├── teleop_keyboard.launch.py
 ├── teleop_system.launch.py
 ├── rviz_ee_drag_sim.launch.py
-└── visual_grasp_system.launch.py       # 视觉候选入口（选择离线或外部环境）
+└── visual_perception_system.launch.py  # 感知、抓取候选生成、筛选与显示（离线或外部环境）
 ```
 
 内部组合片段位于 `launch/includes/`，由正式总入口加载，不作为用户入口单独启动：
@@ -38,7 +38,7 @@ includes/
 ├── visual_input.launch.py
 ├── grasp_candidate.launch.py
 ├── candidate_filter.launch.py
-└── grasp_preview.launch.py
+└── candidate_markers.launch.py
 ```
 
 
@@ -49,7 +49,7 @@ includes/
 - `rebotarm_vision/config/`：相机、YOLO、GraspNet、候选评分与视觉策略；由视觉包维护。
 - launch 文件：只负责后端选择、生命周期开关和兼容性覆盖；不新增算法默认值。
 
-视觉主入口已统一为 `visual_grasp_system.launch.py`，旧 compact、readonly、plan_only、
+视觉主入口已统一为 `visual_perception_system.launch.py`，旧 compact、readonly、plan_only、
 execute 包装入口已删除。新接口参数先加到 `visual_grasp_interfaces.yaml`，不要同时复制到
 多个 include 文件。策略 profile 与节点 policy YAML 仍有既有默认值覆盖关系；入口收敛
 不代表这些策略配置已经全部去重。
@@ -57,7 +57,7 @@ execute 包装入口已删除。新接口参数先加到 `visual_grasp_interface
 ## 分层和包含关系
 
 下图从共享底层向使用它的上层展开，表示复用关系；实际 include 调用方向是上层包含底层，
-不是 hardware_controller 启动所有下方入口。相机只读诊断使用 scripts/run_ubuntu_vision.sh，不加载此视觉抓取组合。
+hardware_controller 由下方入口按需加载。相机只读诊断使用 scripts/run_ubuntu_vision.sh，独立于此视觉感知组合。
 
 ```text
 hardware_controller.launch.py                  唯一真实硬件控制器定义
@@ -91,7 +91,7 @@ mujoco_moveit_sim.launch.py                    MuJoCo + MoveIt + 准备服务
 | `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认使用 MuJoCo。两类后端均提供 MoveIt 场景与准备服务 |
 | `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；默认使用 MuJoCo |
 | `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 复用 MuJoCo、MoveIt 与准备服务，在 RViz 中提供 Plan/Execute |
-| `visual_grasp_system.launch.py` | 唯一视觉入口 | 感知、筛选及显示；默认 `robot_context=offline`，也可接入外部环境 |
+| `visual_perception_system.launch.py` | 唯一视觉入口 | 感知、抓取候选生成、筛选及显示；默认 `robot_context=offline`，也可接入外部环境 |
 
 无硬件执行统一由 MuJoCo 推进物理时间和轨迹，RViz 负责显示模型、规划及反馈。
 直接运行 `mujoco_moveit_sim.launch.py` 可选择 Dashboard 与 MuJoCo Viewer；无窗口时设置
@@ -148,4 +148,4 @@ MoveIt 对象仍执行正常清理，不捕获段错误或改写退出码。
 | `visual_input.launch.py` | D405、YOLO 和显式配置的手眼 TF | 运动控制 |
 | `grasp_candidate.launch.py` | GraspNet、原始候选 Marker、可选 Open3D | IK 筛选 |
 | `candidate_filter.launch.py` | TF、工作空间、IK 和碰撞筛选 | 运动控制 |
-| `grasp_preview.launch.py` | 筛选结果 Marker | 运动控制 |
+| `candidate_markers.launch.py` | 筛选结果 Marker | 运动控制 |

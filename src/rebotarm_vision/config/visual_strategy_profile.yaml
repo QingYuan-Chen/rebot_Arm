@@ -1,4 +1,4 @@
-# 正式视觉启动 profile（非 ROS 参数文件）：候选/抓取编排策略。
+# 正式视觉启动 profile（非 ROS 参数文件）：候选生成、筛选与显示策略。
 # 原视觉总入口的有效值迁入这里；节点 reusable policy YAML 仅作为底层兜底。
 launch:
   vision_profile: ubuntu_native
