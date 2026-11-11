@@ -23,7 +23,7 @@
 
 ```bash
 cd /home/a/project/rebot_Arm
-export PYTHONPATH="$PWD/src/rebotarm_simulation:${PYTHONPATH:-}"
+export PYTHONPATH="$PWD/src/rebotarm_simulation:$PWD/src/rebotarm_force_control${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p logs/sim2real
 ```
 

@@ -48,8 +48,7 @@ reBotArmController ROS 节点
 rebotarmcontroller/
 ├── config/
 │   ├── arm.yaml                      # 六轴电机、共享通道和控制参数
-│   ├── gripper.yaml                  # 夹爪电机和控制参数
-│   └── gravity_compensation.yaml     # 重力模型与补偿参数
+│   └── gripper.yaml                  # 夹爪电机和控制参数
 ├── rebotarmcontroller/
 │   ├── rebotarm_controller.py        # ROS 节点组合、参数与退出协调
 │   ├── hardware_manager.py           # 运行时、生命周期和六个职责组件的纯装配
@@ -84,9 +83,8 @@ rebotarmcontroller/
 │   │   ├── gripper_controller.py     # 坐标、零位验证、准入和发送
 │   │   ├── gripper_execution.py      # 独立任务及周期推进
 │   │   └── gripper_control.py        # 斜坡、限力和保持计算
-│   ├── gravity/                     # 重力补偿与模式交接
-│   │   ├── gravity_controller.py     # 启停、模式交接与诊断
-│   │   └── gravity_control.py        # 动力学模型、力矩约束与补偿计算
+│   ├── gravity/                     # 重力补偿硬件适配
+│   │   └── gravity_controller.py     # 门控、模式交接、周期发送与诊断
 │   ├── ros/                         # ROS 协议与消息适配
 │   │   ├── ros_services.py           # 生命周期、停止、夹爪等 Service
 │   │   ├── ros_actions.py            # 六轴 FJT、网页组合及独立/MoveIt 夹爪 Action
@@ -102,6 +100,9 @@ rebotarmcontroller/
 ├── resource/rebotarmcontroller       # ament 包索引标记
 └── setup.py / setup.cfg / package.xml
 ```
+
+重力模型、补偿状态与 MIT 力矩约束统一归 [rebotarm_force_control](../rebotarm_force_control/README.md)，
+补偿配置随该共享包安装。控制器调用共享算法，继续持有设备线程、反馈准入与发送确认。
 
 ## 依赖、配置与旧 SDK 退出
 

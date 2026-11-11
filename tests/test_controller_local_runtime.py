@@ -459,7 +459,7 @@ def test_runtime_cycle_budget_includes_callback_without_catchup(
         monkeypatch, durations, intervals, faulted):
     """真实调度器按 100 Hz 排期，超时后跳过旧拍且保留重力超时判据。"""
     from rebotarmcontroller.runtime import controller_runtime
-    from rebotarmcontroller.gravity.gravity_control import LoopTiming
+    from rebotarm_force_control.gravity_control import LoopTiming
 
     clock = SimpleNamespace(now=0.)
     monkeypatch.setattr(controller_runtime, 'time',

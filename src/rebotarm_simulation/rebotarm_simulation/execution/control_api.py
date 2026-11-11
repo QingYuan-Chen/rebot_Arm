@@ -1,6 +1,7 @@
-"""ROS 执行层使用的仿真控制端口；原始力矩接口保留在本地诊断层。
+"""仿真 ROS 执行接口：位置、保持、重力与具期限的关节阻抗命令。
 
-调用方通过 SerializedSimulationAccess 串行调用，仿真核心校验目标并拥有模式状态。
+职责：只转发到仿真核心；调用方持有目标锁和仿真锁，核心原子校验数值。
+结构：模式校验 → 仿真命令适配；raw torque 仍由本地诊断入口拥有。
 """
 from typing import Any, Sequence
 ROS_CONTROL_MODES = ("position", "hold", "gravity_comp")
@@ -34,6 +35,11 @@ class SimulationControlApi:
         reached = self.simulation.command_joint_positions(values)
         self.set_mode("position")
         return tuple(float(value) for value in reached)
+
+    def command_joint_impedance(self, positions, stiffness, damping, *, timeout_s):
+        """完整命令同时设置平衡点、增益和期限；裸模式切换保持原接口。"""
+        return self.simulation.command_joint_impedance(
+            positions, stiffness, damping, timeout_s=timeout_s)
 
     def hold_current_position(self) -> None:
         self.simulation.set_mode("hold")

@@ -674,6 +674,33 @@ def test_idle_hold_failure_blocks_admission_until_explicit_stop_confirmation():
     assert execution.active.token is token
 
 
+@pytest.mark.parametrize('entry', ['goal', 'execute', 'service'])
+def test_unconfirmed_idle_stop_rejects_every_gripper_entry(entry):
+    from rclpy.action import GoalResponse
+    from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
+    execution, sim, _ = _execution_fixture()
+    execution.stop_unconfirmed = True
+    errors = []
+    owner = SimpleNamespace(_execution=execution, _sim_access=execution.access,
+        get_logger=lambda:SimpleNamespace(error=errors.append))
+    node_class = create_node_class()
+    before = list(sim.events)
+    if entry == 'goal':
+        assert node_class._gripper_goal_callback(owner, None) is GoalResponse.REJECT
+    elif entry == 'execute':
+        terminal = []
+        goal = SimpleNamespace(request=SimpleNamespace(command=SimpleNamespace(
+            position=.01, max_effort=1.)), abort=lambda:terminal.append('aborted'))
+        node_class._execute_gripper(owner, goal)
+        assert terminal == ['aborted'] and 'unconfirmed' in errors[0]
+    else:
+        response = node_class._gripper_service(owner,
+            SimpleNamespace(position=.01,max_effort=1.), SimpleNamespace())
+        assert not response.success
+    assert execution.gripper.task is None and execution.stop_unconfirmed
+    assert sim.events == before
+
+
 def test_component_observation_is_read_only_and_mode_change_requires_idle():
     execution, sim, curve = _execution_fixture()
     token, payload = _reserve_simulation(execution, curve)

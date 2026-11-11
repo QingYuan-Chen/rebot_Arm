@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import math
 import yaml
-from .gravity.gravity_control import package_file
+from rebotarm_force_control.gravity_control import package_file
 
 JOINT_NAMES = tuple(f"joint{i}" for i in range(1, 7))
 

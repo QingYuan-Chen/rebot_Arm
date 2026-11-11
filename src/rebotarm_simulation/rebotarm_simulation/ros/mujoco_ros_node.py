@@ -1,7 +1,7 @@
 """MuJoCo 后端的 ROS 执行、物理步进及停止保持适配。
 
 文件职责
-    提供仿真 FJT、夹爪和控制模式服务，驱动物理定时器，并发布实际状态与可选验收记录。
+    提供仿真 FJT、夹爪、控制模式及关节阻抗服务，驱动物理定时器并发布实际状态。
 对外接口
     create_node_class 延迟加载 ROS 并返回节点类；main 创建执行器。
     continuous 准备服务只返回检查结果，
@@ -58,7 +58,7 @@ def create_node_class():
     from rclpy.clock import ClockType
     from rclpy.node import Node
     from rebotarm_msgs.msg import JointMotorState, ArmStatus
-    from rebotarm_msgs.srv import SetGripper, SetMode, GetArmPlanningState
+    from rebotarm_msgs.srv import SetGripper, SetMode, SetJointImpedance, GetArmPlanningState
     from rosgraph_msgs.msg import Clock
     from sensor_msgs.msg import JointState
     from std_srvs.srv import Trigger
@@ -242,6 +242,12 @@ def create_node_class():
                 self._mode_service,
                 callback_group=self._callback_group,
             )
+            self.create_service(
+                SetJointImpedance,
+                f"/{self._arm_namespace}/sim/set_joint_impedance",
+                self._impedance_service,
+                callback_group=self._callback_group,
+            )
             # Each callback advances enough fixed physics steps to match the
             # configured publication period; simulation time remains the
             # authoritative trajectory clock.
@@ -420,7 +426,9 @@ def create_node_class():
         def _gripper_goal_callback(self, request):
             try:
                 with self._execution.lock:
-                    self._execution.gripper.reserve(object())
+                    if self._execution.status_snapshot().stop_unconfirmed:
+                        raise RuntimeError('simulation stop/hold unconfirmed')
+                    self._sim_access.run(lambda _sim: self._execution.gripper.reserve(object()))
                 return GoalResponse.ACCEPT
             except RuntimeError:
                 return GoalResponse.REJECT
@@ -434,6 +442,8 @@ def create_node_class():
                 effort = float(goal.request.command.max_effort)
                 validate_gripper_force(effort)
                 with self._execution.lock:
+                    if self._execution.status_snapshot().stop_unconfirmed:
+                        raise RuntimeError('simulation stop/hold unconfirmed')
                     task = self._sim_access.run(lambda sim: self._execution.gripper.start(owner, width, effort))
                 while rclpy.ok():
                     with self._execution.lock:
@@ -468,8 +478,9 @@ def create_node_class():
                 effort = float(request.max_effort)
                 validate_gripper_force(effort)
                 with self._execution.lock:
-                    if self._execution.active.busy or self._execution.gripper.busy:
-                        raise RuntimeError('gripper resources reserved')
+                    if (self._execution.active.busy or self._execution.gripper.busy
+                            or self._execution.status_snapshot().stop_unconfirmed):
+                        raise RuntimeError('gripper resources reserved or stop unconfirmed')
                     task = self._sim_access.run(lambda sim: self._execution.gripper.start(object(), width, effort))
                 while rclpy.ok():
                     with self._execution.lock:
@@ -492,6 +503,17 @@ def create_node_class():
                 response.success, response.message = False, f"mode rejected: {exc}"
                 return response
             response.success, response.message = True, f"simulation mode: {reached}"
+            return response
+
+        def _impedance_service(self, request, response):
+            """薄协议适配；资源检查、锁序与规划失效统一归执行组件。"""
+            try:
+                self._execution.command_joint_impedance(request.positions, request.stiffness,
+                    request.damping, timeout_s=request.timeout_s)
+            except (TypeError, ValueError, RuntimeError) as exc:
+                response.success, response.message = False, f"joint impedance rejected: {exc}"
+                return response
+            response.success, response.message = True, "simulation mode: joint_impedance"
             return response
 
         @staticmethod

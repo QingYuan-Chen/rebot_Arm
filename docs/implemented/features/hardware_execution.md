@@ -423,13 +423,17 @@ SDK 树无独立许可文件，README 声明 MIT，尚未取得上游许可文�
 
 ## 重力补偿控制
 
+共享模型、补偿状态和力矩限制归 `rebotarm_force_control/gravity_control.py`；
+控制器的 `gravity_controller.py` 负责设备门控、反馈验证、模式交接、周期发送与诊断。
+两侧保持单向依赖，共享算法在离线与仿真中复用。
+
 补偿使用 `rebotarm_moveit_config/config/rebotarm.urdf` 的六轴约化模型，保持
 `joint1..joint6` 顺序和原始反馈坐标；夹爪关节锁定在模型零位。模型加载检查
 关节限位与硬件一致，力矩上限读取 URDF effort，且不得超过前三轴 27 N.m、
 后三轴 7 N.m 的软件上限。重力与雅可比使用同一模型；末端速度采用
 `LOCAL_WORLD_ALIGNED`，对应 end_link 原点速度和基座坐标轴。
 
-补偿配置位于 `src/rebotarmcontroller/config/gravity_compensation.yaml`，随包安装，
+补偿配置位于 `src/rebotarm_force_control/config/gravity_compensation.yaml`，随包安装，
 可用控制器参数或唯一硬件 launch 的 `gravity_config` 显式覆盖。保留 Kp=7、
 Kd=0.8；积分按实测 dt 计算，增益 1 N.m/(rad*s)，限幅 0.5 N.m。
 总力矩估计包含电机端 PD 与前馈；同时限制前馈和总力矩，以及总力矩变化率

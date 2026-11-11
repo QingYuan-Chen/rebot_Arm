@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from bisect import bisect_right
 import threading
 import numpy as np
-from ..gravity.gravity_control import vector, POSITION_LIMITS
+from rebotarm_force_control.gravity_control import vector, POSITION_LIMITS
 
 
 @dataclass(frozen=True)

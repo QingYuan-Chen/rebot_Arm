@@ -39,7 +39,7 @@ MuJoCo 3.3.0 / NumPy 1.26.4 依赖，不需要 MuJoCo 专属虚拟环境、激�
 ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true use_mujoco_viewer:=true
 ```
 
-服务器、CI 或只做后台物理测试使用：
+云服务器、CI，或本地 Ubuntu VM 中只做后台物理测试时使用：
 
 ```bash
 ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=false use_mujoco_viewer:=false
@@ -68,9 +68,9 @@ colcon 安装的 console script 使用构建时的解释器 shebang；本机统�
 以下是从工作区源码直接运行的完整等价命令：
 
 ```bash
-MUJOCO_GL=egl PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
-PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_cli run --duration 5
-PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_viewer --duration 30
+MUJOCO_GL=egl PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control python3 -m rebotarm_simulation.diagnostics.mujoco_health --renderer-timeout 30
+PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control python3 -m rebotarm_simulation.apps.mujoco_cli run --duration 5
+PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control python3 -m rebotarm_simulation.apps.mujoco_viewer --duration 30
 ```
 
 ## 健康检查与无界面运行
@@ -78,7 +78,7 @@ PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_vi
 EGL 渲染检查在隔离子进程中运行，并有超时保护，避免驱动挂起拖死主进程：
 
 ```bash
-MUJOCO_GL=egl rebotarm_mujoco_health --renderer-timeout 30
+MUJOCO_GL=egl ros2 run rebotarm_simulation rebotarm_mujoco_health --renderer-timeout 30
 ```
 
 预期 JSON 关键字段如下；版本和路径允许不同，但关节/执行器均应为 8，
@@ -95,7 +95,7 @@ MUJOCO_GL=egl rebotarm_mujoco_health --renderer-timeout 30
 不依赖窗口的定时运行：
 
 ```bash
-rebotarm_mujoco_cli run --duration 5
+ros2 run rebotarm_simulation rebotarm_mujoco_cli run --duration 5
 ```
 
 输出同时含 `"requested_duration"` 和 `"achieved_duration"`；后者会按物理
@@ -104,15 +104,69 @@ rebotarm_mujoco_cli run --duration 5
 `reset`、`pause`、`resume` 和 `quit`。限时原始力矩诊断使用：
 
 ```bash
-rebotarm_mujoco_cli torque --values 1 0 0 0 0 0 --timeout 0.1 --observe 0.2
+ros2 run rebotarm_simulation rebotarm_mujoco_cli torque --values 1 0 0 0 0 0 --timeout 0.1 --observe 0.2
 ```
 
 Raw torque 只用于无实机诊断，按关节峰值限幅；看门狗超时后清零并进入 Hold。
 
+### 六轴静态关节阻抗
+
+关节阻抗使用六轴平衡角、刚度与阻尼，期望速度为零，控制式为
+`tau = gravity(q) + stiffness * (positions - q) - damping * qd`。
+六轴按 `joint1..joint6` 排列，单位依次为 rad、N·m/rad、N·m·s/rad。
+首次接纳要求 `hold`；`joint_impedance` 中的完整请求更新平衡点、增益并续期。
+输入整批校验后生效，力矩遵守仿真电机限幅。活动六轴/夹爪任务及待确认停止期间拒绝请求。
+阻抗活动期间，ROS 夹爪服务和动作同样拒绝新任务，持续续期可保持机械臂模式。
+
+在已经构建并 source 新副本的终端中执行：
+
+```bash
+ros2 run rebotarm_simulation rebotarm_mujoco_cli impedance \
+  --positions 0 -0.8 -1.0 0.3 0 0 \
+  --stiffness 80 80 80 20 10 5 --damping 8 8 8 1 0.5 0.1 \
+  --duration 2 --timeout 0.1
+```
+
+CLI 创建独立仿真实例并复位到 Home+Hold，在 `duration` 内每 `timeout/2` 仿真秒续期；
+随后停止续期并继续步进，输出到期前 `active_control`、到期后 `control` 及
+`watchdog_entered_hold=true`。CLI 的 timeout 至少覆盖两个物理步，默认 0.1 s。
+上述六轴增益用于当前模型和 100 Hz 控制周期；模型惯量或控制周期变化后须重新整定，
+特别是低惯量腕关节的阻尼应通过响应与振荡检查确认。
+
+Python 接口同样使用仿真时间续期；以下示例保持当前姿态，然后验证超时回到 Hold：
+
+```python
+from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
+
+with RebotArmMujoco() as sim:
+    state = sim.reset_home()
+    sim.command_joint_impedance(
+        state.joint_positions[:6], [80, 80, 80, 20, 10, 5],
+        [8, 8, 8, 1, 0.5, 0.1], timeout_s=0.1,
+    )
+    sim.step(round(0.05 / sim.timestep))
+    assert sim.control_mode == "joint_impedance"
+    sim.step(round(0.1 / sim.timestep))
+    assert sim.control_mode == "hold"
+```
+
+运行 ROS 仿真节点时，先显式进入 Hold，再提交完整阻抗请求：
+
+```bash
+ros2 service call /rebotarm/sim/set_mode rebotarm_msgs/srv/SetMode "{mode: hold}"
+ros2 service call /rebotarm/sim/set_joint_impedance rebotarm_msgs/srv/SetJointImpedance \
+  "{positions: [0.0, -0.8, -1.0, 0.3, 0.0, 0.0], stiffness: [80.0, 80.0, 80.0, 20.0, 10.0, 5.0], damping: [8.0, 8.0, 8.0, 1.0, 0.5, 0.1], timeout_s: 1.0}"
+```
+
+看门狗按**仿真时间**到期；暂停物理步进时期限暂停推进。持续控制客户端须在期限内重复
+发送完整请求，停止发送后自动捕获当前位置并进入 Hold。`/diagnostics` 显示实际控制模式；
+立即退出可再次调用 `/sim/set_mode {mode: hold}`。阻抗期间位置命令及两种模式的 FJT
+都会被拒绝；先切回 Hold 后可继续原位置流程。服务由仿真节点提供，使用本地仿真时钟。
+
 无界面 Reach 随机策略批量 rollout：
 
 ```bash
-rebotarm_mujoco_batch --episodes 3 --steps 100 --seed 0
+ros2 run rebotarm_simulation rebotarm_mujoco_batch --episodes 3 --steps 100 --seed 0
 ```
 
 该命令输出 JSON 摘要，包含每回合步数、累计奖励、末端到目标距离和成功标志；
@@ -121,7 +175,7 @@ rebotarm_mujoco_batch --episodes 3 --steps 100 --seed 0
 夹爪接触稳定性检查：
 
 ```bash
-rebotarm_mujoco_contact_check
+ros2 run rebotarm_simulation rebotarm_mujoco_contact_check
 ```
 
 该命令在无界面 MuJoCo 中移动到固定接触验收姿态，打开夹爪、放置 `test_cube`、
@@ -132,13 +186,13 @@ rebotarm_mujoco_contact_check
 基础总验收入口会串行运行 health、headless Reach batch 和接触检查：
 
 ```bash
-rebotarm_mujoco_acceptance --skip-renderer
+ros2 run rebotarm_simulation rebotarm_mujoco_acceptance --skip-renderer
 ```
 
 在已经 source ROS 2 与 `install/setup.bash` 的 Ubuntu VM 中，可追加 ROS 2 接口验收：
 
 ```bash
-rebotarm_mujoco_acceptance --skip-renderer --include-ros --timeout 30
+ros2 run rebotarm_simulation rebotarm_mujoco_acceptance --skip-renderer --include-ros --timeout 30
 ```
 
 MoveIt 联动验收需要先按下文启动 MuJoCo 后端和 MoveIt，再单独运行
@@ -167,7 +221,7 @@ MoveIt 联动验收需要先按下文启动 MuJoCo 后端和 MoveIt，再单独�
 在 Ubuntu 图形桌面的终端运行，而不是普通无显示 SSH 会话：
 
 ```bash
-rebotarm_mujoco_viewer --duration 30
+ros2 run rebotarm_simulation rebotarm_mujoco_viewer --duration 30
 ```
 
 按 `Z/X` 选择上一个/下一个关节，按一次 `J/K` 开始连续反/正向移动当前关节，按一次
@@ -284,6 +338,7 @@ ros2 launch rebotarm_simulation mujoco_sim.launch.py
 - Topic：`/rebotarm/gripper/state`
 - Service：`/rebotarm/trajectory_stop`
 - Service：`/rebotarm/sim/set_mode`（只接受 `position/hold/gravity_comp`）
+- Service：`/rebotarm/sim/set_joint_impedance`（完整六轴平衡点、增益与仿真时间期限）
 - Topic：`/diagnostics`
 - Topic：`/clock`
 
@@ -334,7 +389,7 @@ MuJoCo Action 服务端执行。
 两端启动后，可在第三个终端运行 MoveIt-MuJoCo 联动验收：
 
 ```bash
-rebotarm_mujoco_moveit_acceptance --timeout 30
+ros2 run rebotarm_motion rebotarm_mujoco_moveit_acceptance --timeout 30
 ```
 
 该命令等待 `/plan_kinematic_path`、`/rebotarm/follow_joint_trajectory`、
@@ -475,13 +530,13 @@ MJCF，不需要联网加载。当前支持范围固定为 `mujoco>=3.3,<4`。
 URDF 或其引用的原始 STL 更新后，在仓库根目录重新生成：
 
 ```bash
-rebotarm_urdf_to_mjcf --repo-root .
+ros2 run rebotarm_simulation rebotarm_urdf_to_mjcf --repo-root .
 ```
 
 只检查仓库中的 MJCF 是否仍与 URDF 一致，不写文件：
 
 ```bash
-rebotarm_urdf_to_mjcf --repo-root . --check
+ros2 run rebotarm_simulation rebotarm_urdf_to_mjcf --repo-root . --check
 ```
 
 转换使用 MuJoCo 官方 URDF 解析器。完整原始 STL 保留为视觉网格；主体碰撞代理由

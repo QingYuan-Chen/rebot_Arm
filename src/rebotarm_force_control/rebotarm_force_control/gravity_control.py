@@ -1,8 +1,8 @@
 """重力补偿计算工具: 加载动力学模型, 计算重力力矩并约束 MIT 输出.
 
 职责与位置
-    rebotarmcontroller 的纯计算层, 可离线测试, 不连接电机或创建 ROS 节点.
-    HardwareManager 装配模型与配置, GravityController 在唯一设备周期中调用计算.
+    rebotarm_force_control 的纯计算层, 由硬件适配和仿真共用, 不连接电机或创建节点.
+    调用方装配模型与配置并串行推进计算, 设备事务由硬件适配负责.
     GravityExecutionState 持有目标, 积分和拖动跟随状态; 反馈采集由反馈组件负责,
     模式交接和发送由职责组件经生命周期及 ControllerRuntime 完成.
 
@@ -10,6 +10,7 @@
     GravitySettings 和 load_gravity_model 加载配置与六轴动力学模型.
     GravityModel 提供重力和雅可比计算; GravityExecutionState 推进补偿状态.
     bounded_mit_command 返回有界 MIT 参数, 调用方保存成功发送后的估算总力矩.
+    apply_gravity_compensation_tau_scale 返回按固定增益缩放后的重力力矩副本.
 
 主要计算关系
     当前关节角 q -> GravityModel.gravity(q) -> 重力前馈力矩.
@@ -34,6 +35,7 @@
     package_file: 定位安装资源或源码工作区资源.
     read_position_limits: 从规范 URDF 读取并校验六轴位置边界.
     GravityExecutionState: 推进六轴积分, 目标和拖动跟随状态.
+    apply_gravity_compensation_tau_scale: 复制并缩放六轴重力前馈.
 """
 
 from __future__ import annotations
@@ -314,8 +316,8 @@ def package_file(package, relative):
         if not path.is_file():
             raise FileNotFoundError(f'missing {path}')
         return path
-    # 本模块位于包内 gravity/，parents[3] 才是源码工作区的 src/。
-    path = Path(__file__).resolve().parents[3] / package / relative
+    # 本模块平铺于包根，parents[2] 为源码工作区的 src/。
+    path = Path(__file__).resolve().parents[2] / package / relative
     if not path.is_file():
         raise FileNotFoundError(f'missing {path}')
     return path
@@ -385,3 +387,16 @@ class GravityExecutionState:
         else:
             self.lock_counter += 1
         return gravity + self.integral
+
+
+# 保留当前已校核的单位补偿增益；迁移不改变各轴前馈。
+_GC_TAU_SCALE = np.ones(6, dtype=np.float64)
+
+
+def apply_gravity_compensation_tau_scale(tau: np.ndarray) -> np.ndarray:
+    """对六轴广义重力力矩施加补偿增益, 返回独立副本; 维数不符明确失败."""
+    scaled = np.array(tau, dtype=np.float64, copy=True)
+    if scaled.shape != _GC_TAU_SCALE.shape:
+        raise ValueError('gravity torque must contain 6 values')
+    scaled *= _GC_TAU_SCALE
+    return scaled

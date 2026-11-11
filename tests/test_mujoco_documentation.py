@@ -34,9 +34,9 @@ def test_mujoco_readme_documents_reproducible_install_and_runtime_commands():
         "rebotarm_mujoco_viewer --duration",
         "joints 0.0 -0.8 -1.0 0.3 0.0 0.0",
         "--no-command-input",
-        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.diagnostics.mujoco_health",
-        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_cli",
-        "PYTHONPATH=src/rebotarm_simulation python3 -m rebotarm_simulation.apps.mujoco_viewer",
+        "PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control python3 -m rebotarm_simulation.diagnostics.mujoco_health",
+        "PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control python3 -m rebotarm_simulation.apps.mujoco_cli",
+        "PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control python3 -m rebotarm_simulation.apps.mujoco_viewer",
     )
     for value in required:
         assert value in text

@@ -106,9 +106,9 @@ joint4/joint5/joint6 motor forcerange = -12.5 12.5
 在 VM 中进入同步后的仓库：
 
 ```bash
-cd /home/a/project/rebot_Arm
+cd /home/a/project/rebot_Arm_fork
 source /opt/ros/jazzy/setup.bash
-export PYTHONPATH=src/rebotarm_simulation
+export PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control
 ```
 
 运行核心测试：
@@ -200,7 +200,7 @@ group，collision STL 仍参与碰撞但现在显示为半透明调试层，正�
 在 Ubuntu VM 仓库根目录执行：
 
 ```bash
-export PYTHONPATH=src/rebotarm_simulation
+export PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control
 python3 - <<'PY'
 from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
@@ -238,9 +238,9 @@ forces 不全为 0
 先构建：
 
 ```bash
-cd /home/a/project/rebot_Arm
+cd /home/a/project/rebot_Arm_fork
 source /opt/ros/jazzy/setup.bash
-python3 -m colcon build --symlink-install --packages-select rebotarm_simulation
+python3 -m colcon build --symlink-install --packages-up-to rebotarm_simulation
 source install/setup.bash
 ```
 
@@ -254,7 +254,7 @@ ros2 launch rebotarm_simulation mujoco_sim.launch.py
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd /home/a/project/rebot_Arm
+cd /home/a/project/rebot_Arm_fork
 source install/setup.bash
 
 ros2 node list

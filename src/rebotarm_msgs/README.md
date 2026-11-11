@@ -22,6 +22,7 @@ rebotarm_msgs/
 │   ├── PlanGraspForLabel.srv          # 按标签规划抓取
 │   ├── SetGripper.srv                 # 设置夹爪开口
 │   ├── SetMode.srv                    # 设置控制模式
+│   ├── SetJointImpedance.srv          # 仿真六轴阻抗平衡点、增益和期限
 │   ├── SetZero.srv                    # 电机/夹爪置零
 │   ├── SetTeachRecordPath.srv         # 设置示教记录路径
 │   ├── CalibrationCommand.srv        # 标定会话命令及版本化状态
@@ -46,6 +47,7 @@ rebotarm_msgs/
 | `ExecutionState`、`TaskStatus` | 公共接口 | 预留执行阶段与任务状态 |
 | `JointMotorCmd` | controller 低层透传 | 明确表示绕过规划的底层命令，必须满足控制器安全门 |
 | `MoveToPoseIK`、`SetGripper` 等服务 | motion、controller、simulation | IK 和夹爪位置服务边界 |
+| `SetJointImpedance` | simulation | `/rebotarm/sim/set_joint_impedance` 完整六轴静态阻抗请求，按仿真时间续期和到期保持 |
 | `MoveToPose` | motion 位姿兼容节点 | 规划、FJT 执行、反馈、取消和到位结果 |
 | `ExecuteTeleopMotion` | teleop、controller、simulation | continuous 网页六轴轨迹及可选独立夹爪目标，整体结果等待两侧完成 |
 | `MoveRelative`、`ExecuteGrasp`、`PlanGraspForLabel` | 保留接口定义 | 具体服务端与入口以当前各包实现为准 |
@@ -58,3 +60,9 @@ rebotarm_msgs/
 `CalibrationCommand.srv`：标定会话命令及状态快照（版本化 JSON），由
 rebotarm_calibration 实现、Dashboard 调用。包含请求幂等 ID 和会话 revision。
 此接口不承载运动、使能或重力补偿命令。
+
+`SetJointImpedance.srv`：`positions/stiffness/damping` 均固定六轴，顺序为 `joint1..joint6`，
+单位为 rad、N·m/rad、N·m·s/rad；`timeout_s` 为正有限仿真秒。
+仿真端仅在 Hold 或正在运行的 joint_impedance 中接纳完整请求；轨迹/夹爪占用或停止未确认时
+返回失败，校验失败保留旧状态。续期重复提交完整参数；期限到达后捕获当前位置并进入 Hold。
+CLI 和 ROS 操作示例见[仿真关节阻抗](../rebotarm_simulation/README_mujoco.md#六轴静态关节阻抗)。

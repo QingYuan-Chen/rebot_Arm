@@ -25,7 +25,7 @@ from typing import Optional
 from .configuration import HardwareSettings, load_configuration, default_config
 from .runtime.controller_runtime import ControllerRuntime
 from .arm.controller_kinematics import ArmKinematics
-from .gravity.gravity_control import GravitySettings, load_gravity_model, package_file
+from rebotarm_force_control.gravity_control import GravitySettings, load_gravity_model, package_file
 from .runtime.lifecycle import ControllerLifecycle, LifecyclePorts
 from .arm.arm_controller import ArmController
 from .contracts.component_ports import (
@@ -75,7 +75,7 @@ class HardwareManager:
             gripper_feedback_stale_timeout_sec)
         configuration = load_configuration(arm_cfg, gripper_cfg, channel)
         gravity_path = (Path(gravity_config).expanduser() if gravity_config else
-                        package_file('rebotarmcontroller', 'config/gravity_compensation.yaml'))
+                        package_file('rebotarm_force_control', 'config/gravity_compensation.yaml'))
         model = load_gravity_model(package_file('rebotarm_moveit_config', 'config/rebotarm.urdf'),
                                    GravitySettings.from_yaml(gravity_path))
         # 先创建状态所有者, 后接线; 构造期间只有资源加载和数值校验, 没有总线会话.
