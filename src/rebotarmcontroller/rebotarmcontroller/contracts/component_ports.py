@@ -10,7 +10,7 @@
     端口不复制业务状态, 也不替代运行时仲裁. 冻结字段限制能力面, 不保证回调本身线程安全.
 
 文件结构(按定义顺序)
-    ArmGripperPort: 固定夹爪快照及受预约身份约束的独立位置任务接口，不直接发送设备命令。
+    ArmGripperPort: 固定夹爪快照及受预约身份约束的独立位置任务接口,不直接发送设备命令.
     ArmFeedbackPort: 六轴目标和停止确认所需的新鲜值查询.
     GripperFeedbackPort: 夹爪坐标与目标事务所需的缓存, 刷新和健康查询.
     GravityFeedbackPort: 重力计算所需的同组新鲜反馈和限位验证.
@@ -20,7 +20,7 @@
     GripperCyclePort: 周期对夹爪租约, 执行和会话的推进.
     ArmProtectionPort: 保护只能清透传和终止任务, 不接纳运动.
     GripperProtectionPort: 保护清理及设备绑定, 不提供目标或执行状态的可写引用.
-    GravityProtectionPort: 保护清除补偿执行，失能验证后确认故障；不切换模式。
+    GravityProtectionPort: 保护清除补偿执行,失能验证后确认故障;不切换模式.
     GravityArmPort: 六轴交接需要的补偿状态, 停止与只读力矩限位.
     ArmGravityPort: 重力交接需要的六轴保持能力, 停止待确认时拒绝启动补偿.
     CyclePort: 统一周期分发入口, 调用方不掌握其他执行器状态.
@@ -35,10 +35,10 @@ from .controller_values import JointSnapshot
 
 @dataclass(frozen=True)
 class ArmGripperPort:
-    """读取 positions（两指 m）、raw_position（电机 rad）和 generation。
+    """读取 positions(两指 m),raw_position(电机 rad)和 generation.
 
-    快照由夹爪所有者在新鲜、连续静止且空闲时提供；不符合条件时抛错。
-    端口不缓存或复制静止证据；协同所有者仅在设备线程通过下列窄接口接管、发送和释放。
+    快照由夹爪所有者在新鲜,连续静止且空闲时提供;不符合条件时抛错.
+    端口不缓存或复制静止证据;协同所有者仅在设备线程通过下列窄接口接管,发送和释放.
     """
 
     snapshot: Callable[[], dict]
@@ -146,7 +146,7 @@ class GripperProtectionPort:
 
 @dataclass(frozen=True)
 class GravityProtectionPort:
-    """保护清除执行，验证失能后清除重力故障；端口自身不发送设备命令。"""
+    """保护清除执行,验证失能后清除重力故障;端口自身不发送设备命令."""
 
     clear_execution: Callable[[], None]
     clear_hold_fault: Callable[[], None]

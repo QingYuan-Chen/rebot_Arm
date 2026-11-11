@@ -1,4 +1,4 @@
-"""位置变化不设门限；速度、旧缓存、断流和失能回执仍约束确认。"""
+"""位置变化不设门限;速度,旧缓存,断流和失能回执仍约束确认."""
 import math
 from types import SimpleNamespace as NS
 
@@ -21,7 +21,7 @@ def message(t, q, v):
 @pytest.mark.parametrize('case', ['quiet', 'pulse', 'continuous', 'slow_drift', 'oscillation',
                                   'sustained_speed', 'duplicate', 'gap', 'invalid'])
 def test_stationary_counterexamples(owner, case):
-    # 位置变化不再单独阻断窗口，不能据速度合格宣称已排除真实漂移或振荡。
+    # 位置变化不再单独阻断窗口,不能据速度合格宣称已排除真实漂移或振荡.
     motion = StopFeedback()
     device = StationaryEvidence(window=.3)
     device.reset([0.]*6)
@@ -50,7 +50,7 @@ def test_stationary_counterexamples(owner, case):
     assert (mc if owner == 'motion' else dc) == (case in (
         'quiet', 'pulse', 'continuous', 'slow_drift', 'oscillation'))
     if case == 'pulse':
-        assert not result_at_pulse  # 不是当场放过单帧峰值，而是等待后续完整正常窗口。
+        assert not result_at_pulse  # 不是当场放过单帧峰值,而是等待后续完整正常窗口.
 
 
 def test_controller_stop_requires_all_motor_sequences_to_advance():
@@ -105,7 +105,7 @@ def test_disabled_transition_requires_receipt_statuses_and_speed_window(fault):
         if fault == 'gap' and 10 <= k < 25:
             continue
         q = .01 if fault == 'position' and k == 15 else 0.
-        # 失能后的孤立速度峰必须记录和延迟确认，但不单独判过渡失败。
+        # 失能后的孤立速度峰必须记录和延迟确认,但不单独判过渡失败.
         v = .1685 if k == 3 or fault == 'velocity' else 0.
         codes = [0]*7
         if fault == 'unknown_status' and k == 20:

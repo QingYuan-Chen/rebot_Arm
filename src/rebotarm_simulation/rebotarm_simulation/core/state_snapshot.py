@@ -1,7 +1,7 @@
-"""校验并复制物理与控制器检查点；调用方负责仿真锁和原生资源生命周期。
+"""校验并复制物理与控制器检查点;调用方负责仿真锁和原生资源生命周期.
 
-save_state 导出不可变数值，restore_state 在修改活动状态前检查模型身份与全部字段。
-模型指纹、保存、恢复依次定义于本模块，所有操作借用调用方传入的 model/data。
+save_state 导出不可变数值,restore_state 在修改活动状态前检查模型身份与全部字段.
+模型指纹,保存,恢复依次定义于本模块,所有操作借用调用方传入的 model/data.
 """
 from dataclasses import replace
 import hashlib
@@ -17,8 +17,8 @@ class StateSnapshot:
             | int(mj.mjtState.mjSTATE_USER)
             | int(mj.mjtState.mjSTATE_CTRL)
         )
-        # 模型维度指纹的一部分：nq/nv/na/nu、body/joint/geom 数量与状态向量长度。
-        # 快照恢复时逐项比对，防止把 A 模型的状态灌进 B 模型。
+        # 模型维度指纹的一部分:nq/nv/na/nu,body/joint/geom 数量与状态向量长度.
+        # 快照恢复时逐项比对,防止把 A 模型的状态灌进 B 模型.
         self._model_dimensions = tuple(int(value) for value in (
             model.nq, model.nv, model.na, model.nu,
             model.nbody, model.njnt, model.ngeom,
@@ -27,11 +27,11 @@ class StateSnapshot:
         self._model_fingerprint = self._fingerprint_model(model)
 
     def _fingerprint_model(self, model) -> str:
-        """对模型结构做 SHA-256 指纹，用于校验状态快照与模型是否匹配。
+        """对模型结构做 SHA-256 指纹,用于校验状态快照与模型是否匹配.
 
-        参与哈希的量：维度元组、名称表、关节类型/地址/限位、执行器传动目标、
-        geom 所属 body，以及物理步长。只要 MJCF 结构或积分步长改变，指纹即变化，
-        restore_state 会因此拒绝恢复旧快照。
+        参与哈希的量:维度元组,名称表,关节类型/地址/限位,执行器传动目标,
+        geom 所属 body,以及物理步长.只要 MJCF 结构或积分步长改变,指纹即变化,
+        restore_state 会因此拒绝恢复旧快照.
         """
         digest = hashlib.sha256()
         digest.update(repr(self._model_dimensions).encode("ascii"))
@@ -50,12 +50,12 @@ class StateSnapshot:
 
 
     def save_state(self, mj, model, data, control) -> SavedSimulationState:
-        """保存完整检查点：物理状态 + 控制器内部状态 + 目标与控制模式。
+        """保存完整检查点:物理状态 + 控制器内部状态 + 目标与控制模式.
 
-        物理状态按 _state_spec 导出（积分/用户/控制量），并附带模型实例 id、结构
-        指纹与维度，供 restore_state 做兼容性校验。控制器侧记录目标角、位置/速度
-        积分、已施加力矩、控制相位与模式，保证恢复后控制行为连续。返回值为不可变
-        快照，可安全长期持有。
+        物理状态按 _state_spec 导出(积分/用户/控制量),并附带模型实例 id,结构
+        指纹与维度,供 restore_state 做兼容性校验.控制器侧记录目标角,位置/速度
+        积分,已施加力矩,控制相位与模式,保证恢复后控制行为连续.返回值为不可变
+        快照,可安全长期持有.
         """
         state = np.empty(self._model_dimensions[-1], dtype=float)
         mj.mj_getState(model, data, state, self._state_spec)
@@ -70,16 +70,16 @@ class StateSnapshot:
 
 
     def restore_state(self, mj, model, data, control, state: SavedSimulationState) -> None:
-        """从 save_state() 的快照恢复物理与控制器状态。
+        """从 save_state() 的快照恢复物理与控制器状态.
 
-        只接受同一模型实例产生的快照：模型实例 id、结构指纹、维度、状态向量长度、
-        控制器各向量长度与控制模式必须全部匹配；不匹配时抛 ValueError，防止把
-        不兼容状态灌进当前模型（例如 MJCF 已重新生成）。控制相位按控制周期取模，
-        保持控制节拍与当前模型步长一致。
+        只接受同一模型实例产生的快照:模型实例 id,结构指纹,维度,状态向量长度,
+        控制器各向量长度与控制模式必须全部匹配;不匹配时抛 ValueError,防止把
+        不兼容状态灌进当前模型(例如 MJCF 已重新生成).控制相位按控制周期取模,
+        保持控制节拍与当前模型步长一致.
         """
         if not isinstance(state, SavedSimulationState):
             raise TypeError("state must be returned by save_state()")
-        # 重建冻结值对象以重新校验所有数值，校验完成后才修改活动仿真。
+        # 重建冻结值对象以重新校验所有数值,校验完成后才修改活动仿真.
         state = replace(state)
         compatible = (
             state.model_identity == id(model)
@@ -100,7 +100,7 @@ class StateSnapshot:
         if state.impedance_command is not None:
             control.validate_impedance_target(model, state.impedance_command)
         if state.impedance_command is not None or state.impedance_handoff:
-            # 先解码到临时数据以验证历史时间和实际输出，坏快照保持实时物理状态原样。
+            # 先解码到临时数据以验证历史时间和实际输出,坏快照保持实时物理状态原样.
             candidate = mj.MjData(model)
             mj.mj_setState(model, candidate, np.asarray(state.state, dtype=float), self._state_spec)
             if state.last_control_time > float(candidate.time):
@@ -117,8 +117,8 @@ class StateSnapshot:
             model, data, np.asarray(state.state, dtype=float), self._state_spec
         )
         control.restore(state, model, data)
-        # mj_forward 更新派生运动学时可能舍入求解器热启动值（MuJoCo 3.3 尤其明显）。
-        # 恢复原积分种子，使下一物理步与连续运行时采用相同的初始求解状态。
+        # mj_forward 更新派生运动学时可能舍入求解器热启动值(MuJoCo 3.3 尤其明显).
+        # 恢复原积分种子,使下一物理步与连续运行时采用相同的初始求解状态.
         warmstart = data.qacc_warmstart.copy()
         mj.mj_forward(model, data)
         data.qacc_warmstart[:] = warmstart

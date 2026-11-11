@@ -1,7 +1,7 @@
-# 筛选结果：在最优抓取候选基础上补齐预抓取位姿。
-# 发布在 /grasp/plan 一类话题上，供可视化标记与候选消费者使用。
+# 筛选结果:在最优抓取候选基础上补齐预抓取位姿.
+# 发布在 /grasp/plan 一类话题上,供可视化标记与候选消费者使用.
 
-# 时间戳与坐标系。frame_id 覆盖本消息内所有位姿（candidate、pregrasp_pose、grasp_pose）。
+# 时间戳与坐标系.frame_id 覆盖本消息内所有位姿(candidate,pregrasp_pose,grasp_pose).
 std_msgs/Header header
 # 被选中的抓取候选原文，保留类别、置信度、夹爪宽度与来源等信息。
 GraspCandidate candidate

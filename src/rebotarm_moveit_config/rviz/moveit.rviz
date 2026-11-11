@@ -1,32 +1,32 @@
-# MoveIt MotionPlanning 可视化配置（moveit.rviz）
+# MoveIt MotionPlanning 可视化配置(moveit.rviz)
 #
-# 用途：由 moveit_demo.launch.py 以 `rviz2 -d` 加载，为离线调试提供「网格 + 机器人模型 + TF +
-#       运动规划面板」的最小界面；真机与仿真场景也复用同一份配置，只是通过 launch 参数
-#       切换关节状态来源。
-# 关键约定：
-#   * Fixed Frame 为 base_link，与 SRDF 虚拟关节 world_joint 的 child_link 一致；
-#   * 机器人模型、规划场景与规划轨迹全部来自话题（/robot_description、
-#     /monitored_planning_scene、/display_planned_path），本文件不内嵌任何模型数据；
-#   * MotionPlanning 面板只负责规划与预览，执行与否由 move_group 的轨迹执行参数决定，
-#     本配置不放松任何硬件保护。
+# 用途:由 moveit_demo.launch.py 以 `rviz2 -d` 加载,为离线调试提供"网格 + 机器人模型 + TF +
+#       运动规划面板"的最小界面;真机与仿真场景也复用同一份配置,只是通过 launch 参数
+#       切换关节状态来源.
+# 关键约定:
+#   * Fixed Frame 为 base_link,与 SRDF 虚拟关节 world_joint 的 child_link 一致;
+#   * 机器人模型,规划场景与规划轨迹全部来自话题(/robot_description,
+#     /monitored_planning_scene,/display_planned_path),本文件不内嵌任何模型数据;
+#   * MotionPlanning 面板只负责规划与预览,执行与否由 move_group 的轨迹执行参数决定,
+#     本配置不放松任何硬件保护.
 Panels:
-  # 左侧 Displays 面板：显示项属性树。Help Height=0 表示隐藏帮助区以节省竖直空间。
+  # 左侧 Displays 面板:显示项属性树.Help Height=0 表示隐藏帮助区以节省竖直空间.
   - Class: rviz_common/Displays
-    # 帮助区域高度（像素），0 表示不显示。
+    # 帮助区域高度(像素),0 表示不显示.
     Help Height: 0
     Name: Displays
     Property Tree Widget:
-      # ~ 表示 null：属性树当前展开状态未持久化，启动时按默认折叠。
+      # ~ 表示 null:属性树当前展开状态未持久化,启动时按默认折叠.
       Expanded: ~
-      # 属性树与右侧视图的横向分割比例（0~1），0.5 即各占一半。
+      # 属性树与右侧视图的横向分割比例(0~1),0.5 即各占一半.
       Splitter Ratio: 0.5
-    # 显示项列表高度（像素）。
+    # 显示项列表高度(像素).
     Tree Height: 339
 Visualization Manager:
   Class: ""
   Displays:
     # ---- 地面网格 ----------------------------------------------------------
-    # 提供空间尺度参照；Cell Size=1 m，覆盖 20x20 个格子（约 20 m 见方）。
+    # 提供空间尺度参照;Cell Size=1 m,覆盖 20x20 个格子(约 20 m 见方).
     - Alpha: 0.5
       Cell Size: 1
       Class: rviz_default_plugins/Grid
@@ -43,31 +43,31 @@ Visualization Manager:
         Z: 0
       Plane: XY
       Plane Cell Count: 20
-      # 网格绘制在 base_link 下，与全局 Fixed Frame 一致，便于判断机械臂相对基座的位姿。
+      # 网格绘制在 base_link 下,与全局 Fixed Frame 一致,便于判断机械臂相对基座的位姿.
       Reference Frame: base_link
       Value: true
-    # ---- 机器人模型（URDF 可视化） ----------------------------------------
-    # 模型文本从 /robot_description 话题订阅（Description Source: Topic），
-    # 因此不需要在 RViz 里配置 Description File，模型始终与 move_group 实际加载的一致。
+    # ---- 机器人模型(URDF 可视化) ----------------------------------------
+    # 模型文本从 /robot_description 话题订阅(Description Source: Topic),
+    # 因此不需要在 RViz 里配置 Description File,模型始终与 move_group 实际加载的一致.
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
-      # 关闭碰撞体显示，只显示 visual，避免与 MotionPlanning 面板的场景显示混淆。
+      # 关闭碰撞体显示,只显示 visual,避免与 MotionPlanning 面板的场景显示混淆.
       Collision Enabled: false
       Description File: ""
       Description Source: Topic
       Description Topic:
-        # QoS：深度 5、Volatile、Keep Last、Reliable——机器人描述是 latched 单次发布，
-        # Reliable + Keep Last 保证启动较慢的 RViz 也能收到最后一条。
+        # QoS:深度 5,Volatile,Keep Last,Reliable-机器人描述是 latched 单次发布,
+        # Reliable + Keep Last 保证启动较慢的 RViz 也能收到最后一条.
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot_description
       Enabled: true
-      # 以下逐个 link 的显示开关：Alpha=1 不透明，Show Axes/Trail=false 不画坐标轴与轨迹，
-      # Value=true 表示该 link 参与渲染。base_link 为基座，link1~link6 为六轴本体，
-      # end_link 为法兰，left/right_finger_link 为夹爪左右手指（其姿态由
-      # visual_joint_states 中的手指关节驱动）。
+      # 以下逐个 link 的显示开关:Alpha=1 不透明,Show Axes/Trail=false 不画坐标轴与轨迹,
+      # Value=true 表示该 link 参与渲染.base_link 为基座,link1~link6 为六轴本体,
+      # end_link 为法兰,left/right_finger_link 为夹爪左右手指(其姿态由
+      # visual_joint_states 中的手指关节驱动).
       Links:
         All Links Enabled: true
         Expand Joint Details: false
@@ -124,18 +124,18 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-      # 不显示惯性/质量属性覆盖层，保持画面简洁。
+      # 不显示惯性/质量属性覆盖层,保持画面简洁.
       Mass Properties:
         Inertia: false
         Mass: false
       Name: RobotModel
       TF Prefix: ""
-      # Update Interval=0 表示每帧更新（不降频）。
+      # Update Interval=0 表示每帧更新(不降频).
       Update Interval: 0
       Value: true
       Visual Enabled: true
-    # ---- TF 坐标系显示（默认关闭） ---------------------------------------
-    # 排查坐标系问题时可勾选 Enabled；Frame Timeout=15 s 决定超过多久没更新的坐标系被隐藏。
+    # ---- TF 坐标系显示(默认关闭) ---------------------------------------
+    # 排查坐标系问题时可勾选 Enabled;Frame Timeout=15 s 决定超过多久没更新的坐标系被隐藏.
     - Class: rviz_default_plugins/TF
       Enabled: false
       Filter (blacklist): ""
@@ -153,30 +153,30 @@ Visualization Manager:
       Update Interval: 0
       Value: false
     # ---- MoveIt 运动规划面板 ---------------------------------------------
-    # 这是本配置的核心：左侧提供规划组选择、目标位姿拖动标记、Plan/Execute 按钮，
-    # 右侧渲染规划场景与规划出的轨迹。
-    # 缩放系数均取 0.1（保守）：真正的执行速度还受 joint_limits.yaml 与控制器限幅约束，
-    # 这里调小只是让规划/显示的时间参数化更慢，不会放宽硬件保护。
+    # 这是本配置的核心:左侧提供规划组选择,目标位姿拖动标记,Plan/Execute 按钮,
+    # 右侧渲染规划场景与规划出的轨迹.
+    # 缩放系数均取 0.1(保守):真正的执行速度还受 joint_limits.yaml 与控制器限幅约束,
+    # 这里调小只是让规划/显示的时间参数化更慢,不会放宽硬件保护.
     - Acceleration_Scaling_Factor: 0.1
       Class: moveit_rviz_plugin/MotionPlanning
       Enabled: true
-      # move_group 所在命名空间；留空表示根命名空间（本仓库的 move_group 未加命名空间，
-      # 只有手臂话题在 /rebotarm 下），因此不能填 rebotarm，否则面板连不上 move_group。
+      # move_group 所在命名空间;留空表示根命名空间(本仓库的 move_group 未加命名空间,
+      # 只有手臂话题在 /rebotarm 下),因此不能填 rebotarm,否则面板连不上 move_group.
       Move Group Namespace: ""
-      # 以下四个开关全部关闭：不允许近似 IK、不允许调用外部程序生成规划、
-      # 不允许面板自动重规划、不允许用传感器数据做位姿修正——离线调试保持行为可预期。
+      # 以下四个开关全部关闭:不允许近似 IK,不允许调用外部程序生成规划,
+      # 不允许面板自动重规划,不允许用传感器数据做位姿修正-离线调试保持行为可预期.
       MoveIt_Allow_Approximate_IK: false
       MoveIt_Allow_External_Program: false
       MoveIt_Allow_Replanning: false
       MoveIt_Allow_Sensor_Positioning: false
-      # 每次 Plan 最多尝试 10 次不同的随机种子，单次规划时间上限 5 s。
+      # 每次 Plan 最多尝试 10 次不同的随机种子,单次规划时间上限 5 s.
       MoveIt_Planning_Attempts: 10
       MoveIt_Planning_Time: 5
-      # 不使用笛卡尔直线路径，也不使用约束感知 IK，均走 MoveIt 默认（OMPL 关节空间）路径。
+      # 不使用笛卡尔直线路径,也不使用约束感知 IK,均走 MoveIt 默认(OMPL 关节空间)路径.
       MoveIt_Use_Cartesian_Path: false
       MoveIt_Use_Constraint_Aware_IK: false
-      # 规划工作空间（米）：以原点为中心、2x2x2 m 的立方体，超出范围的 IK 目标会被拒绝；
-      # 与 URDF 中机械臂约 0.7 m 的臂展相比留有充足余量。
+      # 规划工作空间(米):以原点为中心,2x2x2 m 的立方体,超出范围的 IK 目标会被拒绝;
+      # 与 URDF 中机械臂约 0.7 m 的臂展相比留有充足余量.
       MoveIt_Workspace:
         Center:
           X: 0
@@ -187,9 +187,9 @@ Visualization Manager:
           Y: 2
           Z: 2
       Name: MotionPlanning
-      # 规划路径（轨迹）的显示设置：颜色覆盖关闭、机器人半透明（Robot Alpha=0），
-      # 只把轨迹线画出来；State Display Time=3x 表示按规划时长的 3 倍慢放动画，
-      # Trail Step Size=1 表示每个轨迹点都留痕（不抽稀）。
+      # 规划路径(轨迹)的显示设置:颜色覆盖关闭,机器人半透明(Robot Alpha=0),
+      # 只把轨迹线画出来;State Display Time=3x 表示按规划时长的 3 倍慢放动画,
+      # Trail Step Size=1 表示每个轨迹点都留痕(不抽稀).
       Planned Path:
         Color Enabled: false
         Interrupt Display: false
@@ -257,13 +257,13 @@ Visualization Manager:
         Show Trail: false
         State Display Time: 3x
         Trail Step Size: 1
-        # 规划轨迹的可视化话题（DisplayTrajectory 载体）：面板与轨迹观察方通过该话题
-        # 对接；改名会导致规划出的轨迹看不到，必须与其它配置里的同名话题保持一致。
+        # 规划轨迹的可视化话题(DisplayTrajectory 载体):面板与轨迹观察方通过该话题
+        # 对接;改名会导致规划出的轨迹看不到,必须与其它配置里的同名话题保持一致.
         Trajectory Topic: /display_planned_path
-        # 面板自身不使用仿真时间（是否使用仿真时间由 launch 参数决定 move_group 侧行为）。
+        # 面板自身不使用仿真时间(是否使用仿真时间由 launch 参数决定 move_group 侧行为).
         Use Sim Time: false
-      # 规划质量指标显示：Payload=1 kg 是参与力矩/可操作度估算的负载质量，
-      # 其余开关默认关闭，勾选后可在 3D 视图中叠加文字标注（TextHeight 为文字高度，米）。
+      # 规划质量指标显示:Payload=1 kg 是参与力矩/可操作度估算的负载质量,
+      # 其余开关默认关闭,勾选后可在 3D 视图中叠加文字标注(TextHeight 为文字高度,米).
       Planning Metrics:
         Payload: 1
         Show Joint Torques: false
@@ -271,12 +271,12 @@ Visualization Manager:
         Show Manipulability Index: false
         Show Weight Limit: false
         TextHeight: 0.07999999821186066
-      # 规划请求的交互与配色：
-      # * Planning Group=arm 是默认规划组（六轴链 base_link->end_link）；
-      # * Query Goal State=true 显示可拖动的目标位姿标记，Query Start State=false
-      #   表示起点直接取当前关节状态（由 /<ns>/visual_joint_states 驱动）；
-      # * Interactive Marker Size=0.12 是目标标记手柄的尺寸（米），太小不便拖动；
-      # * 各种颜色用于区分碰撞 link（红）、违反关节限位（品红）、起点（绿）、目标（橙）。
+      # 规划请求的交互与配色:
+      # * Planning Group=arm 是默认规划组(六轴链 base_link->end_link);
+      # * Query Goal State=true 显示可拖动的目标位姿标记,Query Start State=false
+      #   表示起点直接取当前关节状态(由 /<ns>/visual_joint_states 驱动);
+      # * Interactive Marker Size=0.12 是目标标记手柄的尺寸(米),太小不便拖动;
+      # * 各种颜色用于区分碰撞 link(红),违反关节限位(品红),起点(绿),目标(橙).
       Planning Request:
         Colliding Link Color: 255; 0; 0
         Goal State Alpha: 1
@@ -289,13 +289,13 @@ Visualization Manager:
         Show Workspace: false
         Start State Alpha: 1
         Start State Color: 0; 255; 0
-      # 规划场景来源话题：move_group 的 planning_scene_monitor 按增量发布，
-      # 因此 RViz 不需要自己维护一份模型副本。
+      # 规划场景来源话题:move_group 的 planning_scene_monitor 按增量发布,
+      # 因此 RViz 不需要自己维护一份模型副本.
       Planning Scene Topic: /monitored_planning_scene
-      # 该名称必须与 move_group 参数树中机器人描述的键名一致，不能改。
+      # 该名称必须与 move_group 参数树中机器人描述的键名一致,不能改.
       Robot Description: robot_description
-      # 场景几何（碰撞物体/障碍）显示：Scene Alpha 半透明、绿色；Scene Display Time 仅
-      # 0.01 s，用于控制增量几何的淡出时长；体素按 Z 轴着色、只画被占据体素。
+      # 场景几何(碰撞物体/障碍)显示:Scene Alpha 半透明,绿色;Scene Display Time 仅
+      # 0.01 s,用于控制增量几何的淡出时长;体素按 Z 轴着色,只画被占据体素.
       Scene Geometry:
         Scene Alpha: 0.8999999761581421
         Scene Color: 50; 230; 50
@@ -303,9 +303,9 @@ Visualization Manager:
         Show Scene Geometry: true
         Voxel Coloring: Z-Axis
         Voxel Rendering: Occupied Voxels
-      # 规划场景中机器人自身的显示：Attached Body Color 为附着物体颜色；
-      # Robot Alpha=0 且 Show Robot Visual/Collision=false，即不在场景层重复画机器人
-      # （机器人外观由上面的 RobotModel 显示项负责），避免重叠闪烁。
+      # 规划场景中机器人自身的显示:Attached Body Color 为附着物体颜色;
+      # Robot Alpha=0 且 Show Robot Visual/Collision=false,即不在场景层重复画机器人
+      # (机器人外观由上面的 RobotModel 显示项负责),避免重叠闪烁.
       Scene Robot:
         Attached Body Color: 150; 50; 150
         Links:
@@ -368,17 +368,17 @@ Visualization Manager:
         Show Robot Collision: false
         Show Robot Visual: false
       Value: true
-      # 速度缩放系数 0.1（10% 额定速度），与上面的加速度缩放一起保证调试时动作缓慢可控。
+      # 速度缩放系数 0.1(10% 额定速度),与上面的加速度缩放一起保证调试时动作缓慢可控.
       Velocity_Scaling_Factor: 0.1
   Enabled: true
-  # 全局选项：背景色深灰；Fixed Frame 取 base_link（SRDF 中 world_joint 的 child_link），
-  # 与规划场景根坐标系一致；Frame Rate=30 为界面刷新帧率（Hz）。
+  # 全局选项:背景色深灰;Fixed Frame 取 base_link(SRDF 中 world_joint 的 child_link),
+  # 与规划场景根坐标系一致;Frame Rate=30 为界面刷新帧率(Hz).
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: base_link
     Frame Rate: 30
   Name: root
-  # 工具栏：Interact 用于拖动运动规划的目标位姿标记，MoveCamera 用于移动视角。
+  # 工具栏:Interact 用于拖动运动规划的目标位姿标记,MoveCamera 用于移动视角.
   Tools:
     - Class: rviz_default_plugins/Interact
       Hide Inactive Objects: true
@@ -387,10 +387,10 @@ Visualization Manager:
     Current:
       Class: rviz_default_plugins/TF
   Value: true
-  # 当前视图：Orbit（轨道）相机。
-  # Distance=1.807 m 为相机到焦点的距离，Focal Point 为焦点（原点）,
-  # Pitch/Yaw 为俯仰/偏航角（弧度），Near Clip Distance=0.01 m 为近裁剪面；
-  # Focal Shape Size 为焦点标记尺寸（米）。
+  # 当前视图:Orbit(轨道)相机.
+  # Distance=1.807 m 为相机到焦点的距离,Focal Point 为焦点(原点),
+  # Pitch/Yaw 为俯仰/偏航角(弧度),Near Clip Distance=0.01 m 为近裁剪面;
+  # Focal Shape Size 为焦点标记尺寸(米).
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
@@ -413,10 +413,10 @@ Visualization Manager:
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
       Yaw: 1.6103929281234741
-    # ~ 表示 null：没有保存过的备用视图。
+    # ~ 表示 null:没有保存过的备用视图.
     Saved: ~
-# 窗口几何与停靠布局：以下数值由 RViz 退出时自动写回，Height/Width/X/Y 为像素尺寸与
-# 屏幕位置，collapsed 记录各面板是否折叠；QMainWindow State 是 Qt 序列化状态，不要手改。
+# 窗口几何与停靠布局:以下数值由 RViz 退出时自动写回,Height/Width/X/Y 为像素尺寸与
+# 屏幕位置,collapsed 记录各面板是否折叠;QMainWindow State 是 Qt 序列化状态,不要手改.
 Window Geometry:
   "":
     collapsed: false

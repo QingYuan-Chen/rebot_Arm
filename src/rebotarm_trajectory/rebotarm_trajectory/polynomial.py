@@ -1,22 +1,22 @@
-"""具名分段多项式的数据契约和数值求值内核。
+"""具名分段多项式的数据契约和数值求值内核.
 
 文件职责
-    保存不可变轨迹点和系数，校验数值结构，并按外部提供的经过时间求 q/v/a/jerk。
-    motion 生成、检查曲线；控制器和仿真复用本文件执行同一组系数。
+    保存不可变轨迹点和系数,校验数值结构,并按外部提供的经过时间求 q/v/a/jerk.
+    motion 生成,检查曲线;控制器和仿真复用本文件执行同一组系数.
 
 对外接口
-    TrajectoryPoint、PolynomialSegment、PolynomialTrajectory 表示点、段和整条轨迹；
-    ordered_points 统一关节顺序；curve_from_payload 解码已准备的曲线，不重新拟合。
-    系数按归一化时间 u=(t-start)/duration 的升幂排列，行顺序由 joint_names 明确声明。
-    六轴位置为 rad、左指位置为 m；导数沿用对应位置单位，时间单位 s。
+    TrajectoryPoint,PolynomialSegment,PolynomialTrajectory 表示点,段和整条轨迹;
+    ordered_points 统一关节顺序;curve_from_payload 解码已准备的曲线,不重新拟合.
+    系数按归一化时间 u=(t-start)/duration 的升幂排列,行顺序由 joint_names 明确声明.
+    六轴位置为 rad,左指位置为 m;导数沿用对应位置单位,时间单位 s.
 
 安全约束
-    本库不读取时钟，不持有执行状态，不访问 ROS、设备或物理引擎。
-    数值合法不代表限位、碰撞或执行上下文有效；这些检查由上层各自完成。
-    缺失导数用空元组表示，不能补零后声称更高连续性；五次曲线也不承诺 jerk 连续。
+    本库不读取时钟,不持有执行状态,不访问 ROS,设备或物理引擎.
+    数值合法不代表限位,碰撞或执行上下文有效;这些检查由上层各自完成.
+    缺失导数用空元组表示,不能补零后声称更高连续性;五次曲线也不承诺 jerk 连续.
 
 文件结构
-    常量及向量校验 → 轨迹点与排序 → 分段求值 → 整轨采样/编码 → 系数解码。
+    常量及向量校验 → 轨迹点与排序 → 分段求值 → 整轨采样/编码 → 系数解码.
 """
 
 from bisect import bisect_right
@@ -28,7 +28,7 @@ CALC_ATOL = 1e-9
 
 
 def finite_vector(values, size=None):
-    """复制具名曲线的一行数值；维度由轨迹契约核对，不按单位混合做范数。"""
+    """复制具名曲线的一行数值;维度由轨迹契约核对,不按单位混合做范数."""
     result = tuple(float(v) for v in values)
     if (not result or (size is None and len(result) not in (1, 2, 6, 7, 8))
             or (size is not None and len(result) != size) or not all(math.isfinite(v) for v in result)):
@@ -37,7 +37,7 @@ def finite_vector(values, size=None):
 
 
 def canonical_names(names):
-    """六轴执行曲线或单夹爪规划预算；单夹爪曲线不能作为 FJT 执行。"""
+    """六轴执行曲线或单夹爪规划预算;单夹爪曲线不能作为 FJT 执行."""
     names = tuple(names)
     for supported in (JOINT_NAMES, ('left_finger_joint',)):
         if len(names) == len(supported) and set(names) == set(supported):
@@ -55,7 +55,7 @@ def vector6(values):
 
 @dataclass(frozen=True)
 class TrajectoryPoint:
-    """带相对时刻的等维关节约束点；复制为元组，维度和关节顺序由整轨契约核对。"""
+    """带相对时刻的等维关节约束点;复制为元组,维度和关节顺序由整轨契约核对."""
 
     time: float
     positions: tuple
@@ -88,7 +88,7 @@ def ordered_points(joint_names, points):
         tuple(p.accelerations[i] for i in order) if p.accelerations else ()) for p in source)
     if any(b.time <= a.time for a, b in zip(result, result[1:])):
         raise ValueError('trajectory times must strictly increase')
-    # 全轨迹必须采用同一约束等级；部分节点缺导数时不能静默降级或自行补零。
+    # 全轨迹必须采用同一约束等级;部分节点缺导数时不能静默降级或自行补零.
     for field in ('velocities', 'accelerations'):
         present = [bool(getattr(p, field)) for p in result]
         if any(present) and not all(present):
@@ -100,7 +100,7 @@ def ordered_points(joint_names, points):
 
 @dataclass(frozen=True)
 class PolynomialSegment:
-    """全部具名关节共用一个时间区间；每行 2/4/6 个升幂系数表示线性/三次/五次。"""
+    """全部具名关节共用一个时间区间;每行 2/4/6 个升幂系数表示线性/三次/五次."""
 
     start: float
     duration: float
@@ -119,11 +119,11 @@ class PolynomialSegment:
         object.__setattr__(self, 'coefficients', coefficients)
 
     def axis(self, joint, order=0):
-        """返回实际秒制导数系数；求根和极值判定由运动层负责。"""
+        """返回实际秒制导数系数;求根和极值判定由运动层负责."""
         c = tuple(self.coefficients[joint])
         for _ in range(order):
             c = tuple(i * value for i, value in enumerate(c) if i) or (0.,)
-        # 对 u 求导后还需除以 T**order，才能得到相对于实际秒的导数。
+        # 对 u 求导后还需除以 T**order,才能得到相对于实际秒的导数.
         try:
             values = tuple(value / self.duration ** order for value in c)
         except (OverflowError, ZeroDivisionError) as exc:
@@ -133,7 +133,7 @@ class PolynomialSegment:
         return values
 
     def at(self, u, order=0):
-        """在归一化时刻 u 用 Horner 法求各关节值；区间选择和钳位由整轨采样负责。"""
+        """在归一化时刻 u 用 Horner 法求各关节值;区间选择和钳位由整轨采样负责."""
         values = []
         for joint in range(len(self.coefficients)):
             value = 0.
@@ -145,7 +145,7 @@ class PolynomialSegment:
 
 @dataclass(frozen=True)
 class PolynomialTrajectory:
-    """点约束和分段系数的冻结容器；构造检查结构，交换数据还须经过解码校验。"""
+    """点约束和分段系数的冻结容器;构造检查结构,交换数据还须经过解码校验."""
 
     points: tuple
     segments: tuple
@@ -187,7 +187,7 @@ class PolynomialTrajectory:
             point = self.points[0] if elapsed <= 0 else self.points[-1]
             zeros = (0.,) * len(self.joint_names)
             return (point.positions, zeros, zeros, zeros)
-        # 内部节点取右段，终点取最后一段；C0/C1 的高阶导数跳变不会被平滑隐藏。
+        # 内部节点取右段,终点取最后一段;C0/C1 的高阶导数跳变不会被平滑隐藏.
         index = min(len(self.segments) - 1,
                     bisect_right(self.times, elapsed) - 1)
         segment = self.segments[index]
@@ -195,7 +195,7 @@ class PolynomialTrajectory:
         return tuple(segment.at(u, k) for k in range(4))
 
     def to_payload(self):
-        """编码版本化数值载荷；执行端采样携带的系数，避免重新拟合造成检查与执行不一致。"""
+        """编码版本化数值载荷;执行端采样携带的系数,避免重新拟合造成检查与执行不一致."""
         return {'version': 1 if self.joint_names == JOINT_NAMES else 2,
                 'joint_names': list(self.joint_names), 'degree': self.degree,
                 'points': [dict(time_from_start=p.time, positions=p.positions,
@@ -204,7 +204,7 @@ class PolynomialTrajectory:
 
 
 def curve_from_payload(payload):
-    """校验版本、形状、有限性及端点约束并载入系数；不替代上层限位和碰撞检查。"""
+    """校验版本,形状,有限性及端点约束并载入系数;不替代上层限位和碰撞检查."""
     names = canonical_names(payload['joint_names'])
     if tuple(payload['joint_names']) != names:
         raise ValueError('curve payload must declare canonical joint order')
@@ -233,7 +233,7 @@ def curve_from_payload(payload):
         for order in range(4):
             segment.at(0., order)
             segment.at(1., order)
-        # 只核对源轨迹实际声明的导数；解码不能改变兼容等级或修复不一致的载荷。
+        # 只核对源轨迹实际声明的导数;解码不能改变兼容等级或修复不一致的载荷.
         for order, field in enumerate(('positions', 'velocities', 'accelerations')):
             if order and not getattr(first, field):
                 continue

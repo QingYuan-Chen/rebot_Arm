@@ -1,5 +1,5 @@
-"""夹爪现场回归客户端：单一监测与目标所有者、独立接收和分项授权请求。
-失败停止保持，不自动失能；显式失能仅允许本轮基线新鲜且连续静止一秒后。
+"""夹爪现场回归客户端:单一监测与目标所有者,独立接收和分项授权请求.
+失败停止保持,不自动失能;显式失能仅允许本轮基线新鲜且连续静止一秒后.
 """
 import argparse, fcntl, json, math, os, queue, threading, time
 from pathlib import Path
@@ -24,7 +24,7 @@ if not __debug__:
 parser=argparse.ArgumentParser(description='单一监测者的现场回归；不会自动使能或运动')
 parser.add_argument('session', type=Path, help='包含 baseline.json 和 controller_audit.jsonl 的本轮目录')
 ROOT=parser.parse_args().session.resolve()
-# 同一用户在本机只允许一个本工具实例；旧临时脚本不能与本工具同时运行。
+# 同一用户在本机只允许一个本工具实例;旧临时脚本不能与本工具同时运行.
 owner_file=open(f'/tmp/rebotarm-hardware-regression-{os.getuid()}.lock', 'a+')
 try: fcntl.flock(owner_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except BlockingIOError: raise RuntimeError('已有现场回归所有者')
@@ -57,7 +57,7 @@ def critical_audit_writer():
 critical_writer=threading.Thread(target=critical_audit_writer,name='critical-audit',daemon=True)
 critical_writer.start()
 def record_critical(event,**values):
-    # 本轮只产生有限次故障交接记录；审计排队不能等待写盘或阻塞停止/取消。
+    # 本轮只产生有限次故障交接记录;审计排队不能等待写盘或阻塞停止/取消.
     try:critical_events.put((event,phase,time.monotonic(),values))
     except Exception:critical_audit_failed.set()
 def emit(event,**v):
@@ -165,7 +165,7 @@ def snap(gripper_active=None, inspect_speed=False):
             issues.append('invalid_'+n)
         if abs(x['position']-base[n])>(.0065 if n=='gripper' else .005):
             issues.append('position_scope_'+n)
-        # 速度峰保留在接收审计；按独立源帧判断持续超限，不能凭重读缓存累计。
+        # 速度峰保留在接收审计;按独立源帧判断持续超限,不能凭重读缓存累计.
         if inspect_speed:
             if speed_history.observe(n,x['stamp'],x['velocity'],gripper_active):
                 issues.append('sustained_speed_'+n)
@@ -179,7 +179,7 @@ def health(code=None,history=True):
         assert s['codes']==[code]*6 and all(x['code']==code for x in v.values()),(s,v)
     return np.array([v[n]['position'] for n in JOINT_NAMES])
 def request_hold():
-    # 无论异常发生在动作接纳前后均只请求停止保持，迟到夹爪句柄由 gate 取消。
+    # 无论异常发生在动作接纳前后均只请求停止保持,迟到夹爪句柄由 gate 取消.
     record_critical('monitor_failure',issues=gate.fault,fault_mono=gate.fault_at)
     record_critical('monitor_stop_call_start')
     try:
@@ -291,7 +291,7 @@ def stationary(target=qbase,seconds=1.,history=True,tolerance=.003):
         time.sleep(.005)
     raise RuntimeError('新鲜连续基线/目标静止未确认')
 def collision_gripper():
-    # 在当前六轴姿态下检查完整夹爪路径；故障锁存后健康检查拒绝后续目标。
+    # 在当前六轴姿态下检查完整夹爪路径;故障锁存后健康检查拒绝后续目标.
     current=health(1)
     actual=snap()[0]['gripper']['position']
     assert abs(actual-base['gripper'])<=.0005,'当前夹爪位置不符合本轮基线'
@@ -333,7 +333,7 @@ def finish(item,expected=4,timeout=20.):
         if hasattr(result.result,'success'):assert result.result.success,result.result
         if hasattr(result.result,'error_code'):assert result.result.error_code==0,result.result
     return result
-# 首次发现只允许失能反馈；未就绪前不开始统计，也不发送任何状态命令。
+# 首次发现只允许失能反馈;未就绪前不开始统计,也不发送任何状态命令.
 deadline=time.monotonic()+15.;stable=None
 while time.monotonic()<deadline:
     try:
@@ -343,7 +343,7 @@ while time.monotonic()<deadline:
     time.sleep(.005)
 else:raise RuntimeError('新鲜默认失能反馈未就绪')
 for name in services:unique('/rebotarm/'+name)
-# 拒绝已知历史监测客户端，避免它们继续按旧规则触发停止。
+# 拒绝已知历史监测客户端,避免它们继续按旧规则触发停止.
 assert not any(n in old_names for n,_ in node.get_node_names_and_namespaces()),'旧回归监测器仍在运行'
 phase='ready_disabled';monitor=threading.Thread(target=observe_faults,name='independent-source-age',daemon=True);monitor.start()
 deadline=time.monotonic()+1.

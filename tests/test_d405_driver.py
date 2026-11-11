@@ -1,4 +1,4 @@
-"""通过假 RealSense SDK 验证采集接线、单位、光学几何与会话收尾。"""
+"""通过假 RealSense SDK 验证采集接线,单位,光学几何与会话收尾."""
 
 from types import SimpleNamespace
 import sys

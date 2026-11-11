@@ -1,4 +1,4 @@
-"""使用真实 MuJoCo 的 Reach 接口与回合语义回归。"""
+"""使用真实 MuJoCo 的 Reach 接口与回合语义回归."""
 import numpy as np
 import pytest
 

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_moveit_plugin_lifetime_environment_is_scoped_and_preserves_user_preload(tmp_path):
-    """只展开启动描述，确认两类 MoveIt 进程使用索引中的插件，其他节点不受影响。"""
+    """只展开启动描述,确认两类 MoveIt 进程使用索引中的插件,其他节点不受影响."""
     result = subprocess.run([sys.executable, "-", str(ROOT), str(tmp_path)], input=r'''
 import importlib.util
 import os

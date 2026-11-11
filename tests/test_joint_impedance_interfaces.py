@@ -1,4 +1,4 @@
-"""关节阻抗入口回归：假仿真核对期限、资源互斥和协议错误，零硬件访问。"""
+"""关节阻抗入口回归:假仿真核对期限,资源互斥和协议错误,零硬件访问."""
 from __future__ import annotations
 
 import io
@@ -21,7 +21,7 @@ DAMPING = (8., 8., 8., 1., .5, .1)
 
 
 class ImpedanceSim:
-    """推进物理时钟和看门狗的替身；核心数值校验由独立物理测试覆盖。"""
+    """推进物理时钟和看门狗的替身;核心数值校验由独立物理测试覆盖."""
     timestep = .01
 
     def __init__(self):
@@ -206,7 +206,7 @@ def test_gripper_entry_rejects_impedance_before_reserving_resources(entry):
         invoke()
     assert not execution.gripper.busy
     assert execution.gripper.task is None and execution.gripper.reservation is None
-    command(execution)  # 夹爪拒绝后仍允许正常续期。
+    command(execution)  # 夹爪拒绝后仍允许正常续期.
     execution.change_mode('hold')
     invoke()
     assert execution.gripper.busy

@@ -85,7 +85,7 @@ def test_filter_detection_array_is_explicit_allowlist_and_fail_closed():
 
 @pytest.fixture
 def offline_node_factory(monkeypatch, tmp_path):
-    """构造真实节点类与检测器，只替换模型依赖和 ROS 通信端口，避免创建 DDS 实体。"""
+    """构造真实节点类与检测器,只替换模型依赖和 ROS 通信端口,避免创建 DDS 实体."""
     from rebotarm_vision.nodes import offline_yolo_node as module
     from rclpy.node import Node
 
@@ -129,7 +129,7 @@ def offline_node_factory(monkeypatch, tmp_path):
         return node, models[-1], output, logs
 
     yield build
-    # 防止真实检测器模块持有本测试的模型替身，影响后续独立模块测试。
+    # 防止真实检测器模块持有本测试的模型替身,影响后续独立模块测试.
     sys.modules.pop(detector_name, None)
     if previous_child is missing:
         delattr(detector_package, "yolo_detector")

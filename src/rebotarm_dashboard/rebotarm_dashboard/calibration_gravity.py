@@ -1,4 +1,4 @@
-"""操作员重力模式切换门控：核对明确确认、当前使能状态和新鲜反馈，再交控制器服务。"""
+"""操作员重力模式切换门控:核对明确确认,当前使能状态和新鲜反馈,再交控制器服务."""
 import math
 
 
@@ -11,7 +11,7 @@ def gravity_rejection(command, confirmed, *, hardware, web_enabled, execution_mo
     if not math.isfinite(status_age) or not 0 <= status_age <= .5:
         return '控制器反馈过期，请检查连接'
     errors = arm.get('error_codes', [])
-    # 仅重力故障保持允许显式交接回位置保持；设备与反馈错误继续阻断切换。
+    # 仅重力故障保持允许显式交接回位置保持;设备与反馈错误继续阻断切换.
     hold_exit = command == 'stop' and all(code.startswith('GRAVITY_HOLD:') for code in errors)
     if not arm.get('enabled') or (errors and not hold_exit):
         return '需要已显式使能且无错误的控制器'
@@ -23,7 +23,7 @@ def gravity_rejection(command, confirmed, *, hardware, web_enabled, execution_mo
 
 
 class GravityRequestTracker:
-    """超时后保留模式切换 Future，等待服务结果及其后的新反馈共同确认状态。"""
+    """超时后保留模式切换 Future,等待服务结果及其后的新反馈共同确认状态."""
     def __init__(self):
         self.future = None
         self.command = None
@@ -61,7 +61,7 @@ class GravityRequestTracker:
         return bool(self.response.success), str(self.response.message)
 
     def idle_confirmed(self, *, now, received_at, arm):
-        """用单调接收时刻确认 IDLE；请求完成前收到的旧反馈继续等待更新。"""
+        """用单调接收时刻确认 IDLE;请求完成前收到的旧反馈继续等待更新."""
         if self.refresh(now) or received_at is None:
             return False
         return (0 <= now - received_at <= .5 and

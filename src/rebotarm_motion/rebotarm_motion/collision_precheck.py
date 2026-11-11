@@ -179,12 +179,12 @@ class CollisionPrechecker:
             request = self._request_factory()
             request.group_name = str(config.group_name)
             request.robot_state.joint_state.name = list(joint_names)
-            # 完整关节值作为场景差量，保留已存在的附着物；不能用空附着物列表清空场景状态。
+            # 完整关节值作为场景差量,保留已存在的附着物;不能用空附着物列表清空场景状态.
             request.robot_state.is_diff = True
             request.robot_state.joint_state.position = [float(v) for v in positions]
             try:
                 future = self._client.call_async(request)
-                # 不持有 executor；1 ms 轮询避免大量短查询把固定总预算耗在休眠上。
+                # 不持有 executor;1 ms 轮询避免大量短查询把固定总预算耗在休眠上.
                 while not future.done() and self._monotonic() < deadline:
                     self._sleep(0.001)
                 if not future.done():
@@ -271,7 +271,7 @@ class CollisionPrechecker:
         names = tuple(str(name) for name in joint_names)
         if 'left_finger_joint' in names and 'right_finger_joint' not in names:
             index = names.index('left_finger_joint')
-            # 协同样本的右指随左指变化，不能用“当前开口默认值”冻结整个预检序列。
+            # 协同样本的右指随左指变化,不能用"当前开口默认值"冻结整个预检序列.
             return (names+('right_finger_joint',),
                 [(*positions,-positions[index]) for positions in positions_list], ['right_finger_joint'])
         # 已经出现在轨迹里的关节不覆盖, 保留记录到的真实位置.

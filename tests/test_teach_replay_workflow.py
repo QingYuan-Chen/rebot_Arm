@@ -178,7 +178,7 @@ def test_dashboard_no_longer_owns_replay_algorithms_or_planner():
 
 
 def _qv_record(workflow, tmp_path):
-    """模拟现场 309 帧 q/v、无 a；保留原记录，使用有非零曲率的六轴路径。"""
+    """模拟现场 309 帧 q/v,无 a;保留原记录,使用有非零曲率的六轴路径."""
     import math
     from rebotarm_teach.teach_models import TeachSample
     from rebotarm_teach.teach_record_io import encode_teach_sample
@@ -301,7 +301,7 @@ def test_final_teach_curve_rejects_interior_position_violation():
     from rebotarm_motion.trajectory_time_parameterization import finalize_teach_curve
     from rebotarm_motion.polynomial_trajectory import TrajectoryPoint
     names=tuple(f'joint{i}' for i in range(1,7))
-    # 两端位置合法，中间速度使曲线越界；拉长时间不能修复几何。
+    # 两端位置合法,中间速度使曲线越界;拉长时间不能修复几何.
     points=(TrajectoryPoint(0.,(0.,)*6,(0.,)*6,(0.,)*6),
         TrajectoryPoint(1.,(0.,)*6,(100.,)*6,(0.,)*6),
         TrajectoryPoint(2.,(0.,)*6,(0.,)*6,(0.,)*6))

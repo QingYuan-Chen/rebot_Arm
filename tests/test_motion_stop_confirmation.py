@@ -1,4 +1,4 @@
-"""公共停止反馈的时效、连续性和静止窗口验证。"""
+"""公共停止反馈的时效,连续性和静止窗口验证."""
 
 import pytest
 from rebotarm_motion.stop_feedback import StopFeedback

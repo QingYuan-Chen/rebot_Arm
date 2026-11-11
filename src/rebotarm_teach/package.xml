@@ -2,41 +2,41 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>rebotarm_teach</name>
-  <!-- 包版本：与 setup.py 中的 version 保持一致，改动需同步。 -->
+  <!-- 包版本:与 setup.py 中的 version 保持一致,改动需同步. -->
   <version>0.1.0</version>
-  <!-- 包用途说明：示教录制、预处理轨迹与回放工作流工具（描述文本，不参与依赖解析）。 -->
+  <!-- 包用途说明:示教录制,预处理轨迹与回放工作流工具(描述文本,不参与依赖解析). -->
   <description>Teach recording, prepared trajectory, and replay workflow utilities for reBotArm.</description>
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 构建工具：本包是纯 Python（ament_python）包，无编译产物。 -->
+  <!-- 构建工具:本包是纯 Python(ament_python)包,无编译产物. -->
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- 运行依赖：以下均为 exec_depend（本包只被运行时导入，不参与编译）。 -->
-  <!-- 关节轨迹动作类型（回放目标/结果，FollowJointTrajectory）。 -->
+  <!-- 运行依赖:以下均为 exec_depend(本包只被运行时导入,不参与编译). -->
+  <!-- 关节轨迹动作类型(回放目标/结果,FollowJointTrajectory). -->
   <exec_depend>control_msgs</exec_depend>
-  <!-- MoveIt 侧服务消息（起始对齐与碰撞预检用的状态有效性查询）。 -->
+  <!-- MoveIt 侧服务消息(起始对齐与碰撞预检用的状态有效性查询). -->
   <exec_depend>moveit_msgs</exec_depend>
-  <!-- 节点基类、参数、订阅/服务/动作客户端。 -->
+  <!-- 节点基类,参数,订阅/服务/动作客户端. -->
   <exec_depend>rclpy</exec_depend>
-  <!-- 本仓库自定义消息（机械臂状态、电机状态等）。 -->
+  <!-- 本仓库自定义消息(机械臂状态,电机状态等). -->
   <exec_depend>rebotarm_msgs</exec_depend>
-  <!-- 重定时/时间参数化等运动层工具（回放轨迹生成依赖）。 -->
+  <!-- 重定时/时间参数化等运动层工具(回放轨迹生成依赖). -->
   <exec_depend>rebotarm_motion</exec_depend>
   <exec_depend>rebotarm_trajectory</exec_depend>
   <exec_depend>rebotarm_moveit_config</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
-  <!-- 关节状态等传感器消息类型。 -->
+  <!-- 关节状态等传感器消息类型. -->
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- 基础消息类型（状态发布）。 -->
+  <!-- 基础消息类型(状态发布). -->
   <exec_depend>std_msgs</exec_depend>
-  <!-- Trigger 服务类型（录制/重力补偿/急停等服务调用）。 -->
+  <!-- Trigger 服务类型(录制/重力补偿/急停等服务调用). -->
   <exec_depend>std_srvs</exec_depend>
-  <!-- 关节轨迹消息类型（JointTrajectory / JointTrajectoryPoint，轨迹构造与下发）。 -->
+  <!-- 关节轨迹消息类型(JointTrajectory / JointTrajectoryPoint,轨迹构造与下发). -->
   <exec_depend>trajectory_msgs</exec_depend>
 
   <export>
-    <!-- 构建类型：ament_python（Python 包，安装到 lib/python*/site-packages）。 -->
+    <!-- 构建类型:ament_python(Python 包,安装到 lib/python*/site-packages). -->
     <build_type>ament_python</build_type>
   </export>
 </package>

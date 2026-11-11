@@ -1,4 +1,4 @@
-"""停止状态机的源时间、发送确认和代次约束；不连接真实设备。"""
+"""停止状态机的源时间,发送确认和代次约束;不连接真实设备."""
 from rebotarmcontroller.arm.arm_stop import ArmStop
 import pytest
 
@@ -19,7 +19,7 @@ def test_stop_requires_successful_send_and_new_stationary_window():
     assert update(10.).quiet_since is None
     assert update(10.01).quiet_since == 10.01
     clock[0] = 10.01
-    assert update(10.01).state == 'stopping'  # 重读缓存不累计静止窗口。
+    assert update(10.01).state == 'stopping'  # 重读缓存不累计静止窗口.
     assert update(10.06, speed=.06).quiet_since is None
     assert update(10.07).state == 'stopping'
     assert update(10.17).state == 'stopping'
@@ -41,7 +41,7 @@ def test_stop_timeout_and_generation_change_never_confirm():
 
 @pytest.mark.parametrize('residual', [.003, .01])
 def test_stop_uses_actual_stationary_window_instead_of_command_error(residual):
-    """保持发送和新帧仍必须满足；静止残差不再被解释为停止失败。"""
+    """保持发送和新帧仍必须满足;静止残差不再被解释为停止失败."""
     clock = [10.]
     stop = ArmStop(clock=lambda: clock[0])
     stop.begin([0.]*6, 1)

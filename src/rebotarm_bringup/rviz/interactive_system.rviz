@@ -1,32 +1,32 @@
-# 交互拖拽示教（RViz + MoveIt 规划）用的界面布局：左侧显示面板 + 右侧规划面板。
-# 目标位姿由 MoveIt 规划组自带的目标交互标记（Planning Request 里的 Goal State）给出，
-# 不再使用已废弃的自定义交互标记服务与预览/执行节点。
-# 本文件由 launch 以 -d 参数整体加载；注释用 # 整行书写，不改动任何键值。
+# 交互拖拽示教(RViz + MoveIt 规划)用的界面布局:左侧显示面板 + 右侧规划面板.
+# 目标位姿由 MoveIt 规划组自带的目标交互标记(Planning Request 里的 Goal State)给出,
+# 不再使用已废弃的自定义交互标记服务与预览/执行节点.
+# 本文件由 launch 以 -d 参数整体加载;注释用 # 整行书写,不改动任何键值.
 Panels:
-  # 面板插件：显示树（Displays），即所有可视化图层所在的面板
+  # 面板插件:显示树(Displays),即所有可视化图层所在的面板
   - Class: rviz_common/Displays
-    # 说明区高度，单位像素；影响面板顶部提示文字占用的高度
+    # 说明区高度,单位像素;影响面板顶部提示文字占用的高度
     Help Height: 138
     Name: Displays
     Property Tree Widget:
       Expanded: ~
       Splitter Ratio: 0.5
-    # 显示树区域高度，单位像素；仅在窗口首次布局时生效
+    # 显示树区域高度,单位像素;仅在窗口首次布局时生效
     Tree Height: 138
-  # 显示管理器：以下 Displays 为当前加载的全部可视化图层，Global Options 为全局渲染设置
+  # 显示管理器:以下 Displays 为当前加载的全部可视化图层,Global Options 为全局渲染设置
 Visualization Manager:
   Class: ""
   Displays:
-      # 网格透明度，0=全透明、1=不透明；调低可减少网格对机械臂/目标标记的遮挡
+      # 网格透明度,0=全透明,1=不透明;调低可减少网格对机械臂/目标标记的遮挡
     - Alpha: 0.5
-      # 单个网格边长，单位 m；1 m 为便于判断末端与工作台尺度的粗网格
+      # 单个网格边长,单位 m;1 m 为便于判断末端与工作台尺度的粗网格
       Cell Size: 1
       Class: rviz_default_plugins/Grid
-      # 网格线颜色（R; G; B，0~255）
+      # 网格线颜色(R; G; B,0~255)
       Color: 160; 160; 164
       Enabled: true
       Line Style:
-          # 网格线宽，单位 m；约 3 cm，调大更容易看清台面尺度
+          # 网格线宽,单位 m;约 3 cm,调大更容易看清台面尺度
         Line Width: 0.029999999329447746
         Value: Lines
       Name: Grid
@@ -36,29 +36,29 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      # 网格平面内每方向绘制的格子数；20×1 m = 20 m 见方，超出部分不绘制
+      # 网格平面内每方向绘制的格子数;20×1 m = 20 m 见方,超出部分不绘制
       Plane Cell Count: 20
-      # 网格参考坐标系（机械臂基座系），网格原点固定在基座原点
+      # 网格参考坐标系(机械臂基座系),网格原点固定在基座原点
       Reference Frame: base_link
       Value: true
     - Alpha: 1
-      # 机器人模型图层：按 /robot_description 渲染完整 URDF（机械臂 + 夹爪）
+      # 机器人模型图层:按 /robot_description 渲染完整 URDF(机械臂 + 夹爪)
       Class: rviz_default_plugins/RobotModel
-      # 是否渲染碰撞体几何；关闭时只画视觉几何，避免与碰撞体网格重叠显示
+      # 是否渲染碰撞体几何;关闭时只画视觉几何,避免与碰撞体网格重叠显示
       Collision Enabled: false
       Description File: ""
-      # 模型来源：Topic 表示订阅话题动态获取，便于仿真/真机切换时不需要改配置
+      # 模型来源:Topic 表示订阅话题动态获取,便于仿真/真机切换时不需要改配置
       Description Source: Topic
       Description Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        # 机器人描述话题名；真机与仿真都必须发布同名话题，否则此处无模型可显示
+        # 机器人描述话题名;真机与仿真都必须发布同名话题,否则此处无模型可显示
         Value: /robot_description
       Enabled: true
-      # 各连杆显示开关：链路由基座（base_link）经 6 个臂关节 link1~link6 到末端（end_link），
-      # 再分出左右夹爪指（left_finger_link / right_finger_link）；全部关闭轴与轨迹显示，只画外形
+      # 各连杆显示开关:链路由基座(base_link)经 6 个臂关节 link1~link6 到末端(end_link),
+      # 再分出左右夹爪指(left_finger_link / right_finger_link);全部关闭轴与轨迹显示,只画外形
       Links:
         All Links Enabled: true
         Expand Joint Details: false
@@ -115,24 +115,24 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-      # 质量属性显示开关：惯性椭球与质心标记，调试动力学时可打开
+      # 质量属性显示开关:惯性椭球与质心标记,调试动力学时可打开
       Mass Properties:
         Inertia: false
         Mass: false
       Name: RobotModel
-      # 连杆名统一加的前缀，空串表示不加；多机器人同场时才需要设置
+      # 连杆名统一加的前缀,空串表示不加;多机器人同场时才需要设置
       TF Prefix: ""
-      # 模型刷新间隔，单位 s；0 表示仅在收到新描述时刷新一次
+      # 模型刷新间隔,单位 s;0 表示仅在收到新描述时刷新一次
       Update Interval: 0
       Value: true
       Visual Enabled: true
     - Class: rviz_default_plugins/TF
       Enabled: true
-      # 坐标系黑名单（不显示），留空表示不排除任何坐标系
+      # 坐标系黑名单(不显示),留空表示不排除任何坐标系
       Filter (blacklist): ""
-      # 坐标系白名单（只显示），留空表示不限制
+      # 坐标系白名单(只显示),留空表示不限制
       Filter (whitelist): ""
-      # 坐标系超时时间，单位 s；超过该时长没有更新的坐标系会被判为过期而隐藏
+      # 坐标系超时时间,单位 s;超过该时长没有更新的坐标系会被判为过期而隐藏
       Frame Timeout: 15
       Frames:
         All Enabled: false
@@ -158,9 +158,9 @@ Visualization Manager:
           Value: true
         world:
           Value: true
-      # 坐标轴/箭头标记尺寸，单位 m；约 8 cm，调小可避免密集坐标系互相遮挡
+      # 坐标轴/箭头标记尺寸,单位 m;约 8 cm,调小可避免密集坐标系互相遮挡
       Marker Scale: 0.07999999821186066
-      # 图层显示名（仅界面显示，非接口），用于区分这是末端 TCP 相关的坐标系视图
+      # 图层显示名(仅界面显示,非接口),用于区分这是末端 TCP 相关的坐标系视图
       Name: TCP TF
       Show Arrows: true
       Show Axes: true
@@ -181,43 +181,43 @@ Visualization Manager:
                             {}
       Update Interval: 0
       Value: true
-      # 加速度缩放系数（0~1）；0.1 表示只用控制器加速度上限的 10%，是示教/调试用的保守值
+      # 加速度缩放系数(0~1);0.1 表示只用控制器加速度上限的 10%,是示教/调试用的保守值
     - Acceleration_Scaling_Factor: 0.1
-      # 运动规划面板：提供规划组选择、起点/目标状态设置与“规划/执行”按钮。
+      # 运动规划面板:提供规划组选择,起点/目标状态设置与"规划/执行"按钮.
       # 拖拽示教时的目标位姿即由本面板的原生目标状态交互标记给出
       Class: moveit_rviz_plugin/MotionPlanning
       Enabled: true
       Move Group Namespace: ""
-      # 是否允许近似逆解；false 表示只接受精确解，避免末端姿态与目标存在不可控偏差
+      # 是否允许近似逆解;false 表示只接受精确解,避免末端姿态与目标存在不可控偏差
       MoveIt_Allow_Approximate_IK: false
-      # 是否允许外部程序控制本面板；false 表示只接受界面操作，防止第三方程序绕过确认直接规划执行
+      # 是否允许外部程序控制本面板;false 表示只接受界面操作,防止第三方程序绕过确认直接规划执行
       MoveIt_Allow_External_Program: false
-      # 是否允许自动重规划；false 表示规划失败即失败，需人工确认后重试
+      # 是否允许自动重规划;false 表示规划失败即失败,需人工确认后重试
       MoveIt_Allow_Replanning: false
-      # 是否允许用传感器数据更新机器人位置；本站无相关传感器，保持关闭
+      # 是否允许用传感器数据更新机器人位置;本站无相关传感器,保持关闭
       MoveIt_Allow_Sensor_Positioning: false
-      # 单次规划的最大尝试次数；调大提高成功率但规划耗时成倍增加
+      # 单次规划的最大尝试次数;调大提高成功率但规划耗时成倍增加
       MoveIt_Planning_Attempts: 10
-      # 单次规划允许的最长时间，单位 s；与尝试次数共同决定规划阶段的上限耗时
+      # 单次规划允许的最长时间,单位 s;与尝试次数共同决定规划阶段的上限耗时
       MoveIt_Planning_Time: 5
-      # 是否强制笛卡尔直线路径；false 表示允许规划器自行选择路径，通常更容易求出解
+      # 是否强制笛卡尔直线路径;false 表示允许规划器自行选择路径,通常更容易求出解
       MoveIt_Use_Cartesian_Path: false
-      # 是否使用约束感知逆解；false 表示不考虑路径约束做 IK，规划更宽松
+      # 是否使用约束感知逆解;false 表示不考虑路径约束做 IK,规划更宽松
       MoveIt_Use_Constraint_Aware_IK: false
-      # 规划工作空间盒：只在该范围内采样。盒过大降低采样密度与规划效率，盒过小可能规划失败
+      # 规划工作空间盒:只在该范围内采样.盒过大降低采样密度与规划效率,盒过小可能规划失败
       MoveIt_Workspace:
         Center:
           X: 0
           Y: 0
           Z: 0
-        # 工作空间盒边长 (x, y, z)，单位 m；2×2×2 是覆盖整条手臂活动范围的宽松设置
+        # 工作空间盒边长 (x, y, z),单位 m;2×2×2 是覆盖整条手臂活动范围的宽松设置
         Size:
           X: 2
           Y: 2
           Z: 2
-      # 面板显示名（“MotionPlanning”文本同时被主窗口状态引用，不要改名）
+      # 面板显示名("MotionPlanning"文本同时被主窗口状态引用,不要改名)
       Name: MotionPlanning
-      # 规划路径显示：轨迹预览样式与轨迹话题设置
+      # 规划路径显示:轨迹预览样式与轨迹话题设置
       Planned Path:
         Color Enabled: false
         Interrupt Display: false
@@ -279,21 +279,21 @@ Visualization Manager:
             Value: true
         Loop Animation: false
         Robot Alpha: 0
-        # 规划路径上机器人幻影颜色（R; G; B，0~255），与实体模型区分开
+        # 规划路径上机器人幻影颜色(R; G; B,0~255),与实体模型区分开
         Robot Color: 150; 50; 150
-        # 幻影是否显示碰撞体；关闭可减少画面杂乱
+        # 幻影是否显示碰撞体;关闭可减少画面杂乱
         Show Robot Collision: false
-        # 幻影是否显示视觉模型；关闭后只保留轨迹线，避免与实体模型重叠看不清
+        # 幻影是否显示视觉模型;关闭后只保留轨迹线,避免与实体模型重叠看不清
         Show Robot Visual: false
         Show Trail: false
-        # 轨迹回放时每个状态点的停留时间；仅在开启循环动画时有意义
+        # 轨迹回放时每个状态点的停留时间;仅在开启循环动画时有意义
         State Display Time: 0.05 s
         Trail Step Size: 1
-        # 轨迹预览话题；由 move_group 发布，面板订阅后绘制规划结果
+        # 轨迹预览话题;由 move_group 发布,面板订阅后绘制规划结果
         Trajectory Topic: /display_planned_path
-        # 是否使用仿真时间；真机运行时必须为 false，否则轨迹时间轴与真实时钟不一致
+        # 是否使用仿真时间;真机运行时必须为 false,否则轨迹时间轴与真实时钟不一致
         Use Sim Time: false
-      # 规划指标显示：负载、关节力矩、可操作度等文本叠加，调试时使用
+      # 规划指标显示:负载,关节力矩,可操作度等文本叠加,调试时使用
       Planning Metrics:
         Payload: 1
         Show Joint Torques: false
@@ -301,48 +301,48 @@ Visualization Manager:
         Show Manipulability Index: false
         Show Weight Limit: false
         TextHeight: 0.07999999821186066
-      # 规划请求交互设置：目标状态交互标记与起止状态配色，拖拽示教直接操作这里的标记
+      # 规划请求交互设置:目标状态交互标记与起止状态配色,拖拽示教直接操作这里的标记
       Planning Request:
-        # 发生自碰撞的连杆高亮颜色（红）
+        # 发生自碰撞的连杆高亮颜色(红)
         Colliding Link Color: 255; 0; 0
-        # 目标状态幻影透明度，1=完全不透明；拖拽目标标记时保持可见，便于确认目标位置
+        # 目标状态幻影透明度,1=完全不透明;拖拽目标标记时保持可见,便于确认目标位置
         Goal State Alpha: 1
-        # 目标状态幻影颜色（橙）
+        # 目标状态幻影颜色(橙)
         Goal State Color: 250; 128; 0
-        # 目标交互标记尺寸，单位 m（12 cm）；调小便于精细拖拽，调大更容易用鼠标抓住
+        # 目标交互标记尺寸,单位 m(12 cm);调小便于精细拖拽,调大更容易用鼠标抓住
         Interactive Marker Size: 0.12
-        # 关节超限时的连杆高亮颜色（品红）
+        # 关节超限时的连杆高亮颜色(品红)
         Joint Violation Color: 255; 0; 255
-        # 默认规划组名：只含 6 个手臂关节，不含夹爪；必须与 SRDF 中的组名一致
+        # 默认规划组名:只含 6 个手臂关节,不含夹爪;必须与 SRDF 中的组名一致
         Planning Group: arm
-        # 是否在规划前查询/显示目标状态；true 表示界面上的目标标记参与规划
+        # 是否在规划前查询/显示目标状态;true 表示界面上的目标标记参与规划
         Query Goal State: true
-        # 是否查询/显示起始状态；false 表示起点始终取当前实际关节状态
+        # 是否查询/显示起始状态;false 表示起点始终取当前实际关节状态
         Query Start State: false
-        # 是否绘制工作空间盒线框；关闭避免视觉干扰
+        # 是否绘制工作空间盒线框;关闭避免视觉干扰
         Show Workspace: false
-        # 起始状态幻影透明度，1=完全不透明
+        # 起始状态幻影透明度,1=完全不透明
         Start State Alpha: 1
-        # 起始状态幻影颜色（绿）
+        # 起始状态幻影颜色(绿)
         Start State Color: 0; 255; 0
-      # 规划场景话题；订阅它可获得场景中的障碍物与附着物体，用于碰撞显示与检查
+      # 规划场景话题;订阅它可获得场景中的障碍物与附着物体,用于碰撞显示与检查
       Planning Scene Topic: /monitored_planning_scene
-      # 规划面板使用的机器人描述参数名；与 RobotModel 图层的话题来源对应
+      # 规划面板使用的机器人描述参数名;与 RobotModel 图层的话题来源对应
       Robot Description: robot_description
-      # 场景几何显示：碰撞场景中的障碍物/附着物体的绘制样式
+      # 场景几何显示:碰撞场景中的障碍物/附着物体的绘制样式
       Scene Geometry:
-        # 场景几何透明度；0.9 接近不透明，便于看清障碍物边界
+        # 场景几何透明度;0.9 接近不透明,便于看清障碍物边界
         Scene Alpha: 0.8999999761581421
-        # 场景几何颜色（绿）
+        # 场景几何颜色(绿)
         Scene Color: 50; 230; 50
-        # 场景几何保留时间，单位 s；约 10 ms，相当于只显示最新一帧，避免残影
+        # 场景几何保留时间,单位 s;约 10 ms,相当于只显示最新一帧,避免残影
         Scene Display Time: 0.009999999776482582
         Show Scene Geometry: true
-        # 体素着色方式：按 Z 轴高度着色，便于判断障碍物高度
+        # 体素着色方式:按 Z 轴高度着色,便于判断障碍物高度
         Voxel Coloring: Z-Axis
-        # 体素渲染内容：只画被占据的体素，不画空白区域
+        # 体素渲染内容:只画被占据的体素,不画空白区域
         Voxel Rendering: Occupied Voxels
-      # 场景机器人显示：规划场景中的机器人本体样式（与上面的“规划路径”幻影分开设置）
+      # 场景机器人显示:规划场景中的机器人本体样式(与上面的"规划路径"幻影分开设置)
       Scene Robot:
         Attached Body Color: 150; 50; 150
         Links:
@@ -405,62 +405,62 @@ Visualization Manager:
         Show Robot Collision: false
         Show Robot Visual: false
       Value: true
-      # 速度缩放系数（0~1）；0.1 表示只用控制器速度上限的 10%，示教时保持低速
+      # 速度缩放系数(0~1);0.1 表示只用控制器速度上限的 10%,示教时保持低速
       Velocity_Scaling_Factor: 0.1
   Enabled: true
-  # 全局选项：背景色、固定坐标系与渲染帧率
+  # 全局选项:背景色,固定坐标系与渲染帧率
   Global Options:
-    # 3D 视图背景色（深灰，R; G; B）
+    # 3D 视图背景色(深灰,R; G; B)
     Background Color: 48; 48; 48
-    # 固定坐标系：所有显示都相对它渲染；必须与 URDF 根连杆一致，否则模型不可见
+    # 固定坐标系:所有显示都相对它渲染;必须与 URDF 根连杆一致,否则模型不可见
     Fixed Frame: base_link
-    # 渲染帧率，单位 Hz（每秒帧数）；调高更流畅但更占 CPU/GPU
+    # 渲染帧率,单位 Hz(每秒帧数);调高更流畅但更占 CPU/GPU
     Frame Rate: 30
   Name: root
-  # 工具栏：相机操作与交互标记操作两个工具，拖拽目标标记依赖后者
+  # 工具栏:相机操作与交互标记操作两个工具,拖拽目标标记依赖后者
   Tools:
-    # 相机工具（移动视角，不改变机器人状态）
+    # 相机工具(移动视角,不改变机器人状态)
     - Class: rviz_default_plugins/MoveCamera
-    # 交互工具：用于拖动规划面板的目标状态标记
+    # 交互工具:用于拖动规划面板的目标状态标记
     - Class: rviz_default_plugins/Interact
-      # 拖动某个交互标记时隐藏其它标记，避免误抓；仅影响显示，不改变任何目标状态
+      # 拖动某个交互标记时隐藏其它标记,避免误抓;仅影响显示,不改变任何目标状态
       Hide Inactive Objects: true
   Transformation:
     Current:
-      # TF 坐标系图层：显示各坐标系位姿与相对关系
+      # TF 坐标系图层:显示各坐标系位姿与相对关系
       Class: rviz_default_plugins/TF
   Value: true
-  # 视图设置：相机类型（轨道）与初始观察位姿
+  # 视图设置:相机类型(轨道)与初始观察位姿
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      # 相机到焦点的距离，单位 m；约 1.22 m，调小相当于拉近观察
+      # 相机到焦点的距离,单位 m;约 1.22 m,调小相当于拉近观察
       Distance: 1.2225524187088013
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
-      # 相机焦点（轨道中心）在固定坐标系下的坐标，单位 m
+      # 相机焦点(轨道中心)在固定坐标系下的坐标,单位 m
       Focal Point:
         X: 0
         Y: 0
         Z: 0
       Focal Shape Fixed Size: true
-      # 焦点指示图形尺寸，单位 m；5 cm
+      # 焦点指示图形尺寸,单位 m;5 cm
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
-      # 近裁剪面距离，单位 m；约 1 cm，比它更近的物体不渲染（小值便于贴近观察）
+      # 近裁剪面距离,单位 m;约 1 cm,比它更近的物体不渲染(小值便于贴近观察)
       Near Clip Distance: 0.009999999776482582
-      # 相机俯仰角，单位 rad；约 0.32 rad ≈ 18°，即略微俯视工作台
+      # 相机俯仰角,单位 rad;约 0.32 rad ≈ 18°,即略微俯视工作台
       Pitch: 0.3203986883163452
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      # 相机偏航角，单位 rad；约 0.49 rad ≈ 28°
+      # 相机偏航角,单位 rad;约 0.49 rad ≈ 28°
       Yaw: 0.4903937578201294
     Saved: ~
-  # 窗口几何：各面板折叠状态与窗口尺寸/位置，属于纯界面记忆项，不影响任何功能
+  # 窗口几何:各面板折叠状态与窗口尺寸/位置,属于纯界面记忆项,不影响任何功能
 Window Geometry:
   Displays:
     collapsed: false

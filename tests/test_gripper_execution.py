@@ -1,4 +1,4 @@
-"""用假时钟及假写入验证夹爪周期决策与独立对照样本。"""
+"""用假时钟及假写入验证夹爪周期决策与独立对照样本."""
 import json
 from pathlib import Path
 from types import SimpleNamespace

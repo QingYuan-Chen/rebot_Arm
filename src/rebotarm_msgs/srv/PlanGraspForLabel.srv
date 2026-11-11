@@ -1,11 +1,11 @@
-# 按类别名触发一次抓取规划：视觉侧按标签挑出目标并给出最优抓取候选。
+# 按类别名触发一次抓取规划:视觉侧按标签挑出目标并给出最优抓取候选.
 
 # ── 请求 ──────────────────────────────────────────────────────────
-# 目标类别名，需与 Detection2D.class_name / GraspCandidate.class_name 匹配（例如 "bottle"）。
+# 目标类别名,需与 Detection2D.class_name / GraspCandidate.class_name 匹配(例如 "bottle").
 string target_label
 ---
 # ── 响应 ──────────────────────────────────────────────────────────
-# 是否成功产出候选；找不到目标或候选全部被过滤时为 false。
+# 是否成功产出候选;找不到目标或候选全部被过滤时为 false.
 bool success
 # 说明文本：失败原因或结果摘要（英文）。
 string message

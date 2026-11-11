@@ -1,4 +1,4 @@
-"""关节阻抗的真实 MuJoCo 物理、周期、互斥与快照回归。"""
+"""关节阻抗的真实 MuJoCo 物理,周期,互斥与快照回归."""
 from dataclasses import replace
 
 import numpy as np
@@ -15,7 +15,7 @@ DAMPING = (8., 8., 8., 1., .5, .1)
 
 @pytest.fixture
 def sim():
-    # 接触隔离只用于自由空间控制律测试；原模型和运动惯量保持。
+    # 接触隔离只用于自由空间控制律测试;原模型和运动惯量保持.
     with RebotArmMujoco(collisionless=True) as instance:
         yield instance
 

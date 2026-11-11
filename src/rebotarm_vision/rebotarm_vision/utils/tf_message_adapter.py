@@ -1,6 +1,6 @@
-"""ROS TF/Pose 消息与纯数学变换之间的适配层。
+"""ROS TF/Pose 消息与纯数学变换之间的适配层.
 
-本模块不创建 ROS 节点，也不查询 TF；调用方提供已经查询到的变换消息。
+本模块不创建 ROS 节点,也不查询 TF;调用方提供已经查询到的变换消息.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from .transform_points import Transform3D, quaternion_to_rotation_matrix, transf
 
 
 def transform_from_msg(tf_msg: TransformStamped) -> Transform3D:
-    """将 TF 消息转换为平移单位 m、四元数顺序 xyzw 的内部变换。"""
+    """将 TF 消息转换为平移单位 m,四元数顺序 xyzw 的内部变换."""
 
     translation = tf_msg.transform.translation
     rotation = tf_msg.transform.rotation
@@ -24,7 +24,7 @@ def transform_from_msg(tf_msg: TransformStamped) -> Transform3D:
 
 
 def transform_pose_message(pose: Pose, transform: Transform3D) -> Pose:
-    """将 Pose 从源坐标系变换到目标坐标系，返回副本且不修改输入。"""
+    """将 Pose 从源坐标系变换到目标坐标系,返回副本且不修改输入."""
 
     transformed = deepcopy(pose)
     position, orientation = transform_pose_components(
@@ -51,7 +51,7 @@ def apply_tcp_offset_to_pose(
     grasp_tcp_pose: Pose,
     tcp_offset_xyz: tuple[float, float, float],
 ) -> Pose:
-    """把 TCP 位姿换算为末端连杆位姿，返回副本且保持原姿态。"""
+    """把 TCP 位姿换算为末端连杆位姿,返回副本且保持原姿态."""
 
     target = deepcopy(grasp_tcp_pose)
     rotation = quaternion_to_rotation_matrix(

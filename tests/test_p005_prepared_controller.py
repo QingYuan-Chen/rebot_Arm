@@ -1,12 +1,12 @@
-"""continuous 正式控制器所有者与设备周期的假设备回归。
+"""continuous 正式控制器所有者与设备周期的假设备回归.
 
-文件职责：验证资源预约、原子接纳、周期采样、成功保持、失败不确认以及取消/重连失效。
-对外接口：pytest 用例；enabled_manager/reserve/shutdown 复用正式装配和假驱动夹具。
-安全约束：connect/enable 只作用于内存假设备，不打开真实串口；不把任务成功当作实机物理证据。
-    用例中的少量 Action 替身只隔离协议竞态，周期与发送用例仍运行正式所有者。
-文件结构：就绪与交接夹具 → 正式周期/上下文/夹爪测试 → 发送失败与延迟
-    → Goal 身份及迟到响应 → 停靠接替、场景变化和取消回执顺序。
-历史参数 dimensions=7 现在表示六轴加独立夹爪组合，不表示七轴 FJT。
+文件职责:验证资源预约,原子接纳,周期采样,成功保持,失败不确认以及取消/重连失效.
+对外接口:pytest 用例;enabled_manager/reserve/shutdown 复用正式装配和假驱动夹具.
+安全约束:connect/enable 只作用于内存假设备,不打开真实串口;不把任务成功当作实机物理证据.
+    用例中的少量 Action 替身只隔离协议竞态,周期与发送用例仍运行正式所有者.
+文件结构:就绪与交接夹具 → 正式周期/上下文/夹爪测试 → 发送失败与延迟
+    → Goal 身份及迟到响应 → 停靠接替,场景变化和取消回执顺序.
+历史参数 dimensions=7 现在表示六轴加独立夹爪组合,不表示七轴 FJT.
 """
 from dataclasses import replace
 import time
@@ -22,7 +22,7 @@ from rebotarm_motion.trajectory_preparation import point_to_point
 
 
 def enabled_manager(monkeypatch):
-    """等待六轴和夹爪各自的连续静止证据，避免用单帧或强改 ready 标志绕过准入。"""
+    """等待六轴和夹爪各自的连续静止证据,避免用单帧或强改 ready 标志绕过准入."""
     manager, buses = make_local_manager(monkeypatch)
     manager.lifecycle.connect()
     manager.lifecycle.enable()
@@ -33,7 +33,7 @@ def enabled_manager(monkeypatch):
 
 
 def reserve(manager, duration=.4):
-    """按真实预约身份构造同值准备载荷；这里只替代远端准备服务，不跳过后端接纳检查。"""
+    """按真实预约身份构造同值准备载荷;这里只替代远端准备服务,不跳过后端接纳检查."""
     token = manager.arm.reserve_arm_preparation(time.monotonic()+2.)
     target = list(token.hold)
     target[0] += .02
@@ -106,7 +106,7 @@ def test_prepared_curve_uses_actual_writer_cycle_and_final_command_hold(monkeypa
 
 @pytest.mark.parametrize('residual', [.003, .01])
 def test_stationary_hold_residual_allows_two_checked_trajectories_without_reanchoring(monkeypatch,residual):
-    """假电机保留固定跟踪残差，正式静止、准备及接纳不能借旧目标距离间接拒绝。"""
+    """假电机保留固定跟踪残差,正式静止,准备及接纳不能借旧目标距离间接拒绝."""
     from rebotarm_motion.trajectory_preparation import PreparationContext, analyze_trajectory, load_reference_limits
     from pathlib import Path
     manager,opened=make_local_manager(monkeypatch)
@@ -200,7 +200,7 @@ def test_preparation_reserves_arm_gripper_and_cancel_waits_for_stop(monkeypatch)
 
 @pytest.mark.parametrize('dimensions', [6, 7])
 def test_finger_position_change_without_new_owner_does_not_reject_checked_trajectory(monkeypatch, dimensions):
-    """夹爪位置变化不再按量化偏差拒绝，原预约和发送确认仍须完整收尾。"""
+    """夹爪位置变化不再按量化偏差拒绝,原预约和发送确认仍须完整收尾."""
     manager, bus = enabled_manager(monkeypatch)
     try:
         follow_gripper(bus, monkeypatch)
@@ -241,7 +241,7 @@ def test_prepared_partial_write_failure_does_not_acknowledge_candidate(monkeypat
     try:
         token, curve, handoff = reserve(manager)
         previous = manager.runtime.execution.last_sent_target
-        # 第三轴失败意味着前两轴可能已发送；整批不能被确认，更不能更新保持证据。
+        # 第三轴失败意味着前两轴可能已发送;整批不能被确认,更不能更新保持证据.
         bus.failure = (3, 'position')
         manager.arm.admit_prepared_arm_trajectory(token, handoff)
         wait_until(lambda: not manager.runtime.control_loop_active)
@@ -262,7 +262,7 @@ def test_delayed_cycle_samples_current_time_without_replaying_backlog():
     first = execution.sample(10.05)
     assert execution.progress == 0.
     later = execution.sample(10.29)
-    # 采样本身不推进确认；必须显式 acknowledge 才能改写 last_sent_target。
+    # 采样本身不推进确认;必须显式 acknowledge 才能改写 last_sent_target.
     assert later.positions == pytest.approx(curve.sample(.29)[0])
     assert later.positions[0] > first.positions[0]
     assert execution.last_sent_target is None
@@ -300,7 +300,7 @@ def test_action_preparations_remain_bound_to_their_goal_after_invalidation():
         assert actions.trajectory_goal_callback(request) == GoalResponse.ACCEPT
     expected = [actions._pending_preparations[id(request)][1] for request in requests]
     for request in reversed(requests):
-        # 倒序返回模拟旧 Goal 的迟到回调，必须分别使用原预约，不能串用最后一个令牌。
+        # 倒序返回模拟旧 Goal 的迟到回调,必须分别使用原预约,不能串用最后一个令牌.
         handle = SimpleNamespace(request=request, is_cancel_requested=False, abort=lambda: None)
         actions.execute_follow_joint_trajectory(handle)
     assert seen == expected[::-1]
@@ -371,7 +371,7 @@ def test_action_cancel_invalidates_owner_before_returning_acceptance():
 
 
 def coordinated_reserve(manager, duration=.4, finger=.005):
-    """网页组合：六轴已检查曲线与独立夹爪目标，不存在第七轴参考。"""
+    """网页组合:六轴已检查曲线与独立夹爪目标,不存在第七轴参考."""
     token = manager.arm.reserve_arm_preparation(time.monotonic()+2.,web=True,
         gripper_command=(finger*2.,1.))
     start = token.hold
@@ -505,7 +505,7 @@ def test_diagnostic_hold_residual_no_longer_rejects_or_changes_hold(monkeypatch)
 @pytest.mark.parametrize('dimensions', [6, 7])
 @pytest.mark.parametrize('residual', [.003, .01])
 def test_cancel_with_stationary_residual_releases_resources_and_allows_next_goal(monkeypatch, dimensions, residual):
-    """取消后的静止不依赖目标残差；反复空闲停止保留原保持命令，不逐次追锚。"""
+    """取消后的静止不依赖目标残差;反复空闲停止保留原保持命令,不逐次追锚."""
     manager, bus = enabled_manager(monkeypatch)
     try:
         follow_gripper(bus, monkeypatch)
@@ -522,7 +522,7 @@ def test_cancel_with_stationary_residual_releases_resources_and_allows_next_goal
         time.sleep(.04)
         manager.arm.stop_active_motion(task)
         assert task.event.is_set() and task.result.state == 'canceled'
-        if dimensions == 7:  # 历史参数名：现在表示六轴加独立夹爪组合，不是七轴 FJT。
+        if dimensions == 7:  # 历史参数名:现在表示六轴加独立夹爪组合,不是七轴 FJT.
             arm_state, gripper_state = manager.arm.teleop_execution_status(task)
             assert arm_state == 'canceled' and gripper_state == 'failed'
         assert not manager.runtime.arm_resource_reserved
@@ -543,7 +543,7 @@ def test_cancel_with_stationary_residual_releases_resources_and_allows_next_goal
 @pytest.mark.parametrize('previous_result', ['succeeded', 'canceled', 'aborted'])
 @pytest.mark.parametrize('dimensions', [6, 7])
 def test_old_coordinated_terminal_cannot_finalize_next_task(monkeypatch, previous_result, dimensions):
-    """旧终态不能提前释放新预约，也不能使新成功任务永久占用资源。"""
+    """旧终态不能提前释放新预约,也不能使新成功任务永久占用资源."""
     manager, bus = enabled_manager(monkeypatch)
     try:
         follow_gripper(bus, monkeypatch)
@@ -577,7 +577,7 @@ def test_old_coordinated_terminal_cannot_finalize_next_task(monkeypatch, previou
 
 @pytest.mark.parametrize('fault', [None, 'gripper_timeout', 'arm_velocity'])
 def test_coordinated_stop_waits_for_both_sides_without_restart_or_late_cleanup(monkeypatch, fault):
-    """机械臂先停稳时仍加入原事务；超时保留预约，旧续体不能清理后继准备。"""
+    """机械臂先停稳时仍加入原事务;超时保留预约,旧续体不能清理后继准备."""
     manager, bus = enabled_manager(monkeypatch)
     allow_gripper = threading.Event()
     workers, errors = [], []

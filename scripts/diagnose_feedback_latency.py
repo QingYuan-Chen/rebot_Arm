@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""无硬件反馈延迟对照工具。
+"""无硬件反馈延迟对照工具.
 
-职责：用生产 JointStatePublisher 发布内存缓存，在独立进程比较 ROS 单线程与
-多线程接收，记录源时间、发布时刻、DDS 时间、回调入口和独立监测时的数据年龄。
-接口：指定空闲 --domain-id、--output-dir；--with-pose 加入空闲位姿兼容节点，
---without-qos-events 仅用于隔离默认 QoS 事件等待的影响。
-约束：不用 HardwareManager、不导入设备 SDK、不打开串口、不创建运动客户端。
-数据是假反馈，不能当作真机验收。150 ms 门限与生产时间戳语义保持不变。
+职责:用生产 JointStatePublisher 发布内存缓存,在独立进程比较 ROS 单线程与
+多线程接收,记录源时间,发布时刻,DDS 时间,回调入口和独立监测时的数据年龄.
+接口:指定空闲 --domain-id,--output-dir;--with-pose 加入空闲位姿兼容节点,
+--without-qos-events 仅用于隔离默认 QoS 事件等待的影响.
+约束:不用 HardwareManager,不导入设备 SDK,不打开串口,不创建运动客户端.
+数据是假反馈,不能当作真机验收.150 ms 门限与生产时间戳语义保持不变.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def arguments():
     parser.add_argument('--duration', type=float, default=20.)
     parser.add_argument('--with-pose', action='store_true')
     parser.add_argument('--without-qos-events', action='store_true')
-    # 子进程也用相同脚本，避免通过 shell 拼接命令或改变全局 ROS 环境。
+    # 子进程也用相同脚本,避免通过 shell 拼接命令或改变全局 ROS 环境.
     parser.add_argument('--role', choices=('run', 'pub', 'sub', 'pose'), default='run', help=argparse.SUPPRESS)
     parser.add_argument('--executor', choices=('single', 'multi'), default='multi', help=argparse.SUPPRESS)
     parser.add_argument('--namespace', default='feedback_latency_probe', help=argparse.SUPPRESS)
@@ -44,7 +44,7 @@ def arguments():
 
 
 class BlockDevices(importlib.abc.MetaPathFinder):
-    """本工具只允许消息与纯计算依赖；误引入设备访问时立即失败。"""
+    """本工具只允许消息与纯计算依赖;误引入设备访问时立即失败."""
 
     def find_spec(self, fullname, *args):
         if fullname.split('.')[0] in ('reBotArm_control_py', 'motorbridge', 'damiao_motor', 'serial'):
@@ -57,7 +57,7 @@ def write_rows(path, rows):
 
 
 def probe(args):
-    """单个角色的有界采样；先在内存记录，结束后写盘，避免观测日志阻塞回调。"""
+    """单个角色的有界采样;先在内存记录,结束后写盘,避免观测日志阻塞回调."""
     import rclpy
     from rclpy.callback_groups import ReentrantCallbackGroup
     from rclpy.event_handler import SubscriptionEventCallbacks
@@ -75,7 +75,7 @@ def probe(args):
 
     if args.role == 'pose':
         from rebotarm_motion.pose_compat_node import PoseCompatNode
-        # 只创建协议接口；没有控制器、动作请求或设备访问入口。
+        # 只创建协议接口;没有控制器,动作请求或设备访问入口.
         node = PoseCompatNode()
     else:
         node = Node('feedback_latency_'+args.role)
@@ -143,7 +143,7 @@ def probe(args):
                 stamp, received = stamp_ns(msg), time.monotonic()
                 with snapshot_lock:
                     latest[topic] = (stamp, received)
-                # Jazzy 的 MessageInfo 是字典；DDS 时间为墙钟，不与单调时钟直接相减。
+                # Jazzy 的 MessageInfo 是字典;DDS 时间为墙钟,不与单调时钟直接相减.
                 record('callback', topic=topic, stamp=stamp,
                        dds_source=info['source_timestamp'], dds_received=info['received_timestamp'])
             return receive
@@ -163,7 +163,7 @@ def probe(args):
             while not stop.wait(.005):
                 if time.monotonic()-started < 2.:
                     continue
-                # 回调与监测使用同一份完整快照，避免把并发读写误判成消息不同步。
+                # 回调与监测使用同一份完整快照,避免把并发读写误判成消息不同步.
                 with snapshot_lock:
                     snapshot = dict(latest)
                 wall, mono = time.time_ns(), time.monotonic()
@@ -186,7 +186,7 @@ def probe(args):
         stop.set()
         for worker in workers:
             worker.join(timeout=2.)
-        # 先停止并等待执行器线程，再销毁节点；不在运行中销毁回调使用的句柄。
+        # 先停止并等待执行器线程,再销毁节点;不在运行中销毁回调使用的句柄.
         executor.shutdown(timeout_sec=5.)
         record('summary', elapsed=time.monotonic()-started, cpu=time.process_time()-cpu_start)
         node.destroy_node()
@@ -201,7 +201,7 @@ def stamp_ns(msg):
 def summarize(path):
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     callbacks = [row for row in rows if row['event'] == 'callback']
-    # 去掉发现与启动窗口；发布进程比接收端多活 3 秒，不把收尾断流计入过期。
+    # 去掉发现与启动窗口;发布进程比接收端多活 3 秒,不把收尾断流计入过期.
     first = min((row['mono'] for row in callbacks), default=float('inf'))+2.
     callbacks = [row for row in callbacks if row['mono'] >= first]
     joints = [row for row in callbacks if row['topic'].endswith('/joints/joint1/state')]
@@ -234,7 +234,7 @@ def publisher_summary(path):
 
 
 def run(args):
-    """顺序运行两组对照；只终止本工具创建的无硬件子进程。"""
+    """顺序运行两组对照;只终止本工具创建的无硬件子进程."""
     import rclpy
     from rclpy.node import Node
     from rclpy.utilities import get_rmw_implementation_identifier
@@ -298,7 +298,7 @@ def run(args):
 
 
 def main():
-    # ROS 参数仅交给 ROS 初始化，避免和本工具参数互相解析。
+    # ROS 参数仅交给 ROS 初始化,避免和本工具参数互相解析.
     ros_args = sys.argv.index('--ros-args') if '--ros-args' in sys.argv else len(sys.argv)
     extra_ros = sys.argv[ros_args:]
     sys.argv = sys.argv[:ros_args]

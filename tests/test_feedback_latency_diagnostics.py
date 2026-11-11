@@ -1,4 +1,4 @@
-"""延迟证据汇总：接收空档不能被恢复后的新帧或缺失 DDS 时间戳掩盖。"""
+"""延迟证据汇总:接收空档不能被恢复后的新帧或缺失 DDS 时间戳掩盖."""
 import importlib.util
 from pathlib import Path
 

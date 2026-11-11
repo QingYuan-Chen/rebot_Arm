@@ -1,4 +1,4 @@
-"""保护锁存和透传准入的纯值对照；不访问设备。"""
+"""保护锁存和透传准入的纯值对照;不访问设备."""
 from dataclasses import replace
 
 import pytest

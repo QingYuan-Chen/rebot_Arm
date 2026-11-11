@@ -1,27 +1,27 @@
-"""D405 候选深度探针：按配置区间统计深度及重复测量离散度。
+"""D405 候选深度探针:按配置区间统计深度及重复测量离散度.
 
 用途与位置
 ----------
-这是一个诊断/验收辅助节点，不参与正式抓取链路：它订阅抓取候选话题，连续采集若干帧
-目标候选的深度值，输出均值/极值/标准差与逐样本的深度状态，最后给出
-``d405_close_depth_usable`` 统计结论。默认区间取产品标称的 7–50 cm，
-实际精度需通过已知距离样本复核；诊断结果只供操作员查看。
+这是一个诊断/验收辅助节点,不参与正式抓取链路:它订阅抓取候选话题,连续采集若干帧
+目标候选的深度值,输出均值/极值/标准差与逐样本的深度状态,最后给出
+``d405_close_depth_usable`` 统计结论.默认区间取产品标称的 7-50 cm,
+实际精度需通过已知距离样本复核;诊断结果只供操作员查看.
 
 接口与行为
 ----------
-- 订阅：``input_topic``（默认 ``/grasp/graspnet_candidates``，类型为抓取候选数组）。
-- 发布：无。写服务/动作：无。本节点不发布任何运动请求，也不使能硬件。
-- 采满 ``sample_count`` 个样本后打印汇总并主动关闭运行时退出，因此适合脚本化调用：
-  ``ros2 run <本包> rebotarm_grasp_depth_probe``（可带 ``-p`` 覆盖参数）。
-- 参数均在构造时声明，运行期每帧重新读取，因此可以用参数服务在线调整阈值。
+- 订阅:``input_topic``(默认 ``/grasp/graspnet_candidates``,类型为抓取候选数组).
+- 发布:无.写服务/动作:无.本节点不发布任何运动请求,也不使能硬件.
+- 采满 ``sample_count`` 个样本后打印汇总并主动关闭运行时退出,因此适合脚本化调用:
+  ``ros2 run <本包> rebotarm_grasp_depth_probe``(可带 ``-p`` 覆盖参数).
+- 参数均在构造时声明,运行期每帧重新读取,因此可以用参数服务在线调整阈值.
 
 坐标与单位
 ----------
-``candidate.pose`` 在候选消息头声明的坐标系里（由候选生成侧决定，日志按相机坐标系
-解读为 camera_xyz），位置单位为 m；这里取位置的 z 分量作为深度，并与绝对阈值、
-相机可靠测距区间比较。夹爪宽度
-``jaw_width`` 与 ``object_length`` 也是 m，只用于汇总展示（判断目标尺寸是否与
-当前深度下的测量一致），不参与状态判定。
+``candidate.pose`` 在候选消息头声明的坐标系里(由候选生成侧决定,日志按相机坐标系
+解读为 camera_xyz),位置单位为 m;这里取位置的 z 分量作为深度,并与绝对阈值,
+相机可靠测距区间比较.夹爪宽度
+``jaw_width`` 与 ``object_length`` 也是 m,只用于汇总展示(判断目标尺寸是否与
+当前深度下的测量一致),不参与状态判定.
 """
 
 from __future__ import annotations
@@ -37,28 +37,28 @@ from rebotarm_msgs.msg import GraspCandidateArray
 
 
 class GraspDepthProbeNode(Node):
-    """采集目标候选深度样本并判定近距离深度可用性的节点。
+    """采集目标候选深度样本并判定近距离深度可用性的节点.
 
-    生命周期：由 ``main`` 创建后一直 spin，直到采满样本数（回调内主动关闭运行时）
-    或被 Ctrl-C 中断。回调在单线程执行器里串行执行，样本列表无需加锁；样本只增不
-    清，跨帧累积，因此要求候选在采集期间保持静止。
+    生命周期:由 ``main`` 创建后一直 spin,直到采满样本数(回调内主动关闭运行时)
+    或被 Ctrl-C 中断.回调在单线程执行器里串行执行,样本列表无需加锁;样本只增不
+    清,跨帧累积,因此要求候选在采集期间保持静止.
 
-    参数（全部可在启动时覆盖）：
-    - ``input_topic``：候选来源话题，默认 ``/grasp/graspnet_candidates``。
-    - ``sample_count``：汇总所需的样本数，构造时钳到至少 1。
-    - ``absolute_min_depth_m``：绝对最近可信距离；更近直接判 ``too_close_unreliable``。
-    - ``min_reliable_depth_m``：可靠区下限；介于绝对下限与它之间判 ``near_limit``。
-    - ``max_reliable_depth_m``：可靠区上限；更远判 ``too_far``。
-    - ``max_depth_std_m``：样本深度标准差上限，超过则整体判定不可用（离散度约束，
-      与逐样本状态判定相互独立）。
-    - ``target_class``：只采集该类别名的候选；为空表示不按类别筛选。
+    参数(全部可在启动时覆盖):
+    - ``input_topic``:候选来源话题,默认 ``/grasp/graspnet_candidates``.
+    - ``sample_count``:汇总所需的样本数,构造时钳到至少 1.
+    - ``absolute_min_depth_m``:绝对最近可信距离;更近直接判 ``too_close_unreliable``.
+    - ``min_reliable_depth_m``:可靠区下限;介于绝对下限与它之间判 ``near_limit``.
+    - ``max_reliable_depth_m``:可靠区上限;更远判 ``too_far``.
+    - ``max_depth_std_m``:样本深度标准差上限,超过则整体判定不可用(离散度约束,
+      与逐样本状态判定相互独立).
+    - ``target_class``:只采集该类别名的候选;为空表示不按类别筛选.
     """
 
     def __init__(self) -> None:
         super().__init__("rebotarm_grasp_depth_probe")
         self.declare_parameter("input_topic", "/grasp/graspnet_candidates")
         self.declare_parameter("sample_count", 20)
-        # D405 标称工作区间；仅用于诊断，不修改正式候选筛选阈值。
+        # D405 标称工作区间;仅用于诊断,不修改正式候选筛选阈值.
         self.declare_parameter("min_reliable_depth_m", 0.07)
         self.declare_parameter("absolute_min_depth_m", 0.07)
         self.declare_parameter("max_reliable_depth_m", 0.50)
@@ -67,7 +67,7 @@ class GraspDepthProbeNode(Node):
         self._samples: list[float] = []
         self._last_widths: list[float] = []
         self._last_lengths: list[float] = []
-        # 样本数为 0 会导致永远无法汇总，这里构造时就钳到至少 1。
+        # 样本数为 0 会导致永远无法汇总,这里构造时就钳到至少 1.
         self._sample_count = max(int(self.get_parameter("sample_count").value), 1)
         self._target_class = str(self.get_parameter("target_class").value).strip()
         self.create_subscription(
@@ -82,7 +82,7 @@ class GraspDepthProbeNode(Node):
         )
 
     def _on_candidates(self, msg: GraspCandidateArray) -> None:
-        """每帧候选回调：选一个目标、记一组样本、打印状态，采满后输出汇总并退出。"""
+        """每帧候选回调:选一个目标,记一组样本,打印状态,采满后输出汇总并退出."""
         candidate = self._select_candidate(msg)
         if candidate is None:
             self.get_logger().warn("no grasp candidate received in this frame")
@@ -106,11 +106,11 @@ class GraspDepthProbeNode(Node):
             rclpy.shutdown()
 
     def _select_candidate(self, msg: GraspCandidateArray):
-        """从一帧候选中挑出要采样的目标。
+        """从一帧候选中挑出要采样的目标.
 
-        指定 ``target_class`` 时按类别名精确匹配（区分大小写），找不到就返回 None——
-        宁可本帧不采样，也不混入其他类别的深度。未指定类别时优先用数组的
-        ``best_index``；下标非法（空列表为 -1 或越界）时退回第一个候选。
+        指定 ``target_class`` 时按类别名精确匹配(区分大小写),找不到就返回 None-
+        宁可本帧不采样,也不混入其他类别的深度.未指定类别时优先用数组的
+        ``best_index``;下标非法(空列表为 -1 或越界)时退回第一个候选.
         """
         if not msg.candidates:
             return None
@@ -125,12 +125,12 @@ class GraspDepthProbeNode(Node):
         return msg.candidates[0]
 
     def _depth_status(self, depth_m: float) -> str:
-        """给出单个深度样本的状态标签。
+        """给出单个深度样本的状态标签.
 
-        返回值为稳定的英文枚举（会被写入日志并被汇总逻辑复用，不可翻译）：
-        "invalid"（非有限值或非正，通常是无效测量）、"too_close_unreliable"
-        （近于绝对下限，测距不可信）、"near_limit"（在绝对下限与可靠下限之间，勉强
-        可用）、"too_far"（超过可靠上限）、"reliable"（落在可靠区间内）。
+        返回值为稳定的英文枚举(会被写入日志并被汇总逻辑复用,不可翻译):
+        "invalid"(非有限值或非正,通常是无效测量),"too_close_unreliable"
+        (近于绝对下限,测距不可信),"near_limit"(在绝对下限与可靠下限之间,勉强
+        可用),"too_far"(超过可靠上限),"reliable"(落在可靠区间内).
         """
         if not math.isfinite(depth_m) or depth_m <= 0.0:
             return "invalid"
@@ -146,12 +146,12 @@ class GraspDepthProbeNode(Node):
         return "reliable"
 
     def _print_summary(self) -> None:
-        """输出样本统计与最终结论。
+        """输出样本统计与最终结论.
 
-        统计前先剔除无效深度（非有限或非正）。整体可用需同时满足两条：所有有效样本
-        状态都是 "reliable"（即在可靠区间内），且样本标准差不超过 ``max_depth_std_m``
-        （重复测量一致性足够）。只有一个样本时标准差按 0 处理。标准差用的是总体
-        标准差，样本本身就是全部观测，不做无偏修正。
+        统计前先剔除无效深度(非有限或非正).整体可用需同时满足两条:所有有效样本
+        状态都是 "reliable"(即在可靠区间内),且样本标准差不超过 ``max_depth_std_m``
+        (重复测量一致性足够).只有一个样本时标准差按 0 处理.标准差用的是总体
+        标准差,样本本身就是全部观测,不做无偏修正.
         """
         depths = [value for value in self._samples if math.isfinite(value) and value > 0.0]
         if not depths:
@@ -181,10 +181,10 @@ class GraspDepthProbeNode(Node):
 
 
 def main(args: Optional[list[str]] = None) -> None:
-    """命令行入口：初始化运行时、创建节点并 spin。
+    """命令行入口:初始化运行时,创建节点并 spin.
 
-    Ctrl-C（KeyboardInterrupt）视为正常结束。注意收尾顺序：只有在运行时仍然有效时才
-    销毁节点并关闭；若回调已经采满样本主动关闭过运行时，这里不能再关一次。
+    Ctrl-C(KeyboardInterrupt)视为正常结束.注意收尾顺序:只有在运行时仍然有效时才
+    销毁节点并关闭;若回调已经采满样本主动关闭过运行时,这里不能再关一次.
     """
     rclpy.init(args=args)
     node = GraspDepthProbeNode()

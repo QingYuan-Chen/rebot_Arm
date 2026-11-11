@@ -1,4 +1,4 @@
-"""隔离状态桥与真实 robot_state_publisher，对照独立 Pinocchio FK 和历史时间。"""
+"""隔离状态桥与真实 robot_state_publisher,对照独立 Pinocchio FK 和历史时间."""
 import json
 from pathlib import Path
 import subprocess
@@ -73,7 +73,7 @@ try:
         message.header.stamp = source.get_clock().now().to_msg()
         message.name, message.position = [f'joint{i}' for i in range(1,7)],pose.tolist()
         message.header.frame_id = 'base_link'
-        # 每个姿态采用独立源时间，重复发送同一帧仅等待 DDS 发现与交付。
+        # 每个姿态采用独立源时间,重复发送同一帧仅等待 DDS 发现与交付.
         timestamp = Time.from_msg(message.header.stamp)
         def delivered():
             publisher.publish(message)

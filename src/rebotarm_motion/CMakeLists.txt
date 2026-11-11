@@ -1,7 +1,7 @@
-# 文件职责：同时安装运动层 Python 节点和 MoveIt C++ 适配插件。
-# 对外接口：保留既有可执行名；导出响应适配器及绑定校验控制器管理插件。
-# 安全约束：构建不访问设备；C++ 仅转换协议，数值重定时仍由 Python 算法负责。
-# 文件结构：依赖 → Python 安装 → 插件 → 可执行入口及资源。
+# 文件职责:同时安装运动层 Python 节点和 MoveIt C++ 适配插件.
+# 对外接口:保留既有可执行名;导出响应适配器及绑定校验控制器管理插件.
+# 安全约束:构建不访问设备;C++ 仅转换协议,数值重定时仍由 Python 算法负责.
+# 文件结构:依赖 → Python 安装 → 插件 → 可执行入口及资源.
 cmake_minimum_required(VERSION 3.16)
 project(rebotarm_motion)
 find_package(ament_cmake REQUIRED)
@@ -21,7 +21,7 @@ install(TARGETS rebotarm_execution_adapters LIBRARY DESTINATION lib)
 function(python_entry name module)
   set(entry "${CMAKE_CURRENT_BINARY_DIR}/${name}")
   file(WRITE "${entry}" "#!${Python3_EXECUTABLE}\nfrom ${module} import main\nif __name__ == '__main__':\n    main()\n")
-  # 符号链接安装指向构建目录，生成的脚本本身也必须可执行。
+  # 符号链接安装指向构建目录,生成的脚本本身也必须可执行.
   file(CHMOD "${entry}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
   install(PROGRAMS "${entry}" DESTINATION lib/${PROJECT_NAME})
 endfunction()

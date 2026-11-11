@@ -1,4 +1,4 @@
-"""依次组合视觉输入、抓取候选生成、筛选和标记显示。"""
+"""依次组合视觉输入,抓取候选生成,筛选和标记显示."""
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource

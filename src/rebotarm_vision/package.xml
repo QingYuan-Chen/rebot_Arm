@@ -1,48 +1,48 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <!-- 包名：视觉包。负责相机与深度输入、目标检测、深度融合、抓取候选生成与评分。 -->
+  <!-- 包名:视觉包.负责相机与深度输入,目标检测,深度融合,抓取候选生成与评分. -->
   <name>rebotarm_vision</name>
-  <!-- 版本号 0.1.0：主版本.次版本.修订号，随包内容变更递增。 -->
+  <!-- 版本号 0.1.0:主版本.次版本.修订号,随包内容变更递增. -->
   <version>0.1.0</version>
-  <!-- D405 感知、候选筛选及显示。 -->
+  <!-- D405 感知,候选筛选及显示. -->
   <description>ROS 2 D405 vision node for reBotArm grasp candidates.</description>
-  <!-- 维护者与联系邮箱，用于包索引展示与问题反馈。 -->
+  <!-- 维护者与联系邮箱,用于包索引展示与问题反馈. -->
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
-  <!-- 许可证标识（Apache-2.0）。 -->
+  <!-- 许可证标识(Apache-2.0). -->
   <license>Apache-2.0</license>
 
-  <!-- 构建工具依赖：本包是纯 Python 包，用 ament_python 构建（可执行入口在 setup.py 的 console_scripts）。 -->
+  <!-- 构建工具依赖:本包是纯 Python 包,用 ament_python 构建(可执行入口在 setup.py 的 console_scripts). -->
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- 以下为运行期依赖（exec_depend）：只在运行时 import 或启动阶段使用，不参与编译。 -->
-  <!-- 查询包 share 目录，用于定位模型权重、标定与配置文件等资源。 -->
+  <!-- 以下为运行期依赖(exec_depend):只在运行时 import 或启动阶段使用,不参与编译. -->
+  <!-- 查询包 share 目录,用于定位模型权重,标定与配置文件等资源. -->
   <exec_depend>ament_index_python</exec_depend>
-  <!-- 标准几何消息：位姿（Pose/PoseStamped）与点等抓取目标与预览话题的消息类型。 -->
+  <!-- 标准几何消息:位姿(Pose/PoseStamped)与点等抓取目标与预览话题的消息类型. -->
   <exec_depend>geometry_msgs</exec_depend>
-  <!-- 运动规划框架的消息与服务：候选位姿的逆解查询与状态有效性检查。 -->
+  <!-- 运动规划框架的消息与服务:候选位姿的逆解查询与状态有效性检查. -->
   <exec_depend>moveit_msgs</exec_depend>
-  <!-- 可视化消息：RViz 中显示抓取候选与标记数组。 -->
+  <!-- 可视化消息:RViz 中显示抓取候选与标记数组. -->
   <exec_depend>visualization_msgs</exec_depend>
-  <!-- 启动框架：编写 launch 脚本。 -->
+  <!-- 启动框架:编写 launch 脚本. -->
   <exec_depend>launch</exec_depend>
-  <!-- 启动框架的节点侧扩展：组合并启动各节点、传参。 -->
+  <!-- 启动框架的节点侧扩展:组合并启动各节点,传参. -->
   <exec_depend>launch_ros</exec_depend>
-  <!-- Python 客户端库：节点、话题、服务、动作、参数与执行器。 -->
+  <!-- Python 客户端库:节点,话题,服务,动作,参数与执行器. -->
   <exec_depend>rclpy</exec_depend>
-  <!-- 本仓库自定义消息与服务：检测结果、抓取候选/规划、夹爪与位姿执行接口。 -->
+  <!-- 本仓库自定义消息与服务:检测结果,抓取候选/规划,夹爪与位姿执行接口. -->
   <exec_depend>rebotarm_msgs</exec_depend>
-  <!-- 传感器消息：彩色/深度图像与相机内参消息类型。 -->
+  <!-- 传感器消息:彩色/深度图像与相机内参消息类型. -->
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- 标准消息包：基础类型与 Header 等通用消息（供消息字段与外部接口使用）。 -->
+  <!-- 标准消息包:基础类型与 Header 等通用消息(供消息字段与外部接口使用). -->
   <exec_depend>std_msgs</exec_depend>
-  <!-- 标准服务：Trigger 之类的空请求/布尔响应服务。 -->
+  <!-- 标准服务:Trigger 之类的空请求/布尔响应服务. -->
   <exec_depend>std_srvs</exec_depend>
-  <!-- 坐标变换监听：把候选与抓取位姿从相机系变换到规划/基座系。 -->
+  <!-- 坐标变换监听:把候选与抓取位姿从相机系变换到规划/基座系. -->
   <exec_depend>tf2_ros</exec_depend>
 
   <export>
-    <!-- 构建类型：ament_python，对应 setup.py/setup.cfg 安装方式。 -->
+    <!-- 构建类型:ament_python,对应 setup.py/setup.cfg 安装方式. -->
     <build_type>ament_python</build_type>
   </export>
 </package>

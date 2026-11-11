@@ -316,7 +316,7 @@ def package_file(package, relative):
         if not path.is_file():
             raise FileNotFoundError(f'missing {path}')
         return path
-    # 本模块平铺于包根，parents[2] 为源码工作区的 src/。
+    # 本模块平铺于包根,parents[2] 为源码工作区的 src/.
     path = Path(__file__).resolve().parents[2] / package / relative
     if not path.is_file():
         raise FileNotFoundError(f'missing {path}')
@@ -389,7 +389,7 @@ class GravityExecutionState:
         return gravity + self.integral
 
 
-# 保留当前已校核的单位补偿增益；迁移不改变各轴前馈。
+# 保留当前已校核的单位补偿增益;迁移不改变各轴前馈.
 _GC_TAU_SCALE = np.ones(6, dtype=np.float64)
 
 

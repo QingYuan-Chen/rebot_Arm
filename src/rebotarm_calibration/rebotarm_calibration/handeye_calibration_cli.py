@@ -1,4 +1,4 @@
-"""读取离线数据集并保存手眼求解报告；相机采集和外参部署由各自入口负责。"""
+"""读取离线数据集并保存手眼求解报告;相机采集和外参部署由各自入口负责."""
 import argparse
 import json
 from pathlib import Path

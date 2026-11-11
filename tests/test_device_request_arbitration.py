@@ -1,4 +1,4 @@
-"""批次 6：资源代次、单写入线程、取消确认和迟到请求的离线故障注入。"""
+"""批次 6:资源代次,单写入线程,取消确认和迟到请求的离线故障注入."""
 import threading
 import time
 from types import SimpleNamespace
@@ -259,7 +259,7 @@ def test_reconnect_waits_until_shutdown_worker_join_finishes(monkeypatch):
 def test_lifecycle_component_queues_once_with_original_policy(
     monkeypatch, entry, args, priority, ttl,
 ):
-    """从真实队列观测策略，生命周期命令不能漏排队或重复排队。"""
+    """从真实队列观测策略,生命周期命令不能漏排队或重复排队."""
     manager, _ = make_local_manager(monkeypatch)
     runtime = manager.runtime
     if entry != 'connect':
@@ -270,7 +270,7 @@ def test_lifecycle_component_queues_once_with_original_policy(
     submit = runtime.requests.submit
 
     def record(operation, **options):
-        # 请求线程不能拿着生命周期锁等待设备线程。
+        # 请求线程不能拿着生命周期锁等待设备线程.
         assert not manager.lifecycle.lock._is_owned()
         observed.append(options)
         return submit(operation, **options)

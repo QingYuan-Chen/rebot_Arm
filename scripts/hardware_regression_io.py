@@ -1,4 +1,4 @@
-"""现场回归客户端的有界异步审计；写入失败或丢弃使会话失效。"""
+"""现场回归客户端的有界异步审计;写入失败或丢弃使会话失效."""
 import json
 import queue
 import threading

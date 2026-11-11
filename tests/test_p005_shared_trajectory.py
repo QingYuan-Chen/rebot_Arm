@@ -1,10 +1,10 @@
-"""共享轨迹迁移、入口兼容与 MuJoCo 控制边界回归。
+"""共享轨迹迁移,入口兼容与 MuJoCo 控制边界回归.
 
-文件职责：用独立解析值和旧采样语义核对共享内核，并复现越界目标、支撑力矩及重复 PI 推进问题。
-对外接口：pytest 用例，直接构造数值曲线、消息替身或本地 MuJoCo 实例。
-安全约束：不访问真实硬件；数值等价、物理回归与完整 ROS 操作链是不同验证层。
-文件结构：纯依赖/系数往返 → 解析值和非法输入 → 旧采样 → 物理控制缺陷
-    → 不可变对象、消息/能力/示教等级 → 高频目标写入不推进 PI。
+文件职责:用独立解析值和旧采样语义核对共享内核,并复现越界目标,支撑力矩及重复 PI 推进问题.
+对外接口:pytest 用例,直接构造数值曲线,消息替身或本地 MuJoCo 实例.
+安全约束:不访问真实硬件;数值等价,物理回归与完整 ROS 操作链是不同验证层.
+文件结构:纯依赖/系数往返 → 解析值和非法输入 → 旧采样 → 物理控制缺陷
+    → 不可变对象,消息/能力/示教等级 → 高频目标写入不推进 PI.
 """
 
 import ast
@@ -140,7 +140,7 @@ def test_web_coordinated_plan_is_single_use():
     with pytest.raises(ValueError,match='missing'):
         plans.take(preview['plan_id'])
     preview = plans.preview(payload,current,max_delta=.2,min_duration=.1,max_duration=10.,max_speed=1.)
-    # 交接不读取新的位置、不重锚起点；绑定失效由后端按原计划身份拒绝。
+    # 交接不读取新的位置,不重锚起点;绑定失效由后端按原计划身份拒绝.
     message, _, gripper = plans.take(preview['plan_id'])
     assert len(message.joint_names) == 6
     assert list(message.points[0].positions) == [0.]*6
@@ -148,7 +148,7 @@ def test_web_coordinated_plan_is_single_use():
 
 @pytest.mark.parametrize('level_name,ready', [('OK',True),('WARN',False),('ERROR',False),('STALE',False)])
 def test_web_admission_reads_ros_byte_level_without_constructing_node(level_name,ready):
-    """使用真实 ROS 字节字段；诊断接收不构造节点、读设备或改变准入。"""
+    """使用真实 ROS 字节字段;诊断接收不构造节点,读设备或改变准入."""
     from types import SimpleNamespace
     from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
     from rebotarm_dashboard.teleop_status_panel_node import TeleopStatusPanelNode
@@ -205,7 +205,7 @@ def test_coordinated_retiming_respects_backend_speed_and_quantized_extrema():
 
 @pytest.mark.parametrize('names', [JOINT_NAMES, ('left_finger_joint',)])
 def test_fixed_stationary_plan_does_not_check_artificial_start_displacement(names):
-    """恒定曲线不因额外首点扰动而被动态限值拒绝。"""
+    """恒定曲线不因额外首点扰动而被动态限值拒绝."""
     from rebotarm_motion.coordinated_trajectory import retime_curve
     from rebotarm_motion.trajectory_preparation import load_reference_limits
     config = Path(__file__).resolve().parents[1]/'src/rebotarm_moveit_config/config'
@@ -291,7 +291,7 @@ def test_planning_rejects_geometry_capability_and_nanosecond_damage():
     low,high,limits = load_reference_limits(config)
     with pytest.raises(ValueError,match='position extremum'):
         retime_curve(JOINT_NAMES,point_to_point((0.,)*6,(99.,)*6),low,high,limits)
-    # 两个合法浮点时刻在 ROS 纳秒编码后合为一个节点，必须拒绝而非悄悄丢点。
+    # 两个合法浮点时刻在 ROS 纳秒编码后合为一个节点,必须拒绝而非悄悄丢点.
     with pytest.raises(ValueError,match='strictly increase'):
         retime_curve(JOINT_NAMES,tuple(TrajectoryPoint(t,(0.,)*6,(0.,)*6,(0.,)*6)
             for t in (0.,1.,1.+1e-12,2.)),low,high,limits)
@@ -348,7 +348,7 @@ def test_simulation_rejects_out_of_limit_batch_without_partial_target_change():
     with RebotArmMujoco() as sim:
         before = sim.get_control_status()
         with pytest.raises(ValueError, match='outside'):
-            # 第一轴合法、第二轴越界：同时断言没有部分写入前一轴，而不只检查异常类型。
+            # 第一轴合法,第二轴越界:同时断言没有部分写入前一轴,而不只检查异常类型.
             sim.command_joint_positions({'joint1': .1, 'joint2': 99.})
         after = sim.get_control_status()
         assert after.joint_targets == before.joint_targets
@@ -363,7 +363,7 @@ def test_stationary_position_to_hold_preserves_support_torque():
         sim.command_joint_positions(start)
         sim.step(1000)
         before = sim.get_control_status()
-        # 先证明当前确有支撑负载，零力矩姿态无法暴露切换时清零控制器状态的缺陷。
+        # 先证明当前确有支撑负载,零力矩姿态无法暴露切换时清零控制器状态的缺陷.
         assert max(abs(value) for value in before.applied_torques) > 1.
         sim.set_mode('hold')
         after = sim.get_control_status()

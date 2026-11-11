@@ -5,11 +5,11 @@
 
 对外接口
     ArmActions 注册回调, 提交数值请求, 发布缓存反馈并映射任务终态.
-    公共 FJT 异步调用内部准备服务，经原所有者复核后执行 continuous 曲线。
+    公共 FJT 异步调用内部准备服务,经原所有者复核后执行 continuous 曲线.
 
 安全与并发约束
     准入检查不能替代设备线程中的再次检查; 取消携带任务身份或代次.
-    六轴取消回调先撤销许可并回接纳，任务终态仍等待保持确认；不能把取消回执等同停稳。
+    六轴取消回调先撤销许可并回接纳,任务终态仍等待保持确认;不能把取消回执等同停稳.
 
 文件结构(按定义顺序)
     ArmActions: 将 ROS Action 协议映射到原组件的数值任务与查询端口, 不拥有执行状态.
@@ -36,7 +36,7 @@ class ArmActions:
         self._node = node
         self._runtime, self._lifecycle = runtime, lifecycle
         self._feedback, self._arm, self._gripper = feedback, arm, gripper
-        # 保留请求对象本身，避免只用 id 时对象被回收重用而把迟到回调配到另一 Goal。
+        # 保留请求对象本身,避免只用 id 时对象被回收重用而把迟到回调配到另一 Goal.
         self._pending_preparations = {}
         from std_msgs.msg import String
         from rclpy.qos import QoSProfile, DurabilityPolicy
@@ -50,7 +50,7 @@ class ArmActions:
         self._diagnostics = node.create_publisher(DiagnosticArray, '/diagnostics', 10)
 
         def publish_admission():
-            """只读数值缓存；标准诊断不替代 Action 因果信息，也不改变电机故障码。"""
+            """只读数值缓存;标准诊断不替代 Action 因果信息,也不改变电机故障码."""
             capability = self._arm.trajectory_capability()
             self._versioned_capabilities.publish(String(data=json.dumps(capability, allow_nan=False)))
             snapshot = self._arm.admission_snapshot()
@@ -66,7 +66,7 @@ class ArmActions:
         self._diagnostic_timer = node.create_timer(.1, publish_admission)
         from rebotarm_msgs.srv import GetArmPlanningState
         def get_planning_state(_request, response):
-            """只读服务走所有者设备队列；服务成功不授予执行资源。"""
+            """只读服务走所有者设备队列;服务成功不授予执行资源."""
             try:
                 state = self._arm.planning_snapshot()
                 response.state_json = json.dumps(state, allow_nan=False)
@@ -112,7 +112,7 @@ class ArmActions:
                 else GoalResponse.REJECT)
 
     def trajectory_goal_callback(self, request, *, web=False):
-        """准备路径先占用资源；忙时直接拒绝，不能积累尚未执行的 Goal。"""
+        """准备路径先占用资源;忙时直接拒绝,不能积累尚未执行的 Goal."""
         received = time.monotonic()
         try:
             if (len(request.trajectory.joint_names) != 6
@@ -127,7 +127,7 @@ class ArmActions:
             duration = last.sec+last.nanosec*1e-9
             if not math.isfinite(duration) or not 0 <= duration <= 300.:
                 raise ValueError(f'trajectory duration={duration}, required range=[0,300] s')
-            # 从收到 Goal 而非服务调用开始计时；准备消耗也必须留在 MoveIt 的总预算内。
+            # 从收到 Goal 而非服务调用开始计时;准备消耗也必须留在 MoveIt 的总预算内.
             deadline = received+min(2., .2*duration+.25)
             command = ((request.gripper_position, request.gripper_max_effort)
                        if web and request.move_gripper else ())
@@ -142,7 +142,7 @@ class ArmActions:
             if planning is not None:
                 options['planning'] = planning
             token = self._arm.reserve_arm_preparation(deadline, **options)
-            # Jazzy 将同一个请求交给 GoalHandle；按请求绑定，停止后新 Goal 不能串用旧令牌。
+            # Jazzy 将同一个请求交给 GoalHandle;按请求绑定,停止后新 Goal 不能串用旧令牌.
             self._pending_preparations[id(request)] = (request, token)
             return GoalResponse.ACCEPT
         except (ValueError, RuntimeError, IndexError, AttributeError, TypeError) as exc:
@@ -150,13 +150,13 @@ class ArmActions:
             return GoalResponse.REJECT
 
     def _prepare_follow_goal(self, goal_handle, token):
-        """服务等待和数值解码均在 ROS 调用线程；设备周期继续发送原保持目标。"""
+        """服务等待和数值解码均在 ROS 调用线程;设备周期继续发送原保持目标."""
         request = self._prepare_type.Request()
         request.trajectory = goal_handle.request.trajectory
         request.session, request.generation = token.session, token.generation
         request.hold_positions, request.feedback_positions = list(token.hold), list(token.feedback)
         request.feedback_observed_at = token.observed_at
-        request.stationary = False  # 兼容字段；机械臂准入不再声称已有静止证据。
+        request.stationary = False  # 兼容字段;机械臂准入不再声称已有静止证据.
         request.enabled = True
         request.gripper_positions = list(token.gripper_positions)
         request.gripper_generation = token.gripper_generation
@@ -167,7 +167,7 @@ class ArmActions:
         while not future.done():
             if goal_handle.is_cancel_requested or time.monotonic() >= token.deadline:
                 future.cancel()
-                # 取消 Future 不保证远端计算立即结束；令牌与期限复核才阻止迟到结果发送。
+                # 取消 Future 不保证远端计算立即结束;令牌与期限复核才阻止迟到结果发送.
                 raise RuntimeError('trajectory preparation canceled or timed out')
             time.sleep(.002)
         response = future.result()
@@ -179,15 +179,15 @@ class ArmActions:
             capability_revision=token.capability, require_execution=True)
         if goal_handle.is_cancel_requested:
             raise RuntimeError('trajectory canceled before atomic admission')
-        # 最终复核在唯一设备线程中完成，不能用回调线程刚刚看到的状态代替它。
+        # 最终复核在唯一设备线程中完成,不能用回调线程刚刚看到的状态代替它.
         return self._arm.admit_prepared_arm_trajectory(token, handoff)
 
     def cancel_follow_joint_trajectory(self, goal):
-        """先撤销本 Goal 令牌，执行回调按任务身份确认停止。"""
+        """先撤销本 Goal 令牌,执行回调按任务身份确认停止."""
         pending = self._pending_preparations.get(id(goal.request))
         if pending is not None and pending[0] is goal.request:
             try:
-                # 撤销所有者令牌先于取消回执，已排队的接纳也不能越过取消。
+                # 撤销所有者令牌先于取消回执,已排队的接纳也不能越过取消.
                 self._arm.cancel_arm_preparation(pending[1], wait_for_stop=False)
             except RuntimeError as exc:
                 self._node.get_logger().error(f'trajectory cancel stop unconfirmed: {exc}')
@@ -256,7 +256,7 @@ class ArmActions:
                 goal_handle.publish_feedback(feedback)
                 task.event.wait(.05)
             status = self._arm.arm_execution_status(task)
-            # 停止服务返回后仍读取该句柄的最终结果，保留停止超时或清理失败的原因。
+            # 停止服务返回后仍读取该句柄的最终结果,保留停止超时或清理失败的原因.
             if web:
                 result.arm_state, result.gripper_state = self._arm.teleop_execution_status(task)
             result.error_string = status.message
@@ -290,14 +290,14 @@ class ArmActions:
             else:
                 goal_handle.abort()
         finally:
-            # 清理 ROS 请求登记与释放设备预约是两件事；后者必须由原所有者确认停止。
+            # 清理 ROS 请求登记与释放设备预约是两件事;后者必须由原所有者确认停止.
             if pending is not None:
                 self._pending_preparations.pop(id(goal_handle.request), None)
             if token is not None and task is not None and task.result.state != 'succeeded':
                 try:
                     self._arm.cancel_arm_preparation(token)
                 except Exception as stop_error:
-                    # 未确认停止仍由所有者保留资源，清理异常不能吞掉原 Action 结果。
+                    # 未确认停止仍由所有者保留资源,清理异常不能吞掉原 Action 结果.
                     result.error_string += f'; stop unconfirmed: {stop_error}'
         self._node.publish_arm_status()
         return result
@@ -347,7 +347,7 @@ class ArmActions:
                 try:
                     self._gripper.cancel_gripper_position_command(str(exc), expected_generation=generation)
                 except Exception as cleanup_error:
-                    # 取消失败不能覆盖原 Action 失败; 两者一并上报运行边界。
+                    # 取消失败不能覆盖原 Action 失败; 两者一并上报运行边界.
                     message += f'; gripper cleanup failed: {cleanup_error}'
             self._node.get_logger().error(message)
             goal_handle.abort()

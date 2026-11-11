@@ -1,27 +1,27 @@
 <!doctype html>
 <!--
-  reBotArm 网页遥操作面板（单文件：HTML + 内联 CSS + 内联 JS）。
+  reBotArm 网页遥操作面板(单文件:HTML + 内联 CSS + 内联 JS).
 
-  定位与边界：本页面由仪表盘节点以静态资源形式经 HTTP 直接提供（同源路由
-  /api/* 返回 JSON，/events 是 SSE 状态流，/robot/urdf 是 3D 模型）。页面自身
-  只承担 UI 与状态展示两部分职责：把后端报告的状态渲染成人能一眼看懂的卡片，
-  并把操作员意图翻译成一次 HTTP 请求后交给后端裁决。运动规划、轨迹重定时、
-  碰撞检查、示教录制与回放算法全部位于后端，浏览器侧只有单位换算和估算。
-  因此这里不存在任何可以绕过后端直接驱动机械臂的路径，所有真正影响硬件的动作
-  都要经过后端的安全检查与确认字段。
+  定位与边界:本页面由仪表盘节点以静态资源形式经 HTTP 直接提供(同源路由
+  /api/* 返回 JSON,/events 是 SSE 状态流,/robot/urdf 是 3D 模型).页面自身
+  只承担 UI 与状态展示两部分职责:把后端报告的状态渲染成人能一眼看懂的卡片,
+  并把操作员意图翻译成一次 HTTP 请求后交给后端裁决.运动规划,轨迹重定时,
+  碰撞检查,示教录制与回放算法全部位于后端,浏览器侧只有单位换算和估算.
+  因此这里不存在任何可以绕过后端直接驱动机械臂的路径,所有真正影响硬件的动作
+  都要经过后端的安全检查与确认字段.
 
-  主要区域划分：
-    1. 左侧：3D 实时视图（Three.js + URDFLoader 渲染 /robot/urdf）与使能、
-       失能、回安全位三个真机命令按钮。
-    2. 右上：机械臂总状态、电机实时状态、错误信息。
-    3. 右中：网页遥操作——预览滑条只改左侧模型，确认后才一次性下发关节目标
-       和夹爪目标；旁边是单次最大差值、执行时长、最大速度等执行参数。
-    4. 右下：示教轨迹三步流程（录制 → 检查 → 回放）、轨迹曲线查看、键盘遥操作
-       以及回放事件日志。
-    5. 顶部：配置来源说明与最近一次状态更新时间戳。
+  主要区域划分:
+    1. 左侧:3D 实时视图(Three.js + URDFLoader 渲染 /robot/urdf)与使能,
+       失能,回安全位三个真机命令按钮.
+    2. 右上:机械臂总状态,电机实时状态,错误信息.
+    3. 右中:网页遥操作-预览滑条只改左侧模型,确认后才一次性下发关节目标
+       和夹爪目标;旁边是单次最大差值,执行时长,最大速度等执行参数.
+    4. 右下:示教轨迹三步流程(录制 → 检查 → 回放),轨迹曲线查看,键盘遥操作
+       以及回放事件日志.
+    5. 顶部:配置来源说明与最近一次状态更新时间戳.
 
-  阅读提示：JS 里的限位、步长、倍率、刷新周期都优先取后端配置（/api/config），
-  文件中的数值只作为后端字段缺失时的兜底默认值。
+  阅读提示:JS 里的限位,步长,倍率,刷新周期都优先取后端配置(/api/config),
+  文件中的数值只作为后端字段缺失时的兜底默认值.
 -->
 <html lang="zh-CN">
 <head>
@@ -29,22 +29,22 @@
   <title>reBot 遥操作面板</title>
   <style>
     /*
-      样式区结构总览，便于快速定位：
-        1. CSS 变量与页面基础排版；
-        2. 工作台两栏网格与右侧可折叠卡片列表；
-        3. 3D 视图容器与浮层控件；
-        4. 实时 / 预览两套关节滑条；
-        5. 执行类按钮的配色与禁用态；
-        6. 状态芯片与错误列表；
-        7. 示教录制、检查、回放三块的网格与参数控件；
-        8. 回放事件日志、轨迹曲线画布；
-        9. 宽度 980px / 560px 两个响应式断点。
-      下面按此顺序分段给出中文说明。
+      样式区结构总览,便于快速定位:
+        1. CSS 变量与页面基础排版;
+        2. 工作台两栏网格与右侧可折叠卡片列表;
+        3. 3D 视图容器与浮层控件;
+        4. 实时 / 预览两套关节滑条;
+        5. 执行类按钮的配色与禁用态;
+        6. 状态芯片与错误列表;
+        7. 示教录制,检查,回放三块的网格与参数控件;
+        8. 回放事件日志,轨迹曲线画布;
+        9. 宽度 980px / 560px 两个响应式断点.
+      下面按此顺序分段给出中文说明.
     */
-    /* CSS 变量：整套配色与状态语义的单一来源，改主题只需要动这一处。
-       状态色约定：good 绿=通过/运行中/就绪，warn 黄=需对齐/超时/等待，
-       bad 红=失败/被阻止/不可用，info 蓝=中性信息（.chip）。
-       所有颜色走变量引用，状态芯片因此不必各自硬编码颜色。 */
+    /* CSS 变量:整套配色与状态语义的单一来源,改主题只需要动这一处.
+       状态色约定:good 绿=通过/运行中/就绪,warn 黄=需对齐/超时/等待,
+       bad 红=失败/被阻止/不可用,info 蓝=中性信息(.chip).
+       所有颜色走变量引用,状态芯片因此不必各自硬编码颜色. */
     :root {
       color-scheme: light;
       --bg: #f4f6f8;
@@ -77,18 +77,18 @@
     }
     h1 { margin: 0; font-size: 20px; font-weight: 750; }
     .timestamp { color: var(--muted); font-variant-numeric: tabular-nums; }
-    /* 工作台主体：宽屏下左（3D 视图与臂命令）右（可折叠控制卡片）两栏。
-       左列允许收缩到内容宽度以下，避免内部表格把布局撑破；
-       右列给 380px 下限，保证关节行“名称 + 滑条 + 数值/限位”三列仍然排得下。
-       980px 断点降到单栏。 */
+    /* 工作台主体:宽屏下左(3D 视图与臂命令)右(可折叠控制卡片)两栏.
+       左列允许收缩到内容宽度以下,避免内部表格把布局撑破;
+       右列给 380px 下限,保证关节行"名称 + 滑条 + 数值/限位"三列仍然排得下.
+       980px 断点降到单栏. */
     .teleop-workbench {
       display: grid;
       grid-template-columns: minmax(0, 2fr) minmax(380px, 1fr);
       gap: 10px;
       align-items: start;
     }
-    /* 右侧卡片列表自己滚动（高度上限为视口减 76px 的顶栏），
-       这样页面级滚动条只属于整页，3D 视图不会因为下方卡片过长而被推到屏幕外。 */
+    /* 右侧卡片列表自己滚动(高度上限为视口减 76px 的顶栏),
+       这样页面级滚动条只属于整页,3D 视图不会因为下方卡片过长而被推到屏幕外. */
     .robot-workspace,
     .control-cards {
       display: grid;
@@ -126,7 +126,7 @@
       line-height: 1.2;
       overflow-wrap: anywhere;
     }
-    /* 数值行用等宽数字，避免数值刷新时宽度跳动导致整块卡片抖动。 */
+    /* 数值行用等宽数字,避免数值刷新时宽度跳动导致整块卡片抖动. */
     .value.small { font-size: 15px; font-weight: 600; }
     .panel {
       background: var(--panel);
@@ -154,8 +154,8 @@
       padding: 0;
       border-bottom: 0;
     }
-    /* 折叠卡片的展开/收起按钮；+/- 图标由 ::after 按 collapsed 类生成，
-       不额外占用 DOM 文本节点。折叠只隐藏展示，不改变后端状态。 */
+    /* 折叠卡片的展开/收起按钮;+/- 图标由 ::after 按 collapsed 类生成,
+       不额外占用 DOM 文本节点.折叠只隐藏展示,不改变后端状态. */
     .card-toggle {
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -198,8 +198,8 @@
       min-height: min(72vh, 720px);
       background: #101820;
     }
-    /* 3D 画布本体：宽度撑满容器，高度与 .viewer-body 的最小高度保持一致，
-       使画布的 CSS 像素比例恒定、初始相机取景不被拉伸。 */
+    /* 3D 画布本体:宽度撑满容器,高度与 .viewer-body 的最小高度保持一致,
+       使画布的 CSS 像素比例恒定,初始相机取景不被拉伸. */
     #robot-view {
       display: block;
       width: 100%;
@@ -232,9 +232,9 @@
       grid-template-columns: 1fr;
       gap: 10px 14px;
     }
-    /* 关节滑条行：三列 = 关节名 / 滑条轨道 / 数值与限位。
-       数值列用等宽数字，保证实时刷新时小数点不对齐地左右跳动；
-       滑条被禁用时只降透明度，保留可读的数值，让操作员看得出“不可操作但值仍在”。 */
+    /* 关节滑条行:三列 = 关节名 / 滑条轨道 / 数值与限位.
+       数值列用等宽数字,保证实时刷新时小数点不对齐地左右跳动;
+       滑条被禁用时只降透明度,保留可读的数值,让操作员看得出"不可操作但值仍在". */
     .joint-slider {
       display: grid;
       grid-template-columns: 76px minmax(0, 1fr) 132px;
@@ -275,8 +275,8 @@
       padding: 0;
       border-bottom: 0;
     }
-    /* 预览滑条的强调色（下方 .preview-active）与实时反馈滑条的默认色故意不同：
-       拖动预览后橙色提示“当前左侧模型不是真机姿态”，属于安全视觉提示而非装饰。 */
+    /* 预览滑条的强调色(下方 .preview-active)与实时反馈滑条的默认色故意不同:
+       拖动预览后橙色提示"当前左侧模型不是真机姿态",属于安全视觉提示而非装饰. */
     .slider-pane[hidden] { display: none; }
     .tool-button {
       border: 1px solid var(--line);
@@ -387,9 +387,9 @@
     #teach-record-select:invalid { color: var(--muted); }
     #teach-record-select option { color: var(--text); }
     #teach-record-select option[value=""] { color: var(--muted); }
-    /* 执行类按钮的配色约定：危险/执行=红、停止=深灰、夹爪=蓝。
-       三个按钮的禁用态统一降级为白底灰字，表示“当前不允许发送”，
-       因此操作员不需要读文案即可判断动作被门控。 */
+    /* 执行类按钮的配色约定:危险/执行=红,停止=深灰,夹爪=蓝.
+       三个按钮的禁用态统一降级为白底灰字,表示"当前不允许发送",
+       因此操作员不需要读文案即可判断动作被门控. */
     .execute-button {
       border-color: #9f3a32;
       background: #c24135;
@@ -432,8 +432,8 @@
       color: var(--muted);
       border-color: var(--line);
     }
-    /* 状态区块：左侧白色小标签、右侧数值/芯片。状态文本来自后端，
-       前端只做“英文状态码 → 中文标签 + 颜色”的映射（见 classFor / displayState）。 */
+    /* 状态区块:左侧白色小标签,右侧数值/芯片.状态文本来自后端,
+       前端只做"英文状态码 → 中文标签 + 颜色"的映射(见 classFor / displayState). */
     .status-list { padding: 10px 12px; display: grid; gap: 10px; }
     .status-row {
       display: grid;
@@ -443,8 +443,8 @@
     }
     .status-key { color: var(--muted); font-size: 12px; padding-top: 3px; }
     .status-main { min-width: 0; }
-    /* 状态芯片：颜色由 classFor 按状态码映射，红=禁止回放/失败，绿=通过，
-       黄=需对齐或超时。检查结论用芯片颜色表达，操作员不必逐字阅读说明。 */
+    /* 状态芯片:颜色由 classFor 按状态码映射,红=禁止回放/失败,绿=通过,
+       黄=需对齐或超时.检查结论用芯片颜色表达,操作员不必逐字阅读说明. */
     .chip {
       display: inline-flex;
       align-items: center;
@@ -469,9 +469,9 @@
       overflow-wrap: anywhere;
     }
     .teach-panel { margin-bottom: 0; }
-    /* 示教面板：上方是回放前检查结果的四格状态条，
-       下面是 .teach-metric 信息卡网格（.compact-grid 为两列的紧凑变体），
-       整块默认折叠（HTML 里带 collapsed），避免占用右侧栏的纵向空间。 */
+    /* 示教面板:上方是回放前检查结果的四格状态条,
+       下面是 .teach-metric 信息卡网格(.compact-grid 为两列的紧凑变体),
+       整块默认折叠(HTML 里带 collapsed),避免占用右侧栏的纵向空间. */
     .precheck-strip {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -534,9 +534,9 @@
       grid-template-columns: 1fr;
       gap: 10px;
     }
-    /* 回放参数控件：标签 / 滑条 / 数字框同行。
-       数字框用来精细输入，滑条用来快速扫动，两者绑定同一个值（见 bindTeachReplaySetting）。
-       改动任一参数都会清空上一次检查结果，因为检查结论只在同一组参数下有效。 */
+    /* 回放参数控件:标签 / 滑条 / 数字框同行.
+       数字框用来精细输入,滑条用来快速扫动,两者绑定同一个值(见 bindTeachReplaySetting).
+       改动任一参数都会清空上一次检查结果,因为检查结论只在同一组参数下有效. */
     .teach-control {
       display: grid;
       grid-template-columns: 110px minmax(0, 1fr) 72px;
@@ -560,8 +560,8 @@
       font: inherit;
       font-variant-numeric: tabular-nums;
     }
-    /* 回放事件日志：只保留最近 8 条（见 addReplayEvent 的 splice），
-       属于诊断信息，不参与任何判断，面板折叠时不渲染以省开销。 */
+    /* 回放事件日志:只保留最近 8 条(见 addReplayEvent 的 splice),
+       属于诊断信息,不参与任何判断,面板折叠时不渲染以省开销. */
     .event-log {
       border-top: 1px solid var(--line);
       padding: 10px 12px;
@@ -635,9 +635,9 @@
       font: inherit;
       min-width: 0;
     }
-    /* 示教轨迹文件与曲线：摘要格子 + 2D canvas 折线图。
-       画布用 CSS 定宽高、由 JS 按 devicePixelRatio 放大位图并重设变换，
-       所以在高 DPI 屏上曲线不发虚。 */
+    /* 示教轨迹文件与曲线:摘要格子 + 2D canvas 折线图.
+       画布用 CSS 定宽高,由 JS 按 devicePixelRatio 放大位图并重设变换,
+       所以在高 DPI 屏上曲线不发虚. */
     .trajectory-view { padding: 12px; display: grid; gap: 10px; }
     .trajectory-summary {
       display: grid;
@@ -667,8 +667,8 @@
     .calibration-entry strong { display:block; font-size:16px; }
     .calibration-entry span { display:block; margin-top:3px; color:#4f6874; font-size:13px; }
     .calibration-entry em { font-style:normal; font-weight:750; white-space:nowrap; }
-    /* 响应式断点一（980px）：工作台由两栏改单栏，卡片列表取消内部滚动与高度上限，
-       3D 视图高度改 340px，避免在小屏上把控制区推到视口之外。 */
+    /* 响应式断点一(980px):工作台由两栏改单栏,卡片列表取消内部滚动与高度上限,
+       3D 视图高度改 340px,避免在小屏上把控制区推到视口之外. */
     @media (max-width: 980px) {
       .teleop-workbench { grid-template-columns: 1fr; }
       .control-cards { max-height: none; overflow: visible; padding-right: 0; }
@@ -680,8 +680,8 @@
       .viewer-body { min-height: 340px; }
       #teach-trajectory-canvas { height: 340px; }
     }
-    /* 响应式断点二（560px）：窄屏下单列化了关节滑条与各类网格，
-       数值对齐方式从右对齐改为左对齐，方便逐行阅读。 */
+    /* 响应式断点二(560px):窄屏下单列化了关节滑条与各类网格,
+       数值对齐方式从右对齐改为左对齐,方便逐行阅读. */
     @media (max-width: 560px) {
       .joint-slider { grid-template-columns: 1fr; gap: 4px; }
       .joint-values { text-align: left; }
@@ -704,10 +704,10 @@
     </div>
     <section class="teleop-workbench">
       <div class="robot-workspace">
-        <!-- 左侧 3D 实时视图：canvas 由 Three.js 渲染，
-             浮层 status 显示加载/预览/跟随等文字，右上角按钮切换地面网格。
-             下方三个按钮是真机命令（回安全位、使能、失能），
-             它们的可用性由后端配置开关、检查模式与回放状态共同决定。 -->
+        <!-- 左侧 3D 实时视图:canvas 由 Three.js 渲染,
+             浮层 status 显示加载/预览/跟随等文字,右上角按钮切换地面网格.
+             下方三个按钮是真机命令(回安全位,使能,失能),
+             它们的可用性由后端配置开关,检查模式与回放状态共同决定. -->
         <section class="panel robot-viewer">
           <div class="panel-title">机械臂 3D 实时视图</div>
           <div class="viewer-body">
@@ -725,9 +725,9 @@
         </section>
       </div>
       <aside class="control-cards">
-        <!-- 机械臂总状态卡片：模式、状态机、使能、录制/回放/机械臂/夹爪命令状态，
-             以及错误码列表。这些字段全部由 SSE 推送，页面不自行推断。
-             卡片默认折叠，展开与否只影响渲染频率。 -->
+        <!-- 机械臂总状态卡片:模式,状态机,使能,录制/回放/机械臂/夹爪命令状态,
+             以及错误码列表.这些字段全部由 SSE 推送,页面不自行推断.
+             卡片默认折叠,展开与否只影响渲染频率. -->
         <section class="panel collapsible-card collapsed" id="arm-status-card">
           <div class="card-header"><div class="panel-title">机械臂总状态</div><button class="card-toggle" type="button" data-card-toggle="arm-status-card" aria-label="展开或折叠机械臂总状态"></button></div>
           <div class="card-body">
@@ -766,8 +766,8 @@
           </div>
         </section>
 
-        <!-- 电机实时状态表：关节名的行顺序按后端配置的关节顺序重建，
-             夹爪在后端是独立电机但在这里显示为 joint7（见 updateMotorRows）。 -->
+        <!-- 电机实时状态表:关节名的行顺序按后端配置的关节顺序重建,
+             夹爪在后端是独立电机但在这里显示为 joint7(见 updateMotorRows). -->
         <section class="panel collapsible-card collapsed" id="motor-state-card">
           <div class="card-header"><div class="panel-title">电机实时状态</div><button class="card-toggle" type="button" data-card-toggle="motor-state-card" aria-label="展开或折叠电机实时状态"></button></div>
           <div class="card-body">
@@ -778,9 +778,9 @@
           </div>
         </section>
 
-        <!-- 网页遥操作卡片：拖动预览滑条只改左侧 3D 模型和本地目标值，
-             点“执行关节 + 夹爪”才把关节目标和夹爪目标一次性发给后端。
-             执行时长由组合计划使用，限位由后端复核。 -->
+        <!-- 网页遥操作卡片:拖动预览滑条只改左侧 3D 模型和本地目标值,
+             点"执行关节 + 夹爪"才把关节目标和夹爪目标一次性发给后端.
+             执行时长由组合计划使用,限位由后端复核. -->
         <section class="panel slider-panel collapsible-card collapsed" id="web-teleop-card">
           <div class="card-header"><div class="panel-title">网页遥操作</div><button class="card-toggle" type="button" data-card-toggle="web-teleop-card" aria-label="展开或折叠网页遥操作"></button></div>
           <div class="card-body">
@@ -816,10 +816,10 @@
           </div>
         </section>
 
-        <!-- 示教轨迹卡片：三步流程用 details 折叠块串起来，
-             “开始示教”按钮只在未录制且非检查模式时可点，
-             “检查轨迹”必须在存在有效轨迹文件时才可点，
-             “回放优化轨迹”还额外要求最近一次检查通过且针对的是当前选中的文件。 -->
+        <!-- 示教轨迹卡片:三步流程用 details 折叠块串起来,
+             "开始示教"按钮只在未录制且非检查模式时可点,
+             "检查轨迹"必须在存在有效轨迹文件时才可点,
+             "回放优化轨迹"还额外要求最近一次检查通过且针对的是当前选中的文件. -->
         <section class="panel teach-panel collapsible-card collapsed" id="teach-trajectory-card">
           <div class="card-header"><div class="panel-title">示教轨迹</div><button class="card-toggle" type="button" data-card-toggle="teach-trajectory-card" aria-label="展开或折叠示教轨迹"></button></div>
           <div class="card-body">
@@ -899,9 +899,9 @@
           </div>
         </section>
 
-        <!-- 键盘遥操作卡片：键位映射说明 + 步长/速度参数。
-             按键只在页面获得焦点且键盘遥操作已开启时才会发送，
-             Esc 是关闭键盘遥操作的硬出口，任何情况下都优先处理。 -->
+        <!-- 键盘遥操作卡片:键位映射说明 + 步长/速度参数.
+             按键只在页面获得焦点且键盘遥操作已开启时才会发送,
+             Esc 是关闭键盘遥操作的硬出口,任何情况下都优先处理. -->
         <section class="panel collapsible-card collapsed" id="keyboard-teleop-card">
           <div class="card-header"><div class="panel-title">键盘遥操作</div><button class="card-toggle" type="button" data-card-toggle="keyboard-teleop-card" aria-label="展开或折叠键盘遥操作"></button></div>
           <div class="card-body">
@@ -943,8 +943,8 @@
       </aside>
     </section>
   </main>
-  <!-- import map 必须在下面的模块脚本之前声明：模块里用裸标识符导入 Three.js，
-       否则浏览器会按相对路径解析而 404。 -->
+  <!-- import map 必须在下面的模块脚本之前声明:模块里用裸标识符导入 Three.js,
+       否则浏览器会按相对路径解析而 404. -->
   <script type="importmap">
     {
       "imports": {
@@ -953,19 +953,19 @@
       }
     }
   </script>
-  <!-- 前端主逻辑：动态导入 Three.js 与 URDF 加载器，通过 HTTP 与 SSE 与面板节点交互。
-       阅读顺序：配置与工具函数 → 双套滑条 DOM → 3D 视图 → 目标值校验与下发 →
-       示教录制/检查/回放 → 键盘遥操作 → 事件绑定 → SSE 状态渲染循环。 -->
+  <!-- 前端主逻辑:动态导入 Three.js 与 URDF 加载器,通过 HTTP 与 SSE 与面板节点交互.
+       阅读顺序:配置与工具函数 → 双套滑条 DOM → 3D 视图 → 目标值校验与下发 →
+       示教录制/检查/回放 → 键盘遥操作 → 事件绑定 → SSE 状态渲染循环. -->
   <script type="module">
-    // Three.js 与 URDF 加载器都是运行时从 CDN 动态导入，页面没有打包步骤。
-    // 面板节点只负责提供静态资源与本地 API，不参与前端构建。
+    // Three.js 与 URDF 加载器都是运行时从 CDN 动态导入,页面没有打包步骤.
+    // 面板节点只负责提供静态资源与本地 API,不参与前端构建.
     import * as THREE from 'https://unpkg.com/three@0.165.0/build/three.module.js';
     import { OrbitControls } from 'https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js';
     import URDFLoader from 'https://unpkg.com/urdf-loader@0.12.6/src/URDFLoader.js';
 
-    // 面板节点下发的配置是权威来源：关节名与顺序、关节限位、夹爪行程、
-    // 各执行开关与安全阈值都在这里取。顶层 await 保证在继续初始化之前配置已就绪；
-    // 请求失败时退回到一组保守默认值，避免页面整块不可用，但不会因此放宽后端门控。
+    // 面板节点下发的配置是权威来源:关节名与顺序,关节限位,夹爪行程,
+    // 各执行开关与安全阈值都在这里取.顶层 await 保证在继续初始化之前配置已就绪;
+    // 请求失败时退回到一组保守默认值,避免页面整块不可用,但不会因此放宽后端门控.
     const panelConfig = await fetch('/api/config')
       .then((response) => response.json())
       .catch(() => ({
@@ -988,15 +988,15 @@
           joint6: 1.5,
         },
       }));
-    // 与状态轮询不同，页面用 SSE 长连接接收后端主动推送的状态快照，
-    // 好处是机械臂状态变化能立刻反映到界面，而不是等下一次定时请求。
-    // 浏览器断线时会自动重连；面板模式也从同一份配置读取（control=可操作，check=只读）。
+    // 与状态轮询不同,页面用 SSE 长连接接收后端主动推送的状态快照,
+    // 好处是机械臂状态变化能立刻反映到界面,而不是等下一次定时请求.
+    // 浏览器断线时会自动重连;面板模式也从同一份配置读取(control=可操作,check=只读).
     const source = new EventSource('/events');
     const panelMode = String(panelConfig.panel_mode || 'control').toLowerCase();
     const isCheckMode = panelMode === 'check';
     const useHardware = panelConfig.use_hardware === true;
-    // Enable / Disable / Safe Home 只属于真实控制器；仿真模式直接隐藏这一组，避免把
-    // web_execute_enabled 误解为已经开放真实硬件控制。网页键盘和仿真 Execute 不受影响。
+    // Enable / Disable / Safe Home 只属于真实控制器;仿真模式直接隐藏这一组,避免把
+    // web_execute_enabled 误解为已经开放真实硬件控制.网页键盘和仿真 Execute 不受影响.
     const hardwareArmCommandRow = document.getElementById('hardware-arm-command-row');
     if (hardwareArmCommandRow) hardwareArmCommandRow.hidden = !useHardware;
     const armJointNames = panelConfig.joint_names || ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6'];
@@ -1005,9 +1005,9 @@
       ...(panelConfig.joint_limits || {}),
       gripper: panelConfig.gripper_limits || [0.0, 0.09],
     };
-    // 下列全局变量缓存“最近一次的权威数据”和各类派生状态：
-    // 当前预览目标、最近一次检查结果、回放估计、上一次各面板渲染的时间戳等。
-    // 3D 场景对象集中放在 robotViewer 单例里，避免多次初始化时重复创建 WebGL 资源。
+    // 下列全局变量缓存"最近一次的权威数据"和各类派生状态:
+    // 当前预览目标,最近一次检查结果,回放估计,上一次各面板渲染的时间戳等.
+    // 3D 场景对象集中放在 robotViewer 单例里,避免多次初始化时重复创建 WebGL 资源.
     const webExecuteEnabled = panelConfig.web_execute?.enabled === true;
     let latestTeachFileInfo = null;
     let selectedTeachRecordPath = '';
@@ -1020,9 +1020,9 @@
     const motorRowsByName = new Map();
     // JSON null denotes unavailable feedback; Number(null) would fake zero.
     const motorPosition = (joint) => Number.isFinite(joint?.position) ? joint.position : NaN;
-    // 工具函数：物理量格式化、字符串兜底、HTML 转义、状态对象归一化。
-    // 关键约定：数值缺失（NaN / null / undefined）一律显示为 '-'，
-    // 不显示 0，因为 0 在关节位置上是合法值，混淆两者会让操作员误判真实姿态。
+    // 工具函数:物理量格式化,字符串兜底,HTML 转义,状态对象归一化.
+    // 关键约定:数值缺失(NaN / null / undefined)一律显示为 '-',
+    // 不显示 0,因为 0 在关节位置上是合法值,混淆两者会让操作员误判真实姿态.
     const fmt = (value, digits = 4) => Number.isFinite(value) ? Number(value).toFixed(digits) : '-';
     const deg = (value) => Number.isFinite(value) ? (Number(value) * 180 / Math.PI).toFixed(1) : '-';
     const text = (value) => value === undefined || value === null || value === '' ? '-' : String(value);
@@ -1036,8 +1036,8 @@
       if (value && typeof value === 'object' && !Array.isArray(value)) return value;
       return { state: text(value) };
     };
-    // DOM 辅助函数：折叠卡片 / details 的开关状态查询、可选的局部清空与写入。
-    // 折叠中的区域不做渲染，只把内容替换成占位提示，展开时再补渲染。
+    // DOM 辅助函数:折叠卡片 / details 的开关状态查询,可选的局部清空与写入.
+    // 折叠中的区域不做渲染,只把内容替换成占位提示,展开时再补渲染.
     const isDetailsOpen = (id) => document.getElementById(id)?.open === true;
     const isControlCardOpen = (id) => !document.getElementById(id)?.classList.contains('collapsed');
     const clearOptionalDetails = (id, html = '<div class="empty">展开后显示详情</div>') => {
@@ -1061,9 +1061,9 @@
         button.addEventListener('click', () => toggleControlCard(button.dataset.cardToggle));
       });
     };
-    // 状态码到颜色的映射，是后端状态文本与界面视觉语义之间的唯一桥梁。
-    // 分类依据的是“该状态能否继续推进流程”：可直接运行/已完成 → good，
-    // 需要等待、对齐或重定时 → warn，被阻止、失败、不可用 → bad。
+    // 状态码到颜色的映射,是后端状态文本与界面视觉语义之间的唯一桥梁.
+    // 分类依据的是"该状态能否继续推进流程":可直接运行/已完成 → good,
+    // 需要等待,对齐或重定时 → warn,被阻止,失败,不可用 → bad.
     const classFor = (state) => {
       const normalized = String(state || '').toLowerCase();
       if (['active', 'recording', 'replaying', 'ready', 'idle', 'deadman', 'done', 'direct', 'green', 'pass', 'planned', 'skipped'].includes(normalized)) return 'good';
@@ -1110,17 +1110,17 @@
       if (Object.prototype.hasOwnProperty.call(stateLabels, normalized)) return stateLabels[normalized];
       return text(state);
     };
-    // 数值与状态渲染函数：把后端返回的原始对象渲染成状态行、指标卡、检查摘要或曲线。
-    // 展示层只做换算和中文标签，不做任何“是否可以继续”的判定，判定一律看后端字段。
+    // 数值与状态渲染函数:把后端返回的原始对象渲染成状态行,指标卡,检查摘要或曲线.
+    // 展示层只做换算和中文标签,不做任何"是否可以继续"的判定,判定一律看后端字段.
     const setChip = (id, state) => {
       const el = document.getElementById(id);
       const cls = classFor(state);
       const context = id === 'teleop-state' ? 'keyboard' : '';
       el.innerHTML = `<span class="chip ${cls}">${displayState(state, context)}</span>`;
     };
-    // 按钮可用性的本地门控：检查模式（只读页面）与“网页执行未启用”两种情况下，
-    // 统一禁用所有会真正改变硬件的按钮。这里是纵深防御的第一道，
-    // 后端仍会独立复核；本地禁用是为了让操作员在点击前就看到动作是否可能生效。
+    // 按钮可用性的本地门控:检查模式(只读页面)与"网页执行未启用"两种情况下,
+    // 统一禁用所有会真正改变硬件的按钮.这里是纵深防御的第一道,
+    // 后端仍会独立复核;本地禁用是为了让操作员在点击前就看到动作是否可能生效.
     const syncRealActionButtons = () => {
       if (isCheckMode) {
         document.getElementById('execute-preview')?.setAttribute('disabled', '');
@@ -1132,8 +1132,8 @@
       document.getElementById('execute-preview')?.setAttribute('disabled', '');
       document.getElementById('run-teach-replay')?.setAttribute('disabled', '');
     };
-    // 把后端的状态对象拼成“状态芯片 + 明细”的一行；
-    // 明细字段按需出现，缺失的字段不会渲染成空行，保持面板紧凑。
+    // 把后端的状态对象拼成"状态芯片 + 明细"的一行;
+    // 明细字段按需出现,缺失的字段不会渲染成空行,保持面板紧凑.
     const statusBlock = (label, value) => {
       const obj = statusObj(value);
       const state = obj.state || obj.status || '-';
@@ -1232,10 +1232,10 @@
         teachMetric('原始文件', text(payload.raw_record_path || latestTeachFileInfo?.path), { wide: true }),
       ].join('');
     };
-    // 曲线画布：每个关节一条折线，颜色按关节序号循环取色。
-    // 画布尺寸按 devicePixelRatio 放大后再把绘图坐标系缩放回来，
-    // 这样在高 DPI 屏上线条不发虚，而布局仍按 CSS 像素计算。
-    // 空数据时画一句提示而不是留白，避免看起来像渲染失败。
+    // 曲线画布:每个关节一条折线,颜色按关节序号循环取色.
+    // 画布尺寸按 devicePixelRatio 放大后再把绘图坐标系缩放回来,
+    // 这样在高 DPI 屏上线条不发虚,而布局仍按 CSS 像素计算.
+    // 空数据时画一句提示而不是留白,避免看起来像渲染失败.
     const drawTeachTrajectoryChart = (payload) => {
       const canvas = document.getElementById('teach-trajectory-canvas');
       if (!canvas) return;
@@ -1305,8 +1305,8 @@
       ctx.fillText(`${fmt(yMin)} rad`, 6, height - bottom);
       ctx.fillText(`${fmt(tMax, 2)} s`, width - right - 42, height - 8);
     };
-    // 轨迹曲线的数据来自 /api/teach_trajectory：
-    // 只取有限个采样点（max_points）用于绘制，避免长轨迹拖慢浏览器渲染。
+    // 轨迹曲线的数据来自 /api/teach_trajectory:
+    // 只取有限个采样点(max_points)用于绘制,避免长轨迹拖慢浏览器渲染.
     const loadTeachTrajectory = async () => {
       try {
         const suffix = selectedTeachRecordPath ? `?path=${encodeURIComponent(selectedTeachRecordPath)}&max_points=500` : '?max_points=500';
@@ -1320,8 +1320,8 @@
           `<div class="empty">轨迹加载失败：${escapeHtml(error.message)}</div>`;
       }
     };
-    // 回放前检查摘要：把文件检查、安全检查与回放估计的结果汇总成一组格子。
-    // 起点状态是最关键的一项，它决定回放按钮是否可能被放行。
+    // 回放前检查摘要:把文件检查,安全检查与回放估计的结果汇总成一组格子.
+    // 起点状态是最关键的一项,它决定回放按钮是否可能被放行.
     const renderReplayPrecheckSummary = (info) => {
       const band = String(info?.start_band || 'unknown').toLowerCase();
       const quality = info?.quality || {};
@@ -1391,9 +1391,9 @@
         teachMetric('轨迹点', estimate.trajectoryPoints),
       ].join('');
     };
-    // 回放时间与轨迹点的本地估算，仅用于在确认弹窗里提示“大概要多久、多少点”，
-    // 属于体验信息而非安全门限；真正的重定时与限速仍由后端完成。
-    // 起点误差换算出的自动对齐时长被夹在 3~10s：太短来不及对齐，太长又没必要等。
+    // 回放时间与轨迹点的本地估算,仅用于在确认弹窗里提示"大概要多久,多少点",
+    // 属于体验信息而非安全门限;真正的重定时与限速仍由后端完成.
+    // 起点误差换算出的自动对齐时长被夹在 3~10s:太短来不及对齐,太长又没必要等.
     const replayEstimate = (info) => {
       const speed = Math.min(Math.max(Number(teachReplaySettings.replaySpeed), 0.1), 1.0);
       const maxError = Number(info?.max_error);
@@ -1403,7 +1403,7 @@
       const useAlign = String(info?.start_band || '').toLowerCase() === 'align';
       const recordDuration = Number(info?.duration_sec);
       const replayDuration = Number.isFinite(recordDuration) ? recordDuration / Math.max(speed, 0.01) : NaN;
-      // dry-run 已生成完整曲线时采用其最终时长；输入变化会清除 lastTeachDryRun。
+      // dry-run 已生成完整曲线时采用其最终时长;输入变化会清除 lastTeachDryRun.
       const checkedDuration = lastTeachDryRun?.prepared_replay?.final_curve?.duration;
       return {
         speed,
@@ -1415,9 +1415,9 @@
         trajectoryPoints: (Number(info?.samples) || 0) + (useAlign ? alignSteps : 0) + ((Number(info?.samples) || 0) > 0 && finalHold > 0 ? 1 : 0),
       };
     };
-    // 回放参数载荷：倍率、对齐时长、对齐步数、末端保持时间。
-    // 这些值连同轨迹文件一起送给后端，后端按自己的限速与碰撞检查重新计算，
-    // 因此这里的数值只是请求，不是承诺。
+    // 回放参数载荷:倍率,对齐时长,对齐步数,末端保持时间.
+    // 这些值连同轨迹文件一起送给后端,后端按自己的限速与碰撞检查重新计算,
+    // 因此这里的数值只是请求,不是承诺.
     const replaySettingsPayload = () => ({
       replay_speed: Math.min(Math.max(Number(teachReplaySettings.replaySpeed), 0.1), 1.0),
       align_duration: replayEstimate(latestTeachFileInfo).alignDuration,
@@ -1469,13 +1469,13 @@
         });
       });
     };
-    // “检查轨迹”与“回放”按钮的可用性门控，是示教流程里最关键的安全判断：
-    //   1. 检查模式只读，任何回放入口都禁用；
-    //   2. 只有起点状态允许（direct / align / moveit_align）才可检查，
-    //      否则说明当前姿态离示教起点太远，回放没有意义；
-    //   3. 回放还必须满足“网页执行已启用 + 最近一次检查通过 + 检查针对的就是当前选中的文件”，
-    //      三者缺一不可，避免用旧结论去回放新文件；
-    //   4. 停止按钮只在回放中或正在取消时才可点，保证停止语义可预期。
+    // "检查轨迹"与"回放"按钮的可用性门控,是示教流程里最关键的安全判断:
+    //   1. 检查模式只读,任何回放入口都禁用;
+    //   2. 只有起点状态允许(direct / align / moveit_align)才可检查,
+    //      否则说明当前姿态离示教起点太远,回放没有意义;
+    //   3. 回放还必须满足"网页执行已启用 + 最近一次检查通过 + 检查针对的就是当前选中的文件",
+    //      三者缺一不可,避免用旧结论去回放新文件;
+    //   4. 停止按钮只在回放中或正在取消时才可点,保证停止语义可预期.
     const updateTeachDryRunButton = (info) => {
       const band = String(info?.start_band || '').toLowerCase();
       const button = document.getElementById('run-teach-dry-run');
@@ -1491,9 +1491,9 @@
       const replayState = String(statusObj(previewState.latestTeleop?.replay).state || '').toLowerCase();
       stopButton.disabled = !['replaying', 'cancel_requested', 'safety_stop'].includes(replayState);
     };
-    // 读取选中示教文件的检查信息并刷新所有相关面板。
-    // 卡片折叠时跳过（除非调用方要求强制刷新），避免后台无意义地反复查询。
-    // 请求失败时把所有回放相关按钮置灰：即使本地判断放行，后端不可达也不允许继续。
+    // 读取选中示教文件的检查信息并刷新所有相关面板.
+    // 卡片折叠时跳过(除非调用方要求强制刷新),避免后台无意义地反复查询.
+    // 请求失败时把所有回放相关按钮置灰:即使本地判断放行,后端不可达也不允许继续.
     const refreshTeachFileInfo = async (options = {}) => {
       if (!options.force && !isControlCardOpen('teach-trajectory-card')) return;
       try {
@@ -1515,7 +1515,7 @@
         setHtml('teach-params-details', `<div class="empty">回放参数不可用: ${escapeHtml(error.message)}</div>`);
       }
     };
-    // 刷新可选示教文件列表；条目数上限用于防止目录很大时把下拉框撑爆。
+    // 刷新可选示教文件列表;条目数上限用于防止目录很大时把下拉框撑爆.
     const refreshTeachRecords = async () => {
       try {
         const response = await fetch('/api/teach_records');
@@ -1545,18 +1545,18 @@
       addReplayEvent(selectedTeachRecordPath ? `已选择文件: ${selectedTeachRecordPath}` : '已清空文件选择');
       await refreshTeachFileInfo();
     };
-    // 预览状态：targets 是操作员拖出来但尚未下发的目标，
-    // latestJoints 是最新的实时关节反馈。两者分开保存，
-    // 目的是让预览模式与实时反馈模式都能随时切换、且不会互相污染。
+    // 预览状态:targets 是操作员拖出来但尚未下发的目标,
+    // latestJoints 是最新的实时关节反馈.两者分开保存,
+    // 目的是让预览模式与实时反馈模式都能随时切换,且不会互相污染.
     const previewState = {
       active: false,
       targets: {},
       latestJoints: {},
       latestTeleop: {},
     };
-    // 执行参数与设置项的初始值：全部优先取后端配置，代码里的字面量只是兜底。
-    // 单位约定：关节位置为弧度（rad），夹爪为米（m），速度为 rad/s，时长为秒（s）。
-    // 键盘单步默认 0.02 rad 属于很小的步长，配合下面的时长上限保证单步速度受限。
+    // 执行参数与设置项的初始值:全部优先取后端配置,代码里的字面量只是兜底.
+    // 单位约定:关节位置为弧度(rad),夹爪为米(m),速度为 rad/s,时长为秒(s).
+    // 键盘单步默认 0.02 rad 属于很小的步长,配合下面的时长上限保证单步速度受限.
     const executeSettings = {
       duration: 3.0,
       maxSpeed: Number(panelConfig.web_execute?.max_joint_speed_rad_s) || 1.5,
@@ -1578,8 +1578,8 @@
       replaySpeed: Number(panelConfig.teach?.replay_speed) || 1.0,
       alignSteps: Number(panelConfig.teach?.align_steps) || 30,
     };
-    // 注意 JS 的 Math.min/Math.max 传播 NaN：输入非数值时这里会得到 NaN，
-    // 调用方必须先用 Number.isFinite 判断，否则 clamp 不能起到保护作用。
+    // 注意 JS 的 Math.min/Math.max 传播 NaN:输入非数值时这里会得到 NaN,
+    // 调用方必须先用 Number.isFinite 判断,否则 clamp 不能起到保护作用.
     const clamp = (value, min, max) => Math.min(Math.max(Number(value), min), max);
     const makeSlider = (name, mode = 'live') => {
       const [min, max] = jointLimits[name] || [-3.1416, 3.1416];
@@ -1597,14 +1597,14 @@
           </div>
         </div>`;
     };
-    // 关节滑条 DOM 只在这里构建一次：实时反馈一套（只读、跟随反馈），
-    // 预览一套（可拖动、决定待下发目标）。夹爪的行程单位是米且没有角度换算，
-    // 因此在 makeSlider 里单独处理小数位与单位后缀（1 位小数、不带 deg）。
+    // 关节滑条 DOM 只在这里构建一次:实时反馈一套(只读,跟随反馈),
+    // 预览一套(可拖动,决定待下发目标).夹爪的行程单位是米且没有角度换算,
+    // 因此在 makeSlider 里单独处理小数位与单位后缀(1 位小数,不带 deg).
     document.getElementById('joint-sliders').innerHTML = sliderNames.map(makeSlider).join('');
     document.getElementById('preview-sliders').innerHTML = sliderNames.map((name) => makeSlider(name, 'preview')).join('');
-    // 3D 视图初始化：建场景、相机、渲染器与 OrbitControls，加载 URDF，
-    // 通过左右手指关节带动整侧传动件、安装座和软指。
-    // 关节值来自实时电机反馈或预览目标，两种数据源共用同一套渲染入口。
+    // 3D 视图初始化:建场景,相机,渲染器与 OrbitControls,加载 URDF,
+    // 通过左右手指关节带动整侧传动件,安装座和软指.
+    // 关节值来自实时电机反馈或预览目标,两种数据源共用同一套渲染入口.
     const robotViewer = {
       scene: null,
       camera: null,
@@ -1648,8 +1648,8 @@
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x101820);
       const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10);
-      // 相机需要落在地平面之上俯视机械臂：模型已在下方被转成 Y-up，
-      // 若把相机放到地平面之下沿 Z 轴看，初始画面会从地板下面望上去。
+      // 相机需要落在地平面之上俯视机械臂:模型已在下方被转成 Y-up,
+      // 若把相机放到地平面之下沿 Z 轴看,初始画面会从地板下面望上去.
       // URDFLoader's Z-up robot is rotated into Three.js' Y-up scene below.
       // Keep the initial camera above the XZ ground plane and look at the arm,
       // rather than placing it below the floor and aiming along the Z axis.
@@ -1701,8 +1701,8 @@
       robotViewer.robot = robot;
       robotViewer.gripperJoints = gripperJoints;
       markGripperDebug(gripperJoints);
-      // 画布尺寸跟随容器变化：按 CSS 像素设置绘图缓冲，
-      // aspect 用 max(height, 1) 兜底，避免容器隐藏时高度为 0 导致投影矩阵出现 NaN。
+      // 画布尺寸跟随容器变化:按 CSS 像素设置绘图缓冲,
+      // aspect 用 max(height, 1) 兜底,避免容器隐藏时高度为 0 导致投影矩阵出现 NaN.
       const resize = () => {
         const rect = canvas.getBoundingClientRect();
         renderer.setSize(rect.width, rect.height, false);
@@ -1725,8 +1725,8 @@
       });
       return result;
     };
-    // 历史开口接口映射为双侧总行程，左右关节各走一半；新软指净开口尚待标定。
-    // 先钳位并减去闭合端偏移，再驱动整个 link，避免只移动其中一份网格。
+    // 历史开口接口映射为双侧总行程,左右关节各走一半;新软指净开口尚待标定.
+    // 先钳位并减去闭合端偏移,再驱动整个 link,避免只移动其中一份网格.
     const updateRobotViewer = (joints) => {
       if (!robotViewer.ready) return;
       armJointNames.forEach((name) => {
@@ -1772,9 +1772,9 @@
       radLabel.textContent = fmt(position);
       if (degLabel) degLabel.textContent = deg(position);
     };
-    // 预览与实时反馈的切换点。两套滑条共用同一份关节限位，
-    // 因此预览目标一定落在与后端一致的行程内；同步按钮把预览值拉回实时反馈，
-    // 并顺手把“可执行”状态复位为“仅预览”。
+    // 预览与实时反馈的切换点.两套滑条共用同一份关节限位,
+    // 因此预览目标一定落在与后端一致的行程内;同步按钮把预览值拉回实时反馈,
+    // 并顺手把"可执行"状态复位为"仅预览".
     const syncPreviewFromLive = () => {
       sliderNames.forEach((name) => {
         const joint = previewState.latestJoints[name];
@@ -1807,10 +1807,10 @@
       updateRobotViewer(previewState.latestJoints);
       viewerStatus('3D 视图已连接：正在跟随实时反馈');
     };
-    // 关节表格按后端给出的关节顺序排序渲染（夹爪排在最后并显示为 joint7）。
-    // 行是复用而不是每帧重建的：每帧重建会让表格闪烁、丢失滚动位置和文本选中。
-    // 反馈缺失的关节用 '-' 占位并保留行，让操作员看到是“这个关节没数据”，
-    // 而不是整块数据消失。
+    // 关节表格按后端给出的关节顺序排序渲染(夹爪排在最后并显示为 joint7).
+    // 行是复用而不是每帧重建的:每帧重建会让表格闪烁,丢失滚动位置和文本选中.
+    // 反馈缺失的关节用 '-' 占位并保留行,让操作员看到是"这个关节没数据",
+    // 而不是整块数据消失.
     const updateMotorRows = (joints) => {
       const tbody = document.getElementById('joints');
       const source = { ...(joints || {}) };
@@ -1886,8 +1886,8 @@
       input.addEventListener('change', (event) => update(event.target.value));
       update(executeSettings[key]);
     };
-    // 停止执行：请求发出后立刻禁用按钮防止连点；
-    // 仅当后端明确没有接收且当前不是空闲态时才重新启用，方便操作员重试。
+    // 停止执行:请求发出后立刻禁用按钮防止连点;
+    // 仅当后端明确没有接收且当前不是空闲态时才重新启用,方便操作员重试.
     const stopExecute = async () => {
       const stopButton = document.getElementById('stop-execute');
       stopButton.disabled = true;
@@ -1903,7 +1903,7 @@
         stopButton.disabled = false;
       }
     };
-    // plan_id 对应服务端保存的最终轨迹和起点绑定；浏览器仅持有预览及一次提交所需身份。
+    // plan_id 对应服务端保存的最终轨迹和起点绑定;浏览器仅持有预览及一次提交所需身份.
     let coordinatedPlan = null;
     let previewAnimation = 0;
     const planCoordinated = async () => {
@@ -1929,12 +1929,12 @@
           ? `计划：${fmt(result.duration,3)} s，起点已绑定` : '仅预览：使能后须重新预览';
         const start = performance.now();
         const animate = (now) => {
-          // 新计划替换对象后，旧动画立即退出；动画时间只控制显示，执行时间由后端拥有。
+          // 新计划替换对象后,旧动画立即退出;动画时间只控制显示,执行时间由后端拥有.
           if (coordinatedPlan !== result) return;
           const t = Math.min(result.duration,(now-start)/1000);
           const sample = result.preview.find(p => p.time >= t) || result.preview.at(-1);
           const targets = Object.fromEntries(result.joint_names.slice(0,6).map((n,i)=>[n,sample.positions[i]]));
-          targets.gripper = result.gripper_position; // 仅显示独立目标，不代表经过检查的夹爪运动曲线。
+          targets.gripper = result.gripper_position; // 仅显示独立目标,不代表经过检查的夹爪运动曲线.
           updateRobotViewer(jointsFromTargets(targets));
           if (t < result.duration) previewAnimation = requestAnimationFrame(animate);
         };
@@ -1945,7 +1945,7 @@
         return null;
       }
     };
-    // 一个组合按钮提交一个整体 Action；后端同周期登记六轴与独立夹爪目标。
+    // 一个组合按钮提交一个整体 Action;后端同周期登记六轴与独立夹爪目标.
     const executePreviewAndGripper = async () => {
       if (!webExecuteEnabled) return;
       const plan = coordinatedPlan || await planCoordinated();
@@ -1955,15 +1955,15 @@
         const response = await fetch('/api/execute_preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'EXECUTE',plan_id:plan.plan_id})});
         const result = await response.json();
         if (!result.accepted) window.alert(result.message || '组合任务被拒绝。');
-        // HTTP 接纳只显示“已提交”，整体 Action 结果与反馈由后续状态流更新。
+        // HTTP 接纳只显示"已提交",整体 Action 结果与反馈由后续状态流更新.
         else document.getElementById('motion-result').textContent = '任务：已提交';
         exitPreviewToLive();
       } catch(error) { window.alert(`组合请求失败：${error.message}`); exitPreviewToLive(); }
     };
-    // 夹爪不参与示教回放；请先独立设置开度，再检查六轴路径。
-    // 示教轨迹检查（dry-run）：只向后端提交检查请求，不下发任何真实轨迹。
-    // 检查凭据由服务端回放工作流保存；浏览器展示结果，并在回放时提交记录路径与设置。
-    // 服务端复核凭据后，仍以当前反馈重新构建整条曲线并检查质量与碰撞。
+    // 夹爪不参与示教回放;请先独立设置开度,再检查六轴路径.
+    // 示教轨迹检查(dry-run):只向后端提交检查请求,不下发任何真实轨迹.
+    // 检查凭据由服务端回放工作流保存;浏览器展示结果,并在回放时提交记录路径与设置.
+    // 服务端复核凭据后,仍以当前反馈重新构建整条曲线并检查质量与碰撞.
     const runTeachDryRun = async () => {
       const button = document.getElementById('run-teach-dry-run');
       const status = document.getElementById('teach-dry-run-status');
@@ -2008,9 +2008,9 @@
         updateTeachDryRunButton(latestTeachFileInfo);
       }
     };
-    // 真机回放：把文件路径、上次检查结果与回放参数一起提交。
-    // 确认框把起点误差、倍率、对齐时长与预计时长全部列出，
-    // 让操作员在按下之前就知道机械臂接下来会做什么。
+    // 真机回放:把文件路径,上次检查结果与回放参数一起提交.
+    // 确认框把起点误差,倍率,对齐时长与预计时长全部列出,
+    // 让操作员在按下之前就知道机械臂接下来会做什么.
     const runTeachReplay = async () => {
       const replayButton = document.getElementById('run-teach-replay');
       const status = document.getElementById('teach-dry-run-status');
@@ -2081,9 +2081,9 @@
         updateTeachDryRunButton(latestTeachFileInfo);
       }
     };
-    // 录制按钮的互斥门控：start 只在未录制时可点，stop 只在录制进行中可点，
-    // 两者在检查模式下都禁用。starting/waiting 也算“进行中”，
-    // 避免刚点下开始、后端还在切换状态时重复触发。
+    // 录制按钮的互斥门控:start 只在未录制时可点,stop 只在录制进行中可点,
+    // 两者在检查模式下都禁用.starting/waiting 也算"进行中",
+    // 避免刚点下开始,后端还在切换状态时重复触发.
     const syncTeachRecordButtons = (recordingValue) => {
       const recording = statusObj(recordingValue || {});
       const state = String(recording.state || '').toLowerCase();
@@ -2138,10 +2138,10 @@
         syncTeachRecordButtons({ state: 'recording' });
       }
     };
-    // 真机命令（回安全位 / 使能 / 失能）：检查模式、网页执行未启用、
-    // 或示教回放尚未完全停止（replaying/cancel_requested/stop_requested）时一律拒绝，
-    // 最后一种情况是防止机械臂在同一时刻被两套运动源争抢。
-    // 回安全位需要额外确认，因为后端会先停止当前轨迹再移动。
+    // 真机命令(回安全位 / 使能 / 失能):检查模式,网页执行未启用,
+    // 或示教回放尚未完全停止(replaying/cancel_requested/stop_requested)时一律拒绝,
+    // 最后一种情况是防止机械臂在同一时刻被两套运动源争抢.
+    // 回安全位需要额外确认,因为后端会先停止当前轨迹再移动.
     const runArmCommand = async (command, label) => {
       const buttons = ['arm-safe-home', 'arm-enable', 'arm-disable']
         .map((id) => document.getElementById(id))
@@ -2191,8 +2191,8 @@
         restoreArmButtons();
       }
     };
-    // 回放参数改动会清空上一次检查结果：检查结论只对当时那组参数有效，
-    // 参数一变就必须重新检查，否则等于用旧结论放行新参数。
+    // 回放参数改动会清空上一次检查结果:检查结论只对当时那组参数有效,
+    // 参数一变就必须重新检查,否则等于用旧结论放行新参数.
     const bindTeachReplaySetting = (rangeId, numberId, key, min, max, digits = 1) => {
       const range = document.getElementById(rangeId);
       const number = document.getElementById(numberId);
@@ -2228,9 +2228,9 @@
       number.addEventListener('change', (event) => update(event.target.value));
       update(keyboardSettings[key]);
     };
-    // 键盘单步的运动时长推导：步长除以最大速度得到“不快于限速”的最短时长，
-    // 再夹到配置的时长上下限之间。这样连续按键时单步速度不会超过配置上限，
-    // 同时避免步长很小时时长小到后端无法执行。
+    // 键盘单步的运动时长推导:步长除以最大速度得到"不快于限速"的最短时长,
+    // 再夹到配置的时长上下限之间.这样连续按键时单步速度不会超过配置上限,
+    // 同时避免步长很小时时长小到后端无法执行.
     const keyboardDurationForStep = () => {
       const speedDuration = keyboardSettings.stepRad / Math.max(keyboardSettings.maxSpeed, 1e-6);
       return clamp(Math.max(keyboardSettings.duration, speedDuration), keyboardSettings.minDuration, keyboardSettings.maxDuration);
@@ -2270,7 +2270,7 @@
       }
       syncKeyboardButtons();
     };
-    // 键盘按键下发：只有在键盘遥操作已开启、非检查模式且网页执行已启用时才发送。
+    // 键盘按键下发:只有在键盘遥操作已开启,非检查模式且网页执行已启用时才发送.
     const sendKeyboardKey = async (key) => {
       if (!keyboardSettings.enabled || isCheckMode || !webExecuteEnabled) return;
       try {
@@ -2330,10 +2330,10 @@
     document.getElementById('keyboard-disable').addEventListener('click', disableKeyboardTeleop);
     document.getElementById('start-teach-record').addEventListener('click', startTeachRecord);
     document.getElementById('stop-teach-record').addEventListener('click', stopTeachRecord);
-    // 全局按键处理：焦点在输入框、下拉框或按钮里时不抢按键，
-    // 否则操作员在“文件名”里输入数字会被当成关节命令。
-    // Esc 是关闭键盘遥操作的硬出口，优先于所有映射键。
-    // 单字符按键统一转小写，使大小写手感一致。
+    // 全局按键处理:焦点在输入框,下拉框或按钮里时不抢按键,
+    // 否则操作员在"文件名"里输入数字会被当成关节命令.
+    // Esc 是关闭键盘遥操作的硬出口,优先于所有映射键.
+    // 单字符按键统一转小写,使大小写手感一致.
     window.addEventListener('keydown', (event) => {
       const targetTag = String(event.target?.tagName || '').toLowerCase();
       if (['input', 'textarea', 'select', 'button'].includes(targetTag)) return;
@@ -2363,10 +2363,10 @@
     document.getElementById('teach-record-select').addEventListener('change', (event) => {
       selectTeachRecord(event.target.value);
     });
-    // SSE 状态事件：每收到一份快照就刷新面板。
-    // 渲染分两档频率：轻量面板（关节、状态芯片、按钮门控）按固定间隔节流，
-    // 较重的可选面板（事件日志等）约每秒才重绘一次，避免高频推送下浏览器忙于重排。
-    // 回放状态只在 state/message/轨迹点数真正变化时才追加日志，防止同一状态刷屏。
+    // SSE 状态事件:每收到一份快照就刷新面板.
+    // 渲染分两档频率:轻量面板(关节,状态芯片,按钮门控)按固定间隔节流,
+    // 较重的可选面板(事件日志等)约每秒才重绘一次,避免高频推送下浏览器忙于重排.
+    // 回放状态只在 state/message/轨迹点数真正变化时才追加日志,防止同一状态刷屏.
     source.addEventListener('status', (event) => {
       const data = JSON.parse(event.data);
       const nowMs = performance.now();
@@ -2397,8 +2397,8 @@
           addReplayEvent(`状态 ${replayStatus.state || '-'}: ${replayStatus.message || '-'}`);
         }
       }
-      // 停止按钮只在此刻确实有执行动作时才可点（active/accepted），
-      // 保证“能停下”和“有东西可停”一致。
+      // 停止按钮只在此刻确实有执行动作时才可点(active/accepted),
+      // 保证"能停下"和"有东西可停"一致.
       const webExecuteState = statusObj(data.teleop.web_execute).state || '-';
       document.getElementById('stop-execute').disabled = !['submitted','active','accepted','preparing','executing','stopping','cancel_requested'].includes(String(webExecuteState).toLowerCase());
       const motionLabels = {submitted:'已提交', accepted:'已接纳', preparing:'准备中', executing:'执行中',
@@ -2420,9 +2420,9 @@
       setHtml('teach-record-summary', renderTeachRecordSummary(latestTeachFileInfo, data.teleop.recording));
       updateMotorRows(data.joints || {});
       sliderNames.forEach((name) => updateSlider(name, data.joints[name]));
-      // 预览进行中时不能让实时反馈覆盖滑条与 3D 模型，
-      // 否则操作员刚拖到的目标会被下一帧反馈冲掉；
-      // 只有未进入预览模式时才让左侧模型跟随真机姿态。
+      // 预览进行中时不能让实时反馈覆盖滑条与 3D 模型,
+      // 否则操作员刚拖到的目标会被下一帧反馈冲掉;
+      // 只有未进入预览模式时才让左侧模型跟随真机姿态.
       if (!previewState.active) {
         sliderNames.forEach((name) => updateSlider(name, data.joints[name], 'preview'));
         updateRobotViewer(data.joints);
@@ -2431,8 +2431,8 @@
         lastSlowRenderMs = nowMs;
         renderOptionalDetails(latestStatusData);
       }
-      // 错误码由后端给出，逐条渲染成红色芯片；为空时显示“无错误”而不是留白，
-      // 这样“没有错误”和“还没收到数据”在界面上一眼可分。
+      // 错误码由后端给出,逐条渲染成红色芯片;为空时显示"无错误"而不是留白,
+      // 这样"没有错误"和"还没收到数据"在界面上一眼可分.
       const errors = data.arm.error_codes || [];
       document.getElementById('errors').innerHTML = errors.length
         ? errors.map((item) => `<div class="chip bad">${item}</div>`).join('')
@@ -2442,9 +2442,9 @@
     attachDetailsUnloaders();
     refreshTeachRecords();
     refreshTeachFileInfo();
-    // 首次加载：绑定卡片折叠与面板开合、拉一次示教文件列表与检查信息，
-    // 然后每 5 秒复查一次示教文件（文件可能被其他终端改写或被录制更新），
-    // 定期刷新也让起点是否已对齐的变化能自动反映到按钮门控上。
+    // 首次加载:绑定卡片折叠与面板开合,拉一次示教文件列表与检查信息,
+    // 然后每 5 秒复查一次示教文件(文件可能被其他终端改写或被录制更新),
+    // 定期刷新也让起点是否已对齐的变化能自动反映到按钮门控上.
     setInterval(refreshTeachFileInfo, 5000);
   </script>
 </body>

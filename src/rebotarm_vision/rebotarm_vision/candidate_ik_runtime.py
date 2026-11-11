@@ -1,4 +1,4 @@
-"""候选 IK 过滤的运行时编排，不负责 ROS 生命周期。"""
+"""候选 IK 过滤的运行时编排,不负责 ROS 生命周期."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from .policies.motion_feasibility_policy import evaluate_motion_feasibility
 
 
 class CandidateIkRuntime:
-    """把候选过滤顺序与 ROS 节点适配分开。
+    """把候选过滤顺序与 ROS 节点适配分开.
 
-    Policy 提供候选决策，gateway 提供 TF/MoveIt 与发布接口；本类只协调一帧内
-    的预检、变体、可行性和排序顺序，不持有 ROS Node。
+    Policy 提供候选决策,gateway 提供 TF/MoveIt 与发布接口;本类只协调一帧内
+    的预检,变体,可行性和排序顺序,不持有 ROS Node.
     """
 
     def __init__(self, *, policy, gateway, max_candidates: int, logger) -> None:

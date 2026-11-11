@@ -1,4 +1,4 @@
-"""停止确认使用生产运行时与假设备；验证紧急请求不会等待静止窗口。"""
+"""停止确认使用生产运行时与假设备;验证紧急请求不会等待静止窗口."""
 import threading
 import time
 from types import SimpleNamespace
@@ -34,7 +34,7 @@ def test_disable_preempts_pending_stop_and_rejects_new_motion(monkeypatch):
             manager.gravity.start_gravity_compensation()
         started = time.monotonic()
         manager.lifecycle.disable()
-        # 假设备无硬件延迟；若写入线程仍阻塞式等静止，这里会接近 2 s。
+        # 假设备无硬件延迟;若写入线程仍阻塞式等静止,这里会接近 2 s.
         assert time.monotonic() - started < .5
         assert done.wait(.5) and errors
         assert not manager.lifecycle.enabled and manager.lifecycle.state == 'CONNECTED_DISABLED'
@@ -93,7 +93,7 @@ def test_disable_cancels_passthrough_continuation_before_any_direct_write(monkey
         worker.join(.5)
         assert not worker.is_alive() and errors
         assert task.event.is_set() and manager.arm.arm_execution_status(task).state == 'aborted'
-        # .02 只属于抢占请求，周期保持输出为 0；不能因停止等待结束而迟到发送。
+        # .02 只属于抢占请求,周期保持输出为 0;不能因停止等待结束而迟到发送.
         assert not any(number == 1 and method == 'position' and args[0] == .02
                        for number, method, args in bus.events)
         assert not manager.lifecycle.enabled

@@ -131,7 +131,7 @@ class ControllerRuntime:
 
     @property
     def arm_resource_reserved(self):
-        """准备、轨迹和停止确认共用的夹爪排他标记，由六轴所有者释放。"""
+        """准备,轨迹和停止确认共用的夹爪排他标记,由六轴所有者释放."""
         return self.execution.reservation is not None
 
     def target(self):
@@ -244,12 +244,12 @@ class ControllerRuntime:
         # 取消或更新目标要等待正在发送的批次, 并使旧代次失效;
         # 取消返回后不会再发送旧快照.
         with self.execution.lock:
-            # 使用当前单调时刻而非 dt 累加，调度延迟不会形成待补发的轨迹积压。
+            # 使用当前单调时刻而非 dt 累加,调度延迟不会形成待补发的轨迹积压.
             target = self.execution.sample(time.monotonic())
             self.send_position_target(target)
 
     def send_position_target(self, target):
-        """发送设备周期已经采样的六轴候选；协同执行不在本方法再次读取时钟。"""
+        """发送设备周期已经采样的六轴候选;协同执行不在本方法再次读取时钟."""
         with self.execution.lock:
             if target.generation != self.execution.generation:
                 raise RuntimeError('position target superseded before send')
@@ -265,7 +265,7 @@ class ControllerRuntime:
             _AUDIT.info('position_receipt', extra={'audit': dict(generation=target.generation,
                 positions=command.positions, velocity_limits=command.velocity_limits,
                 sent=receipt.sent, success=receipt.success)})
-            # 驱动部分发送失败会携带回执抛错；不能推进游标或污染最后成功发送的保持值。
+            # 驱动部分发送失败会携带回执抛错;不能推进游标或污染最后成功发送的保持值.
             self.execution.acknowledge(target)
 
     def assert_writer(self):
@@ -342,7 +342,7 @@ class ControllerRuntime:
                     else:
                         if isinstance(value, CycleResult):
                             # 事务已接纳, 等待者仍等自己的事件; 写入线程继续服务周期和紧急请求.
-                            # 操作本身可能已作废旧代次；续体绑定操作完成后的代次，后续交接再使其失效。
+                            # 操作本身可能已作废旧代次;续体绑定操作完成后的代次,后续交接再使其失效.
                             with self.requests.lock:
                                 generations = tuple((name, self.requests.generations[name])
                                                     for name, _ in request.generations)
@@ -370,7 +370,7 @@ class ControllerRuntime:
                                 self.on_error(exc)
                             except Exception as protection_error:
                                 self.last_error += f'; protection failed: {protection_error}'
-                    # 回调耗时计入本周期；错过下一拍时重新排期，避免追赶积压输出。
+                    # 回调耗时计入本周期;错过下一拍时重新排期,避免追赶积压输出.
                     deadline += self._period
                     finished = time.monotonic()
                     if deadline <= finished:
@@ -393,7 +393,7 @@ class ControllerRuntime:
                                    for name, generation in generations)
                 if closing or obsolete:
                     raise RequestRejected('deferred execution superseded or runtime closed')
-                # 在队列锁外推进续体，其他线程可继续提交停止或失能请求。
+                # 在队列锁外推进续体,其他线程可继续提交停止或失能请求.
                 done, result = value.advance()
                 if not done:
                     continue

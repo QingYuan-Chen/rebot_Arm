@@ -47,8 +47,8 @@ def install_training_knn_fallback() -> None:
 def load_grasp_group():
     """Load GraspGroup without importing graspnetAPI's evaluation-only stack.
 
-    显式 ``GRASPNET_API_ROOT`` 优先；未设置时只尝试已安装的 ``graspnetAPI``。
-    不沿模型目录父级猜测第三方源码位置。
+    显式 ``GRASPNET_API_ROOT`` 优先;未设置时只尝试已安装的 ``graspnetAPI``.
+    不沿模型目录父级猜测第三方源码位置.
     """
     configured = os.environ.get("GRASPNET_API_ROOT", "").strip()
     candidates = [Path(configured).expanduser()] if configured else []

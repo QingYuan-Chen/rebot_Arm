@@ -1,8 +1,8 @@
-"""键盘遥操作组合：真机或 MuJoCo 共用 continuous 规划和执行协议。
+"""键盘遥操作组合:真机或 MuJoCo 共用 continuous 规划和执行协议.
 
-职责：只装配唯一后端、MoveIt 场景与键盘节点；无硬件默认使用 MuJoCo。
-接口：use_hardware 选择后端，use_local_rviz 控制显示，keyboard_prefix 提供 TTY。
-安全：真机默认失能；仿真和真机状态、时钟与执行服务保持互斥。
+职责:只装配唯一后端,MoveIt 场景与键盘节点;无硬件默认使用 MuJoCo.
+接口:use_hardware 选择后端,use_local_rviz 控制显示,keyboard_prefix 提供 TTY.
+安全:真机默认失能;仿真和真机状态,时钟与执行服务保持互斥.
 """
 
 from launch import LaunchDescription

@@ -1,4 +1,4 @@
-"""位姿纯计算及 SDK 退出：规范限位、不可达、采样失败和隔离导入。"""
+"""位姿纯计算及 SDK 退出:规范限位,不可达,采样失败和隔离导入."""
 import ast
 import json
 import os
@@ -129,7 +129,7 @@ def test_fixed_sdk_comparison_vectors(case):
     ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
 ])
 def test_owned_resource_uses_source_when_install_index_is_missing(monkeypatch, package, relative):
-    """只隔离安装索引，确保目录迁移后的源码回退深度仍能找到实际资源。"""
+    """只隔离安装索引,确保目录迁移后的源码回退深度仍能找到实际资源."""
     import ament_index_python.packages
     from rebotarm_force_control.gravity_control import package_file
 
@@ -147,7 +147,7 @@ def test_owned_resource_uses_source_when_install_index_is_missing(monkeypatch, p
     ('rebotarm_moveit_config', 'config/rebotarm.urdf'),
 ])
 def test_owned_resource_prefers_install_index_to_existing_source(tmp_path, monkeypatch, package, relative):
-    """让源码与安装资源同时存在，必须选安装索引，避免本机源码掩盖安装错误。"""
+    """让源码与安装资源同时存在,必须选安装索引,避免本机源码掩盖安装错误."""
     import ament_index_python.packages
     from rebotarm_force_control.gravity_control import package_file
 

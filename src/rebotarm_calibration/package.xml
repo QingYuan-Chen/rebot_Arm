@@ -3,29 +3,29 @@
 <package format="3">
   <name>rebotarm_calibration</name>
   <version>0.1.0</version>
-  <!-- 包描述（保留英文原文，供包索引与 rosdep 展示） -->
+  <!-- 包描述(保留英文原文,供包索引与 rosdep 展示) -->
   <description>Hand-eye, TCP, and TF calibration validation tools for reBotArm.</description>
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 构建类型：ament_python，由 setup.py 安装 Python 包与控制台入口 -->
+  <!-- 构建类型:ament_python,由 setup.py 安装 Python 包与控制台入口 -->
   <buildtool_depend>ament_python</buildtool_depend>
-  <!-- 数值计算：旋转矩阵运算与最小二乘求解 -->
+  <!-- 数值计算:旋转矩阵运算与最小二乘求解 -->
   <exec_depend>python3-numpy</exec_depend>
-  <!-- 视觉算法：ArUco 标记检测、位姿求解与手眼标定 -->
+  <!-- 视觉算法:ArUco 标记检测,位姿求解与手眼标定 -->
   <exec_depend>python3-opencv</exec_depend>
-  <!-- 图像消息与 OpenCV 图像之间的转换（标定节点取图时使用） -->
+  <!-- 图像消息与 OpenCV 图像之间的转换(标定节点取图时使用) -->
   <exec_depend>cv_bridge</exec_depend>
-  <!-- Python 客户端库：节点、参数声明与 TF 监听 -->
+  <!-- Python 客户端库:节点,参数声明与 TF 监听 -->
   <exec_depend>rclpy</exec_depend>
   <exec_depend>rebotarm_msgs</exec_depend>
-  <!-- 消息类型：Image 与 CameraInfo（标定取图与相机内参） -->
+  <!-- 消息类型:Image 与 CameraInfo(标定取图与相机内参) -->
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- TF 缓冲与查询：基座到末端连杆、基座到相机的外参查询 -->
+  <!-- TF 缓冲与查询:基座到末端连杆,基座到相机的外参查询 -->
   <exec_depend>tf2_ros</exec_depend>
 
   <export>
-    <!-- 声明构建类型，缺少时 ros2 run 无法定位本包的可执行入口 -->
+    <!-- 声明构建类型,缺少时 ros2 run 无法定位本包的可执行入口 -->
     <build_type>ament_python</build_type>
   </export>
 </package>

@@ -1,24 +1,24 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <!-- 包名：MoveIt 配置包，只承载模型与规划配置，不含可执行业务逻辑。
-       模型网格（meshes/）的 package:// URI 指向本包，因此本包是这些资源的唯一归属者。 -->
+  <!-- 包名:MoveIt 配置包,只承载模型与规划配置,不含可执行业务逻辑.
+       模型网格(meshes/)的 package:// URI 指向本包,因此本包是这些资源的唯一归属者. -->
   <name>rebotarm_moveit_config</name>
-  <!-- 版本号：随包内配置模型的兼容性变更递增。 -->
+  <!-- 版本号:随包内配置模型的兼容性变更递增. -->
   <version>0.1.0</version>
-  <!-- 描述：保持英文原文（清单对外展示字段，不翻译）。 -->
+  <!-- 描述:保持英文原文(清单对外展示字段,不翻译). -->
   <description>Canonical robot models, planning configuration and RViz resources for reBotArm MoveIt 2.</description>
-  <!-- 维护者与联系邮箱：用于 rosdep/发布检查，不是运行时参数。 -->
+  <!-- 维护者与联系邮箱:用于 rosdep/发布检查,不是运行时参数. -->
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
-  <!-- 许可证标识：Apache-2.0。 -->
+  <!-- 许可证标识:Apache-2.0. -->
   <license>Apache-2.0</license>
 
-  <!-- 构建工具：本包是 Python 包（setup.py + setup.cfg），用 ament_python 构建。 -->
+  <!-- 构建工具:本包是 Python 包(setup.py + setup.cfg),用 ament_python 构建. -->
   <buildtool_depend>ament_python</buildtool_depend>
 
   <!-- This package only installs URDF, SRDF, planning config, meshes, and RViz resources. -->
 
-  <!-- 导出构建类型：ament 依此选择构建插件，必须与上面的 buildtool_depend 一致。 -->
+  <!-- 导出构建类型:ament 依此选择构建插件,必须与上面的 buildtool_depend 一致. -->
   <export>
     <build_type>ament_python</build_type>
   </export>

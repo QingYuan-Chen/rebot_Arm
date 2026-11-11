@@ -1,8 +1,8 @@
-"""隔离域中的批次 6 ROS 验证入口：只能装配假句柄，禁止打开真实通道。
+"""隔离域中的批次 6 ROS 验证入口:只能装配假句柄,禁止打开真实通道.
 
-需先在同一空闲 ROS_DOMAIN_ID 启动 moveit_demo（禁用 RViz 和假关节源）。
-本进程使用安装区控制器和 motion，SDK 导入被拦截；MoveIt 服务端是真实
-move_group。所有使能、轨迹和失能仅作用于本进程创建的内存假电机。
+需先在同一空闲 ROS_DOMAIN_ID 启动 moveit_demo(禁用 RViz 和假关节源).
+本进程使用安装区控制器和 motion,SDK 导入被拦截;MoveIt 服务端是真实
+move_group.所有使能,轨迹和失能仅作用于本进程创建的内存假电机.
 """
 import importlib.abc
 import json
@@ -158,7 +158,7 @@ try:
         group_name='arm', start_positions=start)
     response = wait(planner.call_async(request))
     assert response.motion_plan_response.error_code.val == 1, response
-    # 必须通过 move_group 的 ExecuteTrajectory，再由控制器管理器转 FJT。
+    # 必须通过 move_group 的 ExecuteTrajectory,再由控制器管理器转 FJT.
     execute = ActionClient(client, ExecuteTrajectory, '/execute_trajectory')
     assert execute.wait_for_server(timeout_sec=10.)
     value = ExecuteTrajectory.Goal()
@@ -195,7 +195,7 @@ try:
     assert done.result.arm_state == done.result.gripper_state == 'succeeded', done
     assert controller.hardware.lifecycle.enabled
     report['coordinated_execute'] = [done.status,done.result.error_code]
-    # 真实 ROS Action 链覆盖残差取消与组合→六轴交接；只改内存假电机反馈。
+    # 真实 ROS Action 链覆盖残差取消与组合→六轴交接;只改内存假电机反馈.
     motor = buses[0].motors[0]
     original_send = motor.send_pos_vel
     residuals = []
@@ -223,7 +223,7 @@ try:
             done = wait(handle.get_result_async())
             assert cancel_response.goals_canceling, (residual, cancel_response, done)
             assert done.status == 5, done
-            # 小开口可能在取消前已经独立到位；已完成侧保留成功，整体仍为取消。
+            # 小开口可能在取消前已经独立到位;已完成侧保留成功,整体仍为取消.
             assert done.result.arm_state == 'canceled' and done.result.gripper_state in ('failed','succeeded'), done
             assert not controller.hardware.runtime.arm_resource_reserved
             assert controller.hardware.arm._stop_wait is None
@@ -268,7 +268,7 @@ try:
     report['ok'] = True
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
 finally:
-    # 这里仅有内存假电机，不连接真实端口；显式恢复失能再释放本轮节点。
+    # 这里仅有内存假电机,不连接真实端口;显式恢复失能再释放本轮节点.
     if controller.hardware.lifecycle.enabled:
         controller.hardware.lifecycle.disable()
     controller.hardware.lifecycle.shutdown()

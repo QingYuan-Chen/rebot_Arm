@@ -1,4 +1,4 @@
-"""保留旧行为样本的设备替身；实现运行时接口，不改变生产准入条件。"""
+"""保留旧行为样本的设备替身;实现运行时接口,不改变生产准入条件."""
 import threading
 import time
 from dataclasses import replace
@@ -8,7 +8,7 @@ from rebotarmcontroller.runtime.device_requests import DeviceRequests
 
 
 class WriterRuntime:
-    """独立事务测试显式置于设备线程；外部排队由真实运行时专项覆盖。"""
+    """独立事务测试显式置于设备线程;外部排队由真实运行时专项覆盖."""
 
     in_writer = True
 
@@ -20,7 +20,7 @@ class WriterRuntime:
 
 
 def inject_feedback_refresh(monkeypatch, manager, refresh):
-    """动作开始前注入刷新替身；只替换测试端口，不改已装配的方法引用。"""
+    """动作开始前注入刷新替身;只替换测试端口,不改已装配的方法引用."""
     for component in (manager.gripper, manager.gravity, manager.cycle):
         monkeypatch.setattr(component, 'feedback', replace(
             component.feedback, refresh_feedback_if_due=refresh))
@@ -37,7 +37,7 @@ class FakeBackend:
         self._waiting = False
 
     def assert_writer(self):
-        """旧行为夹具显式处于内存设备事务；与生产端口同样拒绝越过 writer 边界。"""
+        """旧行为夹具显式处于内存设备事务;与生产端口同样拒绝越过 writer 边界."""
         if not self.in_writer:
             raise RuntimeError('device writer context required')
 
@@ -133,10 +133,10 @@ class FakeBackend:
 
     @staticmethod
     def _patch_controller_bus(ctrl) -> None:
-        """给控制器的 poll_feedback_once/enable_all/disable_all 包上可重入锁。
+        """给控制器的 poll_feedback_once/enable_all/disable_all 包上可重入锁.
 
-        这几个方法内部会做多次总线读写，必须在同一把锁内完成，否则与其他线程
-        的电机命令交错会串帧。重复调用是幂等的。
+        这几个方法内部会做多次总线读写,必须在同一把锁内完成,否则与其他线程
+        的电机命令交错会串帧.重复调用是幂等的.
         """
         if not hasattr(ctrl, "_bus_lock"):
             ctrl._bus_lock = threading.RLock()
@@ -154,14 +154,14 @@ class FakeBackend:
         for attr in ("poll_feedback_once", "enable_all", "disable_all"):
             if hasattr(ctrl, attr):
                 wrapped = _wrap(getattr(ctrl, attr))
-                # 标记位用于 _wrap_motor_bus 判定是否已包装，避免重复加锁。
+                # 标记位用于 _wrap_motor_bus 判定是否已包装,避免重复加锁.
                 wrapped._rebotarm_locked = True
                 setattr(ctrl, attr, wrapped)
         ctrl._bus_lock_patched = True
 
     @staticmethod
     def _wrap_motor_bus(mot, lock) -> None:
-        """把单个电机的总线类方法包上同一把锁（幂等，已包装的跳过）。"""
+        """把单个电机的总线类方法包上同一把锁(幂等,已包装的跳过)."""
         def _wrap(fn, _lock=lock):
             def _locked(*args, **kwargs):
                 with _lock:

@@ -1,4 +1,4 @@
-"""固定数值样本驱动生产组件；C++ 应复用 JSON 输入、输出和同一容差。"""
+"""固定数值样本驱动生产组件;C++ 应复用 JSON 输入,输出和同一容差."""
 import json
 from pathlib import Path
 import time
@@ -157,7 +157,7 @@ def test_partial_send_retains_cursor_and_protection_decision():
         driver.close()
 
 
-# v1 停止样本作为历史协议保留；当前策略使用 v2，不能改写旧预期。
+# v1 停止样本作为历史协议保留;当前策略使用 v2,不能改写旧预期.
 STOP_V2 = json.loads((Path(__file__).parent / 'fixtures/controller_stop_reference_v2.json').read_text())
 
 

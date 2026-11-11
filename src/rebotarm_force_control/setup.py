@@ -1,8 +1,8 @@
-"""共享力控库的 ament_python 打包入口。
+"""共享力控库的 ament_python 打包入口.
 
-职责：安装数值模块、配置与包索引；接口：供 setuptools/colcon 构建。
-安全约束：构建不导入控制算法或设备库，不注册硬件节点。
-文件结构：构建工具导入、包元数据与安装资源声明。
+职责:安装数值模块,配置与包索引;接口:供 setuptools/colcon 构建.
+安全约束:构建不导入控制算法或设备库,不注册硬件节点.
+文件结构:构建工具导入,包元数据与安装资源声明.
 """
 
 from setuptools import find_packages, setup

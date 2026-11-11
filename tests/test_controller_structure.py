@@ -1,4 +1,4 @@
-"""批次 6.5/6.7 的职责门禁；防止门面和请求入口重新积累兼容耦合。"""
+"""批次 6.5/6.7 的职责门禁;防止门面和请求入口重新积累兼容耦合."""
 import ast
 import importlib
 from pathlib import Path
@@ -51,7 +51,7 @@ def test_components_never_receive_manager_or_use_lazy_assembly():
                 assert node.name not in ('__getattr__', '__setattr__')
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 assert node.func.attr != '__new__'
-                # 构造/一次绑定之外不得在查询或周期中惰性创建执行器和反馈缓存。
+                # 构造/一次绑定之外不得在查询或周期中惰性创建执行器和反馈缓存.
                 if node.func.attr.startswith('_assemble'):
                     parent = next(method for method in ast.walk(tree)
                                   if isinstance(method, ast.FunctionDef)
@@ -73,7 +73,7 @@ def test_safety_fixtures_use_formal_construction():
 
 
 def test_peer_access_is_limited_to_declared_public_ports():
-    """不只检查门面：bind 的每条边必须是冻结端口，调用不得越过端口字段。"""
+    """不只检查门面:bind 的每条边必须是冻结端口,调用不得越过端口字段."""
     from dataclasses import fields, is_dataclass
     import rebotarmcontroller.contracts.component_ports as ports
     for name in ('arm_controller', 'gripper_controller', 'feedback_reader',
@@ -137,7 +137,7 @@ def test_only_composition_node_receives_manager_components():
 
 
 def test_ros_adapters_only_access_declared_role_ports():
-    """只读端口不能发命令；适配和关闭协调不得穿透组件私有状态或写入属性。"""
+    """只读端口不能发命令;适配和关闭协调不得穿透组件私有状态或写入属性."""
     contracts = ast.parse((PACKAGE / 'contracts/ros_ports.py').read_text())
     classes = {node.name: node for node in contracts.body if isinstance(node, ast.ClassDef)}
 
@@ -149,7 +149,7 @@ def test_ros_adapters_only_access_declared_role_ports():
 
     for name in ('ros_actions', 'ros_services', 'ros_publishers', 'motor_passthrough', 'lifecycle'):
         tree = ast.parse((PACKAGE / MODULES[name]).read_text())
-        # 构造参数与同名私有字段一一对应；关闭策略直接使用参数。
+        # 构造参数与同名私有字段一一对应;关闭策略直接使用参数.
         functions = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
                      and node.name in ('__init__', 'shutdown_policy')]
         for function in functions:
@@ -231,7 +231,7 @@ def test_request_entries_use_one_component_layer_and_the_central_policy():
     for key, entry in found.items():
         assert entry.request_policy is REQUEST_POLICIES[key]
         assert hasattr(entry, '__wrapped__') and not hasattr(entry.__wrapped__, '__wrapped__'), key
-    # 同步编排不能占住唯一设备线程等待自身周期或停止/失能请求。
+    # 同步编排不能占住唯一设备线程等待自身周期或停止/失能请求.
     for owner, name in (('ArmController', 'safe_home'),
                         ('GripperController', 'set_gripper_position'), ('GripperController', 'wait_gripper_target')):
         assert f'{owner}.{name}' not in found

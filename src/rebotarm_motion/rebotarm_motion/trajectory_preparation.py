@@ -1,21 +1,21 @@
-"""正式准备服务与离线分析共用的轨迹规范化、检查及数值交接。
+"""正式准备服务与离线分析共用的轨迹规范化,检查及数值交接.
 
 文件职责
-    在运动层把点约束变成可核验曲线，检查段内限值和完整碰撞采样覆盖。
-    本文件不创建 ROS 节点；正式服务通过注入碰撞检查器复用同一准备流程。
+    在运动层把点约束变成可核验曲线,检查段内限值和完整碰撞采样覆盖.
+    本文件不创建 ROS 节点;正式服务通过注入碰撞检查器复用同一准备流程.
 对外接口
-    PreparationContext 描述会话、目标代次和保持快照；normalize_boundaries
-    规范化首末约束；point_to_point 生成静止到静止约束；analyze_trajectory
-    返回 (PreparedTrajectory 或 None, 报告)。load_reference_limits 读取现有限值。
+    PreparationContext 描述会话,目标代次和保持快照;normalize_boundaries
+    规范化首末约束;point_to_point 生成静止到静止约束;analyze_trajectory
+    返回 (PreparedTrajectory 或 None, 报告).load_reference_limits 读取现有限值.
 安全约束
-    新鲜反馈下将起点对齐已发送保持命令，不以实际位置与保持值的误差单独拒绝。
-    对齐后的准确曲线仍须完整限值及碰撞检查；不得修改中间导数或原有时间。
-    超限、未知或碰撞检查覆盖不足均不能生成候选；不自动拉长时长、裁剪或降级。
-    候选不是执行许可：正式服务另外绑定场景/夹爪，后端在所有者事务内复核后接纳。
-    observed_at/now 使用同源单调秒；反馈采集和资源预约由执行后端负责。
+    新鲜反馈下将起点对齐已发送保持命令,不以实际位置与保持值的误差单独拒绝.
+    对齐后的准确曲线仍须完整限值及碰撞检查;不得修改中间导数或原有时间.
+    超限,未知或碰撞检查覆盖不足均不能生成候选;不自动拉长时长,裁剪或降级.
+    候选不是执行许可:正式服务另外绑定场景/夹爪,后端在所有者事务内复核后接纳.
+    observed_at/now 使用同源单调秒;反馈采集和资源预约由执行后端负责.
 文件结构
     限值读取 → 准备上下文 → 边界规范化与点对点约束 → 极值/参考分析 → 冻结候选
-    → 完整准备流程。报告保留离线分析字段，不能将数值对照当作物理跟踪证据。
+    → 完整准备流程.报告保留离线分析字段,不能将数值对照当作物理跟踪证据.
 """
 
 from dataclasses import asdict, dataclass, replace
@@ -49,7 +49,7 @@ def load_reference_limits(config_directory, joint_names=JOINT_NAMES):
 
 @dataclass(frozen=True)
 class PreparationContext:
-    """冻结的六轴保持快照；hold 是已发送命令，feedback 是带观测时刻的实际值。"""
+    """冻结的六轴保持快照;hold 是已发送命令,feedback 是带观测时刻的实际值."""
 
     session: int
     generation: int
@@ -73,7 +73,7 @@ class PreparationContext:
             raise ValueError('finite feedback observation time required')
 
     def require_ready(self, now):
-        """检查反馈新鲜度和资源状态；不要求机械臂连续静止窗口。"""
+        """检查反馈新鲜度和资源状态;不要求机械臂连续静止窗口."""
         if not math.isfinite(now) or not -.005 <= now - self.observed_at <= MAX_AGE:
             raise ValueError('fresh feedback required')
         if not self.enabled or self.busy:
@@ -93,13 +93,13 @@ def normalize_boundaries(joint_names, points, context, *, now):
     if first.time == 0:
         if len(points) == 1 and first.positions != hold:
             raise ValueError('zero-duration position change forbidden')
-        # 六轴从已发送保持命令连续起步，残差不设单独门限；随后检查整条规范化曲线。
+        # 六轴从已发送保持命令连续起步,残差不设单独门限;随后检查整条规范化曲线.
         points[0] = replace(first, positions=hold)
     else:
-        # 首点晚于零时刻时显式补起点；导数字段是否存在仍沿用输入的兼容等级。
+        # 首点晚于零时刻时显式补起点;导数字段是否存在仍沿用输入的兼容等级.
         points.insert(0, TrajectoryPoint(0., hold,
             zeros if first.velocities else (), zeros if first.accelerations else ()))
-    # 仅将已提供的首末导数归零以连接保持状态，中间点及末点位置均保留。
+    # 仅将已提供的首末导数归零以连接保持状态,中间点及末点位置均保留.
     for i in {0, len(points) - 1}:
         point = points[i]
         points[i] = replace(point, velocities=zeros if point.velocities else (),
@@ -124,7 +124,7 @@ def minimum_point_to_point_duration(start, target, limits):
     required = 0.
     for name, a, b in zip(JOINT_NAMES, start, target):
         distance, limit = abs(b - a), limits[name]
-        # 静止到静止五次曲线的 v/a/jerk 峰值分别按 1/T、1/T²、1/T³ 缩放。
+        # 静止到静止五次曲线的 v/a/jerk 峰值分别按 1/T,1/T²,1/T³ 缩放.
         for peak, bound, power in ((1.875 * distance, limit.max_velocity, 1),
                 (10 / math.sqrt(3) * distance, limit.max_acceleration, 2),
                 (60 * distance, limit.max_jerk, 3)):
@@ -170,7 +170,7 @@ def check_curve(curve, lower, upper, limits):
                 if violated:
                     issues.append(dict(joint=name, kind=kind, time=stamp, value=value, limit=bound))
         peaks[name] = joint_peaks
-    # 低阶曲线的段内导数可能合格，但节点跳变不能据此宣称满足更高阶动态限值。
+    # 低阶曲线的段内导数可能合格,但节点跳变不能据此宣称满足更高阶动态限值.
     return dict(state='rejected' if issues else 'pass', issues=issues, peaks=peaks,
                 continuity=curve.continuity(),
                 derivative_limits_cover_node_jumps=curve.degree == 5)
@@ -213,25 +213,25 @@ def compare_reference(curve, source, *, period=.002, max_samples=100_000):
 
 @dataclass(frozen=True)
 class PreparedTrajectory:
-    """通过数值与注入碰撞检查的不可变候选；后端原子接纳之前不能用于运动。"""
+    """通过数值与注入碰撞检查的不可变候选;后端原子接纳之前不能用于运动."""
 
     curve: PolynomialTrajectory
     context: PreparationContext
 
     def require_current(self, current, *, now):
-        """复核六轴上下文；正式接纳还须由后端检查夹爪、模式、场景和资源预约。"""
+        """复核六轴上下文;正式接纳还须由后端检查夹爪,模式,场景和资源预约."""
         current.require_ready(now)
         if ((current.session, current.generation, current.hold)
                 != (self.context.session, self.context.generation, self.context.hold)):
             raise ValueError('prepared trajectory superseded')
 
     def to_payload(self):
-        """导出精确系数和冻结上下文；正式服务在此载荷外追加场景与夹爪绑定。"""
+        """导出精确系数和冻结上下文;正式服务在此载荷外追加场景与夹爪绑定."""
         return dict(curve=self.curve.to_payload(), context=asdict(self.context))
 
     @classmethod
     def from_payload(cls, payload):
-        """供运动层离线往返验证；执行端不应调用会重新核对生成规则的运动层实现。"""
+        """供运动层离线往返验证;执行端不应调用会重新核对生成规则的运动层实现."""
         return cls(curve_from_payload(payload['curve']), PreparationContext(**payload['context']))
 
 
@@ -241,12 +241,12 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
     """返回候选与可审计报告; 只有完整覆盖的碰撞 pass 才产生候选.
 
     collision_check(names, positions) 由调用者注入, 应绑定其记录的规划场景与完整
-    夹爪状态. 无检查器、异常、超时或样本数不足都不能生成候选.
-    include_reference_comparison 仅控制离线阶梯对照统计，不影响极值或碰撞检查。
+    夹爪状态. 无检查器,异常,超时或样本数不足都不能生成候选.
+    include_reference_comparison 仅控制离线阶梯对照统计,不影响极值或碰撞检查.
     """
     source = ordered_points(joint_names, points)
     names = canonical_names(joint_names)
-    # 去除首点修正幅度门限后，仍明确拒绝越界输入，不能由起点替换掩盖非法位置。
+    # 去除首点修正幅度门限后,仍明确拒绝越界输入,不能由起点替换掩盖非法位置.
     if context and any(q < lo-CALC_ATOL or q > hi+CALC_ATOL
             for q,lo,hi in zip(source[0].positions, lower, upper)):
         raise ValueError('first input position outside limits')
@@ -265,13 +265,13 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
         raise ValueError('explicit initial state at time zero required')
     report = dict(source_points=len(source), normalized_points=len(points),
                   normalized=points != source,
-                  # 保留历史报告格式；正式服务的执行许可来自后端复核，不来自此标签。
+                  # 保留历史报告格式;正式服务的执行许可来自后端复核,不来自此标签.
                   scope='offline_reference_only')
     try:
         curve = build_curve(names, points)
         report.update(duration=curve.duration, degree=curve.degree,
                       normalized_trajectory=curve.to_payload())
-        # 阶梯误差对照仅供离线分析；正式准备不生成长时域网格，仍全量检查极值和碰撞。
+        # 阶梯误差对照仅供离线分析;正式准备不生成长时域网格,仍全量检查极值和碰撞.
         if include_reference_comparison:
             report['comparison'] = compare_reference(curve, source)
         report['limits'] = check_curve(curve, lower, upper, limits)
@@ -286,7 +286,7 @@ def analyze_trajectory(joint_names, points, *, lower, upper, limits, context=Non
     if collision_check is not None:
         try:
             collision = dict(collision_check(names, [curve.sample(t)[0] for t in times]))
-            # 检查器必须证明整个批次都检查过，不能以一部分样本成功代表整条曲线。
+            # 检查器必须证明整个批次都检查过,不能以一部分样本成功代表整条曲线.
             if (collision.get('state') == 'pass' and
                     (collision.get('checked_samples') != len(times)
                      or collision.get('requested_samples') != len(times))):

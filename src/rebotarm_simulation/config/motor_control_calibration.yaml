@@ -1,14 +1,14 @@
-# 仿真专用标定：把达妙固件速度环/PI 的输出换算成物理力矩。
-# 这些是"仿真标定值"，不是固件参数：固件整定增益另见 firmware_reference 段。
-# firmware_reference 是迁移时（2026-09-06）从驱动配置中冻结下来的参考快照。
-# 硬件侧重新整定不得悄悄改变已经冻结的仿真标定，否则仿真结论与历史数据不可比。
+# 仿真专用标定:把达妙固件速度环/PI 的输出换算成物理力矩.
+# 这些是"仿真标定值",不是固件参数:固件整定增益另见 firmware_reference 段.
+# firmware_reference 是迁移时(2026-09-06)从驱动配置中冻结下来的参考快照.
+# 硬件侧重新整定不得悄悄改变已经冻结的仿真标定,否则仿真结论与历史数据不可比.
 firmware_reference:
-  # 固件控制环频率（Hz）。仿真按该周期下发一次控制量，dt = 1/rate。
+  # 固件控制环频率(Hz).仿真按该周期下发一次控制量,dt = 1/rate.
   rate_hz: 100
-  # 各关节的固件原始整定增益（参考值，不由仿真直接整定）：
-  #   pos_kp / pos_ki  位置环比例/积分增益（固件原始量纲）
-  #   vel_kp / vel_ki  速度环比例/积分增益（固件原始量纲）
-  #   vlim             位置环输出的目标速度上限（rad/s）
+  # 各关节的固件原始整定增益(参考值,不由仿真直接整定):
+  #   pos_kp / pos_ki  位置环比例/积分增益(固件原始量纲)
+  #   vel_kp / vel_ki  速度环比例/积分增益(固件原始量纲)
+  #   vlim             位置环输出的目标速度上限(rad/s)
   arm:
     joint1: {pos_kp: 150.0, pos_ki: 0.5, vel_kp: 0.0125, vel_ki: 0.004, vlim: 5.0}
     joint2: {pos_kp: 150.0, pos_ki: 0.5, vel_kp: 0.0125, vel_ki: 0.004, vlim: 5.0}
@@ -16,12 +16,12 @@ firmware_reference:
     joint4: {pos_kp: 50.0, pos_ki: 1.0, vel_kp: 0.0008, vel_ki: 0.002, vlim: 3.0}
     joint5: {pos_kp: 50.0, pos_ki: 1.0, vel_kp: 0.0008, vel_ki: 0.002, vlim: 3.0}
     joint6: {pos_kp: 50.0, pos_ki: 1.0, vel_kp: 0.0008, vel_ki: 0.002, vlim: 3.0}
-  # 固件侧夹爪默认 MIT 增益（kp 位置、kd 速度），仅作参考，仿真使用 gripper.modes。
+  # 固件侧夹爪默认 MIT 增益(kp 位置,kd 速度),仅作参考,仿真使用 gripper.modes.
   gripper: {kp: 8.0, kd: 1.0}
 
-# 电机型号规格，供按型号取额定/峰值力矩与减速比。键名即 arm.<关节>.motor_model 的取值。
+# 电机型号规格,供按型号取额定/峰值力矩与减速比.键名即 arm.<关节>.motor_model 的取值.
 motor_specs:
-  # 大关节（joint1~joint3）所用型号：额定 12 N·m、峰值 40 N·m（关节侧），减速比 40。
+  # 大关节(joint1~joint3)所用型号:额定 12 N·m,峰值 40 N·m(关节侧),减速比 40.
   DM4340P:
     hardware_revision: DM-J4340P-2EC V1.1
     rated_voltage_v: 24
@@ -30,7 +30,7 @@ motor_specs:
     rated_torque_nm: 12.0
     peak_torque_nm: 40.0
     reduction_ratio: 40.0
-  # 小关节（joint4~joint6）与夹爪所用型号：额定 3.5 N·m、峰值 12.5 N·m，减速比 10。
+  # 小关节(joint4~joint6)与夹爪所用型号:额定 3.5 N·m,峰值 12.5 N·m,减速比 10.
   DM4310_V1_2:
     hardware_revision: DM-J4310-2EC V1.2
     rated_voltage_v: 24
@@ -40,31 +40,31 @@ motor_specs:
     peak_torque_nm: 12.5
     reduction_ratio: 10.0
 
-# 机械臂仿真标定与模型动力学。
+# 机械臂仿真标定与模型动力学.
 arm:
-  # 逐关节标定：
-  #   motor_model              该关节所用电机型号（键指向 motor_specs）
-  #   firmware_to_torque_scale 固件速度环输出 → 物理力矩的比例系数（无量纲，随型号不同）
-  #   torque_rate_limit_nm_s   力矩变化率限幅（N·m/s）：越大越接近阶跃，也越易激发振荡
-  #   torque_lowpass_alpha     力矩一阶低通系数，取值范围 (0, 1]；越小越平滑但相位滞后越大
+  # 逐关节标定:
+  #   motor_model              该关节所用电机型号(键指向 motor_specs)
+  #   firmware_to_torque_scale 固件速度环输出 → 物理力矩的比例系数(无量纲,随型号不同)
+  #   torque_rate_limit_nm_s   力矩变化率限幅(N·m/s):越大越接近阶跃,也越易激发振荡
+  #   torque_lowpass_alpha     力矩一阶低通系数,取值范围 (0, 1];越小越平滑但相位滞后越大
   joint1: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
   joint2: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
   joint3: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
   joint4: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
   joint5: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
   joint6: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
-  # 位置环积分累加值限幅：防止长时间偏差把积分项灌满（抗积分饱和）。
-  # 注意键名写作 rad_s，实际量纲是 位置误差(rad) × 时间(s) 的积分结果。
+  # 位置环积分累加值限幅:防止长时间偏差把积分项灌满(抗积分饱和).
+  # 注意键名写作 rad_s,实际量纲是 位置误差(rad) × 时间(s) 的积分结果.
   position_integral_limit_rad_s: 5.0
-  # 速度环积分累加值限幅（rad）：速度误差(rad/s) × 时间(s) 的积分结果。
+  # 速度环积分累加值限幅(rad):速度误差(rad/s) × 时间(s) 的积分结果.
   velocity_integral_limit_rad: 5.0
-  # 重力补偿前馈缩放系数：1.0 为全量补偿，0.0 为关闭（用于做纯反馈对照实验）。
+  # 重力补偿前馈缩放系数:1.0 为全量补偿,0.0 为关闭(用于做纯反馈对照实验).
   gravity_compensation_scale: 1.0
 
-# MuJoCo 关节级模型动力学参数（由 URDF→MJCF 转换时写入模型）。
-#   damping      关节粘性阻尼（N·m·s/rad 或 N·s/m）：越大动作越"黏"，抑制振荡也拖慢响应
-#   armature     关节等效转动惯量（kg·m² 或 kg）：模拟电机转子+减速器折算惯量，提升数值稳定性
-#   frictionloss 干摩擦损失（N·m 或 N）：静摩擦量级，影响低速爬行与到位精度
+# MuJoCo 关节级模型动力学参数(由 URDF→MJCF 转换时写入模型).
+#   damping      关节粘性阻尼(N·m·s/rad 或 N·s/m):越大动作越"黏",抑制振荡也拖慢响应
+#   armature     关节等效转动惯量(kg·m² 或 kg):模拟电机转子+减速器折算惯量,提升数值稳定性
+#   frictionloss 干摩擦损失(N·m 或 N):静摩擦量级,影响低速爬行与到位精度
 model_dynamics:
   joint1: {damping: 10.0, armature: 0.02, frictionloss: 0.02}
   joint2: {damping: 10.0, armature: 0.02, frictionloss: 0.02}
@@ -75,34 +75,34 @@ model_dynamics:
   left_finger_joint: {damping: 20.0, armature: 0.001, frictionloss: 0.1}
   right_finger_joint: {damping: 20.0, armature: 0.001, frictionloss: 0.1}
 
-# 夹爪标定与仿真力伺服参数。
+# 夹爪标定与仿真力伺服参数.
 gripper:
-  # 夹爪电机型号（键指向 motor_specs）。
+  # 夹爪电机型号(键指向 motor_specs).
   motor_model: DM4310_V1_2
-  # 开口位移 → 电机转角换算系数（rad/m，负号表示电机旋转方向与开口增大方向相反）：
-  # 数值为 -5 rad / 0.09 m，即全行程 0.09 m 对应电机转 5 rad。
+  # 开口位移 → 电机转角换算系数(rad/m,负号表示电机旋转方向与开口增大方向相反):
+  # 数值为 -5 rad / 0.09 m,即全行程 0.09 m 对应电机转 5 rad.
   motor_radians_per_opening_m: -55.55555555555556  # -5 rad / 0.09 m
-  # 传动效率（0~1）：由电机力矩折算指尖力时的损耗系数。
+  # 传动效率(0~1):由电机力矩折算指尖力时的损耗系数.
   transmission_efficiency: 0.80
-  # 电机侧力矩上限（N·m）：先于指尖力上限生效，是电机自身的安全边界。
+  # 电机侧力矩上限(N·m):先于指尖力上限生效,是电机自身的安全边界.
   motor_torque_limit_nm: 1.5
-  # 1.5 N·m × 55.56 rad/m × 0.8 只是电机侧折算出的理想上界，并非实测指尖力。
-  # 用户指定每个滑动手指执行器及关节总执行器限力均为1.5 N；非实测夹持力。
+  # 1.5 N·m × 55.56 rad/m × 0.8 只是电机侧折算出的理想上界,并非实测指尖力.
+  # 用户指定每个滑动手指执行器及关节总执行器限力均为1.5 N;非实测夹持力.
   finger_force_limit_n: 1.5
-  # 仿真指尖力伺服：位置刚度（N/m），偏大则接触更硬、更容易数值振荡。
+  # 仿真指尖力伺服:位置刚度(N/m),偏大则接触更硬,更容易数值振荡.
   sim_force_kp_n_per_m: 250.0
-  # 仿真指尖力伺服：速度阻尼（N·s/m），用于抑制接触振荡。
+  # 仿真指尖力伺服:速度阻尼(N·s/m),用于抑制接触振荡.
   sim_force_kd_n_s_per_m: 6.0
-  # 力伺服位置死区（m）：位置误差小于该值不施加接触力，避免接触抖动。
+  # 力伺服位置死区(m):位置误差小于该值不施加接触力,避免接触抖动.
   sim_force_deadband_m: 0.0005
-  # 力伺服速度死区（m/s）：速度小于该值按静止处理。
+  # 力伺服速度死区(m/s):速度小于该值按静止处理.
   sim_velocity_deadband_m_s: 0.002
-  # 夹爪开口位移合法区间（m）：[完全闭合, 完全张开]，指令先夹到该区间再换算。
+  # 夹爪开口位移合法区间(m):[完全闭合, 完全张开],指令先夹到该区间再换算.
   displacement_range_m: [0.0, 0.09]
-  # 三种夹持模式的 MIT 增益（kp 位置、kd 速度）：
-  #   move    正常开合，跟踪目标开口；
-  #   closing 纯阻尼闭合（kp=0），靠阻尼控制闭合速度与接触力；
-  #   hold    保持夹持位置。
+  # 三种夹持模式的 MIT 增益(kp 位置,kd 速度):
+  #   move    正常开合,跟踪目标开口;
+  #   closing 纯阻尼闭合(kp=0),靠阻尼控制闭合速度与接触力;
+  #   hold    保持夹持位置.
   modes:
     move: {kp: 5.0, kd: 1.0}
     closing: {kp: 0.0, kd: 0.5}

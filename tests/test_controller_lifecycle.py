@@ -1,4 +1,4 @@
-"""验证生命周期与关闭协调，不连接设备。"""
+"""验证生命周期与关闭协调,不连接设备."""
 from types import SimpleNamespace
 
 import numpy as np

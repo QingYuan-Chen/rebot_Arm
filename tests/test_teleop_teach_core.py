@@ -258,7 +258,7 @@ class StatusPanelApiRouterTests(unittest.TestCase):
 
 
 def _six_axis_samples(samples, *, with_velocity=False):
-    """将单轴示例扩成完整六轴测试夹具，其余轴固定零位。"""
+    """将单轴示例扩成完整六轴测试夹具,其余轴固定零位."""
     from dataclasses import replace
     names = tuple(f'joint{i}' for i in range(1,7))
     result = []
@@ -1491,7 +1491,7 @@ def test_dashboard_unknown_gripper_feedback_does_not_render_or_command_zero():
 
     helpers = section("    const motorPosition =", "    const deg =")
     slider = section("    const updateSlider =", "    const syncPreviewFromLive =")
-    # 网页已移除独立夹爪入口；继续验证共享实际反馈滑条不会用零冒充缺失值。
+    # 网页已移除独立夹爪入口;继续验证共享实际反馈滑条不会用零冒充缺失值.
     script = r'''
 const assert = require('node:assert/strict');
 const elements = new Map();

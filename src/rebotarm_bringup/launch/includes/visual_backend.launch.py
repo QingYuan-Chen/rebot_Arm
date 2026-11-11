@@ -1,4 +1,4 @@
-"""视觉筛选使用的离线模型环境及可选 RViz 显示。"""
+"""视觉筛选使用的离线模型环境及可选 RViz 显示."""
 
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription

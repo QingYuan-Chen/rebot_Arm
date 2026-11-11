@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<!-- 启动组合包清单：只声明「启动与配置」所需的依赖，本包不含运行时节点，也不做任何算法实现。 -->
+<!-- 启动组合包清单:只声明"启动与配置"所需的依赖,本包不含运行时节点,也不做任何算法实现. -->
 <package format="3">
   <name>rebotarm_bringup</name>
   <version>0.1.0</version>
@@ -8,32 +8,32 @@
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 构建方式：纯 Python 包（使用 setuptools/ament_python），不编译 C++ -->
+  <!-- 构建方式:纯 Python 包(使用 setuptools/ament_python),不编译 C++ -->
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- 启动框架本体：launch 提供 LaunchDescription/Node 等描述与执行机制 -->
+  <!-- 启动框架本体:launch 提供 LaunchDescription/Node 等描述与执行机制 -->
   <exec_depend>launch</exec_depend>
-  <!-- 按包名定位已安装共享目录（launch 文件里解析配置与模型路径时使用） -->
+  <!-- 按包名定位已安装共享目录(launch 文件里解析配置与模型路径时使用) -->
   <exec_depend>ament_index_python</exec_depend>
-  <!-- 被动关节状态发布器：interactive_system 的无硬件预览分支仍使用它 -->
+  <!-- 被动关节状态发布器:interactive_system 的无硬件预览分支仍使用它 -->
   <exec_depend>joint_state_publisher</exec_depend>
-  <!-- 规划配置构建工具：在启动时组装规划器所需的模型/语义/运动学参数 -->
+  <!-- 规划配置构建工具:在启动时组装规划器所需的模型/语义/运动学参数 -->
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
-  <!-- 执行插件亦由启动链按 ament 索引定位，保持其映射覆盖 ROS 回调组析构。 -->
+  <!-- 执行插件亦由启动链按 ament 索引定位,保持其映射覆盖 ROS 回调组析构. -->
   <exec_depend>moveit_simple_controller_manager</exec_depend>
   <exec_depend>moveit_ros_planning</exec_depend>
   <exec_depend>moveit_ros_planning_interface</exec_depend>
   <exec_depend>moveit_ros_visualization</exec_depend>
   <exec_depend>moveit_kinematics</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <!-- 读取 YAML 配置所需（部分启动文件在运行期解析参数文件） -->
+  <!-- 读取 YAML 配置所需(部分启动文件在运行期解析参数文件) -->
   <exec_depend>python3-yaml</exec_depend>
-  <!-- ROS 版启动能力：Node、FindPackageShare 等基于 ROS 的替换与动作 -->
+  <!-- ROS 版启动能力:Node,FindPackageShare 等基于 ROS 的替换与动作 -->
   <exec_depend>launch_ros</exec_depend>
-  <!-- 以下为本包启动组合要用到的同仓库功能包：
-       标定（手眼/TCP）、仪表盘、运动规划适配、规划配置、仿真后端、
-       示教、遥操作、视觉感知、硬件控制 -->
+  <!-- 以下为本包启动组合要用到的同仓库功能包:
+       标定(手眼/TCP),仪表盘,运动规划适配,规划配置,仿真后端,
+       示教,遥操作,视觉感知,硬件控制 -->
   <exec_depend>rebotarm_calibration</exec_depend>
   <exec_depend>rebotarm_dashboard</exec_depend>
   <exec_depend>rebotarm_motion</exec_depend>
@@ -45,11 +45,11 @@
   <exec_depend>rebotarmcontroller</exec_depend>
   <!-- 按 URDF 发布 TF 的机器人状态发布器 -->
   <exec_depend>robot_state_publisher</exec_depend>
-  <!-- 三维可视化界面，加载本包的 .rviz 布局 -->
+  <!-- 三维可视化界面,加载本包的 .rviz 布局 -->
   <exec_depend>rviz2</exec_depend>
 
   <export>
-    <!-- 打包类型：ament_python（包内只有安装到 share 目录的 launch/config/rviz 资源） -->
+    <!-- 打包类型:ament_python(包内只有安装到 share 目录的 launch/config/rviz 资源) -->
     <build_type>ament_python</build_type>
   </export>
 </package>

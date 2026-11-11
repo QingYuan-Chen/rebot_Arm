@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <!--
-  运动包（rebotarm_motion）的包清单，package format 3。
+  运动包(rebotarm_motion)的包清单,package format 3.
 
-  职责：轨迹生成、规划客户端适配、轨迹重定时、速度/加速度/加加速度校验、回放运行时跟踪守卫、
-  碰撞预检、示教回放起始对齐与关节轨迹构造工具。本包可以调用规划服务与控制器动作，但不得
-  直接访问电机 SDK，硬件访问统一收敛在底层硬件控制包里。
+  职责:轨迹生成,规划客户端适配,轨迹重定时,速度/加速度/加加速度校验,回放运行时跟踪守卫,
+  碰撞预检,示教回放起始对齐与关节轨迹构造工具.本包可以调用规划服务与控制器动作,但不得
+  直接访问电机 SDK,硬件访问统一收敛在底层硬件控制包里.
 
-  说明：Python 运动算法由 ament_cmake_python 安装，C++ MoveIt 适配插件由 ament_cmake
-  构建；依赖按编译期和运行期分别声明。本清单也是分层检查的依据，包依赖图必须保持无环。
+  说明:Python 运动算法由 ament_cmake_python 安装,C++ MoveIt 适配插件由 ament_cmake
+  构建;依赖按编译期和运行期分别声明.本清单也是分层检查的依据,包依赖图必须保持无环.
 -->
 <package format="3">
   <name>rebotarm_motion</name>
@@ -17,7 +17,7 @@
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 混合构建：保留 Python 数值算法，C++ 插件通过内部服务复用算法，不复制重定时实现。 -->
+  <!-- 混合构建:保留 Python 数值算法,C++ 插件通过内部服务复用算法,不复制重定时实现. -->
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
   <depend>rclcpp</depend>
@@ -27,39 +27,39 @@
   <build_depend>moveit_msgs</build_depend>
   <build_depend>rebotarm_msgs</build_depend>
 
-  <!-- geometry_msgs：位姿/点/四元数等几何消息类型（目标位姿与规划请求）。 -->
+  <!-- geometry_msgs:位姿/点/四元数等几何消息类型(目标位姿与规划请求). -->
   <exec_depend>geometry_msgs</exec_depend>
-  <!-- builtin_interfaces：时间与时长类型，用于轨迹点的时间戳。 -->
+  <!-- builtin_interfaces:时间与时长类型,用于轨迹点的时间戳. -->
   <exec_depend>builtin_interfaces</exec_depend>
-  <!-- pinocchio：位姿预览、规范模型 IK 和笛卡尔路径采样使用的刚体运动学库。 -->
+  <!-- pinocchio:位姿预览,规范模型 IK 和笛卡尔路径采样使用的刚体运动学库. -->
   <exec_depend>pinocchio</exec_depend>
   <exec_depend>rebotarm_moveit_config</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
-  <!-- ruckig：保留的依赖声明。当前示教重定时使用 motion 的分级 waypoint 算法；
-       请求 ruckig 方法名时报告适配器尚未实现，并返回实际使用的方法名。 -->
+  <!-- ruckig:保留的依赖声明.当前示教重定时使用 motion 的分级 waypoint 算法;
+       请求 ruckig 方法名时报告适配器尚未实现,并返回实际使用的方法名. -->
   <exec_depend>ruckig</exec_depend>
-  <!-- control_msgs：控制器动作接口定义（关节轨迹跟随动作的 Goal/Result/Feedback）。 -->
+  <!-- control_msgs:控制器动作接口定义(关节轨迹跟随动作的 Goal/Result/Feedback). -->
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>action_msgs</exec_depend>
-  <!-- moveit_msgs：运动规划服务与约束消息类型（规划请求、关节/位置/姿态约束）。 -->
+  <!-- moveit_msgs:运动规划服务与约束消息类型(规划请求,关节/位置/姿态约束). -->
   <exec_depend>moveit_msgs</exec_depend>
-  <!-- python3-yaml：YAML 解析库的系统依赖键名；源码中通过 import yaml 读取参数文件。 -->
+  <!-- python3-yaml:YAML 解析库的系统依赖键名;源码中通过 import yaml 读取参数文件. -->
   <exec_depend>python3-yaml</exec_depend>
-  <!-- rclpy：客户端库（节点、参数、话题订阅、动作客户端、执行器）。 -->
+  <!-- rclpy:客户端库(节点,参数,话题订阅,动作客户端,执行器). -->
   <exec_depend>rclpy</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>
-  <!-- rebotarm_msgs：本仓库自定义的服务/消息接口（例如位姿执行服务）。 -->
+  <!-- rebotarm_msgs:本仓库自定义的服务/消息接口(例如位姿执行服务). -->
   <exec_depend>rebotarm_msgs</exec_depend>
   <exec_depend>rosgraph_msgs</exec_depend>
-  <!-- sensor_msgs：关节状态等传感器消息。 -->
+  <!-- sensor_msgs:关节状态等传感器消息. -->
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- shape_msgs：碰撞检测用的几何实体形状（实体基元）。 -->
+  <!-- shape_msgs:碰撞检测用的几何实体形状(实体基元). -->
   <exec_depend>shape_msgs</exec_depend>
-  <!-- std_msgs：基础消息包装类型；当前包源码未直接 import，属保留声明。 -->
+  <!-- std_msgs:基础消息包装类型;当前包源码未直接 import,属保留声明. -->
   <exec_depend>std_msgs</exec_depend>
-  <!-- std_srvs：标准服务类型（Trigger 服务用于按需触发一次动作）。 -->
+  <!-- std_srvs:标准服务类型(Trigger 服务用于按需触发一次动作). -->
   <exec_depend>std_srvs</exec_depend>
-  <!-- trajectory_msgs：关节轨迹消息，构造并下发给控制器。 -->
+  <!-- trajectory_msgs:关节轨迹消息,构造并下发给控制器. -->
   <exec_depend>trajectory_msgs</exec_depend>
 
   <exec_depend>rebotarm_trajectory</exec_depend>

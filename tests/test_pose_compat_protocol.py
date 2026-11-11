@@ -1,4 +1,4 @@
-"""位姿兼容协议：碰撞未知拒绝、唯一服务端、迟到接纳和取消确认。"""
+"""位姿兼容协议:碰撞未知拒绝,唯一服务端,迟到接纳和取消确认."""
 import threading
 import time
 from types import SimpleNamespace as NS
@@ -92,7 +92,7 @@ def test_collision_unknown_or_failed_never_dispatches_fjt(state):
     node, run, pose = planning_node(state)
     with pytest.raises(RuntimeError, match='collision check'):
         node._prepare(run, pose, 0., False)
-    assert run.send is not None  # 该测试替身的旧 future 没有被替换/下发。
+    assert run.send is not None  # 该测试替身的旧 future 没有被替换/下发.
     assert not run.send.done()
 
 
@@ -118,7 +118,7 @@ def test_monitor_uses_source_time_and_audits_actual_quantized_samples(monkeypatc
     import numpy as np
     from rebotarm_motion.trajectory_runtime_limits import JointRuntimeLimit, TrajectoryRuntimeLimitGuard
     from rebotarm_motion.paired_trajectory_protocol import sample_command
-    # launch 的日志类默认关闭传播；审计断言显式接入 caplog，避免依赖收集顺序。
+    # launch 的日志类默认关闭传播;审计断言显式接入 caplog,避免依赖收集顺序.
     monkeypatch.setattr(logging.getLogger('rebotarm.audit'), 'propagate', True)
     node, run = monitor_node()
     run.dispatched, run.dispatched_ns = 100., int(10e9)
@@ -128,7 +128,7 @@ def test_monitor_uses_source_time_and_audits_actual_quantized_samples(monkeypatc
     handle = NS(accepted=True, get_result_async=lambda: Future(), cancel_goal_async=lambda: Future())
     run.send = Future(handle, ready=True)
     monkeypatch.setattr(module.time, 'monotonic', lambda: 100.5)
-    # 到达时间固定为调度起点后 .5 s，源时间只有 .10/.12/.14 s。
+    # 到达时间固定为调度起点后 .5 s,源时间只有 .10/.12/.14 s.
     with caplog.at_level(logging.INFO, logger='rebotarm.audit'):
         for k, velocity in enumerate([-.0024423599243164062, .0024423599243164062, -.0024423599243164062]):
             elapsed = .1+k*.02

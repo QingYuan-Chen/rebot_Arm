@@ -7,27 +7,27 @@
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 纯 Python 包，使用 ament_python 构建（对应 setup.py / setup.cfg），无 C++ 编译步骤 -->
+  <!-- 纯 Python 包,使用 ament_python 构建(对应 setup.py / setup.cfg),无 C++ 编译步骤 -->
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- 依赖清单：下列包名均为对外接口契约的一部分，改名会破坏运行与依赖校验，请勿改动 -->
-  <!-- control_msgs：FollowJointTrajectory 动作类型，用于向控制器下发关节轨迹目标 -->
+  <!-- 依赖清单:下列包名均为对外接口契约的一部分,改名会破坏运行与依赖校验,请勿改动 -->
+  <!-- control_msgs:FollowJointTrajectory 动作类型,用于向控制器下发关节轨迹目标 -->
   <exec_depend>control_msgs</exec_depend>
-  <!-- geometry_msgs：位姿/点等几何消息（供 RViz 交互输入适配使用） -->
+  <!-- geometry_msgs:位姿/点等几何消息(供 RViz 交互输入适配使用) -->
   <exec_depend>geometry_msgs</exec_depend>
-  <!-- rclpy：ROS 2 Python 客户端库，节点、参数、QoS、动作客户端均来自它 -->
+  <!-- rclpy:ROS 2 Python 客户端库,节点,参数,QoS,动作客户端均来自它 -->
   <exec_depend>rclpy</exec_depend>
-  <!-- rebotarm_motion：复用运动层的话题契约与轨迹工具，遥操作层不自行实现运动算法 -->
+  <!-- rebotarm_motion:复用运动层的话题契约与轨迹工具,遥操作层不自行实现运动算法 -->
   <exec_depend>rebotarm_motion</exec_depend>
-  <!-- rebotarm_msgs：项目自定义消息，如夹爪状态 JointMotorState -->
+  <!-- rebotarm_msgs:项目自定义消息,如夹爪状态 JointMotorState -->
   <exec_depend>rebotarm_msgs</exec_depend>
-  <!-- sensor_msgs：JointState 关节状态（订阅实时反馈，作为增量遥操作的基准） -->
+  <!-- sensor_msgs:JointState 关节状态(订阅实时反馈,作为增量遥操作的基准) -->
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- std_msgs：String 等基础消息，用于发布 JSON 形式的遥操作状态 -->
+  <!-- std_msgs:String 等基础消息,用于发布 JSON 形式的遥操作状态 -->
   <exec_depend>std_msgs</exec_depend>
-  <!-- std_srvs：Trigger 服务类型，用于调用控制器的停止/使能等无参服务 -->
+  <!-- std_srvs:Trigger 服务类型,用于调用控制器的停止/使能等无参服务 -->
   <exec_depend>std_srvs</exec_depend>
-  <!-- trajectory_msgs：JointTrajectory / JointTrajectoryPoint，组装下发的轨迹点 -->
+  <!-- trajectory_msgs:JointTrajectory / JointTrajectoryPoint,组装下发的轨迹点 -->
   <exec_depend>trajectory_msgs</exec_depend>
 
   <exec_depend>rebotarm_trajectory</exec_depend>

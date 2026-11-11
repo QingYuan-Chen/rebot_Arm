@@ -1,29 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  机械臂权威模型描述（URDF）。MoveIt 规划、RViz 可视化与 MuJoCo 仿真都消费这一份文件，
-  因此这里的关节名、关节限位和惯性参数是跨层共享的“唯一事实来源”：
-    * 规划侧：joint_limits.yaml、rebotarm.srdf（虚拟关节、规划组、末端执行器、命名状态）；
-    * 运行时侧：运动包按 joint{1..6} 逐关节读取 lower/upper/effort/velocity 做保守限幅；
-    * 仿真侧：仿真包按 joint{1..6} 读取同样四个字段，
-      其电机模型的 ctrlrange / 力矩上限必须与本文件逐值一致（有测试逐项比对）。
+  机械臂权威模型描述(URDF).MoveIt 规划,RViz 可视化与 MuJoCo 仿真都消费这一份文件,
+  因此这里的关节名,关节限位和惯性参数是跨层共享的"唯一事实来源":
+    * 规划侧:joint_limits.yaml,rebotarm.srdf(虚拟关节,规划组,末端执行器,命名状态);
+    * 运行时侧:运动包按 joint{1..6} 逐关节读取 lower/upper/effort/velocity 做保守限幅;
+    * 仿真侧:仿真包按 joint{1..6} 读取同样四个字段,
+      其电机模型的 ctrlrange / 力矩上限必须与本文件逐值一致(有测试逐项比对).
 
-  约定：
-    * 长度单位米（m），角度单位弧度（rad），质量 kg，转动惯量 kg·m^2；
-    * 所有 <origin> 表示“父 link 坐标系 -> 该元素自身坐标系”的平移与 RPY 旋转
-      （固定轴 XYZ 外旋，等价于 R = Rz(yaw) * Ry(pitch) * Rx(roll)）；
-    * joint 的 <axis> 写在子 link 坐标系中（原点变换之后），而不是父 link 坐标系；
-    * 关节名 joint1..joint6 与末端名称被上层代码、参数文件硬编码引用，重命名会直接破坏联动；
-    * <mesh filename> 一律使用 package:// 形式，且必须落在本包 meshes/ 目录下（有测试校验归属）。
+  约定:
+    * 长度单位米(m),角度单位弧度(rad),质量 kg,转动惯量 kg·m^2;
+    * 所有 <origin> 表示"父 link 坐标系 -> 该元素自身坐标系"的平移与 RPY 旋转
+      (固定轴 XYZ 外旋,等价于 R = Rz(yaw) * Ry(pitch) * Rx(roll));
+    * joint 的 <axis> 写在子 link 坐标系中(原点变换之后),而不是父 link 坐标系;
+    * 关节名 joint1..joint6 与末端名称被上层代码,参数文件硬编码引用,重命名会直接破坏联动;
+    * <mesh filename> 一律使用 package:// 形式,且必须落在本包 meshes/ 目录下(有测试校验归属).
 
-  运动链：base_link -joint1-> link1 -joint2-> link2 -joint3-> link3 -joint4-> link4
-          -joint5-> link5 -joint6-> link6 -end_joint(固定)-> end_link（末端法兰/夹爪基座）
-          end_link -left_finger_joint/right_finger_joint-> 两个手指 link（平移关节）。
-  注意：link 编号按“距基座由近到远”排列，不按装配位置命名；例如 link2 是上臂、link5 是腕部，
-  link2 与 link5 的自碰撞检查由 rebotarm.srdf 保留，实际碰撞结果取决于关节姿态和碰撞几何。
+  运动链:base_link -joint1-> link1 -joint2-> link2 -joint3-> link3 -joint4-> link4
+          -joint5-> link5 -joint6-> link6 -end_joint(固定)-> end_link(末端法兰/夹爪基座)
+          end_link -left_finger_joint/right_finger_joint-> 两个手指 link(平移关节).
+  注意:link 编号按"距基座由近到远"排列,不按装配位置命名;例如 link2 是上臂,link5 是腕部,
+  link2 与 link5 的自碰撞检查由 rebotarm.srdf 保留,实际碰撞结果取决于关节姿态和碰撞几何.
 
-  robot name 与 rebotarm.srdf 保持一致，MoveIt 与仿真侧会按同名模型装配。
+  robot name 与 rebotarm.srdf 保持一致,MoveIt 与仿真侧会按同名模型装配.
 -->
-<!-- 规划、可视化与仿真共用的权威机器人描述文件（详见上方说明）。 -->
+<!-- 规划,可视化与仿真共用的权威机器人描述文件(详见上方说明). -->
 <robot
   name="reBot-DevArm_fixend">
   <link
@@ -66,10 +66,10 @@
       </geometry>
     </collision>
   </link>
-<!-- 链式结构总览：base_link 经 joint1..joint6 依次串到 link6，再由 end_joint（固定）接到 end_link，
-     end_link 上挂两个手指平移关节（夹爪）。三维几何由 meshes/ 下的 STL 提供，
-     本文件只描述拓扑、几何原点、轴向与动力学参数。
-     各 link 的 <inertial> 由 CAD 实测导出，其 <origin> 是质心在本 link 坐标系中的位置。 -->
+<!-- 链式结构总览:base_link 经 joint1..joint6 依次串到 link6,再由 end_joint(固定)接到 end_link,
+     end_link 上挂两个手指平移关节(夹爪).三维几何由 meshes/ 下的 STL 提供,
+     本文件只描述拓扑,几何原点,轴向与动力学参数.
+     各 link 的 <inertial> 由 CAD 实测导出,其 <origin> 是质心在本 link 坐标系中的位置. -->
   <link
     name="link1">
     <inertial>
@@ -110,12 +110,12 @@
       </geometry>
     </collision>
   </link>
-<!-- joint1：第一轴（腰/回转轴）。原点抬高 0.08465 m 到肩部回转中心（x 偏移 -8.416E-05 m 可忽略）；
-     无旋转，因此 link1 与 base_link 同向，axis = +Z 就是绕 base_link 竖直轴旋转，
-     正方向为俯视逆时针。
-     限位 ±2.8 rad（±160°），比 ±π 各留约 0.34 rad（≈20°）余量，限制线缆扭转；
-     effort=27 N·m、velocity=50 rad/s 与 joint2/joint3 相同（三者共用同一大电机型号），
-     规划侧 joint_limits.yaml 把 max_velocity 限定为 3.0 rad/s，比这里更保守。 -->
+<!-- joint1:第一轴(腰/回转轴).原点抬高 0.08465 m 到肩部回转中心(x 偏移 -8.416E-05 m 可忽略);
+     无旋转,因此 link1 与 base_link 同向,axis = +Z 就是绕 base_link 竖直轴旋转,
+     正方向为俯视逆时针.
+     限位 ±2.8 rad(±160°),比 ±π 各留约 0.34 rad(≈20°)余量,限制线缆扭转;
+     effort=27 N·m,velocity=50 rad/s 与 joint2/joint3 相同(三者共用同一大电机型号),
+     规划侧 joint_limits.yaml 把 max_velocity 限定为 3.0 rad/s,比这里更保守. -->
   <joint
     name="joint1"
     type="revolute">
@@ -174,11 +174,11 @@
       </geometry>
     </collision>
   </link>
-<!-- joint2：肩部俯仰轴。原点相对于 link1 有 0.020084/0.031625/0.05555 m 的偏置，
-     RPY = -1.5708 rad（-90° 绕 X）把子坐标系翻转：link2 的 +Z 指向 link1 的 -Y。
-     axis = -Z 是在 link2 坐标系中表达的，折算回 link1 坐标系为 (0, -1, 0)，
-     即绕机械臂与肩部轴线正交的水平轴（-Y）做前俯/后仰。
-     限位 [-3.14, 0.02] rad：只能单向俯下，几乎不能往后仰（0.02 rad 为限位留缝）。 -->
+<!-- joint2:肩部俯仰轴.原点相对于 link1 有 0.020084/0.031625/0.05555 m 的偏置,
+     RPY = -1.5708 rad(-90° 绕 X)把子坐标系翻转:link2 的 +Z 指向 link1 的 -Y.
+     axis = -Z 是在 link2 坐标系中表达的,折算回 link1 坐标系为 (0, -1, 0),
+     即绕机械臂与肩部轴线正交的水平轴(-Y)做前俯/后仰.
+     限位 [-3.14, 0.02] rad:只能单向俯下,几乎不能往后仰(0.02 rad 为限位留缝). -->
   <joint
     name="joint2"
     type="revolute">
@@ -237,10 +237,10 @@
       </geometry>
     </collision>
   </link>
-<!-- joint3：肘部俯仰轴。原点 = link2 坐标系下沿 -X 平移 0.264 m（上臂长度），无旋转；
-     axis = +Z（在 link3 坐标系中），折算回 link2 坐标系为 -Y，与 joint2 同向转动（俯仰）。
-     limit3 的 [-3.14, 0.02] 是当前规范模型的软件位置范围；几何原点使前臂可折回上臂旁。
-     零位附近的碰撞需按完整关节姿态查询，命名状态及其值见 rebotarm.srdf。 -->
+<!-- joint3:肘部俯仰轴.原点 = link2 坐标系下沿 -X 平移 0.264 m(上臂长度),无旋转;
+     axis = +Z(在 link3 坐标系中),折算回 link2 坐标系为 -Y,与 joint2 同向转动(俯仰).
+     limit3 的 [-3.14, 0.02] 是当前规范模型的软件位置范围;几何原点使前臂可折回上臂旁.
+     零位附近的碰撞需按完整关节姿态查询,命名状态及其值见 rebotarm.srdf. -->
   <joint
     name="joint3"
     type="revolute">
@@ -299,12 +299,12 @@
       </geometry>
     </collision>
   </link>
-<!-- joint4：大臂/前臂组俯仰轴（与 joint2、joint3 同轴系）。原点 = link3 坐标系下
-     (+0.2426, -0.054, -0.001625) m，即 joint3 与 joint4 的轴线间距 0.2426 m（前臂长度）；无旋转，子坐标系与 link3 同向。
-     axis = +Z（在 link4 坐标系中，也就是 link3 的 +Z）⇒ 折算回 link2 系为 -Y，
-     因此 joint2/joint3/joint4 的转轴互相平行且方向一致，都是绕机械臂的同一水平轴转动。
-     关节4 之后负载变小，换用 70 减速比电机：effort=7 N·m，velocity=200 rad/s，
-     限位 [-1.87, 1.57] rad（约 -107°~+90°）。 -->
+<!-- joint4:大臂/前臂组俯仰轴(与 joint2,joint3 同轴系).原点 = link3 坐标系下
+     (+0.2426, -0.054, -0.001625) m,即 joint3 与 joint4 的轴线间距 0.2426 m(前臂长度);无旋转,子坐标系与 link3 同向.
+     axis = +Z(在 link4 坐标系中,也就是 link3 的 +Z)⇒ 折算回 link2 系为 -Y,
+     因此 joint2/joint3/joint4 的转轴互相平行且方向一致,都是绕机械臂的同一水平轴转动.
+     关节4 之后负载变小,换用 70 减速比电机:effort=7 N·m,velocity=200 rad/s,
+     限位 [-1.87, 1.57] rad(约 -107°~+90°). -->
   <joint
     name="joint4"
     type="revolute">
@@ -363,11 +363,11 @@
       </geometry>
     </collision>
   </link>
-<!-- joint5：腕部俯仰轴。原点 = link4 坐标系下 (+0.078308, -0.0375, -0.03) m；
-     RPY = -1.5708 rad（-90° 绕 X）把子坐标系翻转：link5 的 +Z 指向 link4 的 -Y。
-     axis = +Z（在 link5 坐标系中）折算回 link4 坐标系为 (0, -1, 0)，
-     与 joint2/joint3 的俯仰轴平行、方向相同，构成手腕俯仰。
-     限位 ±1.57 rad（±90°），effort/velocity 同 joint4。 -->
+<!-- joint5:腕部俯仰轴.原点 = link4 坐标系下 (+0.078308, -0.0375, -0.03) m;
+     RPY = -1.5708 rad(-90° 绕 X)把子坐标系翻转:link5 的 +Z 指向 link4 的 -Y.
+     axis = +Z(在 link5 坐标系中)折算回 link4 坐标系为 (0, -1, 0),
+     与 joint2/joint3 的俯仰轴平行,方向相同,构成手腕俯仰.
+     限位 ±1.57 rad(±90°),effort/velocity 同 joint4. -->
   <joint
     name="joint5"
     type="revolute">
@@ -426,10 +426,10 @@
       </geometry>
     </collision>
   </link>
-<!-- joint6：腕部回转轴（末端滚转）。原点 = link5 坐标系下 (+0.028008, 0, 0.04) m；
-     RPY = (0, +1.5708, 0) 绕 Y 转 +90°，使 link6 的 +Z 指向 link5 的 +X。
-     axis = +Z（在 link6 坐标系中）折算回 link5 坐标系为 (1, 0, 0)，即绕 link5 的 +X 旋转。
-     限位 ±3.14 rad，可整圈回转，是夹爪滚转姿态的调整轴。 -->
+<!-- joint6:腕部回转轴(末端滚转).原点 = link5 坐标系下 (+0.028008, 0, 0.04) m;
+     RPY = (0, +1.5708, 0) 绕 Y 转 +90°,使 link6 的 +Z 指向 link5 的 +X.
+     axis = +Z(在 link6 坐标系中)折算回 link5 坐标系为 (1, 0, 0),即绕 link5 的 +X 旋转.
+     限位 ±3.14 rad,可整圈回转,是夹爪滚转姿态的调整轴. -->
   <joint
     name="joint6"
     type="revolute">
@@ -489,12 +489,12 @@
       </geometry>
     </collision>
   </link>
-<!-- end_joint：固定关节（type=fixed），把 link6 与末端法兰 end_link 刚性连接；
-     原点 = link6 坐标系下沿 +Z 平移 0.15539 m（腕长），RPY = (0, -1.5708, 3.1415)，
-     即先绕 Y 转 -90° 再绕 Z 转 180°：end_link 的 +Z 轴（工具接近方向）对到 link6 的 -X，
-     而手指的平移轴 +Y 在 link6 中为 -Y，与接近方向正交（零位时已经 FK 复核）。
-     零位时 end_link 姿态相对 link6 绕 Z 翻转 180°，其原点在 base_link 的 (+0.2603, 0, +0.1917) m。
-     fixed 关节的 <axis> 不参与运算，保留 (0 0 0) 只是 CAD 导出的习惯。 -->
+<!-- end_joint:固定关节(type=fixed),把 link6 与末端法兰 end_link 刚性连接;
+     原点 = link6 坐标系下沿 +Z 平移 0.15539 m(腕长),RPY = (0, -1.5708, 3.1415),
+     即先绕 Y 转 -90° 再绕 Z 转 180°:end_link 的 +Z 轴(工具接近方向)对到 link6 的 -X,
+     而手指的平移轴 +Y 在 link6 中为 -Y,与接近方向正交(零位时已经 FK 复核).
+     零位时 end_link 姿态相对 link6 绕 Z 翻转 180°,其原点在 base_link 的 (+0.2603, 0, +0.1917) m.
+     fixed 关节的 <axis> 不参与运算,保留 (0 0 0) 只是 CAD 导出的习惯. -->
   <joint
     name="end_joint"
     type="fixed">
@@ -508,14 +508,14 @@
     <axis
       xyz="0 0 0" />
   </joint>
-<!-- 夹爪：end_link 上挂两个镜像的平移关节，左右位移合起来是总行程。
-     left_finger_joint 沿 +Y 平移，范围 [0, 0.045] m；right_finger_joint 沿 -Y 平移，范围 [-0.045, 0] m；
-     两关节原点重合（xyz 全零），两侧位移分别为 +a、-a，总行程最大 0.09 m；
-     新软指的真实指间距与抓取 TCP 尚待实测，不把此行程直接视为已标定开口
-     （rebotarm.srdf 的 open / closed 命名状态取值与这里一一对应）。
-     effort 对平移关节按力（N）解释，即单指最大推力；velocity=0.2 m/s 与 joint_limits.yaml
-     的 max_velocity 一致。每个手指 link 包含保留的齿条/滑块、安装底座和软指三份网格，
-     visual 与 collision 均覆盖三部分。软指为未变形刚体模型；装配依据见 soft_gripper_model.md。 -->
+<!-- 夹爪:end_link 上挂两个镜像的平移关节,左右位移合起来是总行程.
+     left_finger_joint 沿 +Y 平移,范围 [0, 0.045] m;right_finger_joint 沿 -Y 平移,范围 [-0.045, 0] m;
+     两关节原点重合(xyz 全零),两侧位移分别为 +a,-a,总行程最大 0.09 m;
+     新软指的真实指间距与抓取 TCP 尚待实测,不把此行程直接视为已标定开口
+     (rebotarm.srdf 的 open / closed 命名状态取值与这里一一对应).
+     effort 对平移关节按力(N)解释,即单指最大推力;velocity=0.2 m/s 与 joint_limits.yaml
+     的 max_velocity 一致.每个手指 link 包含保留的齿条/滑块,安装底座和软指三份网格,
+     visual 与 collision 均覆盖三部分.软指为未变形刚体模型;装配依据见 soft_gripper_model.md. -->
   <link name="left_finger_link">
     <visual
       name="left_finger">
@@ -587,8 +587,8 @@
       effort="1.0"
       velocity="0.2" />
   </joint>
-<!-- right_finger_link / right_finger_joint：与左指镜像，轴向 -Y、范围 [-0.045, 0]，
-     其余参数（effort / velocity / 碰撞体）与左指一致，两指共同决定夹爪开口。 -->
+<!-- right_finger_link / right_finger_joint:与左指镜像,轴向 -Y,范围 [-0.045, 0],
+     其余参数(effort / velocity / 碰撞体)与左指一致,两指共同决定夹爪开口. -->
   <link name="right_finger_link">
     <visual
       name="right_finger">
@@ -645,7 +645,7 @@
   <joint
     name="right_finger_joint"
     type="prismatic">
-    <!-- 单电机镜像机构；MoveIt 只规划左指独立自由度，物理模型已有相同耦合。 -->
+    <!-- 单电机镜像机构;MoveIt 只规划左指独立自由度,物理模型已有相同耦合. -->
     <mimic joint="left_finger_joint" multiplier="-1" offset="0" />
     <origin
       xyz="0 0 0"

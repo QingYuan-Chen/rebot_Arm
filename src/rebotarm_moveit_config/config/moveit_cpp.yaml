@@ -1,22 +1,22 @@
-# move_group 的 planning_scene_monitor（规划场景监视器）参数。
+# move_group 的 planning_scene_monitor(规划场景监视器)参数.
 #
-# 该监视器是 move_group 与外部世界之间的桥梁：它订阅关节状态与附加碰撞物体，据此刻画"当前
-# 场景"，再把场景增量发布出去供 RViz 显示。本文件由 MoveItConfigsBuilder 以 moveit_cpp
-# 类别加载，因此这些键属于 move_group 的参数树，改了会影响规划场景的实时性。
+# 该监视器是 move_group 与外部世界之间的桥梁:它订阅关节状态与附加碰撞物体,据此刻画"当前
+# 场景",再把场景增量发布出去供 RViz 显示.本文件由 MoveItConfigsBuilder 以 moveit_cpp
+# 类别加载,因此这些键属于 move_group 的参数树,改了会影响规划场景的实时性.
 planning_scene_monitor_options:
-  # 该监视器在 move_group 内部的实例名，主要用于参数命名空间与日志定位。
+  # 该监视器在 move_group 内部的实例名,主要用于参数命名空间与日志定位.
   name: planning_scene_monitor
-  # 机器人描述参数名：从中读取 URDF 文本，必须与启动文件下发的参数名一致（不可写成路径）。
+  # 机器人描述参数名:从中读取 URDF 文本,必须与启动文件下发的参数名一致(不可写成路径).
   robot_description: robot_description
-  # 关节状态话题：控制器/仿真发布的六轴关节反馈；moveit_demo.launch.py 会把它重映射到
-  # /<arm_namespace>/visual_joint_states（含手指关节），以便 RViz 中的手指 link 也能动。
+  # 关节状态话题:控制器/仿真发布的六轴关节反馈;moveit_demo.launch.py 会把它重映射到
+  # /<arm_namespace>/visual_joint_states(含手指关节),以便 RViz 中的手指 link 也能动.
   joint_state_topic: /rebotarm/joint_states
-  # 附加/分离碰撞物体的话题：外部节点通过它把被抓物体挂到机械臂上或摘下来。
+  # 附加/分离碰撞物体的话题:外部节点通过它把被抓物体挂到机械臂上或摘下来.
   attached_collision_object_topic: /attached_collision_object
-  # 规划场景发布话题：move_group 发布完整规划场景（供客户端整体获取）。
+  # 规划场景发布话题:move_group 发布完整规划场景(供客户端整体获取).
   publish_planning_scene_topic: /planning_scene
-  # 监视场景话题：move_group 发布增量更新（几何、状态、TF 等），RViz 用它保持显示同步。
+  # 监视场景话题:move_group 发布增量更新(几何,状态,TF 等),RViz 用它保持显示同步.
   monitored_planning_scene_topic: /monitored_planning_scene
-  # 启动时等待首个关节状态的最长时间，单位 s。10.0 给真机反馈留出充足时间；
-  # 调小会让 move_group 在没有反馈时更早进入"无当前状态"的运行态，调大则启动更慢。
+  # 启动时等待首个关节状态的最长时间,单位 s.10.0 给真机反馈留出充足时间;
+  # 调小会让 move_group 在没有反馈时更早进入"无当前状态"的运行态,调大则启动更慢.
   wait_for_initial_state_timeout: 10.0

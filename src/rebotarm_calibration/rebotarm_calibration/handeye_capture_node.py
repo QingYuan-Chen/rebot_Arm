@@ -1,8 +1,8 @@
-"""只读手眼采集服务：独立接收图像/内参与 TF，业务线程执行检测和会话落盘。
+"""只读手眼采集服务:独立接收图像/内参与 TF,业务线程执行检测和会话落盘.
 
-接收快照保留源时间，采集仍要求请求后的新帧及连续稳定窗口；不调用电机服务或动作。
-对外提供 command 会话服务与 observation 单帧只读估测服务；两者使用独立回调组。
-文件依次组织订阅配置、单帧质量检查、采集窗口及服务适配，质量阈值由两种观测共用。
+接收快照保留源时间,采集仍要求请求后的新帧及连续稳定窗口;不调用电机服务或动作.
+对外提供 command 会话服务与 observation 单帧只读估测服务;两者使用独立回调组.
+文件依次组织订阅配置,单帧质量检查,采集窗口及服务适配,质量阈值由两种观测共用.
 """
 import json
 import base64
@@ -34,7 +34,7 @@ def stamp_ns(stamp):
 
 
 class WaitingObservation(Exception):
-    """本次尚无新观测，交由采集循环在总期限和帧间隔门内继续等待。"""
+    """本次尚无新观测,交由采集循环在总期限和帧间隔门内继续等待."""
 
 
 class HandeyeCaptureNode(Node):
@@ -66,7 +66,7 @@ class HandeyeCaptureNode(Node):
             self.commands = MutuallyExclusiveCallbackGroup()
             self.service = self.create_service(CalibrationCommand, '~/command', self.command,
                                                callback_group=self.commands)
-            # 距离估测独立调度，采集等待稳定窗口时仍可读取相机；只读路径不切换订阅。
+            # 距离估测独立调度,采集等待稳定窗口时仍可读取相机;只读路径不切换订阅.
             self.observations = MutuallyExclusiveCallbackGroup()
             self.observation_service = self.create_service(CalibrationCommand, '~/observation',
                 self.observe_command, callback_group=self.observations)
@@ -90,7 +90,7 @@ class HandeyeCaptureNode(Node):
         return super().destroy_node()
 
     def camera_frame(self, metadata, after_ns, checks=None):
-        """读取与指定会话匹配的新鲜图像和内参，保留原始像素及时间。"""
+        """读取与指定会话匹配的新鲜图像和内参,保留原始像素及时间."""
         if checks:
             checks.start('image')
         snapshot = self._inputs.snapshot()
@@ -128,7 +128,7 @@ class HandeyeCaptureNode(Node):
         return image, info, age
 
     def marker_pose(self, metadata, image, info):
-        """复用采集的 ArUco 解算和质量门；平移单位为米，尺度来自会话边长。"""
+        """复用采集的 ArUco 解算和质量门;平移单位为米,尺度来自会话边长."""
         marker = detect_aruco_pose(self.bridge.imgmsg_to_cv2(image, desired_encoding='bgr8'),
                  camera_matrix=np.asarray(info.k).reshape(3, 3), distortion=info.d,
                  marker_length_m=metadata['marker_length_m'],
@@ -280,7 +280,7 @@ class HandeyeCaptureNode(Node):
             'frame_id': image.header.frame_id}}
 
     def observe_command(self, request, response):
-        """只估测当前标记距离；无需 TF/稳定窗口，不写会话或修改相机订阅。"""
+        """只估测当前标记距离;无需 TF/稳定窗口,不写会话或修改相机订阅."""
         data = {'schema_version': 1, 'session_id': request.session_id, 'state': 'observation'}
         try:
             if request.command != 'observe':
@@ -371,7 +371,7 @@ class HandeyeCaptureNode(Node):
             response.reason_code = 'CAPTURE_TIMEOUT' if isinstance(exc, TimeoutError) else 'COMMAND_REJECTED'
             response.message = str(exc)
             if request.command in ('capture', 'preflight'):
-                # 每次失败只记最终原因，保留请求归属；逐帧重试不刷日志、不写入样本。
+                # 每次失败只记最终原因,保留请求归属;逐帧重试不刷日志,不写入样本.
                 self.get_logger().warning(f'标定请求失败 command={request.command} '
                     f'session={request.session_id} request={request.request_id} '
                     f'code={response.reason_code}: {exc}')

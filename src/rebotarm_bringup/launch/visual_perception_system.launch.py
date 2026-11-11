@@ -1,4 +1,4 @@
-"""视觉感知、抓取候选生成、筛选与显示组合入口。"""
+"""视觉感知,抓取候选生成,筛选与显示组合入口."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction, IncludeLaunchDescription
@@ -9,7 +9,7 @@ from launch_ros.actions import SetParameter
 
 
 def _prepare_stages(context):
-    """分域 YAML 是正式入口的唯一默认值来源。"""
+    """分域 YAML 是正式入口的唯一默认值来源."""
     import os
     import json
     from rebotarm_bringup.visual_profiles import read_section

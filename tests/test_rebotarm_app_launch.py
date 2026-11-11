@@ -80,7 +80,7 @@ def test_operator_configs_are_split_by_consumer() -> None:
     assert not (set(keyboard_params) & set(teach_params))
     assert "web_execute_enabled" in web_params
     assert "web_keyboard_default_step_rad" in web_params
-    # 随包配置不能覆盖节点已有的分模式默认值；用户自定义 YAML 仍可设置时长。
+    # 随包配置不能覆盖节点已有的分模式默认值;用户自定义 YAML 仍可设置时长.
     assert "trajectory_duration" not in keyboard_params
     assert "web_keyboard_default_duration" not in web_params
     assert keyboard_params["joint_step_rad"] == web_params["web_keyboard_default_step_rad"] == 0.02
@@ -154,7 +154,7 @@ def test_teleop_system_forwards_execution_mode_to_dashboard() -> None:
     assert 'execution_mode = LaunchConfiguration("execution_mode")' in system
     assert '"execution_mode": execution_mode' in system
     assert '"web_execute_enabled": web_execute_enabled' in system
-    # 控制器所在 include 与网页参数必须收到同一模式。
+    # 控制器所在 include 与网页参数必须收到同一模式.
 
 
 def test_dashboard_hides_and_blocks_hardware_only_commands_in_simulation() -> None:

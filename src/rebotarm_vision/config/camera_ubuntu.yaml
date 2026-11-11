@@ -1,89 +1,89 @@
-# Ubuntu 原生 D405 视觉链路的参数文件。
-# 由启动文件加载，节点之间的输入/输出话题、相机取流 profile 与检测模型都集中在这里。
-# 顶层键必须与节点名完全一致，否则参数不会生效：
-#   rebotarm_vision_node            —— 相机取流 + YOLO 检测节点
-#   rebotarm_grasp_tcp_frame        —— 抓取 TCP 静态坐标系广播节点
-# 话题名和坐标系名沿用现有下游接口。
+# Ubuntu 原生 D405 视觉链路的参数文件.
+# 由启动文件加载,节点之间的输入/输出话题,相机取流 profile 与检测模型都集中在这里.
+# 顶层键必须与节点名完全一致,否则参数不会生效:
+#   rebotarm_vision_node            - 相机取流 + YOLO 检测节点
+#   rebotarm_grasp_tcp_frame        - 抓取 TCP 静态坐标系广播节点
+# 话题名和坐标系名沿用现有下游接口.
 
 rebotarm_vision_node:
   ros__parameters:
-    # 腕部 D405；640x480@30 为请求档位，实际设备验收另行记录。
+    # 腕部 D405;640x480@30 为请求档位,实际设备验收另行记录.
     camera.type: d405
-    # 内参从 SDK 实际 profile 读取，随分辨率更新。
+    # 内参从 SDK 实际 profile 读取,随分辨率更新.
     camera.color_width: 640
     camera.color_height: 480
-    # 彩色流帧率（fps）。提高会增加 USB 带宽与 CPU 占用；降低会让检测结果更新变慢。
+    # 彩色流帧率(fps).提高会增加 USB 带宽与 CPU 占用;降低会让检测结果更新变慢.
     camera.color_fps: 30
-    # SDK 直接提供 BGR8，保持既有 ROS bgr8 接口。
+    # SDK 直接提供 BGR8,保持既有 ROS bgr8 接口.
     camera.color_format: BGR8
-    # 是否启用深度流。关闭后没有点云/深度，抓取链路无法工作（仅剩二维检测）。
+    # 是否启用深度流.关闭后没有点云/深度,抓取链路无法工作(仅剩二维检测).
     camera.enable_depth: true
-    # 原始深度为 Z16；按 SDK 实际 depth scale 转成毫米 uint16。
+    # 原始深度为 Z16;按 SDK 实际 depth scale 转成毫米 uint16.
     camera.depth_width: 640
     camera.depth_height: 480
-    # 深度流帧率（fps）。
+    # 深度流帧率(fps).
     camera.depth_fps: 30
-    # 是否开启深度对齐到彩色坐标系（D2C）。开启后深度图可按彩色像素坐标索引，
-    # 检测框无需再做坐标换算即可取深度；本仓库的相机内参与该开关配套使用，务必保持 true。
+    # 是否开启深度对齐到彩色坐标系(D2C).开启后深度图可按彩色像素坐标索引,
+    # 检测框无需再做坐标换算即可取深度;本仓库的相机内参与该开关配套使用,务必保持 true.
     camera.enable_align: true
-    # RealSense pipeline 提供同步 frameset；缺流时保持空检测，不借用历史帧。
-    # 启动时丢弃的前若干帧：自动曝光/自动白平衡与深度引擎尚未稳定，前几帧深度常为无效值。
+    # RealSense pipeline 提供同步 frameset;缺流时保持空检测,不借用历史帧.
+    # 启动时丢弃的前若干帧:自动曝光/自动白平衡与深度引擎尚未稳定,前几帧深度常为无效值.
     camera.warmup_frames: 15
-    # 单帧等待超时，单位毫秒。超时即视为本帧失败（USB 抖动或设备被抢占）。
+    # 单帧等待超时,单位毫秒.超时即视为本帧失败(USB 抖动或设备被抢占).
     camera.frame_timeout_ms: 1000
-    # 连续空帧上限：达到该帧数后节点判定相机故障并锁存失败状态，
-    # 同时改为持续发布空检测结果（不再假装有数据），避免下游用陈旧检测继续规划。
-    # 调小会更快触发故障锁存，调大则容错更久但故障发现更慢。
+    # 连续空帧上限:达到该帧数后节点判定相机故障并锁存失败状态,
+    # 同时改为持续发布空检测结果(不再假装有数据),避免下游用陈旧检测继续规划.
+    # 调小会更快触发故障锁存,调大则容错更久但故障发现更慢.
     camera.max_empty_frames: 30
-    # Ubuntu 启动文件会用已安装模型的路径覆盖此值；这里留空，
-    # 使直接 ros2 run 且未配置模型时立即报错，避免加载非预期模型。
-    # 留空表示"必须由启动文件注入"。启动文件会用 share 目录下安装好的模型路径覆盖该值；
-    # 若直接 ros2 run 而未注入，节点检测到空路径会立即报错（yolo.model_path must not be empty），
-    # 这样能快速失败，避免误加载到非预期模型。
+    # Ubuntu 启动文件会用已安装模型的路径覆盖此值;这里留空,
+    # 使直接 ros2 run 且未配置模型时立即报错,避免加载非预期模型.
+    # 留空表示"必须由启动文件注入".启动文件会用 share 目录下安装好的模型路径覆盖该值;
+    # 若直接 ros2 run 而未注入,节点检测到空路径会立即报错(yolo.model_path must not be empty),
+    # 这样能快速失败,避免误加载到非预期模型.
     yolo.model_path: ""
-    # YOLO 推理设备标识：字符串 "0" 表示第 0 号 GPU（CUDA），"cpu" 表示纯 CPU 推理。
-    # 保持字符串引号，参数类型为 string。
+    # YOLO 推理设备标识:字符串 "0" 表示第 0 号 GPU(CUDA),"cpu" 表示纯 CPU 推理.
+    # 保持字符串引号,参数类型为 string.
     yolo.device: "0"
-    # 检测置信度阈值（0~1）：低于该值的框被丢弃。调高更保守（漏检多），调低误检多。
+    # 检测置信度阈值(0~1):低于该值的框被丢弃.调高更保守(漏检多),调低误检多.
     yolo.conf_threshold: 0.25
-    # NMS 交并比阈值（0~1）：越大保留的重叠框越多。与 conf_threshold 共同决定最终框数量。
+    # NMS 交并比阈值(0~1):越大保留的重叠框越多.与 conf_threshold 共同决定最终框数量.
     yolo.iou_threshold: 0.45
-    # 是否使用模型的 world 坐标输出（YOLO-world 开放词表模式）。本仓库用固定类别，故为 false。
+    # 是否使用模型的 world 坐标输出(YOLO-world 开放词表模式).本仓库用固定类别,故为 false.
     yolo.use_world: false
-    # 只保留这些类别的检测结果（其余类别丢弃）。列表元素必须与模型类别名一致；
-    # 增减类别会直接改变抓取目标范围，person 等类别被有意排除。
+    # 只保留这些类别的检测结果(其余类别丢弃).列表元素必须与模型类别名一致;
+    # 增减类别会直接改变抓取目标范围,person 等类别被有意排除.
     yolo.custom_classes:
       - bottle
       - cup
-    # 彩色消息的坐标系名；与手眼标定文件中的 frame 名共同决定 TF 链，改名前需确保 TF 树中存在该 frame。
+    # 彩色消息的坐标系名;与手眼标定文件中的 frame 名共同决定 TF 链,改名前需确保 TF 树中存在该 frame.
     ros.frame_id_color: camera_color_frame
-    # 深度消息的坐标系名（默认与输出抓取位姿的坐标系一致）。
+    # 深度消息的坐标系名(默认与输出抓取位姿的坐标系一致).
     ros.frame_id_depth: camera_depth_frame
-    # 是否发布带检测框/掩膜的可视化图像。关闭可省带宽，调试时打开。
+    # 是否发布带检测框/掩膜的可视化图像.关闭可省带宽,调试时打开.
     ros.publish_annotated: true
-    # 是否弹出本地 OpenCV 预览窗口。headless 运行（无显示器）时必须为 false，否则节点报错。
+    # 是否弹出本地 OpenCV 预览窗口.headless 运行(无显示器)时必须为 false,否则节点报错.
     ros.show_preview: false
-    # 预览窗口标题（字符串，仅显示用，不影响功能）。
+    # 预览窗口标题(字符串,仅显示用,不影响功能).
     ros.preview_window_name: RebotArm Ubuntu Vision
-    # 主循环频率（Hz）：取流 + 推理 + 发布的整体节奏上限。
-    # 调高会更实时但更耗 CPU/GPU；调低会减轻负载，但检测结果更新变慢。
+    # 主循环频率(Hz):取流 + 推理 + 发布的整体节奏上限.
+    # 调高会更实时但更耗 CPU/GPU;调低会减轻负载,但检测结果更新变慢.
     ros.loop_rate_hz: 15.0
-    # 本机 Fast DDS 使用 BEST_EFFORT 时，640x480 bgr8 大图像样本会分片丢失；
-    # RELIABLE 已通过 C++ 数据载荷对照测试。
-    # 本机 Fast DDS 在 BEST_EFFORT 下会分片丢失 640x480 bgr8 大样本；
-    # 改用 RELIABLE 后通过了 C++ 侧载荷校验，因此这里必须是 reliable。
-    # 合法取值仅 best_effort / reliable，其它取值节点会直接报错。
+    # 本机 Fast DDS 使用 BEST_EFFORT 时,640x480 bgr8 大图像样本会分片丢失;
+    # RELIABLE 已通过 C++ 数据载荷对照测试.
+    # 本机 Fast DDS 在 BEST_EFFORT 下会分片丢失 640x480 bgr8 大样本;
+    # 改用 RELIABLE 后通过了 C++ 侧载荷校验,因此这里必须是 reliable.
+    # 合法取值仅 best_effort / reliable,其它取值节点会直接报错.
     ros.image_reliability: reliable
-    # 是否启用检测（YOLO）推理。关闭时只取流与发布图像，不做检测。
+    # 是否启用检测(YOLO)推理.关闭时只取流与发布图像,不做检测.
     ros.enable_detection: true
 
 rebotarm_grasp_tcp_frame:
   ros__parameters:
-    # 父坐标系：机械臂末端连杆；子坐标系：抓取 TCP。两者构成发布到 TF 树的静态变换。
+    # 父坐标系:机械臂末端连杆;子坐标系:抓取 TCP.两者构成发布到 TF 树的静态变换.
     parent_frame: end_link
     child_frame: grasp_tcp
-    # 操作员实测的 end_link -> grasp_tcp 平移，不能用 MuJoCo 的 ee_site 值替代。
-    # 操作员实测的 end_link -> grasp_tcp 平移，单位米（沿末端 X 轴 -4 cm）。
-    # 不要用仿真模型（MuJoCo）里的 ee_site 取值替代：仿真等效点与真机实测点并不一致，
-    # 混用会让真机所有抓取位姿整体偏移，可能直接压到桌面或物体。
+    # 操作员实测的 end_link -> grasp_tcp 平移,不能用 MuJoCo 的 ee_site 值替代.
+    # 操作员实测的 end_link -> grasp_tcp 平移,单位米(沿末端 X 轴 -4 cm).
+    # 不要用仿真模型(MuJoCo)里的 ee_site 取值替代:仿真等效点与真机实测点并不一致,
+    # 混用会让真机所有抓取位姿整体偏移,可能直接压到桌面或物体.
     tcp_offset_xyz: [-0.04, 0.0, 0.0]

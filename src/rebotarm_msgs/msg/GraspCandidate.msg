@@ -1,9 +1,9 @@
-# 单个抓取候选：一个"末端 TCP 应该以什么位姿、张开多大夹爪去抓"的建议。
-# 由视觉侧依据检测结果与深度生成（普通抓取、GraspNet 基线、候选 IK 过滤等），
-# 下游按置信度/可达性筛选并发布结果。
+# 单个抓取候选:一个"末端 TCP 应该以什么位姿,张开多大夹爪去抓"的建议.
+# 由视觉侧依据检测结果与深度生成(普通抓取,GraspNet 基线,候选 IK 过滤等),
+# 下游按置信度/可达性筛选并发布结果.
 
-# 时间戳与坐标系。header.frame_id 是 pose 所在坐标系（通常 camera_depth_frame，
-# 经 IK 过滤后可能已变换到机械臂基座系），也是该候选的参考系，必须与 pose 配套解读。
+# 时间戳与坐标系.header.frame_id 是 pose 所在坐标系(通常 camera_depth_frame,
+# 经 IK 过滤后可能已变换到机械臂基座系),也是该候选的参考系,必须与 pose 配套解读.
 std_msgs/Header header
 # 目标类别名，与 Detection2D.class_name 对应，用于按标签匹配目标。
 string class_name

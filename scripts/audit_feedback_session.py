@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""同一会话的有界异步审计入口；默认不打开串口、不启动硬件。
+"""同一会话的有界异步审计入口;默认不打开串口,不启动硬件.
 
-用 --module 包.模块运行既有 main(args)，只配置 rebotarm.audit 日志。
-可选 --serial 由本进程独占真实串口并桥接 PTY，传入参数中的 {audit_serial}
-替换为 PTY。不会构造第二份 SDK、不主动发命令；原始字节和 SDK 序号分别
-留存，不能把缓存观测时间当作线上的到达时间。审计丢弃/写入错误须使验收无效。
+用 --module 包.模块运行既有 main(args),只配置 rebotarm.audit 日志.
+可选 --serial 由本进程独占真实串口并桥接 PTY,传入参数中的 {audit_serial}
+替换为 PTY.不会构造第二份 SDK,不主动发命令;原始字节和 SDK 序号分别
+留存,不能把缓存观测时间当作线上的到达时间.审计丢弃/写入错误须使验收无效.
 """
 import argparse
 import importlib
@@ -23,7 +23,7 @@ import tty
 
 
 class AuditWriter(logging.Handler):
-    """生产者只做有界入队；JSON 编码和磁盘操作只在审计线程中执行。"""
+    """生产者只做有界入队;JSON 编码和磁盘操作只在审计线程中执行."""
 
     def __init__(self, path, session, *, capacity=8192):
         super().__init__()
@@ -37,7 +37,7 @@ class AuditWriter(logging.Handler):
         self.worker.start()
 
     def emit(self, record):
-        # 不格式化消息、不等待磁盘；payload 必须是调用点复制的普通数值。
+        # 不格式化消息,不等待磁盘;payload 必须是调用点复制的普通数值.
         item = dict(session=self.session, pid=os.getpid(), mono_ns=time.monotonic_ns(),
                     wall_ns=time.time_ns(), event=record.msg, data=getattr(record, 'audit', {}))
         try:
@@ -76,16 +76,16 @@ class AuditWriter(logging.Handler):
 
 
 class SerialRelay:
-    """DM 串口单所有者；TX 保留完整 30 字节帧及间隔，RX 原样转发。
+    """DM 串口单所有者;TX 保留完整 30 字节帧及间隔,RX 原样转发.
 
-    PTY 是字节流，读取边界不能当作 SDK 的写入边界。不能把多条 SDK 命令
-    合成一次 USB 写入或转发半帧；不识别的 TX 格式立即断流并使审计无效。
-    此类不改载荷、不补帧、不重试；Python 调度和 USB 分包仍需实机测量。
+    PTY 是字节流,读取边界不能当作 SDK 的写入边界.不能把多条 SDK 命令
+    合成一次 USB 写入或转发半帧;不识别的 TX 格式立即断流并使审计无效.
+    此类不改载荷,不补帧,不重试;Python 调度和 USB 分包仍需实机测量.
     """
 
     _TX_HEADER = bytes.fromhex('55aa1e03')
     _TX_LENGTH = 30
-    _TX_GAP_SEC = .000120  # 与 MotorBridge 默认多电机发送间隔一致。
+    _TX_GAP_SEC = .000120  # 与 MotorBridge 默认多电机发送间隔一致.
 
     def __init__(self, channel, baud):
         import serial
@@ -145,7 +145,7 @@ class SerialRelay:
                             del self._tx_pending[:self._TX_LENGTH]
                             self._forwarded(logger, direction, frame, read_ns, started_ns)
                     else:
-                        # 保留分段/粘包的原始字节；不能用解码后的值代替原始帧。
+                        # 保留分段/粘包的原始字节;不能用解码后的值代替原始帧.
                         started_ns = time.monotonic_ns()
                         view = memoryview(data)
                         while view:
@@ -169,7 +169,7 @@ class SerialRelay:
         self.worker.join(1.)
         if self.worker.is_alive():
             raise RuntimeError('serial relay did not stop')
-        # 关闭不补发命令。SDK 已写入 PTY、代理尚未读取的字节也不能静默丢弃。
+        # 关闭不补发命令.SDK 已写入 PTY,代理尚未读取的字节也不能静默丢弃.
         try:
             unsent = os.read(self.master, 4096)
         except BlockingIOError:
@@ -222,7 +222,7 @@ def main(argv=None):
                     motorbridge_version=motorbridge_version)})
         module.main(args=args)
     finally:
-        # 代理清理异常也必须排空日志，留下“不完整”的证据及原始异常。
+        # 代理清理异常也必须排空日志,留下"不完整"的证据及原始异常.
         try:
             if relay:
                 relay.close()

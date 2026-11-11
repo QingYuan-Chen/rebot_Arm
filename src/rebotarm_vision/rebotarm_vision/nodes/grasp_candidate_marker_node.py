@@ -1,4 +1,4 @@
-"""把 GraspNet 原始候选转换为 RViz MarkerArray（只读显示）。"""
+"""把 GraspNet 原始候选转换为 RViz MarkerArray(只读显示)."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def _rotate(v, q):
 
 
 class GraspCandidateMarkerNode(Node):
-    """显示前 N 个原始候选；不参与 IK、规划或执行。"""
+    """显示前 N 个原始候选;不参与 IK,规划或执行."""
 
     def __init__(self):
         super().__init__("rebotarm_grasp_candidate_markers")
@@ -66,7 +66,7 @@ class GraspCandidateMarkerNode(Node):
         q = (pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w)
         width = max(0.006, min(float(candidate.jaw_width), 0.2))
         length = 0.06
-        # 在候选局部坐标中画两指和根部横梁，再旋转/平移到 target_frame。
+        # 在候选局部坐标中画两指和根部横梁,再旋转/平移到 target_frame.
         local = [
             ((-length, -width / 2, 0), (0, -width / 2, 0)),
             ((-length, width / 2, 0), (0, width / 2, 0)),

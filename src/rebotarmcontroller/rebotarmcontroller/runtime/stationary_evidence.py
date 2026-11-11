@@ -20,10 +20,10 @@ from collections import deque
 import numpy as np
 
 class StationaryEvidence:
-    """只按新帧、速度与完整窗口确认；位置锚点仅供诊断记录。"""
+    """只按新帧,速度与完整窗口确认;位置锚点仅供诊断记录."""
 
     def __init__(self, *, window=.20, velocity_limit=.05, max_age=.15, joints=6):
-        """保留各调用方的窗口、速度和新鲜度策略，不以位置偏差判定静止。"""
+        """保留各调用方的窗口,速度和新鲜度策略,不以位置偏差判定静止."""
         if not np.isfinite([window, velocity_limit, max_age]).all() or min(window, velocity_limit, max_age) <= 0:
             raise ValueError('stationary policy requires positive finite bounds')
         self.window, self.velocity_limit, self.max_age = window, velocity_limit, max_age
@@ -31,7 +31,7 @@ class StationaryEvidence:
         self.reset()
 
     def reset(self, anchor=None):
-        """保存可选诊断起点，清除样本、序号与源时间；不设置位置门限。"""
+        """保存可选诊断起点,清除样本,序号与源时间;不设置位置门限."""
         self.anchor = None if anchor is None else np.array(anchor, dtype=float, copy=True)
         if self.anchor is not None and (self.anchor.shape != (self.joints,) or not np.isfinite(self.anchor).all()):
             raise ValueError('stationary anchor must contain finite positions')
@@ -45,7 +45,7 @@ class StationaryEvidence:
 
         stamp / now 必须同属单调时钟. 重复时间或未全部推进的序号不累计窗口.
         无效值, 断流和回退清空窗口并报告原因; 上层事务须保留连续性失败.
-        速度峰清空静止窗口；位置仍校验维度和有限性，不检查位置极差或锚点偏差。
+        速度峰清空静止窗口;位置仍校验维度和有限性,不检查位置极差或锚点偏差.
         """
         q, v = np.asarray(positions, dtype=float), np.asarray(velocities, dtype=float)
         if (q.shape != (self.joints,) or v.shape != (self.joints,) or not np.isfinite(q).all()
@@ -78,7 +78,7 @@ class StationaryEvidence:
             self.samples.clear()
             self.reason = 'source_gap'
             return self.reason
-        # 只保留初始位置用于诊断输出，不用它限制累计位移。
+        # 只保留初始位置用于诊断输出,不用它限制累计位移.
         if self.anchor is None:
             self.anchor = q.copy()
         if np.max(np.abs(v)) > self.velocity_limit:
@@ -98,7 +98,7 @@ class StationaryEvidence:
         return self.samples[0][0] if self.samples else None
 
     def confirmed(self, now=None):
-        """要求至少三份速度合格的新帧覆盖完整窗口，可选同时检查最新年龄。"""
+        """要求至少三份速度合格的新帧覆盖完整窗口,可选同时检查最新年龄."""
         return (len(self.samples) >= 3
                 and (now is None or -.005 <= now-self.last_stamp <= self.max_age)
                 and self.samples[-1][0]-self.samples[0][0] >= self.window-1e-9)
@@ -109,7 +109,7 @@ class DisabledTransitionEvidence:
 
     七路输入均为原始电机 rad/rad/s. 需显式服务成功, 请求后七路新鲜失能帧,
     之后连续一秒速度合格; 孤立速度峰保留事件并延迟确认.
-    断流/未知状态锁存失败，位置变化不再单独使诊断失败。
+    断流/未知状态锁存失败,位置变化不再单独使诊断失败.
     """
 
     def __init__(self, positions, sequences, requested_at):
@@ -135,7 +135,7 @@ class DisabledTransitionEvidence:
             self.failure = 'disable service failed'
 
     def observe(self, positions, velocities, statuses, sequences, observed_at, now):
-        """以七路新帧检查连续性及失能状态；速度峰累计诊断并延后确认。"""
+        """以七路新帧检查连续性及失能状态;速度峰累计诊断并延后确认."""
         if self.failure:
             return
         if observed_at <= self.requested_at:

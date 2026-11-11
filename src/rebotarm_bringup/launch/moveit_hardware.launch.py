@@ -1,9 +1,9 @@
-# 真机 MoveIt 启动入口：interactive_system.launch.py 的真机专用包装。
+# 真机 MoveIt 启动入口:interactive_system.launch.py 的真机专用包装.
 #
-# 本文件不复制硬件控制器、状态发布器或 MoveIt 的节点定义。
-# interactive_system.launch.py 负责共享实现，本文件只固定选择真机、MoveIt、
-# 真实关节状态和唯一状态源。启动后仍保持失能，执行前须显式调用
-# /rebotarm/enable。
+# 本文件不复制硬件控制器,状态发布器或 MoveIt 的节点定义.
+# interactive_system.launch.py 负责共享实现,本文件只固定选择真机,MoveIt,
+# 真实关节状态和唯一状态源.启动后仍保持失能,执行前须显式调用
+# /rebotarm/enable.
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -13,7 +13,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    """固定使用真机后端的 MoveIt 包装入口。"""
+    """固定使用真机后端的 MoveIt 包装入口."""
     bringup_share = FindPackageShare("rebotarm_bringup")
     interactive_launch = PathJoinSubstitution(
         [bringup_share, "launch", "interactive_system.launch.py"]

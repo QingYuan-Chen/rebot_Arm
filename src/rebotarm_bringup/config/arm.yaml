@@ -1,33 +1,33 @@
 # reBotArm 机械臂配置文件
 #
-# 与仿真的关系：仿真侧在“仿真包”的 config/motor_control_calibration.yaml 里冻结了一组 firmware_reference 数值（pos_kp/pos_ki/vel_kp/vel_ki/vlim）
-# 用于把固件 PI 输出折算成物理力矩；本文件的 POS_VEL 段就是那份参考对应的真机整定值。真机调参后不要顺手去改仿真标定，两者是各自独立冻结的。
+# 与仿真的关系:仿真侧在"仿真包"的 config/motor_control_calibration.yaml 里冻结了一组 firmware_reference 数值(pos_kp/pos_ki/vel_kp/vel_ki/vlim)
+# 用于把固件 PI 输出折算成物理力矩;本文件的 POS_VEL 段就是那份参考对应的真机整定值.真机调参后不要顺手去改仿真标定,两者是各自独立冻结的.
 #
-# 安全提醒：本文件里的增益直接决定电机输出。
+# 安全提醒:本文件里的增益直接决定电机输出.
 channel: /dev/ttyACM0
 
 # 控制循环频率 (Hz)
 rate: 100
 
-# 关节列表：顺序即关节编号顺序（joint1..joint6），也是反馈/命令向量的元素顺序。
-# 每项字段含义（下方各关节同构，仅数值不同）：
-#   name        关节名，必须与 URDF/SRDF、话题消息里的关节名逐字一致。
-#   motor_id    电机接收（命令）ID，十六进制；0x01..0x06 依次对应 joint1..joint6。
-#   feedback_id 电机反馈 ID，十六进制；0x11..0x16 与 motor_id 成对（DM 约定为接收 ID + 0x10）。
-#   model       厂商型号字符串：4340P（前三轴，大扭矩）/ 4310（后三轴腕部）。
-#   vendor      厂商选择，取值 damiao | myactuator | robstride。同一总线上挂多个厂商时按厂商分组各自建控制器；本文件六轴全部为 damiao。
-#   MIT         阻抗（MIT）模式参数，用于重力补偿与力位混合下发，力矩 = kp*(目标位置-当前位置) + kd*(0-当前速度)：
-#                 kp  位置刚度增益，越大越“硬”地拉向目标角；调大易振荡、发热。
-#                 kd  速度阻尼增益，抑制超调与抖动；调大响应变钝。
-#   POS_VEL     位置-速度模式参数，常规轨迹跟踪与 safe_home 使用：
-#                 vel_kp / vel_ki  速度环 PI 增益（对应 DM 寄存器 KP_ASR / KI_ASR）
-#                 pos_kp / pos_ki  位置环 PI 增益（对应 DM 寄存器 KP_APR / KI_APR）
-#                 vlim             该关节的速度限幅（rad/s），按位置-速度命令下发
+# 关节列表:顺序即关节编号顺序(joint1..joint6),也是反馈/命令向量的元素顺序.
+# 每项字段含义(下方各关节同构,仅数值不同):
+#   name        关节名,必须与 URDF/SRDF,话题消息里的关节名逐字一致.
+#   motor_id    电机接收(命令)ID,十六进制;0x01..0x06 依次对应 joint1..joint6.
+#   feedback_id 电机反馈 ID,十六进制;0x11..0x16 与 motor_id 成对(DM 约定为接收 ID + 0x10).
+#   model       厂商型号字符串:4340P(前三轴,大扭矩)/ 4310(后三轴腕部).
+#   vendor      厂商选择,取值 damiao | myactuator | robstride.同一总线上挂多个厂商时按厂商分组各自建控制器;本文件六轴全部为 damiao.
+#   MIT         阻抗(MIT)模式参数,用于重力补偿与力位混合下发,力矩 = kp*(目标位置-当前位置) + kd*(0-当前速度):
+#                 kp  位置刚度增益,越大越"硬"地拉向目标角;调大易振荡,发热.
+#                 kd  速度阻尼增益,抑制超调与抖动;调大响应变钝.
+#   POS_VEL     位置-速度模式参数,常规轨迹跟踪与 safe_home 使用:
+#                 vel_kp / vel_ki  速度环 PI 增益(对应 DM 寄存器 KP_ASR / KI_ASR)
+#                 pos_kp / pos_ki  位置环 PI 增益(对应 DM 寄存器 KP_APR / KI_APR)
+#                 vlim             该关节的速度限幅(rad/s),按位置-速度命令下发
 #
-# 整定分组（数值的分界线与机械结构一致）：
-#   前三轴 joint1-joint3：4340P，MIT kp=120 / kd=8，位置环 150/0.5，速度环 0.0125/0.004，vlim=5.0 rad/s——承担整臂负载，允许更高速。
-#   后三轴 joint4-joint6：4310，MIT kp=18 / kd=2，位置环 50/1.0，速度环 0.0008/0.002，vlim=3.0 rad/s——腕部惯量小，增益与限速都更低以抑制抖动。
-# 调参顺序建议：先 vlim 限速，再 pos_kp/pos_ki，最后 vel_kp/vel_ki；每次只改一组并在失能-使能循环后重新验证，避免多参数同时变化导致无法归因。
+# 整定分组(数值的分界线与机械结构一致):
+#   前三轴 joint1-joint3:4340P,MIT kp=120 / kd=8,位置环 150/0.5,速度环 0.0125/0.004,vlim=5.0 rad/s-承担整臂负载,允许更高速.
+#   后三轴 joint4-joint6:4310,MIT kp=18 / kd=2,位置环 50/1.0,速度环 0.0008/0.002,vlim=3.0 rad/s-腕部惯量小,增益与限速都更低以抑制抖动.
+# 调参顺序建议:先 vlim 限速,再 pos_kp/pos_ki,最后 vel_kp/vel_ki;每次只改一组并在失能-使能循环后重新验证,避免多参数同时变化导致无法归因.
 joints:
   - name: joint1
     motor_id: 0x01

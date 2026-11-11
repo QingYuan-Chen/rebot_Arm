@@ -1,7 +1,7 @@
-# 机械臂整体运行状态快照，锁存（latched）且可靠发布，晚加入的订阅者立刻能拿到最后一帧。
-# 界面/示教/验收等模块用它判断"现在能不能发命令"，它同时也是反馈读取失败时唯一的故障通告通道。
+# 机械臂整体运行状态快照,锁存(latched)且可靠发布,晚加入的订阅者立刻能拿到最后一帧.
+# 界面/示教/验收等模块用它判断"现在能不能发命令",它同时也是反馈读取失败时唯一的故障通告通道.
 
-# 时间戳取发布瞬间的 ROS 时间；frame_id 不使用。
+# 时间戳取发布瞬间的 ROS 时间;frame_id 不使用.
 std_msgs/Header header
 # 当前电机控制模式，字符串（小写），取值："mit"、"pos_vel"、"vel"。
 string mode
@@ -19,7 +19,7 @@ string[] joint_names
 uint8[] per_joint_status_code
 # 当前错误码列表，为空表示无错误。内容是"累计故障（如 ENABLE_ROLLBACK_FAILED、
 # FEEDBACK_PROTECTIVE_DISABLE）+ 当前反馈健康状态派生的项（如 ARM_FEEDBACK: ...）"，
-# 因此反馈恢复后派生项会自动消失，不需要额外清理历史。
+# 因此反馈恢复后派生项会自动消失,不需要额外清理历史.
 string[] error_codes
 
-# 对应topic通信，给订阅者和发布者使用
+# 对应topic通信,给订阅者和发布者使用

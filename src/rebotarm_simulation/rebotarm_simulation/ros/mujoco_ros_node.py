@@ -1,20 +1,20 @@
-"""MuJoCo 后端的 ROS 执行、物理步进及停止保持适配。
+"""MuJoCo 后端的 ROS 执行,物理步进及停止保持适配.
 
 文件职责
-    提供仿真 FJT、夹爪、控制模式及关节阻抗服务，驱动物理定时器并发布实际状态。
+    提供仿真 FJT,夹爪,控制模式及关节阻抗服务,驱动物理定时器并发布实际状态.
 对外接口
-    create_node_class 延迟加载 ROS 并返回节点类；main 创建执行器。
-    continuous 准备服务只返回检查结果，
-    execution 组件拥有目标令牌、资源占用及原子接纳；节点驱动物理时钟。
+    create_node_class 延迟加载 ROS 并返回节点类;main 创建执行器.
+    continuous 准备服务只返回检查结果,
+    execution 组件拥有目标令牌,资源占用及原子接纳;节点驱动物理时钟.
 安全约束
-    不导入真实硬件后端或运动层实现；参考求值来自共享数值包。
-    锁序固定为活动目标锁 → 仿真锁；准备服务等待、停止等待均不能占住物理步进锁。
-    continuous 用仿真时间采样，用主机单调时间控制准备期限和反馈新鲜度。
-    固定夹爪或场景变化后停止保持；停止未确认继续占用资源，不能因 Action 退出而放行。
-    正常成功保持曲线终点；Action 成功条件与独立物理验收指标分开。
+    不导入真实硬件后端或运动层实现;参考求值来自共享数值包.
+    锁序固定为活动目标锁 → 仿真锁;准备服务等待,停止等待均不能占住物理步进锁.
+    continuous 用仿真时间采样,用主机单调时间控制准备期限和反馈新鲜度.
+    固定夹爪或场景变化后停止保持;停止未确认继续占用资源,不能因 Action 退出而放行.
+    正常成功保持曲线终点;Action 成功条件与独立物理验收指标分开.
 文件结构
     延迟创建节点 → 参数/执行组件/ROS 装配 → 协议转换与服务等待
-    → Action 反馈和终态映射 → 物理调度及状态发布 → 关闭和进程入口。
+    → Action 反馈和终态映射 → 物理调度及状态发布 → 关闭和进程入口.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from rebotarm_simulation.ros.message_codec import validate_gripper_force
 DEFAULT_HOME_JOINT_POSITIONS = (0.0, -0.8, -1.0, 0.3, 0.0, 0.0)
 
 def create_node_class():
-    """延迟导入 ROS 并返回具体节点类；仅导入本模块不会创建节点或仿真实例。"""
+    """延迟导入 ROS 并返回具体节点类;仅导入本模块不会创建节点或仿真实例."""
     import rclpy
     from control_msgs.action import FollowJointTrajectory, GripperCommand
     from rebotarm_msgs.action import ExecuteTeleopMotion
@@ -96,7 +96,7 @@ def create_node_class():
                 value = float(self.get_parameter(name).value)
                 if not math.isfinite(value) or value <= 0.0:
                     raise ValueError(f"{name} must be positive and finite")
-            # 以下三项是启动前的硬门：参数不合法直接抛错终止，绝不带着错误配置跑仿真。
+            # 以下三项是启动前的硬门:参数不合法直接抛错终止,绝不带着错误配置跑仿真.
             if self.get_parameter("backend").value != "mujoco":
                 raise ValueError("simulation backend must be mujoco")
             if self.get_parameter("headless").value is not True:
@@ -170,7 +170,7 @@ def create_node_class():
                 float(self.get_parameter('gripper_position_torque_cap_nm').value), revision)
             self._execution = TrajectoryExecution(self._sim_access, self._control,
                 capability, settling_policy)
-            # 仅保存 ROS Goal UUID 与执行令牌的传输关联；任务状态仍全部归 execution。
+            # 仅保存 ROS Goal UUID 与执行令牌的传输关联;任务状态仍全部归 execution.
             self._goal_tokens = {}
             self._versioned_capabilities = self.create_publisher(String,
                 f'/{namespace}/trajectory_capabilities', qos)
@@ -186,8 +186,8 @@ def create_node_class():
                 self._scene_changed, qos, callback_group=self._callback_group)
             self._timer_callback_group = MutuallyExclusiveCallbackGroup()
             self._stamp = MonotonicStamp()
-            # 只读反馈话题：关节状态、夹爪状态与仿真时钟。队列深度 10 足以吸收
-            # 短暂抖动，仿真时间由 /clock 统一对外，供 use_sim_time 的节点对齐。
+            # 只读反馈话题:关节状态,夹爪状态与仿真时钟.队列深度 10 足以吸收
+            # 短暂抖动,仿真时间由 /clock 统一对外,供 use_sim_time 的节点对齐.
             self._joint_pub = self.create_publisher(
                 JointState, f"/{self._arm_namespace}/joint_states", 10
             )
@@ -199,7 +199,7 @@ def create_node_class():
             self._diagnostic_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
             self._diagnostic_last_wall = time.monotonic()
             self._diagnostic_last_sim = 0.0
-            # 与真实控制器同名的轨迹动作接口：上层运动/示教代码无需区分真机与仿真。
+            # 与真实控制器同名的轨迹动作接口:上层运动/示教代码无需区分真机与仿真.
             self._action_server = TrajectoryActionServer(
                 self,
                 FollowJointTrajectory,
@@ -332,7 +332,7 @@ def create_node_class():
             self._execution.scene_changed(message.data)
 
         def _prepare_sampler(self, goal_handle, token):
-            """ROS 工作线程仅编码请求及等待 Future；执行组件完成上下文复核与原子接纳。"""
+            """ROS 工作线程仅编码请求及等待 Future;执行组件完成上下文复核与原子接纳."""
             pending = self._execution.preparation_for(token)
             request = self._prepare_type.Request()
             request.trajectory = goal_handle.request.trajectory
@@ -368,7 +368,7 @@ def create_node_class():
                 time.sleep(.01)
 
         def _handle_accepted(self, goal_handle):
-            """协议句柄绑定本次令牌；取消与执行回调都使用同一关联。"""
+            """协议句柄绑定本次令牌;取消与执行回调都使用同一关联."""
             with self._execution.lock:
                 self._goal_tokens[bytes(goal_handle.goal_id.uuid)] = self._execution.active.token
             goal_handle.execute()
@@ -510,7 +510,7 @@ def create_node_class():
             return response
 
         def _impedance_service(self, request, response):
-            """薄协议适配；资源检查、锁序与规划失效统一归执行组件。"""
+            """薄协议适配;资源检查,锁序与规划失效统一归执行组件."""
             try:
                 self._execution.command_joint_impedance(request.positions, request.stiffness,
                     request.damping, timeout_s=request.timeout_s)
@@ -538,7 +538,7 @@ def create_node_class():
 
 
         def _execute_goal(self, goal_handle, *, web=False):
-            """协调传输与等待；曲线采样、到位、组合终态和清理由执行组件拥有。"""
+            """协调传输与等待;曲线采样,到位,组合终态和清理由执行组件拥有."""
             execution = self._execution
             goal_key = bytes(goal_handle.goal_id.uuid)
             with execution.lock:
@@ -600,7 +600,7 @@ def create_node_class():
                         return result
                     time.sleep(self._execute_wait_sec)
                 execution.stop(token)
-                # 进程正在结束物理步进，保留未确认预约，随仿真所有者一并释放。
+                # 进程正在结束物理步进,保留未确认预约,随仿真所有者一并释放.
                 execution.stop_unconfirmed = True
                 goal_handle.abort()
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
@@ -621,7 +621,7 @@ def create_node_class():
                         else:
                             goal_handle.abort()
                 except Exception as terminal_error:
-                    # 原执行及停止原因随结果返回；外层 ActionServer 负责终态故障的协议收尾。
+                    # 原执行及停止原因随结果返回;外层 ActionServer 负责终态故障的协议收尾.
                     exc = RuntimeError(f'{exc}; abort: {type(terminal_error).__name__}: {terminal_error}')
                 result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
                 result.error_string = f"simulation trajectory execution failed: {exc}"
@@ -640,7 +640,7 @@ def create_node_class():
                     del self._goal_tokens[goal_key]
 
         def _timer_callback(self) -> None:
-            """物理定时器串行推进仿真；一个定时回调含多步时也在每个物理步重采参考。"""
+            """物理定时器串行推进仿真;一个定时回调含多步时也在每个物理步重采参考."""
             state = self._execution.step(self._steps_per_tick, self._trace.record)
             stamp = Clock()
             seconds, nanoseconds = self._stamp.update(state.simulation_time)
@@ -676,7 +676,7 @@ def create_node_class():
 
 
         def destroy_node(self):
-            """释放动作服务端与仿真实例。"""
+            """释放动作服务端与仿真实例."""
             self._action_server.destroy()
             for server in self._gripper_servers:
                 server.destroy()
@@ -703,7 +703,7 @@ def main(args=None) -> None:
     def interrupt(*_):
         raise KeyboardInterrupt
 
-    # 信号终止调度，ROS context 保留至工作线程和发布回调退出之后。
+    # 信号终止调度,ROS context 保留至工作线程和发布回调退出之后.
     previous_signals = {sig:signal.signal(sig, interrupt) for sig in (signal.SIGINT,signal.SIGTERM)}
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = create_node_class()()

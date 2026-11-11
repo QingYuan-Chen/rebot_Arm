@@ -1,10 +1,10 @@
-"""规划阶段纯计算重定时的 ROS 服务。
+"""规划阶段纯计算重定时的 ROS 服务.
 
-文件职责：读取后端只读能力，将具名点约束交给共享运动算法并编码最终纳秒轨迹。
-对外接口：/<namespace>/retime_arm_trajectory；仅返回计划，不提交执行请求。
-安全约束：只读后端规划快照，不预约资源或发出设备命令；无碰撞许可，固定时长超限拒绝。
-    能力缺失、过期或计算超过两秒均失败；执行端仍须重新核验场景与设备上下文。
-文件结构：消息/数值转换 → 重定时回调 → 能力订阅及节点生命周期。
+文件职责:读取后端只读能力,将具名点约束交给共享运动算法并编码最终纳秒轨迹.
+对外接口:/<namespace>/retime_arm_trajectory;仅返回计划,不提交执行请求.
+安全约束:只读后端规划快照,不预约资源或发出设备命令;无碰撞许可,固定时长超限拒绝.
+    能力缺失,过期或计算超过两秒均失败;执行端仍须重新核验场景与设备上下文.
+文件结构:消息/数值转换 → 重定时回调 → 能力订阅及节点生命周期.
 """
 
 from pathlib import Path
@@ -20,7 +20,7 @@ from rebotarm_trajectory.planning import decode_state, plan_binding, decode_plan
 
 
 def retime_message(request, capability, config_directory, planning_state=None):
-    """数值入口不创建节点；六轴执行曲线和单左指规划预算分别核定，拒绝七轴。"""
+    """数值入口不创建节点;六轴执行曲线和单左指规划预算分别核定,拒绝七轴."""
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
     capability = decode_capability(capability)
     if request.capability_revision and request.capability_revision != capability['revision']:
@@ -31,15 +31,15 @@ def retime_message(request, capability, config_directory, planning_state=None):
     points = tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
         p.positions,p.velocities,p.accelerations) for p in trajectory.points)
     if tuple(trajectory.joint_names) == ('left_finger_joint',):
-        # 仅为 MoveIt 独立夹爪规划核定预算；执行映射为 GripperCommand，绝不送入 FJT。
+        # 仅为 MoveIt 独立夹爪规划核定预算;执行映射为 GripperCommand,绝不送入 FJT.
         names = ('left_finger_joint',)
     else:
         names, points = canonical_input(trajectory.joint_names,points)
     if points[0].time != 0.:
         raise ValueError('planning requires an explicit initial point at time zero')
-    build_curve(names, points)  # 替换起点前完整验证原始维度、等级、有限性与时间。
+    build_curve(names, points)  # 替换起点前完整验证原始维度,等级,有限性与时间.
     low, high, limits = effective_limits(config_directory,names,capability)
-    # 必须在起点替换前拒绝原始越界节点，不能以保持值覆盖来修复非法输入。
+    # 必须在起点替换前拒绝原始越界节点,不能以保持值覆盖来修复非法输入.
     if any(q < lo-1e-9 or q > hi+1e-9 for p in points for q,lo,hi in zip(p.positions,low,high)):
         raise ValueError('original planning position outside limits')
     purpose = 'reference' if request.planning_purpose == 1 else 'execution'
@@ -54,7 +54,7 @@ def retime_message(request, capability, config_directory, planning_state=None):
         if planning_state['capability_revision'] != capability['revision']:
             raise ValueError('planning capability changed')
         if planning_state['executable']:
-            # 起点变更仅发生于规划阶段；重定时、纳秒复核和后续碰撞均针对这条曲线。
+            # 起点变更仅发生于规划阶段;重定时,纳秒复核和后续碰撞均针对这条曲线.
             points = (replace(points[0], positions=tuple(planning_state['hold'])),)+points[1:]
         else:
             purpose = 'preview'
@@ -77,7 +77,7 @@ def retime_message(request, capability, config_directory, planning_state=None):
         result.points.append(point)
     encoded = tuple(TrajectoryPoint(p.time_from_start.sec+p.time_from_start.nanosec*1e-9,
         p.positions,p.velocities,p.accelerations) for p in result.points)
-    # 编码后复核并绑定最终消息，摘要不能基于编码前的浮点时间。
+    # 编码后复核并绑定最终消息,摘要不能基于编码前的浮点时间.
     final = build_curve(names, encoded)
     from .trajectory_preparation import check_curve
     if check_curve(final,low,high,limits)['state'] != 'pass':
@@ -88,8 +88,8 @@ def retime_message(request, capability, config_directory, planning_state=None):
 
 
 def _shutdown_executor(executor):
-    """自旋结束后先排空工作线程，再释放仍被排队回调引用的唤醒句柄。"""
-    # Jazzy shutdown 先销毁 guard 再 join 线程池；这里提前 join，避免排队回调触碰已销毁句柄。
+    """自旋结束后先排空工作线程,再释放仍被排队回调引用的唤醒句柄."""
+    # Jazzy shutdown 先销毁 guard 再 join 线程池;这里提前 join,避免排队回调触碰已销毁句柄.
     executor._executor.shutdown(wait=True)
     executor.shutdown()
     failures = [future.exception() for future in executor._futures if future.done()]
@@ -111,14 +111,14 @@ def main(args=None):
     from rclpy.callback_groups import ReentrantCallbackGroup
     from rclpy.executors import MultiThreadedExecutor
     from std_msgs.msg import String
-    # 信号只请求停止自旋；排空回调和发送服务回复期间保持 ROS context 有效。
+    # 信号只请求停止自旋;排空回调和发送服务回复期间保持 ROS context 有效.
     stopping = threading.Event()
     previous_signals = {sig: signal.signal(sig, lambda *_: stopping.set())
                         for sig in (signal.SIGINT, signal.SIGTERM)}
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = Node('trajectory_retiming')
     namespace = node.declare_parameter('arm_namespace','rebotarm').value.strip('/')
-    # 默认关闭；仿真验收显式指定，用于对照原输入、后端快照与准确输出，页面不刷数值日志。
+    # 默认关闭;仿真验收显式指定,用于对照原输入,后端快照与准确输出,页面不刷数值日志.
     trace_path = node.declare_parameter('planning_trace_path','').value
     directory = Path(get_package_share_directory('rebotarm_moveit_config'))/'config'
     snapshot = [None, 0.]

@@ -1,8 +1,8 @@
-"""职责：仿真控制目标、阻抗命令期限、控制器记忆及控制周期。
+"""职责:仿真控制目标,阻抗命令期限,控制器记忆及控制周期.
 
-对外接口：位置、力矩、关节阻抗命令和模式切换；物理实例由调用者持有。
-安全约束：阻抗只由完整命令激活，按同一控制拍限矩，过期转当前位置保持。
-文件结构：状态与快照、命令准入、逐拍控制、期限与重力辅助函数。
+对外接口:位置,力矩,关节阻抗命令和模式切换;物理实例由调用者持有.
+安全约束:阻抗只由完整命令激活,按同一控制拍限矩,过期转当前位置保持.
+文件结构:状态与快照,命令准入,逐拍控制,期限与重力辅助函数.
 """
 from __future__ import annotations
 import math
@@ -53,7 +53,7 @@ class SimControlRuntime:
         return self._control_mode
 
     def before_step(self, model, data):
-        """物理步开始前检查期限，在控制相位起点更新输出，其余步保持上一拍控制量。"""
+        """物理步开始前检查期限,在控制相位起点更新输出,其余步保持上一拍控制量."""
         if self._control_mode == "joint_impedance" or self._impedance_handoff:
             self._validate_impedance_feedback(data)
         self._expire_impedance_if_needed(model, data)
@@ -62,12 +62,12 @@ class SimControlRuntime:
             self._control_phase = 0
         if self._control_phase == 0:
             self._apply_motor_control(model, data)
-            # 后继位置任务沿用原定拍完成首次交接，随后恢复既有位置控制语义。
+            # 后继位置任务沿用原定拍完成首次交接,随后恢复既有位置控制语义.
             if self._impedance_handoff and self._control_mode == "position":
                 self._impedance_handoff = False
 
     def after_step(self, model, data):
-        """物理时间推进后再次核对期限，保证跨过截止点的一步立即切回保持。"""
+        """物理时间推进后再次核对期限,保证跨过截止点的一步立即切回保持."""
         if self._control_mode == "joint_impedance" or self._impedance_handoff:
             self._validate_impedance_feedback(data)
         self._control_phase = (self._control_phase + 1) % self._control_steps_per_update
@@ -133,7 +133,7 @@ class SimControlRuntime:
         )
 
     def get_control_status(self, state) -> ControlStatus:
-        """复制不可变诊断快照；看门狗剩余量与传入物理状态使用同一时间基准。"""
+        """复制不可变诊断快照;看门狗剩余量与传入物理状态使用同一时间基准."""
         remaining = None
         if self._control_mode == "raw_torque" and self._raw_torque_deadline is not None:
             remaining = max(0.0, self._raw_torque_deadline - state.simulation_time)
@@ -166,7 +166,7 @@ class SimControlRuntime:
                 raise RuntimeError("joint impedance active; enter hold before changing mode")
             self._leave_impedance(model, data)
             return self._control_mode
-        # 键盘重复 hold 时沿用原目标与积分，反复捕获当前位置会引入目标和支撑力矩跳变。
+        # 键盘重复 hold 时沿用原目标与积分,反复捕获当前位置会引入目标和支撑力矩跳变.
         if mode == "hold" and self._control_mode == "hold":
             return self._control_mode
         if self._impedance_handoff and mode in ("position", "hold"):
@@ -185,8 +185,8 @@ class SimControlRuntime:
             self._raw_torque_command.fill(0.0)
             self._raw_torque_requested.fill(0.0)
             self._raw_torque_deadline = float(data.time) + 0.1
-        # position 与 hold 共用位置控制器；position→hold 保留积分和上一拍支撑力矩。
-        # 不能在静止保持时清零后等待 PI 重建重力支撑；其余模式的既有复位规则保留。
+        # position 与 hold 共用位置控制器;position→hold 保留积分和上一拍支撑力矩.
+        # 不能在静止保持时清零后等待 PI 重建重力支撑;其余模式的既有复位规则保留.
         if mode == "gravity_comp" or (mode == "hold" and self._control_mode != "position"):
             self._arm_controller.reset()
         self._control_mode = mode
@@ -195,7 +195,7 @@ class SimControlRuntime:
 
 
     def set_control_mode(self, model, data, mode: str) -> str:
-        """保留 set_mode 的兼容入口，历史拼写 pos_vel 规范化为 position。"""
+        """保留 set_mode 的兼容入口,历史拼写 pos_vel 规范化为 position."""
         return self.set_mode(model, data, mode)
 
 
@@ -217,14 +217,14 @@ class SimControlRuntime:
         else:
             current = list(_finite_vector(targets, len(ARM_JOINT_NAMES), "joint targets"))
 
-        # 整批通过后才修改目标；越界不得截断后伪报成功或留下部分更新。
+        # 整批通过后才修改目标;越界不得截断后伪报成功或留下部分更新.
         for index, joint_id in enumerate(self._joint_ids[:6]):
             lower, upper = (float(value) for value in model.jnt_range[joint_id])
             if not lower <= current[index] <= upper:
                 raise ValueError(f"joint target outside limits: {ARM_JOINT_NAMES[index]}")
         self._position_targets[:6] = current
-        # 高频参考只更新目标，PI 的积分与力矩更新仍由配置控制频率推进。
-        # 每次写目标都调用 set_mode 会额外执行控制计算，使高频轨迹改变有效增益。
+        # 高频参考只更新目标,PI 的积分与力矩更新仍由配置控制频率推进.
+        # 每次写目标都调用 set_mode 会额外执行控制计算,使高频轨迹改变有效增益.
         if self._control_mode != 'position':
             self.set_mode(model, data, "position")
         return tuple(current)
@@ -258,21 +258,21 @@ class SimControlRuntime:
         return tuple(float(value) for value in self._raw_torque_command)
 
     def validate_impedance_target(self, model, command):
-        """整批验证目标；命令接纳和快照恢复共用相同限位。"""
+        """整批验证目标;命令接纳和快照恢复共用相同限位."""
         for name, joint_id, target in zip(ARM_JOINT_NAMES, self._joint_ids[:6], command.target):
             lower, upper = model.jnt_range[joint_id]
             if not lower <= target <= upper:
                 raise ValueError(f"impedance target outside limits: {name}")
 
     def impedance_effort_limits(self, model):
-        """采用模型执行器与标定上限的交集，供接纳、快照和逐拍计算共用。"""
+        """采用模型执行器与标定上限的交集,供接纳,快照和逐拍计算共用."""
         return tuple(min(limit, -float(model.actuator_ctrlrange[actuator_id][0]),
             float(model.actuator_ctrlrange[actuator_id][1]))
             if model.actuator_ctrllimited[actuator_id] else limit
             for limit, actuator_id in zip(self._motor_parameters.arm.effort_limit, self._actuator_ids[:6]))
 
     def _validate_impedance_feedback(self, data):
-        """每个物理步先检查反馈，避免非控制拍的坏值被物理引擎自动复位掩盖。"""
+        """每个物理步先检查反馈,避免非控制拍的坏值被物理引擎自动复位掩盖."""
         if (not math.isfinite(float(data.time)) or not np.isfinite(data.qpos).all()
                 or not np.isfinite(data.qvel).all() or not np.isfinite(data.qacc).all()):
             raise ValueError('joint impedance feedback and time must be finite')
@@ -280,11 +280,11 @@ class SimControlRuntime:
             raise ValueError('joint impedance simulation time moved backwards')
 
     def compute_impedance_output(self, model, data, command, previous, dt):
-        """接纳、快照复核和控制拍共用计算；只读取给定状态，写入由调用方决定。"""
+        """接纳,快照复核和控制拍共用计算;只读取给定状态,写入由调用方决定."""
         qpos_addresses = [int(model.jnt_qposadr[j]) for j in self._joint_ids[:6]]
         qvel_addresses = [int(model.jnt_dofadr[j]) for j in self._joint_ids[:6]]
         scale = self._randomization_torque_scale
-        # 随机化先作用于请求，最终执行输出统一受力矩及变化率约束。
+        # 随机化先作用于请求,最终执行输出统一受力矩及变化率约束.
         command = JointImpedanceCommand(command.target,
             tuple(value * scale for value in command.stiffness),
             tuple(value * scale for value in command.damping))
@@ -294,7 +294,7 @@ class SimControlRuntime:
             previous, dt)
 
     def command_joint_impedance(self, model, data, targets, stiffness, damping, timeout_s):
-        """登记静态平衡点；重复更新保持控制相位和上一拍实际力矩。"""
+        """登记静态平衡点;重复更新保持控制相位和上一拍实际力矩."""
         command = JointImpedanceCommand(targets, stiffness, damping)
         self.validate_impedance_target(model, command)
         timeout = float(timeout_s)
@@ -307,7 +307,7 @@ class SimControlRuntime:
         if np.any(abs(self._applied_arm_torque) > self.impedance_effort_limits(model)):
             raise ValueError("previous torque exceeds impedance effort limits")
         self._validate_impedance_feedback(data)
-        # 在修改模式/目标/期限前拒绝当前状态下已经溢出的控制律；预检不发送输出。
+        # 在修改模式/目标/期限前拒绝当前状态下已经溢出的控制律;预检不发送输出.
         self.compute_impedance_output(model, data, command, self._applied_arm_torque,
             1.0 / self._motor_parameters.control_rate_hz)
         self._impedance_command = command
@@ -338,7 +338,7 @@ class SimControlRuntime:
         return self.command_gripper_width(model, data, width)
 
     def command_gripper_position(self, model, data, width, torque_cap):
-        """独立夹爪开口命令，电机限矩按冻结传动参数折算；时间生命周期由调用者持有。"""
+        """独立夹爪开口命令,电机限矩按冻结传动参数折算;时间生命周期由调用者持有."""
         if not math.isfinite(width) or not 0 <= width <= .09:
             raise ValueError('gripper opening outside limits')
         p = self._motor_parameters.gripper
@@ -348,7 +348,7 @@ class SimControlRuntime:
         return self.command_gripper_width(model,data,width,max_force_n=force)
 
     def release_gripper_position(self, model, data):
-        """协同位置任务结束后中性释放；保留目标记录而将实际输出归零。"""
+        """协同位置任务结束后中性释放;保留目标记录而将实际输出归零."""
         self._gripper_max_force_n = 0.
         self._gripper_control_force.fill(0.)
         for actuator in self._actuator_ids[-2:]:
@@ -363,7 +363,7 @@ class SimControlRuntime:
         gravity = self._gravity_compensation_torque(model, data, qvel_addresses)
         elapsed = float(data.time) - self._last_control_time
         if self._control_mode == "joint_impedance" and elapsed <= 0.0:
-            # 同一物理时刻首次激活或重入计算都保持已有输出，避免凭空消耗变化率预算。
+            # 同一物理时刻首次激活或重入计算都保持已有输出,避免凭空消耗变化率预算.
             requested_torque = self._requested_arm_torque.copy()
             arm_torque = self._applied_arm_torque.copy()
         elif self._control_mode == "joint_impedance":
@@ -381,7 +381,7 @@ class SimControlRuntime:
             arm_torque = requested_torque.copy()
             self._arm_controller.applied_torque[:] = arm_torque
         elif self._control_mode == "hold":
-            # hold 固定进入模式时捕获的位置，复用 position 的控制器和积分状态。
+            # hold 固定进入模式时捕获的位置,复用 position 的控制器和积分状态.
             arm_torque = self._arm_controller.compute(
                 target=self._position_targets[:6],
                 position=position,
@@ -459,7 +459,7 @@ class SimControlRuntime:
         self._control_mode = "hold"
 
     def _leave_impedance(self, model, data):
-        """退出时保留实际支撑力矩；下一原定控制拍平滑接入位置保持。"""
+        """退出时保留实际支撑力矩;下一原定控制拍平滑接入位置保持."""
         self._sync_arm_targets_to_current_position(model, data)
         self._arm_controller.reset()
         self._arm_controller.applied_torque[:] = self._applied_arm_torque / self._randomization_torque_scale
@@ -496,7 +496,7 @@ class SimControlRuntime:
             and abs(velocity) < gripper.sim_velocity_deadband_m_s
         ):
             return 0.0
-        # MuJoCo 手指执行器直接施加 N；电机限矩先换算为线性力上限，滑动关节以米制 PD 稳定。
+        # MuJoCo 手指执行器直接施加 N;电机限矩先换算为线性力上限,滑动关节以米制 PD 稳定.
         return (
             gripper.sim_force_kp_n_per_m * error
             - gripper.sim_force_kd_n_s_per_m * velocity

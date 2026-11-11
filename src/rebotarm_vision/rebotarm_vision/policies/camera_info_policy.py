@@ -1,4 +1,4 @@
-"""校验 RGB-D 抓取所需的真实相机内参（不依赖 ROS 节点）。"""
+"""校验 RGB-D 抓取所需的真实相机内参(不依赖 ROS 节点)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import Mapping
 
 
 def calibrated_intrinsics(info: Mapping[str, object] | None, *, width: int, height: int) -> bool:
-    """只有尺寸一致、焦距有限且为正的驱动内参才可用于抓取。"""
+    """只有尺寸一致,焦距有限且为正的驱动内参才可用于抓取."""
 
     if info is None or width <= 0 or height <= 0:
         return False

@@ -1,4 +1,4 @@
-"""隔离 ROS 域内验证回归客户端；只启动合成节点，不访问任何设备。"""
+"""隔离 ROS 域内验证回归客户端;只启动合成节点,不访问任何设备."""
 import os
 from pathlib import Path
 import subprocess
@@ -31,7 +31,7 @@ def run_probe(root):
     from std_srvs.srv import Trigger
 
     names = [f'joint{i}' for i in range(1, 7)] + ['gripper']
-    # 即使测试域恰好被真实系统使用，也绝不发布或调用实际 /rebotarm 接口。
+    # 即使测试域恰好被真实系统使用,也绝不发布或调用实际 /rebotarm 接口.
     prefix = f'/regression_fake_{os.getpid()}'
     fake_name = f'regression_fake_{os.getpid()}'
     (root / 'baseline.json').write_text(json.dumps({n: .04 if n == 'gripper' else 0. for n in names}))
@@ -87,7 +87,7 @@ def run_probe(root):
             status.per_joint_status_code = [0] * 6
             self.status.publish(status)
 
-    # 复制正式脚本，仅注入一个需要 300 ms 的服务完成回调；真实接收路径不改写。
+    # 复制正式脚本,仅注入一个需要 300 ms 的服务完成回调;真实接收路径不改写.
     script = (ROOT / 'scripts/hardware_regression.py').read_text()
     assert '/rebotarm/' in script
     script = script.replace('/rebotarm/', prefix + '/')
@@ -118,7 +118,7 @@ def run_probe(root):
     def read_rows(path):
         if not path.exists():
             return []
-        # 忽略正在写入的最后半行，不掩盖已经结束的审计失败。
+        # 忽略正在写入的最后半行,不掩盖已经结束的审计失败.
         return [json.loads(line) for line in path.read_text().split('\n')[:-1] if line]
 
     def wait_event(name, timeout=8.):
@@ -154,7 +154,7 @@ def run_probe(root):
             health = [x for x in feedback if x.get('event') == 'health' and enter <= x['mono'] <= leave]
             assert health and not any(x['issues'] for x in health), health
 
-            # 在隔离节点人为中断全部反馈：不得把恢复后的新帧覆盖故障。
+            # 在隔离节点人为中断全部反馈:不得把恢复后的新帧覆盖故障.
             paused.set()
             deadline = time.monotonic() + 3.
             while time.monotonic() < deadline and not (root / 'audit_blocked').exists():

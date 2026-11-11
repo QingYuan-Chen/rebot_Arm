@@ -1218,7 +1218,7 @@ def test_moveit_start_aligner_appends_hold_plan_and_first_hold_with_joint_remap(
     assert planner.calls[0]["target_positions"] == (0.2, -0.2)
     assert trajectory.points[0].positions == [0.0, 0.0]
     assert trajectory.points[1].positions == [0.2, -0.2]
-    # 本例唯一规划点是终点，明确连接静止保持；缺 a 仍保持 C1。
+    # 本例唯一规划点是终点,明确连接静止保持;缺 a 仍保持 C1.
     assert trajectory.points[1].velocities == [0.0, 0.0]
     assert trajectory.points[1].accelerations == []
     assert trajectory.points[-1].positions == [0.2, -0.2]

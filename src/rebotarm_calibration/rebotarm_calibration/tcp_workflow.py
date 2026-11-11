@@ -1,4 +1,4 @@
-"""固定接触点的 TCP 枢轴标定：训练姿态求偏移和接触点，独立姿态检查残差。"""
+"""固定接触点的 TCP 枢轴标定:训练姿态求偏移和接触点,独立姿态检查残差."""
 import numpy as np
 from .tcp_calibration import analyze_tcp_pivot_samples
 from .handeye_residual import transform_matrix
@@ -28,7 +28,7 @@ def solve_tcp_dataset(dataset):
     train=analyze_tcp_pivot_samples(converted[0])
     validation_diversity=analyze_tcp_pivot_samples(converted[1])
     offset=np.asarray(train['tcp_offset_xyz']);pivot=np.asarray(train['pivot_position_base_xyz'])
-    # 验证沿用训练求得的同一个接触点（m）；重新拟合验证点会掩盖两组之间的偏移。
+    # 验证沿用训练求得的同一个接触点(m);重新拟合验证点会掩盖两组之间的偏移.
     errors=np.asarray([np.linalg.norm(pose[:3,3]+pose[:3,:3]@offset-pivot) for pose in matrices[1]])
     rms=float(np.sqrt(np.mean(errors**2)));maximum=float(errors.max())
     gates={'training':train['passed'],

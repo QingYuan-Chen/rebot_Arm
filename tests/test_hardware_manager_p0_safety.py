@@ -160,7 +160,7 @@ def make_manager(
     gripper_feedback_stale_timeout_sec: float = 0.15,
     hardware_feedback_rate_hz: float = 50.0,
 ) -> HardwareManager:
-    # 使用生产构造和校验，只替换设备运行时；不再手工复制初始化顺序。
+    # 使用生产构造和校验,只替换设备运行时;不再手工复制初始化顺序.
     arm = FakeArm(fail_enable_joint=fail_enable_joint)
     config = load_configuration()
     arm._joints = [SimpleNamespace(**(vars(joint) | {'vendor': 'fake'}))
@@ -1850,7 +1850,7 @@ def test_waiter_accepts_in_tolerance_feedback_without_rewriting_goal() -> None:
 
     waiter.start()
     deadline = time.monotonic() + 0.2
-    # 等待者不再推进到位释放；周期执行器在新反馈上决定并发送中性命令。
+    # 等待者不再推进到位释放;周期执行器在新反馈上决定并发送中性命令.
     manager.gripper._gripper_tick()
     waiter.join(timeout=0.5)
 
@@ -2164,12 +2164,12 @@ def test_arm_and_gripper_report_original_status_from_verified_cache(status) -> N
     assert manager.feedback.get_joint_status_codes() == [status] * 6
     assert manager.gripper.get_gripper_state() == (-1.0, 0.0, 0.0, status)
     assert manager.gripper.gripper_feedback_error is None
-    assert manager.feedback.get_feedback_status()[1] == []  # 电机故障原码与反馈不可用分别表达。
+    assert manager.feedback.get_feedback_status()[1] == []  # 电机故障原码与反馈不可用分别表达.
     assert_verified_feedback_unchanged(manager, before)
 
 
 def test_gripper_cached_sample_without_verified_feedback_reports_nan_and_empty_identity() -> None:
-    """无已验证样本时不得用控制镜像冒充反馈数值, 也不得伪造样本身份。"""
+    """无已验证样本时不得用控制镜像冒充反馈数值, 也不得伪造样本身份."""
     manager = make_manager()
     manager.gripper._gripper_mot = FakeMotor(position=-1.0)
     manager.gripper._gripper_execution._gripper_pos = -4.0
@@ -2328,7 +2328,7 @@ def test_arm_feedback_failure_and_recovery_are_independent_of_queries(
         motor.advance_feedback_on_poll = False
     elif fault == "stale":
         clock[0] += 1.0
-        # 夹爪新鲜度独立于六轴整体健康状态。
+        # 夹爪新鲜度独立于六轴整体健康状态.
         with manager.feedback._feedback_component._feedback_lock:
             manager.feedback._record_verified_feedback("gripper", gripper.state, 10, clock[0])
     else:

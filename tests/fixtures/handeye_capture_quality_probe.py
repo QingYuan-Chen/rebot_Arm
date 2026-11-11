@@ -1,4 +1,4 @@
-"""隔离真实 ROS 图像/TF：视觉抖动拒绝、稳定采集、证据与重复姿态准入。"""
+"""隔离真实 ROS 图像/TF:视觉抖动拒绝,稳定采集,证据与重复姿态准入."""
 import base64
 import hashlib
 import json

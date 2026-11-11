@@ -1,4 +1,4 @@
-"""显式接收配置与关节状态输入的候选策略适配器。"""
+"""显式接收配置与关节状态输入的候选策略适配器."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -37,7 +37,7 @@ class CandidateIkPolicy:
         return self._logger
 
     def _tuple3(self, name: str) -> tuple[float, float, float]:
-        """读取三元组向量参数并转为 float；长度不是 3 时立即抛错，避免静默使用错参数。"""
+        """读取三元组向量参数并转为 float;长度不是 3 时立即抛错,避免静默使用错参数."""
         values = list(_parameter(self, name).value)
         if len(values) != 3:
             raise ValueError(f"{name} must contain exactly 3 values")
@@ -45,7 +45,7 @@ class CandidateIkPolicy:
 
 
     def _tuple4(self, name: str) -> tuple[float, float, float, float]:
-        """读取四元数参数并转为 float；长度不是 4 时立即抛错（四元数必须完整给出 x,y,z,w）。"""
+        """读取四元数参数并转为 float;长度不是 4 时立即抛错(四元数必须完整给出 x,y,z,w)."""
         values = list(_parameter(self, name).value)
         if len(values) != 4:
             raise ValueError(f"{name} must contain exactly 4 values")
@@ -53,7 +53,7 @@ class CandidateIkPolicy:
 
 
     def _candidate_precheck_allows(self, candidate) -> bool:
-        """候选级预检：置信度有限且不低于下限，夹爪宽度有限且落在可信行程内。"""
+        """候选级预检:置信度有限且不低于下限,夹爪宽度有限且落在可信行程内."""
         result = evaluate_candidate_precheck(
             confidence=float(candidate.confidence),
             jaw_width_m=float(candidate.jaw_width),
@@ -67,15 +67,15 @@ class CandidateIkPolicy:
 
 
     def _candidate_gate_allows(self, candidate, *, grasp: PoseTarget) -> bool:
-        """几何闸门：夹爪宽度、抓取点最低高度，以及可选的工作空间盒检查。
+        """几何闸门:夹爪宽度,抓取点最低高度,以及可选的工作空间盒检查.
 
-        工作空间闸门默认关闭：关闭时既不判断坐标范围，也不查询 TF 求目标中心，省掉一次
-        变换；开启时把候选自身位姿变换到 target_frame 当作目标中心，并用它与抓取点的
-        距离判断抓取点是否已明显偏离物体。
+        工作空间闸门默认关闭:关闭时既不判断坐标范围,也不查询 TF 求目标中心,省掉一次
+        变换;开启时把候选自身位姿变换到 target_frame 当作目标中心,并用它与抓取点的
+        距离判断抓取点是否已明显偏离物体.
         """
         workspace_enabled = bool(_parameter(self, "candidate_workspace_gate_enabled").value)
         object_center_xyz = None
-        # 闸门关闭时使用与参数默认值相同的占位范围（该分支下不会被用到）
+        # 闸门关闭时使用与参数默认值相同的占位范围(该分支下不会被用到)
         workspace_min_xyz = (-0.35, -0.64, 0.0)
         workspace_max_xyz = (0.35, -0.18, 0.45)
         max_grasp_to_object_center_m = 0.15
@@ -107,10 +107,10 @@ class CandidateIkPolicy:
 
 
     def _candidate_object_center_in_target_frame(self, candidate) -> tuple[float, float, float] | None:
-        """取候选位姿作为目标中心并变换到 target_frame；变换失败交由帧编排器处理。
+        """取候选位姿作为目标中心并变换到 target_frame;变换失败交由帧编排器处理.
 
-        候选消息没有独立的目标中心字段，这里用候选位姿近似目标中心，仅用于"抓取点是否
-        离物体太远"这一粗粒度判断。
+        候选消息没有独立的目标中心字段,这里用候选位姿近似目标中心,仅用于"抓取点是否
+        离物体太远"这一粗粒度判断.
         """
         pose = candidate.pose
         source_frame = str(candidate.header.frame_id)
@@ -124,7 +124,7 @@ class CandidateIkPolicy:
 
 
     def _list_float_parameter(self, name: str) -> list[float]:
-        """读取浮点数组参数（偏航角偏移、高度偏移等），统一转换为 float 列表。"""
+        """读取浮点数组参数(偏航角偏移,高度偏移等),统一转换为 float 列表."""
         values = list(_parameter(self, name).value)
         return [float(value) for value in values]
 
@@ -134,11 +134,11 @@ class CandidateIkPolicy:
         candidates: GraspCandidateArray,
         pose: Pose,
     ) -> list[tuple[PoseTarget, PoseTarget, str]]:
-        """生成该候选全部待校验的 (接近点, 抓取点, 变体标签) 组合。
+        """生成该候选全部待校验的 (接近点, 抓取点, 变体标签) 组合.
 
-        先把候选位姿从消息声明的坐标系变换到 target_frame，再交给位姿策略按 pose_policy、
-        偏航角偏移、高度偏移、TCP 偏移与平行夹爪对称配置展开变体；标签用于日志与打分，
-        其中 yaw/z 下标对应参数列表下标。
+        先把候选位姿从消息声明的坐标系变换到 target_frame,再交给位姿策略按 pose_policy,
+        偏航角偏移,高度偏移,TCP 偏移与平行夹爪对称配置展开变体;标签用于日志与打分,
+        其中 yaw/z 下标对应参数列表下标.
         """
         source_frame = str(candidates.header.frame_id)
         stamp = candidates.header.stamp
@@ -177,17 +177,17 @@ class CandidateIkPolicy:
 
 
     def _joint_motion_penalty(self, robot_state) -> tuple[float | None, str]:
-        """计算逆解相对当前关节状态的位移代价，并拦截 joint6 过大的解。
+        """计算逆解相对当前关节状态的位移代价,并拦截 joint6 过大的解.
 
-        返回 (代价, 说明)；当 joint6 变化超过 candidate_max_joint6_delta_rad 时返回
-        (None, 说明) 表示该解不可行——这类解虽然能到达目标位姿，但腕部需要转过很大的角度，
-        通常说明还存在更省力的等效解（例如平行夹爪的 180° 对称姿态）。当前状态缺失或
-        找不到公共关节名时返回 0 代价，即"无法比较就不惩罚"，避免因为反馈缺失而否决全部候选。
+        返回 (代价, 说明);当 joint6 变化超过 candidate_max_joint6_delta_rad 时返回
+        (None, 说明) 表示该解不可行-这类解虽然能到达目标位姿,但腕部需要转过很大的角度,
+        通常说明还存在更省力的等效解(例如平行夹爪的 180° 对称姿态).当前状态缺失或
+        找不到公共关节名时返回 0 代价,即"无法比较就不惩罚",避免因为反馈缺失而否决全部候选.
         """
         current = self._joint_positions_by_name(self._latest_joint_state)
         solution_joint_state = robot_state.joint_state
         target = self._joint_positions_by_name(solution_joint_state)
-        # 只统计以 joint 开头的臂关节，夹爪等执行器关节不参与位移代价
+        # 只统计以 joint 开头的臂关节,夹爪等执行器关节不参与位移代价
         common_names = [name for name in current if name in target and name.startswith("joint")]
         if not common_names:
             return 0.0, "joint_delta=unknown"
@@ -212,7 +212,7 @@ class CandidateIkPolicy:
 
 
     def _joint_positions_by_name(self, joint_state: JointState | None) -> dict[str, float]:
-        """把关节状态整理成 {关节名: 弧度} 字典，非有限值直接跳过。"""
+        """把关节状态整理成 {关节名: 弧度} 字典,非有限值直接跳过."""
         if joint_state is None:
             return {}
         names = list(joint_state.name)

@@ -1,46 +1,46 @@
-# 视觉候选轻量可视化配置（RViz2 保存的 YAML 配置）。
+# 视觉候选轻量可视化配置(RViz2 保存的 YAML 配置).
 #
-# 用途：显示机器人模型、视觉候选与纯规划轨迹幻影；不加载规划控制面板。
+# 用途:显示机器人模型,视觉候选与纯规划轨迹幻影;不加载规划控制面板.
 #
-# 使用前提：必须已有节点发布 /robot_description 与 /grasp/visual_markers；固定坐标系
-# 为 base_link，因此 TF 链必须从 base_link 出发。本配置只读不写，不产生任何控制命令。
+# 使用前提:必须已有节点发布 /robot_description 与 /grasp/visual_markers;固定坐标系
+# 为 base_link,因此 TF 链必须从 base_link 出发.本配置只读不写,不产生任何控制命令.
 Panels:
-  # 左侧面板只保留 Displays；下方 Views: Current 仍保存初始 Orbit 视角。
+  # 左侧面板只保留 Displays;下方 Views: Current 仍保存初始 Orbit 视角.
   - Class: rviz_common/Displays
     Name: Displays
 Visualization Manager:
   Class: ""
   Displays:
-    # 地面网格：提供尺度参照。Reference Frame 必须与全局 Fixed Frame 一致。
+    # 地面网格:提供尺度参照.Reference Frame 必须与全局 Fixed Frame 一致.
     - Class: rviz_default_plugins/Grid
       Enabled: true
       Name: Grid
-      # Plane Cell Count：网格每边格数（无量纲，20 格），调大视野更广、绘制开销更高。
+      # Plane Cell Count:网格每边格数(无量纲,20 格),调大视野更广,绘制开销更高.
       Plane Cell Count: 20
       Reference Frame: base_link
-    # 机器人模型：从话题读取 URDF 描述，按关节状态绘制。
+    # 机器人模型:从话题读取 URDF 描述,按关节状态绘制.
     - Class: rviz_default_plugins/RobotModel
-      # Description Source=Topic 表示 URDF 从话题订阅，而不是内置字符串或文件。
+      # Description Source=Topic 表示 URDF 从话题订阅,而不是内置字符串或文件.
       Description Source: Topic
       Description Topic:
         Value: /robot_description
       Enabled: true
       Name: RobotModel
-      # Visual Enabled：显示视觉网格；Collision Enabled：显示碰撞体（此处关闭，避免与
-      # 视觉网格重叠造成画面杂乱）。
+      # Visual Enabled:显示视觉网格;Collision Enabled:显示碰撞体(此处关闭,避免与
+      # 视觉网格重叠造成画面杂乱).
       Visual Enabled: true
       Collision Enabled: false
-      # Alpha：模型不透明度 [0,1]，1 为完全不透明；抓取点被模型遮挡时可调低。
+      # Alpha:模型不透明度 [0,1],1 为完全不透明;抓取点被模型遮挡时可调低.
       Alpha: 1
-    # TF 显示：只勾选关心的坐标系，避免满屏坐标轴。
+    # TF 显示:只勾选关心的坐标系,避免满屏坐标轴.
     - Class: rviz_default_plugins/TF
       Enabled: true
-      # Frame Timeout（秒）：超过该时长没有更新的坐标系判为过期，不再绘制。
+      # Frame Timeout(秒):超过该时长没有更新的坐标系判为过期,不再绘制.
       Frame Timeout: 15
       Frames:
-        # All Enabled=false 表示默认不显示全部坐标系，只显示下面显式置 true 的四个：
-        # base_link（基座）、camera_depth_frame（深度相机）、end_link（末端）、
-        # grasp_tcp（抓取工具中心点，抓取规划的参考点）。
+        # All Enabled=false 表示默认不显示全部坐标系,只显示下面显式置 true 的四个:
+        # base_link(基座),camera_depth_frame(深度相机),end_link(末端),
+        # grasp_tcp(抓取工具中心点,抓取规划的参考点).
         All Enabled: false
         base_link:
           Value: true
@@ -50,31 +50,31 @@ Visualization Manager:
           Value: true
         grasp_tcp:
           Value: true
-      # Marker Scale：坐标轴箭头尺寸（米），默认 0.08 是为近距离观察末端与 TCP 关系。
+      # Marker Scale:坐标轴箭头尺寸(米),默认 0.08 是为近距离观察末端与 TCP 关系.
       Marker Scale: 0.08
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        # 展开树以 base_link 为根；空映射表示该根节点下没有额外展开的子项。
+        # 展开树以 base_link 为根;空映射表示该根节点下没有额外展开的子项.
         base_link:
           {}
-      # Update Interval：刷新周期（秒），0 表示每帧都刷新。
+      # Update Interval:刷新周期(秒),0 表示每帧都刷新.
       Update Interval: 0
-    # 抓取候选标记数组：由视觉侧发布，用箭头/线框表达候选抓取位姿与接近方向。
+    # 抓取候选标记数组:由视觉侧发布,用箭头/线框表达候选抓取位姿与接近方向.
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Topic:
-        # 话题名是对外契约：视觉候选标记节点发布到同一名称，改名会导致显示为空。
+        # 话题名是对外契约:视觉候选标记节点发布到同一名称,改名会导致显示为空.
         Value: /grasp/visual_markers
       Name: Visual Grasp Markers
-      # Namespaces：按命名空间过滤标记（空映射 = 全部分命名空间都显示）。
+      # Namespaces:按命名空间过滤标记(空映射 = 全部分命名空间都显示).
       Namespaces:
         {}
-      # Queue Size：消息队列深度；标记刷新很快时队列过小会丢帧，过大则占用内存。
+      # Queue Size:消息队列深度;标记刷新很快时队列过小会丢帧,过大则占用内存.
       Queue Size: 10
-    # YOLO 标注图：显示视觉节点已经绘制好的检测框、类别和掩膜。
+    # YOLO 标注图:显示视觉节点已经绘制好的检测框,类别和掩膜.
     - Class: rviz_default_plugins/Image
       Enabled: true
       Topic:
@@ -84,9 +84,9 @@ Visualization Manager:
       Queue Size: 2
       Transport Hint: raw
       Unreliable: false
-    # GraspNet 原始候选：默认显示前 5 个候选夹爪，可通过启动参数关闭。
+    # GraspNet 原始候选:默认显示前 5 个候选夹爪,可通过启动参数关闭.
     - Class: rviz_default_plugins/MarkerArray
-      # 话题显示项保持启用；是否产生数据由 start_raw_candidate_markers 控制。
+      # 话题显示项保持启用;是否产生数据由 start_raw_candidate_markers 控制.
       Enabled: true
       Topic:
         Value: /grasp/raw_candidate_markers
@@ -96,37 +96,37 @@ Visualization Manager:
       Queue Size: 10
   Enabled: true
   Global Options:
-    # Background Color：背景色 RGB（0-255 三分量，48;48;48 为深灰）。
+    # Background Color:背景色 RGB(0-255 三分量,48;48;48 为深灰).
     Background Color: 48; 48; 48
-    # Fixed Frame：全局固定坐标系，几乎所有显示项都相对它计算；改错会导致整屏显示异常。
+    # Fixed Frame:全局固定坐标系,几乎所有显示项都相对它计算;改错会导致整屏显示异常.
     Fixed Frame: base_link
   Name: root
   Tools:
-    # 仅保留 Interact 工具：本配置面向观察抓取位姿，不需要相机/选择/测距等交互工具，
-    # 减少误操作与启动开销。
+    # 仅保留 Interact 工具:本配置面向观察抓取位姿,不需要相机/选择/测距等交互工具,
+    # 减少误操作与启动开销.
     - Class: rviz_default_plugins/Interact
-  # Value：Visualization Manager 启用标志（RViz 持久化字段）。
+  # Value:Visualization Manager 启用标志(RViz 持久化字段).
   Value: true
 Views:
   Current:
-    # Orbit：以焦点为中心的轨道视角，适合围绕机械臂观察。
+    # Orbit:以焦点为中心的轨道视角,适合围绕机械臂观察.
     Class: rviz_default_plugins/Orbit
-    # Distance：相机到焦点的距离（米），1.2 m 约等于一臂展的观察距离。
+    # Distance:相机到焦点的距离(米),1.2 m 约等于一臂展的观察距离.
     Distance: 1.2
     Focal Point:
-      # Focal Point 为观察焦点在固定坐标系下的位置（米），(0.35, 0, 0.18) 大致指向
-      # 工作台前方的手臂中部区域。
+      # Focal Point 为观察焦点在固定坐标系下的位置(米),(0.35, 0, 0.18) 大致指向
+      # 工作台前方的手臂中部区域.
       X: 0.35
       Y: 0
       Z: 0.18
     Name: Current View
-    # Pitch / Yaw（弧度）：相机俯仰与偏航；0.65 rad ≈ 37° 俯视，3.14 rad 约为水平正对。
+    # Pitch / Yaw(弧度):相机俯仰与偏航;0.65 rad ≈ 37° 俯视,3.14 rad 约为水平正对.
     Pitch: 0.65
     Target Frame: base_link
     Yaw: 3.14
-  # Saved：已保存的具名视角列表，~ 表示没有保存任何视角。
+  # Saved:已保存的具名视角列表,~ 表示没有保存任何视角.
   Saved: ~
 Window Geometry:
-  # 上次退出时的窗口像素尺寸，仅影响界面初始大小，不参与任何计算。
+  # 上次退出时的窗口像素尺寸,仅影响界面初始大小,不参与任何计算.
   Height: 820
   Width: 1180

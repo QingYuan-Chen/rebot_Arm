@@ -1,4 +1,4 @@
-"""内部阶段 visual_input：参数由总入口声明，不单独启动。"""
+"""内部阶段 visual_input:参数由总入口声明,不单独启动."""
 
 import os
 from pathlib import Path

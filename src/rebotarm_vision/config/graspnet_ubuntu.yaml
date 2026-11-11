@@ -1,29 +1,29 @@
-# GraspNet 抓取候选推理参数（Ubuntu 原生链路档）：由上层启动组合包与离线感知启动文件
-# 加载到 GraspNet 基线节点（rebotarm_graspnet_baseline_node）。
-# 模型路径、设备、后端模块和采样点数由启动文件按本机安装路径注入；
-# 本档集中保留 Ubuntu RGB-D 输入、深度范围与候选输出默认值。
-# 注意：本文件中的话题名、坐标系名与参数键都是对外接口，禁止改动；只允许增加注释。
+# GraspNet 抓取候选推理参数(Ubuntu 原生链路档):由上层启动组合包与离线感知启动文件
+# 加载到 GraspNet 基线节点(rebotarm_graspnet_baseline_node).
+# 模型路径,设备,后端模块和采样点数由启动文件按本机安装路径注入;
+# 本档集中保留 Ubuntu RGB-D 输入,深度范围与候选输出默认值.
+# 注意:本文件中的话题名,坐标系名与参数键都是对外接口,禁止改动;只允许增加注释.
 rebotarm_graspnet_baseline_node:
   ros__parameters:
-    # 输入彩色图话题（bgr8）；与深度图、检测结果三者按时间戳就近配对
+    # 输入彩色图话题(bgr8);与深度图,检测结果三者按时间戳就近配对
     input_color_topic: /camera/color/image_raw
-    # 输入深度图话题（16UC1），原始整数单位由下面的 depth_scale_m_per_unit 换算成米
+    # 输入深度图话题(16UC1),原始整数单位由下面的 depth_scale_m_per_unit 换算成米
     input_depth_topic: /camera/depth/image_raw
-    # 输入相机内参话题（深度流）；推理用消息内的实时内参，参数档里的 fx/fy/cx/cy 仅作回退
+    # 输入相机内参话题(深度流);推理用消息内的实时内参,参数档里的 fx/fy/cx/cy 仅作回退
     input_camera_info_topic: /camera/depth/camera_info
-    # 输入检测结果话题（检测框/掩膜），用于把点云裁剪到目标区域
+    # 输入检测结果话题(检测框/掩膜),用于把点云裁剪到目标区域
     input_detections_topic: /grasp/detections
-    # 输出抓取候选数组话题，供下游逆解过滤节点消费
+    # 输出抓取候选数组话题,供下游逆解过滤节点消费
     output_candidates_topic: /grasp/graspnet_candidates
-    # 输出候选位姿的坐标系：深度光学坐标系，与深度图 frame_id 一致
+    # 输出候选位姿的坐标系:深度光学坐标系,与深度图 frame_id 一致
     output_frame_id: camera_depth_frame
-    # 彩色/深度/检测三者允许的最大时间偏差（单位 ms）。超出则本帧不推理；调小更严格但可能丢帧
+    # 彩色/深度/检测三者允许的最大时间偏差(单位 ms).超出则本帧不推理;调小更严格但可能丢帧
     max_input_skew_ms: 100
-    # 深度图"1 个原始单位代表多少米"。16UC1 深度图 1 单位 = 1 mm，故为 0.001；
-    # 若上游改成米制浮点深度，此值必须改为 1.0，否则所有距离会整体缩放 1000 倍。
+    # 深度图"1 个原始单位代表多少米".16UC1 深度图 1 单位 = 1 mm,故为 0.001;
+    # 若上游改成米制浮点深度,此值必须改为 1.0,否则所有距离会整体缩放 1000 倍.
     depth_scale_m_per_unit: 0.001
-    # 单帧最多输出的抓取候选数。调大提高命中可行解的概率，但下游 IK 调用量随之增加
+    # 单帧最多输出的抓取候选数.调大提高命中可行解的概率,但下游 IK 调用量随之增加
     max_grasps: 10
-    # 夹爪最大开口（单位 m）。后端用它过滤夹不住的候选；
-    # 本站夹爪可信行程约 0.006 ~ 0.085 m，因此取行程上限 0.085。
+    # 夹爪最大开口(单位 m).后端用它过滤夹不住的候选;
+    # 本站夹爪可信行程约 0.006 ~ 0.085 m,因此取行程上限 0.085.
     max_jaw_width_m: 0.085

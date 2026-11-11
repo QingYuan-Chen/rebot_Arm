@@ -1,9 +1,9 @@
-"""示教 JSONL 读写与六轴记录适配。
+"""示教 JSONL 读写与六轴记录适配.
 
-职责：保存录制/派生数据，不做导数生成、质量评估或执行准入。
-对外接口：encode/decode_teach_sample、load_teach_samples、write_prepared_teach_record。
-安全约束：原文件及旧派生文件均不覆盖；v5 保留输入等级与导数来源，缺 a 保持为空。
-文件结构：六轴按名提取 → 编解码 → 加载与派生路径 → 派生写出及列表。
+职责:保存录制/派生数据,不做导数生成,质量评估或执行准入.
+对外接口:encode/decode_teach_sample,load_teach_samples,write_prepared_teach_record.
+安全约束:原文件及旧派生文件均不覆盖;v5 保留输入等级与导数来源,缺 a 保持为空.
+文件结构:六轴按名提取 → 编解码 → 加载与派生路径 → 派生写出及列表.
 """
 
 from __future__ import annotations
@@ -16,12 +16,12 @@ from .teach_models import PreparedTeachReplay, TeachSample
 
 
 def arm_replay_samples(samples):
-    """只在派生副本按名提取六轴，原文件及夹爪元数据保持可查看。"""
+    """只在派生副本按名提取六轴,原文件及夹爪元数据保持可查看."""
     names = tuple(f'joint{i}' for i in range(1,7))
     result = []
     for sample in samples:
         if set(sample.joint_names).issubset(names) and len(sample.joint_names) < 6:
-            # 数值预处理保留旧的局部维度分析；正式 FJT 仍只接纳完整六轴。
+            # 数值预处理保留旧的局部维度分析;正式 FJT 仍只接纳完整六轴.
             result.append(sample)
             continue
         if len(set(sample.joint_names)) != len(sample.joint_names) or not set(names).issubset(sample.joint_names):
@@ -36,10 +36,10 @@ def arm_replay_samples(samples):
 
 
 def is_quit_key(key: str | None, *, quit_key: str = "q") -> bool:
-    """判断键盘输入是否等同于"退出示教采集"。
+    """判断键盘输入是否等同于"退出示教采集".
 
-    忽略大小写与首尾空白；``key`` 为 None（例如非阻塞读取没读到按键）时返回 False。
-    只做纯字符串比较，不读取键盘。
+    忽略大小写与首尾空白;``key`` 为 None(例如非阻塞读取没读到按键)时返回 False.
+    只做纯字符串比较,不读取键盘.
     """
     if key is None:
         return False
@@ -47,10 +47,10 @@ def is_quit_key(key: str | None, *, quit_key: str = "q") -> bool:
 
 
 def encode_teach_sample(sample: TeachSample) -> str:
-    """把一个示教样本编码成单行 JSON（JSONL 的一行）。
+    """把一个示教样本编码成单行 JSON(JSONL 的一行).
 
-    分隔符使用最紧凑形式 ``(",", ":")``：采样率高、记录文件大，这里省掉空格。
-    元组被转成列表以便 JSON 序列化；键名是记录文件格式的一部分，不可改动。
+    分隔符使用最紧凑形式 ``(",", ":")``:采样率高,记录文件大,这里省掉空格.
+    元组被转成列表以便 JSON 序列化;键名是记录文件格式的一部分,不可改动.
     """
     return json.dumps(
         {
@@ -76,12 +76,12 @@ def encode_teach_sample(sample: TeachSample) -> str:
 
 
 def decode_teach_sample(payload: str) -> TeachSample:
-    """把一行 JSON 解析回示教样本（与 :func:`encode_teach_sample` 互为逆操作）。
+    """把一行 JSON 解析回示教样本(与 :func:`encode_teach_sample` 互为逆操作).
 
-    ``velocities`` / ``efforts`` / ``motor_status`` / ``arm_state`` 都是可选字段，缺失时
-    分别退化为空元组、空元组、空字典和空串，以兼容早期版本写出的记录文件。
-    数值字段强制转 float / int，字符串字段强制转 str；JSON 本身非法时异常会上抛，
-    由调用方（:func:`inspect_teach_record`）决定如何降级处理。
+    ``velocities`` / ``efforts`` / ``motor_status`` / ``arm_state`` 都是可选字段,缺失时
+    分别退化为空元组,空元组,空字典和空串,以兼容早期版本写出的记录文件.
+    数值字段强制转 float / int,字符串字段强制转 str;JSON 本身非法时异常会上抛,
+    由调用方(:func:`inspect_teach_record`)决定如何降级处理.
     """
     data = json.loads(payload)
     return TeachSample(
@@ -106,11 +106,11 @@ def decode_teach_sample(payload: str) -> TeachSample:
 
 
 def load_teach_samples(path: str | Path) -> list[TeachSample]:
-    """按行读取 JSONL 示教记录，返回样本列表（文件内的顺序即时间顺序）。
+    """按行读取 JSONL 示教记录,返回样本列表(文件内的顺序即时间顺序).
 
-    以 ``utf-8-sig`` 打开：兼容带 BOM 的文件（采集侧可能由不同工具写入）。
-    空行被跳过；单行解析失败会直接抛出异常，不会静默丢弃那一帧——记录缺帧会改变轨迹
-    时序，必须让上层察觉。
+    以 ``utf-8-sig`` 打开:兼容带 BOM 的文件(采集侧可能由不同工具写入).
+    空行被跳过;单行解析失败会直接抛出异常,不会静默丢弃那一帧-记录缺帧会改变轨迹
+    时序,必须让上层察觉.
     """
     samples: list[TeachSample] = []
     with Path(path).open("r", encoding="utf-8-sig") as handle:
@@ -122,11 +122,11 @@ def load_teach_samples(path: str | Path) -> list[TeachSample]:
 
 
 def prepared_record_path(raw_path: str | Path) -> Path:
-    """由原始记录路径推导"预处理记录"的落盘路径。
+    """由原始记录路径推导"预处理记录"的落盘路径.
 
-    规则：在扩展名前插入 ``.prepared``（``a.jsonl`` → ``a.prepared.jsonl``）；
-    没有扩展名时直接追加 ``.prepared.jsonl``。这样预处理结果与原始记录同目录、同名前缀，
-    列举原始记录时可以按后缀把它们排除掉。
+    规则:在扩展名前插入 ``.prepared``(``a.jsonl`` → ``a.prepared.jsonl``);
+    没有扩展名时直接追加 ``.prepared.jsonl``.这样预处理结果与原始记录同目录,同名前缀,
+    列举原始记录时可以按后缀把它们排除掉.
     """
     path = Path(raw_path)
     if path.suffix:
@@ -140,17 +140,17 @@ def write_prepared_teach_record(
     *,
     output_path: str | Path | None = None,
 ) -> Path:
-    """把示教段预处理结果写成 v5 JSONL，返回派生路径；不包含本次 MoveIt 对齐段。
+    """把示教段预处理结果写成 v5 JSONL,返回派生路径;不包含本次 MoveIt 对齐段.
 
-    写出的内容分两种情况：
-      1. 有重定点（``prepared.retimed_points`` 非空）时，以重定点为准：``stamp`` 写
-         ``time_from_start``（相对示教段起点的时间，秒），写入实际生成的速度及加速度，
-         力矩/电机状态清空，``arm_state`` 标记为 ``PREPARED_REPLAY``；
-      2. 没有重定点时，保留预处理样本的相对时序，位置及已有导数直接保存，
-         ``arm_state`` 同样标记为 ``PREPARED_REPLAY``。
-    ``output_path`` 为空时落到 :func:`prepared_record_path` 推导出的默认路径；父目录会自动
-    创建。注意：这里写的是**派生数据**，原始记录文件不会被改写；``arm_state`` 标记用于让
-    下游一眼看出该文件不是手工示教采集的原始记录。
+    写出的内容分两种情况:
+      1. 有重定点(``prepared.retimed_points`` 非空)时,以重定点为准:``stamp`` 写
+         ``time_from_start``(相对示教段起点的时间,秒),写入实际生成的速度及加速度,
+         力矩/电机状态清空,``arm_state`` 标记为 ``PREPARED_REPLAY``;
+      2. 没有重定点时,保留预处理样本的相对时序,位置及已有导数直接保存,
+         ``arm_state`` 同样标记为 ``PREPARED_REPLAY``.
+    ``output_path`` 为空时落到 :func:`prepared_record_path` 推导出的默认路径;父目录会自动
+    创建.注意:这里写的是**派生数据**,原始记录文件不会被改写;``arm_state`` 标记用于让
+    下游一眼看出该文件不是手工示教采集的原始记录.
     """
     target = Path(output_path) if output_path is not None else prepared_record_path(raw_path)
     if target.resolve() == Path(raw_path).resolve():
@@ -178,7 +178,7 @@ def write_prepared_teach_record(
     else:
         samples = [
             TeachSample(
-                # 无重定时也保留已有相对时序，不把显示频率当成控制节点时间。
+                # 无重定时也保留已有相对时序,不把显示频率当成控制节点时间.
                 stamp=float(sample.stamp)-float(prepared.samples[0].stamp),
                 joint_names=sample.joint_names,
                 positions=sample.positions,
@@ -193,7 +193,7 @@ def write_prepared_teach_record(
             )
             for sample in prepared.samples
         ]
-    # 检查/执行可多次派生。独占创建避免覆盖已有证据；显式输出路径冲突直接报错。
+    # 检查/执行可多次派生.独占创建避免覆盖已有证据;显式输出路径冲突直接报错.
     base, index = target, 0
     while True:
         try:

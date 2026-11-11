@@ -1,7 +1,7 @@
-"""离线手眼求解与比较：训练集选择算法，独立验证集检查所选结果。
+"""离线手眼求解与比较:训练集选择算法,独立验证集检查所选结果.
 
-solve_dataset 返回残差、质量门和来源摘要；人工接受与外参部署由后续工作流处理。
-atomic_write_json 提供同目录临时文件、原子替换和目录同步，供会话所有者持久化。
+solve_dataset 返回残差,质量门和来源摘要;人工接受与外参部署由后续工作流处理.
+atomic_write_json 提供同目录临时文件,原子替换和目录同步,供会话所有者持久化.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .handeye_solver import HAND_EYE_METHODS, evaluate_eye_in_hand, solve_eye_in
 
 
 def atomic_write_json(path, payload):
-    """先完成有限数值 JSON 序列化，再将完整临时文件 fsync、替换目标并同步目录。"""
+    """先完成有限数值 JSON 序列化,再将完整临时文件 fsync,替换目标并同步目录."""
     data = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + '\n'
     path = Path(path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,10 +43,10 @@ def atomic_write_json(path, payload):
 
 
 def solve_dataset(dataset):
-    """读取 schema 1 的元数据和独立训练/验证样本，返回数值质量报告。
+    """读取 schema 1 的元数据和独立训练/验证样本,返回数值质量报告.
 
-    两组的样本身份和机器人姿态均须独立；通过结果仍保持 accepted/deployed 为 False，
-    供后续人工审核与部署流程显式推进。
+    两组的样本身份和机器人姿态均须独立;通过结果仍保持 accepted/deployed 为 False,
+    供后续人工审核与部署流程显式推进.
     """
     if not isinstance(dataset, dict) or dataset.get('schema_version') != 1:
         raise ValueError('unsupported dataset schema')
@@ -138,7 +138,7 @@ def solve_dataset(dataset):
             methods[method] = {'passed': False, 'error': str(exc)}
     eligible = [name for name, result in methods.items()
                 if 'training' in result and result['training']['acceptance']['pass']]
-    # 用质量门阈值归一化位置/旋转误差；算法排序只用训练集，保留验证集的独立检验作用。
+    # 用质量门阈值归一化位置/旋转误差;算法排序只用训练集,保留验证集的独立检验作用.
     selected = min(eligible, key=lambda name:
                    methods[name]['training']['position_residual']['rms_m'] / .005 +
                    methods[name]['training']['rotation_residual']['rms_deg'] / 1.5) if eligible else None

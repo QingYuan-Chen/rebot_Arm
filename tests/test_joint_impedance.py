@@ -1,4 +1,4 @@
-"""关节阻抗控制律的解析样本、参数边界与限矩限速检查。"""
+"""关节阻抗控制律的解析样本,参数边界与限矩限速检查."""
 
 from dataclasses import FrozenInstanceError
 

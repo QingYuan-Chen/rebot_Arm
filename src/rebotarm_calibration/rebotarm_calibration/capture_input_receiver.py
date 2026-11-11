@@ -1,9 +1,9 @@
-"""标定图像、内参与 TF 的独立单线程接收。
+"""标定图像,内参与 TF 的独立单线程接收.
 
-接收回调只更新有界缓存；检测、稳定性判断、会话落盘和服务等待由标定节点拥有。
-snapshot 复制消息并保留采集时间；configure 经 guard condition 在接收线程执行，
-新订阅就绪后才交换代次并清空缓存，旧回调不能污染新话题。关闭先结束线程，
-再注销 TF 和销毁节点，不能在等待集中销毁仍被使用的订阅。
+接收回调只更新有界缓存;检测,稳定性判断,会话落盘和服务等待由标定节点拥有.
+snapshot 复制消息并保留采集时间;configure 经 guard condition 在接收线程执行,
+新订阅就绪后才交换代次并清空缓存,旧回调不能污染新话题.关闭先结束线程,
+再注销 TF 和销毁节点,不能在等待集中销毁仍被使用的订阅.
 """
 from collections import deque
 from concurrent.futures import Future
@@ -101,7 +101,7 @@ class CaptureInputReceiver(Node):
         new_subscriptions = []
         try:
             for message, topic, kind in zip((Image, CameraInfo), topics, ('image', 'info')):
-                # 本机大彩色图需可靠重传；与 D405 正式发布端保持一致。
+                # 本机大彩色图需可靠重传;与 D405 正式发布端保持一致.
                 new_subscriptions.append(self.create_subscription(message, topic,
                     self._callback(generation, kind),
                     QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)))
@@ -132,7 +132,7 @@ class CaptureInputReceiver(Node):
             self.joints.append(message)
 
     def joint_evidence(self, stamp):
-        """保留图像时刻两侧最近的原始关节消息；缺失明确留空，TF 仍由 TF2 查询。"""
+        """保留图像时刻两侧最近的原始关节消息;缺失明确留空,TF 仍由 TF2 查询."""
         def timestamp(message):
             return message.header.stamp.sec * 10**9 + message.header.stamp.nanosec
         with self.lock:

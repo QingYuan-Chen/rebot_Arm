@@ -1,49 +1,49 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<!-- 仿真包清单（package format 3）。
-     本包提供离线物理仿真后端：模型档位生成与校验、无头物理检查、仿真轨迹执行、
-     仿真关节与夹爪状态、轨迹指标与抓取质量判定。它不依赖任何真实电机 SDK，
-     也不会开启硬件通道；仿真启动与真实启动彼此独立。 -->
+<!-- 仿真包清单(package format 3).
+     本包提供离线物理仿真后端:模型档位生成与校验,无头物理检查,仿真轨迹执行,
+     仿真关节与夹爪状态,轨迹指标与抓取质量判定.它不依赖任何真实电机 SDK,
+     也不会开启硬件通道;仿真启动与真实启动彼此独立. -->
 <package format="3">
   <name>rebotarm_simulation</name>
   <version>0.1.0</version>
-  <!-- 人类可读的包说明（英文原文保留）。 -->
+  <!-- 人类可读的包说明(英文原文保留). -->
   <description>MuJoCo physics, simulated execution and diagnostics for reBotArm.</description>
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 构建类型：纯 Python 包。 -->
+  <!-- 构建类型:纯 Python 包. -->
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- 运行期依赖（按用途分组标注） -->
-  <!-- 通过 ament 资源索引在 install 空间定位模型/配置等 share 资源。 -->
+  <!-- 运行期依赖(按用途分组标注) -->
+  <!-- 通过 ament 资源索引在 install 空间定位模型/配置等 share 资源. -->
   <exec_depend>ament_index_python</exec_depend>
-  <!-- 时间戳与时长消息类型，用于轨迹点时间与动作反馈。 -->
+  <!-- 时间戳与时长消息类型,用于轨迹点时间与动作反馈. -->
   <exec_depend>builtin_interfaces</exec_depend>
-  <!-- 轨迹执行动作接口（FollowJointTrajectory 的目标/反馈/结果）。 -->
+  <!-- 轨迹执行动作接口(FollowJointTrajectory 的目标/反馈/结果). -->
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
-  <!-- 位姿、变换等几何消息。 -->
+  <!-- 位姿,变换等几何消息. -->
   <exec_depend>geometry_msgs</exec_depend>
-  <!-- 保留的 MuJoCo 单节点启动文件仍使用 ROS launch。 -->
+  <!-- 保留的 MuJoCo 单节点启动文件仍使用 ROS launch. -->
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
-  <!-- Python 客户端库，仿真节点的运行时基础。 -->
+  <!-- Python 客户端库,仿真节点的运行时基础. -->
   <exec_depend>rclpy</exec_depend>
-  <!-- 本项目自定义消息与服务：检测结果、关节电机状态、夹爪设置等。 -->
+  <!-- 本项目自定义消息与服务:检测结果,关节电机状态,夹爪设置等. -->
   <exec_depend>rebotarm_msgs</exec_depend>
-  <!-- 运动规划配置包：提供 URDF、SRDF 与网格，仿真模型与关节限位一致性检查都读它。 -->
+  <!-- 运动规划配置包:提供 URDF,SRDF 与网格,仿真模型与关节限位一致性检查都读它. -->
   <exec_depend>rebotarm_moveit_config</exec_depend>
-  <!-- 示教预演复用 JSONL 读取与轨迹准备；仿真执行仍由本包拥有。 -->
+  <!-- 示教预演复用 JSONL 读取与轨迹准备;仿真执行仍由本包拥有. -->
   <exec_depend>rebotarm_teach</exec_depend>
-  <!-- 仿真时钟消息 /clock，保证规划与执行共用仿真时间。 -->
+  <!-- 仿真时钟消息 /clock,保证规划与执行共用仿真时间. -->
   <exec_depend>rosgraph_msgs</exec_depend>
-  <!-- 关节状态消息。 -->
+  <!-- 关节状态消息. -->
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- 标准服务类型（如 Trigger），用于停止/复位类服务。 -->
+  <!-- 标准服务类型(如 Trigger),用于停止/复位类服务. -->
   <exec_depend>std_srvs</exec_depend>
-  <!-- 轨迹消息类型（JointTrajectoryPoint 等）。 -->
+  <!-- 轨迹消息类型(JointTrajectoryPoint 等). -->
   <exec_depend>trajectory_msgs</exec_depend>
 
   <exec_depend>rebotarm_trajectory</exec_depend>

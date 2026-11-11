@@ -1,9 +1,9 @@
-"""拥有 MuJoCo 模型与物理状态，为 ROS、Viewer 和离线应用提供统一仿真接口。
+"""拥有 MuJoCo 模型与物理状态,为 ROS,Viewer 和离线应用提供统一仿真接口.
 
-接口按构造、状态/模式、目标写入、物理步进、快照与场景操作、关闭组织。
-控制记忆归 SimControlRuntime；多线程调用方负责统一加锁，快照返回复制后的数值。
-关节阻抗重力使用独立零速度数据，控制更新遵循原物理节拍。
-Viewer 借用原生句柄期间，所有者需先结束借用再关闭实例。
+接口按构造,状态/模式,目标写入,物理步进,快照与场景操作,关闭组织.
+控制记忆归 SimControlRuntime;多线程调用方负责统一加锁,快照返回复制后的数值.
+关节阻抗重力使用独立零速度数据,控制更新遵循原物理节拍.
+Viewer 借用原生句柄期间,所有者需先结束借用再关闭实例.
 """
 
 from __future__ import annotations
@@ -75,13 +75,13 @@ class RebotArmMujoco:
     joint_names = JOINT_NAMES
 
     def __init__(self, model_path: str | os.PathLike[str] | None = None, *, collisionless: bool = False, motor_parameters: MotorControlParameters | None = None) -> None:
-        """加载 MuJoCo 模型并完成控制器与初始状态同步。
+        """加载 MuJoCo 模型并完成控制器与初始状态同步.
 
-        model_path 为 None 时按 model_resource() 的优先级搜索默认场景，
-        找不到则抛 FileNotFoundError。构造末尾调用 reset()：把控制目标对齐到
-        初始 qpos、清零控制量，并预置重力补偿力矩，避免第一步出现下坠冲击。
+        model_path 为 None 时按 model_resource() 的优先级搜索默认场景,
+        找不到则抛 FileNotFoundError.构造末尾调用 reset():把控制目标对齐到
+        初始 qpos,清零控制量,并预置重力补偿力矩,避免第一步出现下坠冲击.
         """
-        # 延迟导入 MuJoCo：缺失时给出可执行的安装提示，而不是裸 ImportError。
+        # 延迟导入 MuJoCo:缺失时给出可执行的安装提示,而不是裸 ImportError.
         try:
             self._mj = importlib.import_module("mujoco")
         except (ImportError, ModuleNotFoundError) as exc:
@@ -90,7 +90,7 @@ class RebotArmMujoco:
                 "in the active Python environment."
             ) from exc
         self.model_path = str(model_resource(explicit=model_path))
-        # MjModel 保存模型参数（本实例可显式随机化）；MjData 保存逐次步进的物理状态。
+        # MjModel 保存模型参数(本实例可显式随机化);MjData 保存逐次步进的物理状态.
         self._model = self._mj.MjModel.from_xml_path(self.model_path)
         if collisionless:
             # Reach-only opt-in: visual meshes and inertial properties remain;
@@ -100,7 +100,7 @@ class RebotArmMujoco:
         self._data = self._mj.MjData(self._model)
         self._gravity_data = self._mj.MjData(self._model)
         self._closed = False
-        # 复现用随机数发生器；reset(seed=...) 会按给定种子重建它。
+        # 复现用随机数发生器;reset(seed=...) 会按给定种子重建它.
         self._rng = np.random.default_rng()
         self._randomization_baseline = {
             "body_mass": np.asarray(self._model.body_mass).copy(),
@@ -109,10 +109,10 @@ class RebotArmMujoco:
         }
         self._randomization_sample = None
 
-        # 控制参数 = 仿真标定文件（冻结的固件参考增益）+ URDF 力矩上限，
-        # 真机调参不得反向改变这里的仿真标定值。
+        # 控制参数 = 仿真标定文件(冻结的固件参考增益)+ URDF 力矩上限,
+        # 真机调参不得反向改变这里的仿真标定值.
         motor_parameters = motor_parameters if motor_parameters is not None else load_motor_control_parameters()
-        # 名称 → MuJoCo 内部 id 的映射；缺名会立即报错，避免运行期静默错位。
+        # 名称 → MuJoCo 内部 id 的映射;缺名会立即报错,避免运行期静默错位.
         self._joint_ids = tuple(self._name_id(self._mj.mjtObj.mjOBJ_JOINT, name) for name in JOINT_NAMES)
         self._actuator_ids = tuple(
             self._name_id(self._mj.mjtObj.mjOBJ_ACTUATOR, actuator_name_for_joint(name))
@@ -120,13 +120,13 @@ class RebotArmMujoco:
         )
         self._control = SimControlRuntime(motor_parameters, float(self._model.opt.timestep),
             self._joint_ids, self._actuator_ids, self._joint_gravity_torque)
-        # 末端执行器参考点（site）用于输出 TCP 位置与姿态。
+        # 末端执行器参考点(site)用于输出 TCP 位置与姿态.
         self._ee_site_id = self._name_id(self._mj.mjtObj.mjOBJ_SITE, "ee_site")
-        # 场景中带自由关节的物体（被操作物），用于读写物体位姿。
+        # 场景中带自由关节的物体(被操作物),用于读写物体位姿.
         self._free_bodies = self._find_free_bodies()
-        # 状态检查点范围显式声明：即使在 mjSTATE_INTEGRATION 已包含 CTRL/USER 的
-        # MuJoCo 版本上也保持一致，覆盖控制量、已施加力、mocap/userdata/equality
-        # 状态、插件状态以及求解器积分/热启动状态。
+        # 状态检查点范围显式声明:即使在 mjSTATE_INTEGRATION 已包含 CTRL/USER 的
+        # MuJoCo 版本上也保持一致,覆盖控制量,已施加力,mocap/userdata/equality
+        # 状态,插件状态以及求解器积分/热启动状态.
         self._snapshots = StateSnapshot(self._mj, self._model)
         self.reset()
 
@@ -138,11 +138,11 @@ class RebotArmMujoco:
 
 
     def borrow_viewer_handles(self):
-        """为被动 Viewer 借出可变原生 model/data，所有权仍归本实例。
+        """为被动 Viewer 借出可变原生 model/data,所有权仍归本实例.
 
-        调用方通过现有仿真锁串行协调物理访问与 viewer.sync()，并在 sim.close()
-        前确认 Viewer 已完成关闭。借用只服务显示；业务查询使用值快照接口。
-        已借出的 Python 引用会继续存活，关闭顺序由持有这些引用的应用保证。
+        调用方通过现有仿真锁串行协调物理访问与 viewer.sync(),并在 sim.close()
+        前确认 Viewer 已完成关闭.借用只服务显示;业务查询使用值快照接口.
+        已借出的 Python 引用会继续存活,关闭顺序由持有这些引用的应用保证.
         """
         self._ensure_open()
         return self._model, self._data
@@ -275,8 +275,8 @@ class RebotArmMujoco:
         self._ensure_open()
         values = _finite_vector(positions, len(ARM_JOINT_NAMES), "joint positions")
         for index, (joint_id, value) in enumerate(zip(self._joint_ids[:6], values)):
-            # 先做限位校验（而不是裁剪）：回放起点来自实机，越限说明数据或模型不匹配，
-            # 此时静默裁剪会掩盖问题，因此直接报错。
+            # 先做限位校验(而不是裁剪):回放起点来自实机,越限说明数据或模型不匹配,
+            # 此时静默裁剪会掩盖问题,因此直接报错.
             lower, upper = (float(bound) for bound in self._model.jnt_range[joint_id])
             if value < lower or value > upper:
                 raise ValueError(
@@ -341,13 +341,13 @@ class RebotArmMujoco:
 
     def command_joint_impedance(self, targets: Sequence[float], stiffness: Sequence[float],
                                 damping: Sequence[float], timeout_s: float = 0.1) -> tuple[float, ...]:
-        """接纳六轴静态平衡点；刚度 N·m/rad、阻尼 N·m·s/rad，期限按仿真时间。"""
+        """接纳六轴静态平衡点;刚度 N·m/rad,阻尼 N·m·s/rad,期限按仿真时间."""
         self._ensure_open()
         return self._control.command_joint_impedance(self._model, self._data,
             targets, stiffness, damping, timeout_s)
 
     def _joint_gravity_torque(self, qvel_addresses, data) -> np.ndarray:
-        """在独立零速度数据上计算 g(q)，避免混入科氏项或改写当前物理状态。"""
+        """在独立零速度数据上计算 g(q),避免混入科氏项或改写当前物理状态."""
         self._gravity_data.qpos[:] = data.qpos
         self._gravity_data.qvel[:] = 0.0
         self._mj.mj_forward(self._model, self._gravity_data)
@@ -358,11 +358,11 @@ class RebotArmMujoco:
         return self._control.command_gripper_width(self._model, self._data, width_m, max_force_n)
 
     def command_gripper_position(self, width, torque_cap):
-        """提交双指总开口 m 与电机限矩 N·m；单指位移换算由控制组件完成。"""
+        """提交双指总开口 m 与电机限矩 N·m;单指位移换算由控制组件完成."""
         return self._control.command_gripper_position(self._model,self._data,width,torque_cap)
 
     def release_gripper_position(self):
-        """只中性释放夹爪，机械臂继续保持其命令终点。"""
+        """只中性释放夹爪,机械臂继续保持其命令终点."""
         self._control.release_gripper_position(self._model,self._data)
 
     def set_gripper_width(self, width: float) -> float:
@@ -416,10 +416,10 @@ class RebotArmMujoco:
 
 
     def step(self, n_steps: int = 1) -> SimulationState:
-        """推进 n_steps 个物理步并返回步进后的状态。
+        """推进 n_steps 个物理步并返回步进后的状态.
 
-        n_steps 必须是正整数（bool 会被拒）。控制量按固件控制周期（默认 100 Hz）
-        保持：仅当控制相位回到 0 时才重算一次，其余物理步复用同一控制量。
+        n_steps 必须是正整数(bool 会被拒).控制量按固件控制周期(默认 100 Hz)
+        保持:仅当控制相位回到 0 时才重算一次,其余物理步复用同一控制量.
         """
         self._ensure_open()
         if isinstance(n_steps, bool) or not isinstance(n_steps, int):
@@ -430,18 +430,18 @@ class RebotArmMujoco:
             self._control.before_step(self._model, self._data)
             self._mj.mj_step(self._model, self._data)
             self._control.after_step(self._model, self._data)
-        # mj_step 在位置阶段之后才积分 qpos；这里刷新一次派生运动学，
-        # 使返回的位姿对应步进结束时的 qpos，而不是最后一步开始时的状态。
+        # mj_step 在位置阶段之后才积分 qpos;这里刷新一次派生运动学,
+        # 使返回的位姿对应步进结束时的 qpos,而不是最后一步开始时的状态.
         self._mj.mj_forward(self._model, self._data)
         return self.get_state()
 
 
     def get_state(self) -> SimulationState:
-        """汇总当前仿真状态为不可变快照，供上层发布或记录。
+        """汇总当前仿真状态为不可变快照,供上层发布或记录.
 
-        返回的 joint_positions/joint_velocities 覆盖全部 8 个关节（手臂 rad、rad/s，
-        手指 m、m/s），actuator_forces 为各执行器实际出力；末端位姿取自 ee_site；
-        object_poses 为每个自由物体被标准化成 (x,y,z,qx,qy,qz,qw) 的位姿。
+        返回的 joint_positions/joint_velocities 覆盖全部 8 个关节(手臂 rad,rad/s,
+        手指 m,m/s),actuator_forces 为各执行器实际出力;末端位姿取自 ee_site;
+        object_poses 为每个自由物体被标准化成 (x,y,z,qx,qy,qz,qw) 的位姿.
         """
         self._ensure_open()
         return read_state(self._mj, self._model, self._data, self._joint_ids, self._actuator_ids, self._ee_site_id, self._free_bodies)
@@ -452,10 +452,10 @@ class RebotArmMujoco:
         return self._control.get_control_status(self.get_state())
 
     def get_contacts(self) -> tuple[ContactInfo, ...]:
-        """返回当前所有接触点信息（世界坐标位置与合力大小，单位 N）。
+        """返回当前所有接触点信息(世界坐标位置与合力大小,单位 N).
 
-        对每个接触调用 mj_contactForce 取得 6 维 wrench（前 3 项力、后 3 项力矩），
-        这里只报告力部分的模长。body/geom 名缺失时分别回退为 "world" 与 "geom<id>"。
+        对每个接触调用 mj_contactForce 取得 6 维 wrench(前 3 项力,后 3 项力矩),
+        这里只报告力部分的模长.body/geom 名缺失时分别回退为 "world" 与 "geom<id>".
         """
         self._ensure_open()
         return read_contacts(self._mj, self._model, self._data)
@@ -556,7 +556,7 @@ class RebotArmMujoco:
 
 
     def close(self) -> None:
-        """释放本实例持有的原生引用；调用方应已结束执行线程与 Viewer 借用。"""
+        """释放本实例持有的原生引用;调用方应已结束执行线程与 Viewer 借用."""
         if self._closed:
             return
         self._closed = True

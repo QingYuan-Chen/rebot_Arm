@@ -1,19 +1,19 @@
-"""现场回归的单一监测与目标准入状态，不连接 ROS 或设备。
+"""现场回归的单一监测与目标准入状态,不连接 ROS 或设备.
 
-会话只允许一个动作在途；故障锁存不可复位，所有后续目标均被拒绝。
-监测与发送使用同一锁；故障发生在目标接纳前时，迟到接纳必须取消。
-调用者负责执行停止保持、处理未知终态，并在结束后另行检查现场。
+会话只允许一个动作在途;故障锁存不可复位,所有后续目标均被拒绝.
+监测与发送使用同一锁;故障发生在目标接纳前时,迟到接纳必须取消.
+调用者负责执行停止保持,处理未知终态,并在结束后另行检查现场.
 """
 import threading
 import time
 
 
 class MonitorFault(RuntimeError):
-    """本轮监测失败或监测未就绪，禁止发送新目标。"""
+    """本轮监测失败或监测未就绪,禁止发送新目标."""
 
 
 class SustainedSpeed:
-    """按独立源帧累计；夹爪动作期间和静止期间分别采用调用者给出的上限。"""
+    """按独立源帧累计;夹爪动作期间和静止期间分别采用调用者给出的上限."""
     def __init__(self, stationary_limit, gripper_limit, duration=0.10):
         self._stationary_limit = stationary_limit
         self._gripper_limit = gripper_limit
@@ -67,7 +67,7 @@ class RegressionGate:
 
     @property
     def fault_at(self):
-        """首次锁存的单调时刻；不依赖停止请求何时返回。"""
+        """首次锁存的单调时刻;不依赖停止请求何时返回."""
         with self._fault_lock:
             return self._fault_at
 
@@ -89,10 +89,10 @@ class RegressionGate:
                     or bool(self._cancel_workers) or bool(self._cancel_futures))
 
     def trip(self, issue):
-        """异常路径锁存，禁止后续目标并取消已接纳目标。"""
+        """异常路径锁存,禁止后续目标并取消已接纳目标."""
         if not self._store_fault((issue,)):
             return
-        # 检查可能卡在主锁内；停止和取消彼此独立，任一请求卡住不能拖住另一个。
+        # 检查可能卡在主锁内;停止和取消彼此独立,任一请求卡住不能拖住另一个.
         entry = self._pending
         if entry is not None and entry.get('handle') is not None:
             self._dispatch_cancel(entry)
@@ -114,7 +114,7 @@ class RegressionGate:
             self._fault_dispatch_done.set()
 
     def monitor_check(self, inspect):
-        """在同一锁内检查反馈与活动状态，故障在释放锁之前锁存。"""
+        """在同一锁内检查反馈与活动状态,故障在释放锁之前锁存."""
         stop = False
         with self._lock:
             try:
@@ -138,7 +138,7 @@ class RegressionGate:
         return True
 
     def _dispatch_cancel(self, entry):
-        # ROS 的 async 发送入口也可能等待；不能让它占住监测锁或阻塞停止请求。
+        # ROS 的 async 发送入口也可能等待;不能让它占住监测锁或阻塞停止请求.
         def run():
             try:
                 self._cancel_locked(entry)
@@ -182,23 +182,23 @@ class RegressionGate:
                         self._cancel_futures.discard(future)
                 future.add_done_callback(complete)
         except Exception as exc:
-            # 锁存不因取消失败被清除；现场仍须核实动作终态。
+            # 锁存不因取消失败被清除;现场仍须核实动作终态.
             try:
                 self._on_cancel(None, str(exc))
             except Exception:
                 pass
 
     def watchdog(self):
-        """监测线程失活或长时间未完成检查时锁存并请求停止保持。"""
+        """监测线程失活或长时间未完成检查时锁存并请求停止保持."""
         last_check = self._last_check
         if last_check is None or self._clock() - last_check > self._max_age:
             self.trip('monitor_stale')
         return self.fault
 
     def guarded_call(self, send):
-        """显式使能等非动作请求也必须经过同一故障与监测准入。"""
+        """显式使能等非动作请求也必须经过同一故障与监测准入."""
         with self._lock:
-            # 准入后是可能在途的请求；发送入口卡住时不能占用故障锁。
+            # 准入后是可能在途的请求;发送入口卡住时不能占用故障锁.
             with self._fault_lock:
                 if self._fault is not None:
                     raise MonitorFault(f'本轮监测已锁存: {self._fault}')
@@ -207,7 +207,7 @@ class RegressionGate:
             return send()
 
     def submit(self, send, *, gripper=False):
-        """send 为非阻塞的发送函数，返回接纳 future；迟到的句柄仍受监控。"""
+        """send 为非阻塞的发送函数,返回接纳 future;迟到的句柄仍受监控."""
         stop = False
         error = None
         with self._lock:
@@ -218,7 +218,7 @@ class RegressionGate:
                     raise MonitorFault('监测未就绪或已过期')
                 if self._pending is not None:
                     raise MonitorFault('上一个动作终态未知')
-                # 在放开故障锁前登记在途项；故障后接纳的句柄仍由回调取消。
+                # 在放开故障锁前登记在途项;故障后接纳的句柄仍由回调取消.
                 entry = {'handle': None, 'result': None, 'processed': False,
                          'cancel_requested': False, 'cancel_lock': threading.Lock()}
                 self._pending = entry
@@ -237,7 +237,7 @@ class RegressionGate:
         return future
 
     def _accepted(self, entry, future):
-        # 先公开已接纳的句柄；若监测检查卡住，看门狗仍可取消夹爪。
+        # 先公开已接纳的句柄;若监测检查卡住,看门狗仍可取消夹爪.
         try:
             handle = future.result()
             if handle.accepted:
@@ -268,7 +268,7 @@ class RegressionGate:
             self._request_stop()
 
     def result_for(self, future):
-        """接纳完成时同步合并回调，避免 executor 延迟调度造成句柄缺口。"""
+        """接纳完成时同步合并回调,避免 executor 延迟调度造成句柄缺口."""
         with self._lock:
             entry = self._submitted.pop(future, None)
             if entry is None:

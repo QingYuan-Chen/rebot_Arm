@@ -1,8 +1,8 @@
-"""职责：仿真观测、控制诊断和可恢复快照的不可变数值契约。
+"""职责:仿真观测,控制诊断和可恢复快照的不可变数值契约.
 
-对外接口：SimulationState、ControlStatus、SavedSimulationState 等值对象。
-安全约束：有限性和阻抗模式/命令/期限一致性在构造时校验。
-文件结构：向量校验、观测与诊断、接触信息、完整快照。
+对外接口:SimulationState,ControlStatus,SavedSimulationState 等值对象.
+安全约束:有限性和阻抗模式/命令/期限一致性在构造时校验.
+文件结构:向量校验,观测与诊断,接触信息,完整快照.
 """
 from __future__ import annotations
 
@@ -226,7 +226,7 @@ class SavedSimulationState:
         object.__setattr__(self, "raw_torque_requested", _float_tuple(
             self.raw_torque_requested, label="raw_torque_requested"
         ))
-        # 恢复前重新构造命令，连同快照被外部篡改的数值一起验证。
+        # 恢复前重新构造命令,连同快照被外部篡改的数值一起验证.
         if self.impedance_command is not None:
             if not isinstance(self.impedance_command, JointImpedanceCommand):
                 raise TypeError("impedance_command must be a JointImpedanceCommand")

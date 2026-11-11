@@ -164,7 +164,7 @@ class _CleanupFailureHardware:
 
 
 def test_gripper_action_reports_original_and_cleanup_failure(monkeypatch) -> None:
-    """清理取消失败不得吞掉原 Action 失败原因。"""
+    """清理取消失败不得吞掉原 Action 失败原因."""
     actions = ArmActions.__new__(ArmActions)
     actions._gripper = _CleanupFailureHardware()
     actions._node = _Node()

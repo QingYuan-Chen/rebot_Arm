@@ -1,4 +1,4 @@
-"""使用真实 Jazzy 执行器复现排队回调与唤醒句柄销毁的竞争。"""
+"""使用真实 Jazzy 执行器复现排队回调与唤醒句柄销毁的竞争."""
 
 import threading
 import os
@@ -84,7 +84,7 @@ def test_retiming_process_signal_keeps_inflight_response_valid(tmp_path, shutdow
     from rebotarm_msgs.srv import RetimeArmTrajectory
     from rclpy.executors import SingleThreadedExecutor
 
-    # 子进程使用正式 main；仅在测试中暂停服务回调，精确把信号落在回复前。
+    # 子进程使用正式 main;仅在测试中暂停服务回调,精确把信号落在回复前.
     code = '''
 from pathlib import Path
 import sys, time
@@ -129,7 +129,7 @@ main(args=[])
                     time.sleep(.002)
             process.send_signal(shutdown_signal)
             if busy:
-                # 给主线程进入排空等待的机会；回调回复仍须使用有效的 ROS context。
+                # 给主线程进入排空等待的机会;回调回复仍须使用有效的 ROS context.
                 time.sleep(.15)
                 assert process.poll() is None
                 (tmp_path/'release').touch()

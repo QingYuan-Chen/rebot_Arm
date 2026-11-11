@@ -1,4 +1,4 @@
-"""空闲 localhost 域中的合成反馈验证；禁止设备导入和运动请求。"""
+"""空闲 localhost 域中的合成反馈验证;禁止设备导入和运动请求."""
 import importlib.abc
 import json
 import sys
@@ -49,7 +49,7 @@ rclpy.init(args=['--ros-args', '-p', 'arm_namespace:=feedback_probe',
     '-r', '/feedback_probe/joint_states:=/probe_remapped/joints',
     '-r', '/tf:=/probe_remapped/tf'])
 source = Node('feedback_probe_source')
-# 检查隔离域，不在已有会话中启动验证。
+# 检查隔离域,不在已有会话中启动验证.
 until(lambda: len(source.get_node_names_and_namespaces()) >= 1)
 time.sleep(.3)
 assert source.get_node_names_and_namespaces() == [(source.get_name(), source.get_namespace())]
@@ -119,7 +119,7 @@ try:
     until(lambda: compat._feedback_receiver.snapshot().gripper is not None
           and calibration._inputs.snapshot().image is not None
 )
-    # 真正的 ROS 同步服务回调持业务锁等待，独立接收不得随它停顿。
+    # 真正的 ROS 同步服务回调持业务锁等待,独立接收不得随它停顿.
     entered = threading.Event()
     wait_returned = threading.Event()
     hold_sec = float(sys.argv[2]) if len(sys.argv) > 2 else .65
@@ -152,7 +152,7 @@ try:
     print(json.dumps(dict(sync_wait_maximum_age_ms=max(observed)*1000,
                           sync_wait_observation_sec=hold_sec,
                           independent_observations=len(observed))), flush=True)
-    # 正式同步位姿服务等待内存 FJT 的接纳和终态；不构造硬件控制器。
+    # 正式同步位姿服务等待内存 FJT 的接纳和终态;不构造硬件控制器.
     fake_goals = []
     def execute_fake(goal):
         fake_goals.append(goal.request)
@@ -173,7 +173,7 @@ try:
     until(lambda: compat.active is None)
     assert len(fake_goals) == 1
     fake_action.destroy()
-    # 暂停源，独立轮询统计空档；恢复后的新帧不能抹去计数或旧任务失效。
+    # 暂停源,独立轮询统计空档;恢复后的新帧不能抹去计数或旧任务失效.
     with compat.lock:
         compat._ready()
         old_epoch = compat.epoch
@@ -199,20 +199,20 @@ try:
             assert run.cancel
         finally:
             compat.active = None
-    # 话题切换之后，手动送达的旧代次回调也不能重新填入旧图像。
+    # 话题切换之后,手动送达的旧代次回调也不能重新填入旧图像.
     old_generation = calibration._inputs.generation
     old_callback = calibration._inputs._callback(old_generation, 'image')
     calibration.configure_topics(dict(image_topic='/alternate/image', camera_info_topic='/alternate/info'))
     old_image = Image()
     old_image.header.frame_id = 'obsolete'
     old_callback(old_image)
-    # 图像与内参由独立回调接收，分别等到新代次数据后再验证。
+    # 图像与内参由独立回调接收,分别等到新代次数据后再验证.
     until(lambda: calibration._inputs.snapshot().image is not None)
     until(lambda: calibration._inputs.snapshot().infos)
     assert calibration._inputs.snapshot().image.header.frame_id == 'alternate'
     assert calibration._inputs.generation == old_generation+1
     assert calibration._inputs.snapshot().infos
-    # 新节点继承话题重映射，但不继承父节点名称；显式关闭后线程必须已退出。
+    # 新节点继承话题重映射,但不继承父节点名称;显式关闭后线程必须已退出.
     remapped_owner = Node('owner', cli_args=['--ros-args', '-r', '__node:=renamed_owner'])
     receiver = MotionFeedbackReceiver(remapped_owner, 'feedback_probe')
     until(lambda: receiver.snapshot().joints is not None)
@@ -220,7 +220,7 @@ try:
     receiver.close()
     receiver.close()
     assert not receiver.thread.is_alive()
-    # 父节点不进入执行器时，接收节点仍独立处理重映射后的仿真时钟和源年龄。
+    # 父节点不进入执行器时,接收节点仍独立处理重映射后的仿真时钟和源年龄.
     sim_owner = Node('sim_owner', cli_args=['--ros-args', '-r', '/clock:=/probe_remapped/clock'],
                      parameter_overrides=[Parameter('use_sim_time', value=True)])
     sim_receiver = MotionFeedbackReceiver(sim_owner, 'sim_probe')
@@ -253,7 +253,7 @@ try:
         sim_receiver.close()
         sim_owner.destroy_node()
     assert not sim_receiver.thread.is_alive()
-    # 独立上下文关闭也须正常唤醒并结束接收线程。
+    # 独立上下文关闭也须正常唤醒并结束接收线程.
     from rclpy.context import Context
     context = Context()
     context.init(args=[])

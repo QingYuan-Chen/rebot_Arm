@@ -1,7 +1,7 @@
-"""连接已启动的隔离 MuJoCo/MoveIt 图，验证连续轨迹及夹爪公共接口。
+"""连接已启动的隔离 MuJoCo/MoveIt 图,验证连续轨迹及夹爪公共接口.
 
-启动组合拥有节点生命周期；本工具只创建探针，并在唯一仿真执行服务端上
-完成重定时、规划绑定、六轴 FJT 和夹爪测试。独立非零 ROS 域为必需条件。
+启动组合拥有节点生命周期;本工具只创建探针,并在唯一仿真执行服务端上
+完成重定时,规划绑定,六轴 FJT 和夹爪测试.独立非零 ROS 域为必需条件.
 """
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ def run_acceptance(*, timeout: float = 15.0, gripper_width: float = 0.05) -> dic
         action_error_code = None
         target_positions = None
         if action_ready:
-            # 夹爪动作后等待新物理帧满足准备准入，再获取规划起点。
+            # 夹爪动作后等待新物理帧满足准备准入,再获取规划起点.
             deadline = time.monotonic()+timeout
             while True:
                 state_future = state_client.call_async(GetArmPlanningState.Request())

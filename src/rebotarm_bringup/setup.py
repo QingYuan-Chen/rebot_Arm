@@ -1,7 +1,7 @@
-"""启动组合包的安装脚本：只把 launch、config、rviz 三类资源装到共享目录。
+"""启动组合包的安装脚本:只把 launch,config,rviz 三类资源装到共享目录.
 
-本包安装启动文件、参数资源及配置合并辅助模块，供 ``ros2 launch``
-与各节点在运行期按包共享目录（share）路径读取。
+本包安装启动文件,参数资源及配置合并辅助模块,供 ``ros2 launch``
+与各节点在运行期按包共享目录(share)路径读取.
 """
 
 from glob import glob
@@ -19,14 +19,14 @@ launch_include_files = glob("launch/includes/*.launch.py")
 setup(
     name=package_name,
     version="0.1.0",
-    # 配置合并辅助模块可导入，launch 与配置资源仍通过 data_files 安装。
+    # 配置合并辅助模块可导入,launch 与配置资源仍通过 data_files 安装.
     packages=find_packages(),
     data_files=[
-        # ament 资源索引标记：让 ROS 2 能在环境中发现本包
+        # ament 资源索引标记:让 ROS 2 能在环境中发现本包
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
-        # 包清单，随共享目录一起安装
+        # 包清单,随共享目录一起安装
         (f"share/{package_name}", ["package.xml"]),
-        # 启动文件及同目录结构说明。
+        # 启动文件及同目录结构说明.
         (
             f"share/{package_name}/launch",
             launch_files,
@@ -35,14 +35,14 @@ setup(
             f"share/{package_name}/launch/includes",
             launch_include_files,
         ),
-        # 参数文件：所有 *.yaml（机械臂/夹爪/遥操作等）
+        # 参数文件:所有 *.yaml(机械臂/夹爪/遥操作等)
         (f"share/{package_name}/config", glob("config/*.yaml")),
-        # 可视化布局：所有 *.rviz
+        # 可视化布局:所有 *.rviz
         (f"share/{package_name}/rviz", glob("rviz/*.rviz")),
     ],
-    # 安装期依赖：仅需要 setuptools 本体
+    # 安装期依赖:仅需要 setuptools 本体
     install_requires=["setuptools"],
-    # 纯资源包，可安全打包为 zip
+    # 纯资源包,可安全打包为 zip
     zip_safe=True,
     maintainer="reBotArm Maintainers",
     maintainer_email="support@example.com",

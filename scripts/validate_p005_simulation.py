@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""P005 固定物理指标及隔离 ROS 操作链验收。
+"""P005 固定物理指标及隔离 ROS 操作链验收.
 
 文件职责
-    检查 continuous 的跟踪和保持效果，按需验证已启动的 MuJoCo/MoveIt/
-    Dashboard/键盘正式链；保存原始轨迹、配置摘要和检查结论。
+    检查 continuous 的跟踪和保持效果,按需验证已启动的 MuJoCo/MoveIt/
+    Dashboard/键盘正式链;保存原始轨迹,配置摘要和检查结论.
 对外接口
-    main 接受必需的 --output；--ros 启用 ROS/HTTP 操作链，--dashboard 指定对应仿真界面。
-    physics_acceptance 返回物理指标，ros_acceptance 返回各操作检查记录。
+    main 接受必需的 --output;--ros 启用 ROS/HTTP 操作链,--dashboard 指定对应仿真界面.
+    physics_acceptance 返回物理指标,ros_acceptance 返回各操作检查记录.
 安全约束
-    不启动真实控制器；--ros 会发送目标、取消并修改场景，必须使用隔离的非零 ROS 域
-    和同一仿真链的 Dashboard。程序核对 MuJoCo 节点及唯一 FJT，但不替代运行环境隔离。
-    不调整模型、增益、限值或 Action 容差；独立物理观察窗口不延长 MoveIt 执行预算。
-    输出目录应按本次验收独立分配，同名报告会覆盖；软件结果不构成实机验收。
+    不启动真实控制器;--ros 会发送目标,取消并修改场景,必须使用隔离的非零 ROS 域
+    和同一仿真链的 Dashboard.程序核对 MuJoCo 节点及唯一 FJT,但不替代运行环境隔离.
+    不调整模型,增益,限值或 Action 容差;独立物理观察窗口不延长 MoveIt 执行预算.
+    输出目录应按本次验收独立分配,同名报告会覆盖;软件结果不构成实机验收.
 文件结构
-    JSON 输出 → 固定物理验收 → ROS 服务/Action/网页/终端验收 → 配置摘要和 CLI。
+    JSON 输出 → 固定物理验收 → ROS 服务/Action/网页/终端验收 → 配置摘要和 CLI.
 """
 import argparse
 import hashlib
@@ -27,12 +27,12 @@ from urllib.error import HTTPError
 
 
 def write_json(path, value):
-    """写入一次完整报告，禁止非有限 JSON；调用者负责选择本次独立产物路径。"""
+    """写入一次完整报告,禁止非有限 JSON;调用者负责选择本次独立产物路径."""
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False)+'\n')
 
 
 def physics_acceptance(output):
-    """固定初始姿态和控制配置，检查连续采样的绝对跟踪、到位和保持门限。"""
+    """固定初始姿态和控制配置,检查连续采样的绝对跟踪,到位和保持门限."""
     from rebotarm_motion.polynomial_trajectory import JOINT_NAMES, build_curve
     from rebotarm_motion.trajectory_preparation import point_to_point
     from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
@@ -41,7 +41,7 @@ def physics_acceptance(output):
     target = (.02, *start[1:])
     curve = build_curve(JOINT_NAMES, point_to_point(start, target, .4))
     report = {}
-    # 独立建模并先保持 2 s，使参考开始时的物理状态一致。
+    # 独立建模并先保持 2 s,使参考开始时的物理状态一致.
     with RebotArmMujoco() as sim:
         sim.reset_joint_positions(start)
         sim.command_joint_positions(start)
@@ -61,7 +61,7 @@ def physics_acceptance(output):
             if elapsed <= .4+1e-9:
                 maximum = max(maximum, max(abs(a-b) for a,b in zip(reference,state.joint_positions[:6])))
             if elapsed >= .4:
-                # 到达与连续 0.5 s 静止由独立物理观察判断，不读取 Action 的成功标记。
+                # 到达与连续 0.5 s 静止由独立物理观察判断,不读取 Action 的成功标记.
                 quiet = (max(abs(a-b) for a,b in zip(target,state.joint_positions[:6])) <= .001
                     and max(abs(v) for v in state.joint_velocities[:6]) <= .01)
                 stable_since = stable_since if quiet else None
@@ -72,7 +72,7 @@ def physics_acceptance(output):
             trace.record(state, sim.get_control_status(), dict(curve=curve, start=origin))
         before = sim.get_control_status()
         before_q = sim.get_state().joint_positions[:6]
-        # 同时观察切换瞬间支撑力矩与随后 1 s 漂移，不能只看最终位置是否恢复。
+        # 同时观察切换瞬间支撑力矩与随后 1 s 漂移,不能只看最终位置是否恢复.
         sim.set_mode('hold')
         after = sim.get_control_status()
         torque_jump = max(abs(a-b) for a,b in zip(before.applied_torques,after.applied_torques))
@@ -92,7 +92,7 @@ def physics_acceptance(output):
 
 
 def ros_acceptance(output, dashboard, teach_record=None):
-    """驱动已存在的隔离仿真图；等待、Action 终态和实际反馈分别检查，失败直接抛错。"""
+    """驱动已存在的隔离仿真图;等待,Action 终态和实际反馈分别检查,失败直接抛错."""
     if os.environ.get('ROS_DOMAIN_ID', '0') == '0':
         raise RuntimeError('use an isolated nonzero ROS_DOMAIN_ID for simulation acceptance')
     import rclpy
@@ -123,7 +123,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         node.create_subscription(String, '/rebotarm/'+name,
             lambda m, key=name: latest.update({key:m.data}), qos)
     def wait(predicate, timeout=8.):
-        """等待期间持续 spin 接收反馈；超时表示证据不足，不能替代为成功。"""
+        """等待期间持续 spin 接收反馈;超时表示证据不足,不能替代为成功."""
         deadline = time.monotonic()+timeout
         while not predicate() and time.monotonic()<deadline:
             rclpy.spin_once(node, timeout_sec=.01)
@@ -163,7 +163,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         feedbacks[id(handle)]=events
         return handle
     def finish(handle, success=True):
-        """同时检查 ROS Goal 终态和 FJT 错误码；MoveIt 自身的错误码由对应调用点核对。"""
+        """同时检查 ROS Goal 终态和 FJT 错误码;MoveIt 自身的错误码由对应调用点核对."""
         future=handle.get_result_async();wait(future.done,12.)
         response=future.result()
         if success:assert response.status==4 and response.result.error_code==0,str(response)
@@ -191,7 +191,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
             if name == '/rebotarm/follow_joint_trajectory']
         assert len(owners) == 1, owners
         results['graph_nodes']=nodes
-        # 先验证只读起点与最终计划绑定，再使用现有网页/MoveIt/示教入口。
+        # 先验证只读起点与最终计划绑定,再使用现有网页/MoveIt/示教入口.
         from rebotarm_trajectory.planning import decode_state, decode_plan
         from rebotarm_trajectory.polynomial import TrajectoryPoint,curve_from_payload
         def numeric(message):
@@ -223,7 +223,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         assert final.success and final.executable,final.message
         binding=decode_plan(final.trajectory.header.frame_id,names,numeric(final.trajectory),require_execution=True)
         frozen=binding['state']
-        # 服务发现可能耗时，先建立连接再取得本次准备请求的反馈时间戳。
+        # 服务发现可能耗时,先建立连接再取得本次准备请求的反馈时间戳.
         prepare_client=node.create_client(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory')
         assert prepare_client.wait_for_service(timeout_sec=3)
         pause(.05)
@@ -248,7 +248,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         write_json(output/'planning_binding.json',results['planning_binding'])
         pause(1.)
         if teach_record is not None:
-            # 复用网页正式入口；只复制输入，绝不在用户录制文件旁生成或覆盖派生文件。
+            # 复用网页正式入口;只复制输入,绝不在用户录制文件旁生成或覆盖派生文件.
             raw=output/'teach_input.jsonl'
             original=teach_record.read_bytes()
             raw.write_bytes(original)
@@ -314,26 +314,26 @@ def ros_acceptance(output, dashboard, teach_record=None):
             write_json(output/'teach_feedback.json',trace)
             write_json(output/'teach_ros_acceptance.json',results)
             return results
-        # 同时验证标准 byte 诊断经过网页订阅后仍能正确显示“再次可执行”。
+        # 同时验证标准 byte 诊断经过网页订阅后仍能正确显示"再次可执行".
         wait(lambda:status()['teleop'].get('trajectory_admission',{}).get('ready') is True)
         results['web_admission_ready']=status()['teleop']['trajectory_admission']
         start=list(latest['joint'].position[:6]);target=start.copy();target[0]+=.02
         handle=send(arm,make(target))
-        # 后端在准备期间已占用资源，夹爪请求不能改变固定状态。
+        # 后端在准备期间已占用资源,夹爪请求不能改变固定状态.
         req=SetGripper.Request();req.position=.01;req.max_effort=1.
         assert not call(SetGripper,'/rebotarm/gripper/set',req).success
         finish(handle)
         pause(1.)
         assert max(abs(a-b) for a,b in zip(target,latest['joint'].position[:6]))<=.001
         results['direct_step']='pass'
-        # q-only 和 q/v 保留明确的兼容等级。
+        # q-only 和 q/v 保留明确的兼容等级.
         for grade in (0,1):
             target=list(latest['joint'].position[:6]);target[0]+=.005
             finish(send(arm,make(target,.8,grade)));pause(.5)
         results['compatibility']='C0/C1 pass'
-        # 实际 MoveIt 服务规划，选一条不修改时间、不放宽限值的有效轨迹。
+        # 实际 MoveIt 服务规划,选一条不修改时间,不放宽限值的有效轨迹.
         planned=None
-        # 改变规划请求取得合格样本，不修改返回轨迹；每次实际执行的成功/拒绝都留证据。
+        # 改变规划请求取得合格样本,不修改返回轨迹;每次实际执行的成功/拒绝都留证据.
         for scaling in (.03,.01,.003):
             req=GetMotionPlan.Request();plan=req.motion_plan_request
             plan.group_name='arm';plan.pipeline_id='ompl';plan.num_planning_attempts=1
@@ -348,7 +348,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
             assert response.motion_plan_response.error_code.val==1,str(response)
             candidate=response.motion_plan_response.trajectory
             write_json(output/f'moveit_plan_{scaling}.json',message_to_ordereddict(candidate))
-            # 直接执行原规划，失败也必须保留日志和明确结果，不自动重定时。
+            # 直接执行原规划,失败也必须保留日志和明确结果,不自动重定时.
             goal=ExecuteTrajectory.Goal();goal.trajectory=candidate
             response=finish(send(execute,goal),success=False)
             results[f'moveit_{scaling}']=message_to_ordereddict(response)
@@ -381,7 +381,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
             results[f'moveit_{group}']=message_to_ordereddict(response)
         write_json(output/'ros_acceptance.json',results)
         pause(1.)
-        # HTTP 请求穿过网页正式路由与适配器。
+        # HTTP 请求穿过网页正式路由与适配器.
         assert post('/api/keyboard_enable',{})['accepted']
         first=post('/api/keyboard_key',dict(confirm='KEYBOARD_TELEOP',key='q'))
         second=post('/api/keyboard_key',dict(confirm='KEYBOARD_TELEOP',key='q'))
@@ -410,14 +410,14 @@ def ros_acceptance(output, dashboard, teach_record=None):
         assert results['web_coordinated']['state']=='done',results['web_coordinated']
         assert results['web_coordinated']['arm_state']=='succeeded',results['web_coordinated']
         assert results['web_coordinated']['gripper_state']=='succeeded',results['web_coordinated']
-        # 所有手指 FJT 都必须直接拒绝，不能静默投影。
+        # 所有手指 FJT 都必须直接拒绝,不能静默投影.
         for extra in (['left_finger_joint'],[*names,'left_finger_joint'],[*names,'right_finger_joint']):
             invalid=make(list(latest['joint'].position[:6]),1.)
             invalid.trajectory.joint_names=extra
             future=arm.send_goal_async(invalid);wait(future.done)
             assert not future.result().accepted,extra
         results['finger_fjt_rejected']=True
-        # 网页组合取消并等待资源释放，再执行仅关节，旧任务不得覆盖后继。
+        # 网页组合取消并等待资源释放,再执行仅关节,旧任务不得覆盖后继.
         from rebotarm_msgs.action import ExecuteTeleopMotion
         teleop=ActionClient(node,ExecuteTeleopMotion,'/rebotarm/execute_teleop_motion')
         target=list(latest['joint'].position[:6]);target[0]+=.01
@@ -434,7 +434,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         done=finish(send(teleop,ExecuteTeleopMotion.Goal(trajectory=make(target,1.).trajectory)))
         assert done.result.arm_state=='succeeded' and done.result.gripper_state=='not_requested',str(done)
         results['web_cancel_and_next']=message_to_ordereddict(done)
-        # 新格式保留夹爪数据供查看，正式回放只派生六轴，不修改原始记录。
+        # 新格式保留夹爪数据供查看,正式回放只派生六轴,不修改原始记录.
         pause(.8)
         current=dict(zip(latest['joint'].name,latest['joint'].position))
         raw=output/'coordinated_teach.jsonl'
@@ -459,7 +459,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         results['teach_coordinated']=replay
         assert replay['state']=='done',replay
         assert raw.read_bytes()==original,'raw teach recording was overwritten'
-        # 显式取消并等新帧静止确认，之后继续接纳。
+        # 显式取消并等新帧静止确认,之后继续接纳.
         target=list(latest['joint'].position[:6]);target[0]+=.03
         handle=send(arm,make(target,2.))
         wait(lambda:bool(feedbacks[id(handle)]),.65)
@@ -468,7 +468,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         assert canceled.status==5,str(canceled)
         pause(.5)
         results['cancel']='pass'
-        # 场景变化在执行中触发停止保持；移除后必须能继续接纳。
+        # 场景变化在执行中触发停止保持;移除后必须能继续接纳.
         handle=send(arm,make(target,2.))
         wait(lambda:bool(feedbacks[id(handle)]),.65)
         pause(.15)
@@ -486,7 +486,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         assert call(ApplyPlanningScene,'/apply_planning_scene',req).success
         pause(.8)
         results['scene_stop']='pass'
-        # 真正终端入口经 PTY 读键；第二键必须在首步结束前明确丢弃。
+        # 真正终端入口经 PTY 读键;第二键必须在首步结束前明确丢弃.
         import pty
         import signal
         import subprocess
@@ -514,7 +514,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
             process.wait(timeout=5.)
             os.close(master);terminal_log.close()
             node.destroy_subscription(subscription)
-        # 真实准备服务拒绝原始 jerk 样本，不能用起点不匹配冒充超限拒绝。
+        # 真实准备服务拒绝原始 jerk 样本,不能用起点不匹配冒充超限拒绝.
         fixture=json.loads((Path(__file__).resolve().parents[1]/'tests/fixtures/p005_moveit_trajectory.json').read_text())
         req=PrepareArmTrajectory.Request()
         req.trajectory.joint_names=fixture['joint_names']
@@ -533,7 +533,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
         rejection=call(PrepareArmTrajectory,'/rebotarm/prepare_arm_trajectory',req)
         assert not rejection.success and 'jerk' in rejection.message,rejection.message
         results['jerk_fixture_rejection']=rejection.message
-        # 同一真实场景内分别验证环境和附着物几何的拒绝覆盖。
+        # 同一真实场景内分别验证环境和附着物几何的拒绝覆盖.
         for attached in (False,True):
             revision=latest['trajectory_scene_revision']
             obj=CollisionObject(id='p005_blocker');obj.header.frame_id='end_link' if attached else 'base_link'
@@ -558,12 +558,12 @@ def ros_acceptance(output, dashboard, teach_record=None):
                 req.scene.world.collision_objects=[obj]
             assert call(ApplyPlanningScene,'/apply_planning_scene',req).success
             if attached:
-                # MoveIt 分离附着物时会放回 world；本测试还需显式清除该几何。
+                # MoveIt 分离附着物时会放回 world;本测试还需显式清除该几何.
                 cleanup=ApplyPlanningScene.Request();cleanup.scene.is_diff=True
                 cleanup.scene.world.collision_objects=[obj]
                 assert call(ApplyPlanningScene,'/apply_planning_scene',cleanup).success
             pause(.8)
-        # 静止 position -> hold 仍由正式服务切换。
+        # 静止 position -> hold 仍由正式服务切换.
         req=SetMode.Request();req.mode='hold'
         assert call(SetMode,'/rebotarm/sim/set_mode',req).success
         pause(1.)
@@ -574,7 +574,7 @@ def ros_acceptance(output, dashboard, teach_record=None):
 
 
 def main():
-    """先记录本次安装资源摘要，再执行物理检查；只有显式 --ros 才访问已有仿真图。"""
+    """先记录本次安装资源摘要,再执行物理检查;只有显式 --ros 才访问已有仿真图."""
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--ros',action='store_true')

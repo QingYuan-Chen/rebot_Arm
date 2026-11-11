@@ -1,4 +1,4 @@
-"""故障样本以设备操作及安全结果对照，不以 Python 私有方法名作跨语言要求。"""
+"""故障样本以设备操作及安全结果对照,不以 Python 私有方法名作跨语言要求."""
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,7 +50,7 @@ def test_lifecycle_faults_have_portable_device_results(case):
         before = list(device.calls)
         with pytest.raises(RuntimeError):
             owner.enable()
-        assert before == device.calls  # 未确认失能不能重新使能。
+        assert before == device.calls  # 未确认失能不能重新使能.
 
 
 def test_lifecycle_success_uses_semantic_operations():
@@ -138,7 +138,7 @@ def test_gravity_handoff_and_fault_decisions(case, monkeypatch):
     q = np.array(values['positions'])
     commands = configure_gravity_compensation_test(
         manager, positions=q, velocities=np.array(values['velocities']))
-    # 固定模型输入使样本不受 Pinocchio 版本或真实负载影响；生产控制律照常执行。
+    # 固定模型输入使样本不受 Pinocchio 版本或真实负载影响;生产控制律照常执行.
     manager.gravity._gc_compute_generalized_gravity = lambda q: np.array(values['gravity_torque'])
     disables = []
     manager.test_arm._ctrl_map['fake'].disable_all = lambda: disables.append(True)
@@ -157,9 +157,9 @@ def test_gravity_handoff_and_fault_decisions(case, monkeypatch):
                     raise CommandTransportError(CommandReceipt((), 'joint1', tuple(manager.runtime.joint_names[1:])))
                 raise RuntimeError('injected model failure')
             if case['fault'] == 'transport':
-                # 回执由设备批次返回，协调组件不得将其当作健康计算失败恢复输出。
-                # 重力组件通过自己的运行时后端发送 MIT 批次；FakeArm 只是反馈
-                # 夹具，不应伪装成第二个发送接口。
+                # 回执由设备批次返回,协调组件不得将其当作健康计算失败恢复输出.
+                # 重力组件通过自己的运行时后端发送 MIT 批次;FakeArm 只是反馈
+                # 夹具,不应伪装成第二个发送接口.
                 monkeypatch.setattr(manager.gravity._backend, 'send_mit_batch', fail)
                 del manager.gravity._send_gravity_mit
             else:

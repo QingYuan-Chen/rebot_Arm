@@ -80,7 +80,7 @@ def test_vision_node_close_failure_propagates_after_ros_cleanup(monkeypatch):
 
 @pytest.fixture
 def online_detection_node(monkeypatch):
-    """使用真实帧转换与节点回调，替换相机和发布端口以保持测试离线。"""
+    """使用真实帧转换与节点回调,替换相机和发布端口以保持测试离线."""
     detector_module = types.ModuleType("rebotarm_vision.detector.yolo_detector")
     detector_module.YoloDetector = object
     monkeypatch.setitem(sys.modules, detector_module.__name__, detector_module)
@@ -171,7 +171,7 @@ def test_online_bad_mask_empty_frame_clears_graspnet_pending_candidates(online_d
 
     consumer = object.__new__(GraspNetBaselineNode)
     candidates = []
-    # 用旧的待处理检测模拟 RGB-D 尚未配对的上一帧；新空帧须立即替换它并发布空候选。
+    # 用旧的待处理检测模拟 RGB-D 尚未配对的上一帧;新空帧须立即替换它并发布空候选.
     consumer.pending_inprocess_detections = SimpleNamespace(detections=[object()])
     consumer.last_inprocess_detection_timestamp_ns = 1
     consumer.latest_depth_frame_id = "camera_depth_frame"

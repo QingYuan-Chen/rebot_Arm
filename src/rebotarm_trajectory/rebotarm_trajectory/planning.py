@@ -1,10 +1,10 @@
-"""规划快照及不可变执行计划的纯数值协议。
+"""规划快照及不可变执行计划的纯数值协议.
 
-文件职责：绑定后端会话、六轴代次、已发送保持目标和准确纳秒轨迹。
-对外接口：planning_state、plan_binding、decode_plan、require_plan_context。
-安全约束：不读取 ROS、设备或时钟；绑定不是执行许可，后端仍需复核反馈和碰撞。
-    实际位置残差不参与绑定判定；参考轨迹、失能预览及旧能力绑定不能冒充执行计划。
-文件结构：快照校验 → 轨迹摘要 → 版本化编码/解码 → 执行上下文比对。
+文件职责:绑定后端会话,六轴代次,已发送保持目标和准确纳秒轨迹.
+对外接口:planning_state,plan_binding,decode_plan,require_plan_context.
+安全约束:不读取 ROS,设备或时钟;绑定不是执行许可,后端仍需复核反馈和碰撞.
+    实际位置残差不参与绑定判定;参考轨迹,失能预览及旧能力绑定不能冒充执行计划.
+文件结构:快照校验 → 轨迹摘要 → 版本化编码/解码 → 执行上下文比对.
 """
 
 import hashlib
@@ -16,7 +16,7 @@ PREFIX = 'rebotarm-plan:v1:'
 
 
 def planning_state(capability_revision, session, generation, hold, *, executable, reason=''):
-    """复制设备线程或仿真锁内取得的快照；失能可预览，其他不可用状态须明确失败。"""
+    """复制设备线程或仿真锁内取得的快照;失能可预览,其他不可用状态须明确失败."""
     if (not isinstance(capability_revision, str) or len(capability_revision) != 64
             or any(c not in '0123456789abcdef' for c in capability_revision)
             or type(session) is not int or session < 0
@@ -32,7 +32,7 @@ def planning_state(capability_revision, session, generation, hold, *, executable
 
 
 def decode_state(value):
-    """拒绝未知或不完整快照，避免把服务失败当作失能预览。"""
+    """拒绝未知或不完整快照,避免把服务失败当作失能预览."""
     data = json.loads(value) if isinstance(value, str) else value
     try:
         expected = planning_state(data['capability_revision'], data['session'], data['generation'],
@@ -45,7 +45,7 @@ def decode_state(value):
 
 
 def trajectory_digest(names, points):
-    """摘要以规范关节顺序和整数纳秒编码，保留所有 q/v/a 约束及输入等级。"""
+    """摘要以规范关节顺序和整数纳秒编码,保留所有 q/v/a 约束及输入等级."""
     values = ordered_points(names, points)
     data = [canonical_names(names), [[round(p.time*1e9), p.positions, p.velocities, p.accelerations]
                                     for p in values]]
@@ -53,7 +53,7 @@ def trajectory_digest(names, points):
 
 
 def plan_binding(capability_revision, names, points, *, state=None, purpose='execution'):
-    """执行计划必须有保持快照；参考段和失能预览显式标记且不能下发六轴执行。"""
+    """执行计划必须有保持快照;参考段和失能预览显式标记且不能下发六轴执行."""
     if purpose not in ('execution', 'reference', 'preview', 'gripper'):
         raise ValueError('unknown planning purpose')
     if (not isinstance(capability_revision,str) or len(capability_revision)!=64
@@ -70,7 +70,7 @@ def plan_binding(capability_revision, names, points, *, state=None, purpose='exe
 
 
 def decode_plan(header, names, points, *, capability_revision=None, require_execution=False):
-    """空或普通 frame_id 沿用旧 FJT；已声明的旧/未知协议不得静默降级。"""
+    """空或普通 frame_id 沿用旧 FJT;已声明的旧/未知协议不得静默降级."""
     if not header.startswith(PREFIX):
         if header.startswith('rebotarm-'):
             raise ValueError('old or unknown planning binding; update client and re-plan')
@@ -91,7 +91,7 @@ def decode_plan(header, names, points, *, capability_revision=None, require_exec
 
 
 def require_plan_context(plan, *, capability_revision, session, generation, hold):
-    """比较任务身份和命令保持值；不比较实际位置，不设置位置偏差门限。"""
+    """比较任务身份和命令保持值;不比较实际位置,不设置位置偏差门限."""
     if plan is None:
         return
     state = plan['state']

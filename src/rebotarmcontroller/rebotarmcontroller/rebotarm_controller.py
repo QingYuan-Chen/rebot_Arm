@@ -86,7 +86,7 @@ class reBotArmController(Node):
         # arm_config: 机械臂配置文件路径; 空串表示使用本包默认配置, 不从旧 SDK 加载.
         self.declare_parameter("arm_config", "")
         self.declare_parameter("gravity_config", "")
-        # 实机默认连续轨迹；模式选择不隐含使能或实机验收许可。
+        # 实机默认连续轨迹;模式选择不隐含使能或实机验收许可.
         # gripper_config: 夹爪配置文件路径; 空串表示使用默认夹爪配置.
         self.declare_parameter("gripper_config", "")
         # channel: 电机总线通道(串口设备); 空串表示由配置文件决定.

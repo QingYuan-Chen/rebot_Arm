@@ -1,14 +1,14 @@
-"""MuJoCo 轨迹的预约、原子接纳、采样和停止生命周期。
+"""MuJoCo 轨迹的预约,原子接纳,采样和停止生命周期.
 
-文件职责：拥有规划代次、准备上下文及已接纳曲线；复用活动目标、命令闸门和
-    仿真访问锁，协调六轴与独立夹爪的整体终态。
-对外接口：planning_snapshot/reserve/admit；observe/complete/step；stop/poll_stop/cleanup；
-    change_mode/command_joint_impedance 协调控制模式；status_snapshot 供 ROS 诊断读取。
-    输入输出均为普通 Python 数据。
-安全约束：锁序固定为目标锁→仿真锁。组件不接收 Node、GoalHandle、ROS 消息，
-    不等待服务或自主睡眠；准备/停止期限用单调时间，参考曲线用仿真时间。
-    终态通知先于释放预约，迟到操作只作用于原 token；停止未确认保留执行权。
-文件结构：具名上下文与快照 → 规划/准备 → 原子接纳 → 周期及终态 → 停止收尾。
+文件职责:拥有规划代次,准备上下文及已接纳曲线;复用活动目标,命令闸门和
+    仿真访问锁,协调六轴与独立夹爪的整体终态.
+对外接口:planning_snapshot/reserve/admit;observe/complete/step;stop/poll_stop/cleanup;
+    change_mode/command_joint_impedance 协调控制模式;status_snapshot 供 ROS 诊断读取.
+    输入输出均为普通 Python 数据.
+安全约束:锁序固定为目标锁→仿真锁.组件不接收 Node,GoalHandle,ROS 消息,
+    不等待服务或自主睡眠;准备/停止期限用单调时间,参考曲线用仿真时间.
+    终态通知先于释放预约,迟到操作只作用于原 token;停止未确认保留执行权.
+文件结构:具名上下文与快照 → 规划/准备 → 原子接纳 → 周期及终态 → 停止收尾.
 """
 
 from collections import deque
@@ -24,7 +24,7 @@ from .gripper_execution import GripperExecution, GripperTask
 
 @dataclass(frozen=True)
 class Preparation:
-    """只读预约快照；服务协议由节点据此编码，身份只在后端解释。"""
+    """只读预约快照;服务协议由节点据此编码,身份只在后端解释."""
 
     token: object
     binding: str
@@ -43,7 +43,7 @@ class Preparation:
 
 @dataclass
 class AcceptedTrajectory:
-    """已接纳曲线的唯一运行状态，最后发送时刻由物理周期写入。"""
+    """已接纳曲线的唯一运行状态,最后发送时刻由物理周期写入."""
 
     curve: object
     start: float
@@ -77,7 +77,7 @@ class ExecutionStatus:
 
 
 class TrajectoryExecution:
-    """执行状态唯一所有者；节点只持有此组件及 ROS 传输对象。"""
+    """执行状态唯一所有者;节点只持有此组件及 ROS 传输对象."""
 
     def __init__(self, access, control, capability, settling_policy, *, clock=time.monotonic):
         self.access, self.control, self.capability = access, control, capability
@@ -95,7 +95,7 @@ class TrajectoryExecution:
         self._retained_stop_token = None
 
     def hold(self):
-        """目标锁由闸门或调用方持有；保持、作废规划及夹爪停止属于同一事务。"""
+        """目标锁由闸门或调用方持有;保持,作废规划及夹爪停止属于同一事务."""
         def apply(_sim):
             self.planning_generation += 1
             self.control.hold_current_position()
@@ -104,7 +104,7 @@ class TrajectoryExecution:
         try:
             self.access.run(apply)
         except Exception:
-            # 保持失败仍保留预约；后续显式停止及新物理帧确认完成后才能释放。
+            # 保持失败仍保留预约;后续显式停止及新物理帧确认完成后才能释放.
             self.stop_unconfirmed = True
             raise
 
@@ -120,7 +120,7 @@ class TrajectoryExecution:
         return state, tuple(sim.get_control_status().joint_targets)
 
     def _stationary_snapshot(self, sim, *, after=None):
-        """停止确认使用原六轴及双指速度窗口；准入仍沿用夹爪条件。"""
+        """停止确认使用原六轴及双指速度窗口;准入仍沿用夹爪条件."""
         state = sim.get_state()
         cutoff = state.simulation_time-.2
         samples = [item for item in self._sample_history if item.simulation_time >= cutoff-.0021]
@@ -147,7 +147,7 @@ class TrajectoryExecution:
             return self.access.run(snapshot)
 
     def admission_reasons(self):
-        """诊断只读快照，不进行设备访问或重新接纳。"""
+        """诊断只读快照,不进行设备访问或重新接纳."""
         with self.lock:
             reasons = []
             if self.active.busy or self.stop_unconfirmed:
@@ -163,7 +163,7 @@ class TrajectoryExecution:
             return reasons
 
     def reserve(self, token, names, points, binding, *, web, gripper_command, received):
-        """结构和规模已由协议层校验；在同一锁序内绑定规划与执行资源。"""
+        """结构和规模已由协议层校验;在同一锁序内绑定规划与执行资源."""
         with self.lock:
             if not self.scene_revision:
                 raise RuntimeError('scene revision unavailable')
@@ -190,7 +190,7 @@ class TrajectoryExecution:
             return self.access.run(reserve_in_sim)
 
     def accepted_context(self, token):
-        """返回本次 Action 的只读时间起点与夹爪句柄，后续写入仍由组件负责。"""
+        """返回本次 Action 的只读时间起点与夹爪句柄,后续写入仍由组件负责."""
         with self.lock:
             if self.active.token is not token or self.active.prepared is None:
                 raise RuntimeError('accepted trajectory ownership lost')
@@ -211,7 +211,7 @@ class TrajectoryExecution:
                 self.gate.stop_and_hold(self.hold)
 
     def admit(self, token, payload, response_revision, cancel_requested):
-        """服务返回后的最终原子复核；输入曲线保持已检查系数及绑定。"""
+        """服务返回后的最终原子复核;输入曲线保持已检查系数及绑定."""
         request = self.preparation_for(token)
         curve = curve_from_payload(payload['curve'])
         decode_plan(request.binding, curve.joint_names, curve.points,
@@ -236,7 +236,7 @@ class TrajectoryExecution:
                         or tuple(curve.joint_names) != tuple(ARM_JOINT_NAMES)):
                     raise RuntimeError('prepared simulation context changed')
                 accepted = AcceptedTrajectory(curve, state.simulation_time, response_revision)
-                # 同周期登记；登记阶段不推进任一目标或物理时间。
+                # 同周期登记;登记阶段不推进任一目标或物理时间.
                 if request.gripper_command is not None:
                     accepted.gripper = self.gripper.start(token, *request.gripper_command)
                 self.active.prepared = accepted
@@ -249,7 +249,7 @@ class TrajectoryExecution:
         return PreparedTrajectorySampler(curve)
 
     def observe(self, token, sampler, start_time, cancel_requested):
-        """闸门内读取反馈；曲线采样写入只在物理周期发生。"""
+        """闸门内读取反馈;曲线采样写入只在物理周期发生."""
         observation = None
         def apply():
             nonlocal observation
@@ -277,14 +277,14 @@ class TrajectoryExecution:
         return outcome, observation
 
     def complete(self, token, sampler, cancel_requested, notify):
-        """终态通知与释放保持原闸门事务顺序，通知回调在仿真锁外运行。"""
+        """终态通知与释放保持原闸门事务顺序,通知回调在仿真锁外运行."""
         def succeed():
             self.access.run(lambda _sim: self.control.command_joint_positions(sampler.sample(sampler.duration)[:6]))
             notify()
         return self.gate.complete_with_reason(token, cancel_requested, self.hold, succeed)
 
     def step(self, count, record):
-        """物理调度调用；延迟后按当前仿真时间采样，不补发过期目标。"""
+        """物理调度调用;延迟后按当前仿真时间采样,不补发过期目标."""
         with self.lock:
             def advance(sim):
                 for _ in range(count):
@@ -297,7 +297,7 @@ class TrajectoryExecution:
                             active.sent_at = current.simulation_time
                     self.gripper.advance()
                     state = sim.step()
-                    # 记录器只读本步快照，任务写权限留在执行组件。
+                    # 记录器只读本步快照,任务写权限留在执行组件.
                     record(state, sim.get_control_status(),
                         dict(curve=active.curve, start=active.start) if active else None)
                     self._sample_history.append(state)
@@ -319,7 +319,7 @@ class TrajectoryExecution:
             return StopWait(token, self.access.run(lambda sim: sim.get_state().simulation_time), self.clock()+5.)
 
     def poll_stop(self, wait):
-        """单次观察后立即返回；等待循环由 ROS 工作线程在锁外执行。"""
+        """单次观察后立即返回;等待循环由 ROS 工作线程在锁外执行."""
         with self.lock:
             if self.active.token is not wait.token:
                 return True
@@ -356,13 +356,13 @@ class TrajectoryExecution:
             return result
 
     def command_joint_impedance(self, positions, stiffness, damping, *, timeout_s):
-        """在目标锁→仿真锁内原子接纳；参数失败保留旧模式与规划代次。"""
+        """在目标锁→仿真锁内原子接纳;参数失败保留旧模式与规划代次."""
         with self.lock:
             if self.active.busy or self.gripper.busy or self.stop_unconfirmed:
                 raise RuntimeError('arm/gripper resources reserved or stop unconfirmed')
             result = self.access.run(lambda _sim: self.control.command_joint_impedance(
                 positions, stiffness, damping, timeout_s=timeout_s))
-            # 与显式模式切换一致，每个成功命令作废此前生成的规划起点绑定。
+            # 与显式模式切换一致,每个成功命令作废此前生成的规划起点绑定.
             self.planning_generation += 1
             return result
 

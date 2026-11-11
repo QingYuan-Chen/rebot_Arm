@@ -1,4 +1,4 @@
-"""ROS 职责端口与真实请求运行时的集成；注册和消息出口用内存替身。"""
+"""ROS 职责端口与真实请求运行时的集成;注册和消息出口用内存替身."""
 import threading
 import time
 from types import SimpleNamespace
@@ -20,7 +20,7 @@ from test_device_request_arbitration import motor_command
 
 
 class RegistrationNode:
-    """记录正式构造器注册的接口；不建立 DDS、执行器或串口。"""
+    """记录正式构造器注册的接口;不建立 DDS,执行器或串口."""
     slow_group = reentrant_group = sensor_qos = None
 
     def __init__(self):
@@ -62,7 +62,7 @@ class RegistrationNode:
 
 
 class CancelAfterSubmission:
-    """第一次检查未取消，提交后发出取消意图，覆盖带句柄/代次的撤销路径。"""
+    """第一次检查未取消,提交后发出取消意图,覆盖带句柄/代次的撤销路径."""
     def __init__(self, request):
         self.request, self.state, self.checks = request, 'active', 0
 
@@ -79,7 +79,7 @@ class CancelAfterSubmission:
 
 @pytest.mark.parametrize('moveit,factor', [(False,1.), (True,2.)])
 def test_gripper_protocol_preserves_total_opening_and_converts_moveit_left_finger(moveit, factor):
-    """同一独立执行器只接受总开口；MoveIt 的反馈和结果仍使用左指坐标。"""
+    """同一独立执行器只接受总开口;MoveIt 的反馈和结果仍使用左指坐标."""
     actions = ArmActions.__new__(ArmActions)
     submitted, feedback = [], []
     actions._gripper = SimpleNamespace(
@@ -184,7 +184,7 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
         actions._prepare_client = SimpleNamespace(service_is_ready=lambda: True)
         assert trajectory.goal_callback(request) == GoalResponse.ACCEPT
         goal = CancelAfterSubmission(request)
-        # 模拟取消在服务派发前到达；仍由正式取消路径释放本请求预约并确认保持。
+        # 模拟取消在服务派发前到达;仍由正式取消路径释放本请求预约并确认保持.
         goal.checks = 1
         trajectory.execute_callback(goal)
         assert goal.state == 'canceled' and assembly.lifecycle.enabled
@@ -202,7 +202,7 @@ def test_registered_ros_callbacks_keep_queue_policy_and_live_owner_state(monkeyp
                                safe_home=None, logger=node.get_logger())
         assert not assembly.runtime.writer_active
     finally:
-        # 这里只操作本进程内存假句柄，不接触真实设备。
+        # 这里只操作本进程内存假句柄,不接触真实设备.
         if assembly.lifecycle.enabled:
             assembly.lifecycle.disable()
         assembly.lifecycle.shutdown()

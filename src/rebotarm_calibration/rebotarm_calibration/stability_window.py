@@ -1,4 +1,4 @@
-"""同期机器人与标记位姿的连续稳定窗口，以及保留同期配对的代表帧选择。"""
+"""同期机器人与标记位姿的连续稳定窗口,以及保留同期配对的代表帧选择."""
 import numpy as np
 from .handeye_solver import rotation_angle_deg
 
@@ -38,7 +38,7 @@ class StabilityWindow:
         return len(self.values) >= 3 and (stamp - self.values[0][0]) / 1e9 >= self.duration
 
     def representative_index(self):
-        """选总位姿距离最小的实测帧，机器人和视觉始终使用同一时刻的配对。"""
+        """选总位姿距离最小的实测帧,机器人和视觉始终使用同一时刻的配对."""
         if not self.values:
             raise ValueError('empty stability window')
         def cost(index):

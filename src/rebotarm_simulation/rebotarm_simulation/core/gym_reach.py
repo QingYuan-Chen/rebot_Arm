@@ -1,4 +1,4 @@
-"""纯仿真 Reach 任务；不导入 ROS，不接触真实硬件。"""
+"""纯仿真 Reach 任务;不导入 ROS,不接触真实硬件."""
 from __future__ import annotations
 
 import gymnasium as gym
@@ -10,7 +10,7 @@ from rebotarm_simulation.core.resource_paths import model_resource
 
 
 class RebotArmReachEnv(gym.Env):
-    """六轴从 home 到附近末端位姿的 headless Gymnasium 任务。"""
+    """六轴从 home 到附近末端位姿的 headless Gymnasium 任务."""
     metadata = {"render_modes": []}
 
     def __init__(self, *, max_episode_steps: int = 250, render_mode=None,

@@ -1,11 +1,11 @@
-"""P005 曲线生成、规范化和安全检查的独立数值回归。
+"""P005 曲线生成,规范化和安全检查的独立数值回归.
 
-文件职责：用已知多项式、闭式峰值和段内反例验证分级插值、极值覆盖、碰撞预算及交接规则。
-对外接口：pytest 用例；LIMITS/LOWER/UPPER、context、collision_pass 供相关测试复用。
-安全约束：不使用真实设备或 ROS 图；collision_pass 只是覆盖计数替身，不证明真实无碰撞。
-    捕获的 MoveIt 样本保留为 jerk 超限拒绝证据，不能修改样本或限值使测试通过。
-文件结构：规范限值与夹具 → 分级/连续性/往返 → 解析峰值和段内极值
-    → 起点与上下文 → 碰撞失败 → 真实样本和离线 CLI。
+文件职责:用已知多项式,闭式峰值和段内反例验证分级插值,极值覆盖,碰撞预算及交接规则.
+对外接口:pytest 用例;LIMITS/LOWER/UPPER,context,collision_pass 供相关测试复用.
+安全约束:不使用真实设备或 ROS 图;collision_pass 只是覆盖计数替身,不证明真实无碰撞.
+    捕获的 MoveIt 样本保留为 jerk 超限拒绝证据,不能修改样本或限值使测试通过.
+文件结构:规范限值与夹具 → 分级/连续性/往返 → 解析峰值和段内极值
+    → 起点与上下文 → 碰撞失败 → 真实样本和离线 CLI.
 """
 
 from dataclasses import replace
@@ -154,7 +154,7 @@ def test_quintic_peaks_and_minimum_duration_match_closed_form():
 
 @pytest.mark.parametrize('kind', ['position', 'velocity', 'acceleration', 'jerk'])
 def test_checks_interior_extrema_not_only_waypoints(kind):
-    # q=4u(1-u), 原节点位置为零、速度绝对值4, 加速度为-8.
+    # q=4u(1-u), 原节点位置为零,速度绝对值4, 加速度为-8.
     p = Point(0., ZERO, (4.,) * 6)
     q = Point(1., ZERO, (-4.,) * 6)
     curve = build_curve(JOINT_NAMES, (p, q))
@@ -323,7 +323,7 @@ def test_captured_moveit_curve_preserves_derivatives_and_rejects_jerk():
 
 
 def test_position_only_fjt_inputs_are_graded_without_inventing_derivatives():
-    # 公共 FJT 的 q-only 输入契约保留，执行方式统一交由 continuous 准备。
+    # 公共 FJT 的 q-only 输入契约保留,执行方式统一交由 continuous 准备.
     for source in ((Point(0., START), Point(.4, TARGET)), (Point(.2, TARGET),)):
         candidate, report = analyze(source)
         assert candidate is not None and report['degree'] == 1

@@ -1,51 +1,51 @@
 <?xml version="1.0" ?>
-<!-- reBotArm 的 MoveIt 语义模型（SRDF）。
-     职责：在 URDF（只有几何与运动学）之上补充 MoveIt 规划所需的语义信息——
-     虚拟关节、规划组、末端执行器、命名姿态，以及需要禁用的自碰撞对。
-     本文件的 <robot name> 必须与 config/rebotarm.urdf 中的 <robot name> 完全一致，
-     MoveIt 才会把它们视为同一个模型；名字里的 fixend 表示末端夹爪已固定在法兰上。
-     本包只承载模型与规划配置，不含任何可执行逻辑。 -->
+<!-- reBotArm 的 MoveIt 语义模型(SRDF).
+     职责:在 URDF(只有几何与运动学)之上补充 MoveIt 规划所需的语义信息-
+     虚拟关节,规划组,末端执行器,命名姿态,以及需要禁用的自碰撞对.
+     本文件的 <robot name> 必须与 config/rebotarm.urdf 中的 <robot name> 完全一致,
+     MoveIt 才会把它们视为同一个模型;名字里的 fixend 表示末端夹爪已固定在法兰上.
+     本包只承载模型与规划配置,不含任何可执行逻辑. -->
 <robot name="reBot-DevArm_fixend">
-  <!-- 虚拟关节：把固定基座机械臂挂到世界坐标系上，parent_frame=world、child_link=base_link。
-       type="fixed" 表示两者之间没有自由度，它同时定义了规划场景里的“世界”连接点。
-       moveit_demo.launch.py 里另有 static_transform_publisher 发布同一对坐标系的 TF，
-       因此 RViz 的 Fixed Frame 可以选择 world。 -->
+  <!-- 虚拟关节:把固定基座机械臂挂到世界坐标系上,parent_frame=world,child_link=base_link.
+       type="fixed" 表示两者之间没有自由度,它同时定义了规划场景里的"世界"连接点.
+       moveit_demo.launch.py 里另有 static_transform_publisher 发布同一对坐标系的 TF,
+       因此 RViz 的 Fixed Frame 可以选择 world. -->
   <virtual_joint name="world_joint" type="fixed" parent_frame="world" child_link="base_link" />
 
-  <!-- 主规划组 arm：base_link 到 end_link 的串联链（chain），覆盖 joint1~joint6 六个转动关节。
-       它是最常用的规划组，IK 求解与 OMPL 规划默认都以该组为目标。 -->
+  <!-- 主规划组 arm:base_link 到 end_link 的串联链(chain),覆盖 joint1~joint6 六个转动关节.
+       它是最常用的规划组,IK 求解与 OMPL 规划默认都以该组为目标. -->
   <group name="arm">
     <chain base_link="base_link" tip_link="end_link" />
   </group>
 
-  <!-- 夹爪规划组 gripper：两个镜像平移关节，用于夹爪的碰撞检查以及后续抓取规划。
-       两个关节各自只是一个手指的位移，真正的“开口量”需要两者合成来看。 -->
+  <!-- 夹爪规划组 gripper:两个镜像平移关节,用于夹爪的碰撞检查以及后续抓取规划.
+       两个关节各自只是一个手指的位移,真正的"开口量"需要两者合成来看. -->
   <group name="gripper">
     <joint name="left_finger_joint" />
     <joint name="right_finger_joint" />
   </group>
 
-  <!-- 末端执行器声明：名称 gripper，安装在 end_link 上，所属组 group="gripper"，
-       其父规划组 parent_group="arm"。MoveIt 依据该声明计算抓取姿态，
-       并支持把被抓物体附着到夹爪上一起做碰撞检查。 -->
+  <!-- 末端执行器声明:名称 gripper,安装在 end_link 上,所属组 group="gripper",
+       其父规划组 parent_group="arm".MoveIt 依据该声明计算抓取姿态,
+       并支持把被抓物体附着到夹爪上一起做碰撞检查. -->
   <end_effector name="gripper" parent_link="end_link" group="gripper" parent_group="arm" />
 
-  <!-- 命名姿态与仿真关键帧的约定：下面的 group_state 名称与数值和 MuJoCo 模型配置
-       （rebotarm_simulation/models/rebotarm/scene.xml）中的 keyframe 一一对应，使同一个姿态名在仿真与真机上
-       含义相同。
+  <!-- 命名姿态与仿真关键帧的约定:下面的 group_state 名称与数值和 MuJoCo 模型配置
+       (rebotarm_simulation/models/rebotarm/scene.xml)中的 keyframe 一一对应,使同一个姿态名在仿真与真机上
+       含义相同.
 
-       这里故意没有提供全零命名姿态：joint3 的原点在 x 方向为 -0.264 m，joint4 的原点为
-       +0.2426 m，当 joint2~joint5 都接近 0 时前臂会折回压到上臂，link2 与 link5 的间距
-       缩到约 1.6 mm。MoveIt 随后会在 CheckStartStateCollision 阶段直接拒绝从该姿态出发的
-       所有规划请求（报 "1 contact(s) detected : link2 - link5"），也就是说全零姿态是
-       死胡同：可以被指令到达，却无法从那里规划出去。
+       这里故意没有提供全零命名姿态:joint3 的原点在 x 方向为 -0.264 m,joint4 的原点为
+       +0.2426 m,当 joint2~joint5 都接近 0 时前臂会折回压到上臂,link2 与 link5 的间距
+       缩到约 1.6 mm.MoveIt 随后会在 CheckStartStateCollision 阶段直接拒绝从该姿态出发的
+       所有规划请求(报 "1 contact(s) detected : link2 - link5"),也就是说全零姿态是
+       死胡同:可以被指令到达,却无法从那里规划出去.
 
-       仿真侧另外保留了一个本文件没有对应项的 "zero" keyframe，那是仿真复位初始状态
-       （该姿态下间距已有 201.8 mm），由 mujoco_adapter_core.reset() 消费，
-       它不是可规划的命名目标。 -->
-  <!-- safe_home：安全停机/复位姿态，单位弧度。除 joint3 = -0.017453292519943295（恰为 -1°）
-       之外全部为 0；这 1° 的微小偏置用于把前臂从上臂旁边让开，使自碰撞检查可以通过。
-       驱动侧安全停机默认值、Web 侧安全姿态与仿真 keyframe 均以此为准。 -->
+       仿真侧另外保留了一个本文件没有对应项的 "zero" keyframe,那是仿真复位初始状态
+       (该姿态下间距已有 201.8 mm),由 mujoco_adapter_core.reset() 消费,
+       它不是可规划的命名目标. -->
+  <!-- safe_home:安全停机/复位姿态,单位弧度.除 joint3 = -0.017453292519943295(恰为 -1°)
+       之外全部为 0;这 1° 的微小偏置用于把前臂从上臂旁边让开,使自碰撞检查可以通过.
+       驱动侧安全停机默认值,Web 侧安全姿态与仿真 keyframe 均以此为准. -->
   <group_state name="safe_home" group="arm">
     <joint name="joint1" value="0.0" />
     <joint name="joint2" value="0.0" />
@@ -55,8 +55,8 @@
     <joint name="joint6" value="0.0" />
   </group_state>
 
-  <!-- home：常规作业起始姿态，单位弧度。joint2=-0.8（抬肩）、joint3=-1.2（屈肘）、
-       joint4=0.6（转腕），其余为 0；整体呈抬臂前伸、夹爪朝前的准备位。 -->
+  <!-- home:常规作业起始姿态,单位弧度.joint2=-0.8(抬肩),joint3=-1.2(屈肘),
+       joint4=0.6(转腕),其余为 0;整体呈抬臂前伸,夹爪朝前的准备位. -->
   <group_state name="home" group="arm">
     <joint name="joint1" value="0.0" />
     <joint name="joint2" value="-0.8" />
@@ -67,24 +67,24 @@
   </group_state>
 
 
-  <!-- open：夹爪张开命名状态，单位米。左指沿 +Y 平移 +0.045、右指沿 -Y 平移 -0.045，
-       合计开口 0.09 m，正是 URDF 中两指行程的上限。 -->
+  <!-- open:夹爪张开命名状态,单位米.左指沿 +Y 平移 +0.045,右指沿 -Y 平移 -0.045,
+       合计开口 0.09 m,正是 URDF 中两指行程的上限. -->
   <group_state name="open" group="gripper">
     <joint name="left_finger_joint" value="0.045" />
     <joint name="right_finger_joint" value="-0.045" />
   </group_state>
 
-  <!-- closed：夹爪闭合命名状态，两指都回到 0（各自关节原点），表示完全夹紧；单位米。 -->
+  <!-- closed:夹爪闭合命名状态,两指都回到 0(各自关节原点),表示完全夹紧;单位米. -->
   <group_state name="closed" group="gripper">
     <joint name="left_finger_joint" value="0.0" />
     <joint name="right_finger_joint" value="0.0" />
   </group_state>
 
-  <!-- 自碰撞禁用矩阵：MoveIt 默认会检查所有 link 对，而相邻 link 在结构上本来就贴在一起
-       （关节处必然接触/近乎接触），若不禁用会产生大量假碰撞，使任何规划都失败，
-       因此这些对统一用 reason="Adjacent"（相邻）禁用。
-       注意：这里只禁用了相邻对和两指互碰，并未禁用 link2-link5 等真正可能撞上的组合，
-       所以 safe_home 那 1° 的偏置依然是必要的。 -->
+  <!-- 自碰撞禁用矩阵:MoveIt 默认会检查所有 link 对,而相邻 link 在结构上本来就贴在一起
+       (关节处必然接触/近乎接触),若不禁用会产生大量假碰撞,使任何规划都失败,
+       因此这些对统一用 reason="Adjacent"(相邻)禁用.
+       注意:这里只禁用了相邻对和两指互碰,并未禁用 link2-link5 等真正可能撞上的组合,
+       所以 safe_home 那 1° 的偏置依然是必要的. -->
   <disable_collisions link1="base_link" link2="link1" reason="Adjacent" />
   <disable_collisions link1="link1" link2="link2" reason="Adjacent" />
   <disable_collisions link1="link2" link2="link3" reason="Adjacent" />
@@ -94,7 +94,7 @@
   <disable_collisions link1="link6" link2="end_link" reason="Adjacent" />
   <disable_collisions link1="end_link" link2="left_finger_link" reason="Adjacent" />
   <disable_collisions link1="end_link" link2="right_finger_link" reason="Adjacent" />
-  <!-- 左右手指互碰：两指沿同一条轴线相向运动，夹持物体时必然接近甚至接触，
-       属于结构性接触，因此用 reason="Never"（永不检查）而非 Adjacent 禁用。 -->
+  <!-- 左右手指互碰:两指沿同一条轴线相向运动,夹持物体时必然接近甚至接触,
+       属于结构性接触,因此用 reason="Never"(永不检查)而非 Adjacent 禁用. -->
   <disable_collisions link1="left_finger_link" link2="right_finger_link" reason="Never" />
 </robot>

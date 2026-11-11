@@ -1,20 +1,20 @@
-"""重力补偿硬件适配: 受门控启停、模式交接、周期发送与诊断.
+"""重力补偿硬件适配: 受门控启停,模式交接,周期发送与诊断.
 
 职责与位置
     设备侧适配所有者, 调用 rebotarm_force_control 的模型和控制状态,
-    持有设备事务门控、反馈准入、唯一写入线程调度和发送确认.
+    持有设备事务门控,反馈准入,唯一写入线程调度和发送确认.
 
 对外接口
     start/stop_gravity_compensation 显式交接; target 和 diagnostics 提供副本与诊断.
-    clear_hold_fault 供成功保持交接或已验证失能后的故障确认使用。
+    clear_hold_fault 供成功保持交接或已验证失能后的故障确认使用.
 
 安全与并发约束
     交接前后重新检查新反馈; 模型/计算失败优先有界保持, 无法确认设备输出时进入保护.
     重力模型有可变 Data 缓存, 只由统一设备周期串行调用.
-    故障保持需显式退出或确认失能后解除；交接失败继续保留锁存。
+    故障保持需显式退出或确认失能后解除;交接失败继续保留锁存.
 
 文件结构(按定义顺序)
-    GravityController: 装配共享算法状态并适配设备交接、回执与硬件诊断.
+    GravityController: 装配共享算法状态并适配设备交接,回执与硬件诊断.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from ..controller_parameters import GravityCommandError, _LOG
 
 
 class GravityController:
-    """共享重力算法的硬件适配器, 统一设备门控、模式交接和命令确认."""
+    """共享重力算法的硬件适配器, 统一设备门控,模式交接和命令确认."""
 
     def __init__(self, runtime, lifecycle, settings, model):
         """绑定共享模型计算并创建独立执行状态; 模型缓存由唯一设备周期串行使用."""
@@ -68,7 +68,7 @@ class GravityController:
         self._gravity_execution.integral = None
 
     def clear_hold_fault(self):
-        """设备线程在成功交接保持或验证失能后清除本组件故障，保留其他错误。"""
+        """设备线程在成功交接保持或验证失能后清除本组件故障,保留其他错误."""
         self._backend.assert_writer()
         if self._gravity_execution.active:
             raise RuntimeError('stop gravity compensation before clearing its fault')
@@ -100,7 +100,7 @@ class GravityController:
         if self._gravity_execution.fault is not None:
             raise RuntimeError('gravity fault latched; explicitly stop gravity compensation or verify disable first')
         self._lifecycle.require_enabled()
-        # 准备期间也在保持输出，但不能据此切入拖拽；模式变化会破坏已绑定的曲线起点。
+        # 准备期间也在保持输出,但不能据此切入拖拽;模式变化会破坏已绑定的曲线起点.
         if self._backend.arm_resource_reserved:
             raise RuntimeError('arm resource reserved by prepared trajectory')
         self.arm.clear_passthrough()
@@ -194,7 +194,7 @@ class GravityController:
                 raise
         self._lifecycle.set_execution_state("IDLE")
         if self._lifecycle.enabled:
-            # 失能事务在新反馈确认后另行清错；保持交接成功才可在此解除故障。
+            # 失能事务在新反馈确认后另行清错;保持交接成功才可在此解除故障.
             self.clear_hold_fault()
 
     def gravity_compensation_active(self) -> bool:

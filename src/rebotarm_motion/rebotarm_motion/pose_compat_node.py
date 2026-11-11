@@ -233,7 +233,7 @@ class PoseCompatNode(Node):
             raise RuntimeError(f'expected one FJT server, found {owners}')
         goal = FollowJointTrajectory.Goal()
         goal.trajectory.joint_names = list(JOINT_NAMES)
-        # 位姿兼容路径只提供 q，保持明确的 C0 等级；不能仅给末点补零速度造成字段混缺。
+        # 位姿兼容路径只提供 q,保持明确的 C0 等级;不能仅给末点补零速度造成字段混缺.
         for value in command['points']:
             point = JointTrajectoryPoint()
             point.positions = list(value['positions'])

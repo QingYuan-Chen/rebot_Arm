@@ -28,7 +28,7 @@ class RuntimeStatePort(Protocol):
 
     @property
     def arm_resource_reserved(self) -> bool:
-        """约定只读准备、轨迹及停止确认的资源占用。"""
+        """约定只读准备,轨迹及停止确认的资源占用."""
         ...
 
     @property
@@ -125,10 +125,10 @@ class JointFeedbackPort(Protocol):
 
 
 class ArmCommandPort(Protocol):
-    """六轴任务、准备交接、保持、停靠和受仲裁的透传命令。
+    """六轴任务,准备交接,保持,停靠和受仲裁的透传命令.
 
-    reserve/admit/cancel 委托设备所有者串行执行；decode 只在调用线程解码数值。
-    适配器不能因准备服务成功而跳过 admit，也不能直接写入组件的目标或代次。
+    reserve/admit/cancel 委托设备所有者串行执行;decode 只在调用线程解码数值.
+    适配器不能因准备服务成功而跳过 admit,也不能直接写入组件的目标或代次.
     """
 
     def stop_active_motion(self, task=None):
@@ -136,35 +136,35 @@ class ArmCommandPort(Protocol):
         ...
 
     def admission_snapshot(self):
-        """只读缓存准入诊断；不在 ROS 发布线程发设备请求。"""
+        """只读缓存准入诊断;不在 ROS 发布线程发设备请求."""
         ...
 
     def trajectory_capability(self):
-        """当前设备会话与生效限值的只读版本化快照。"""
+        """当前设备会话与生效限值的只读版本化快照."""
         ...
 
     def planning_snapshot(self):
-        """经设备线程取得只读规划快照；不会预约或变更设备输出。"""
+        """经设备线程取得只读规划快照;不会预约或变更设备输出."""
         ...
 
     def reserve_arm_preparation(self, deadline, *, web=False, gripper_command=(), planning=None):
-        """约定在设备线程预留空闲静止资源并颁发不可变身份。"""
+        """约定在设备线程预留空闲静止资源并颁发不可变身份."""
         ...
 
     def decode_prepared_arm_trajectory(self, payload):
-        """约定在调用线程解码冻结系数，不访问设备。"""
+        """约定在调用线程解码冻结系数,不访问设备."""
         ...
 
     def admit_prepared_arm_trajectory(self, token, handoff):
-        """约定设备线程原子复核身份后接纳同一份系数。"""
+        """约定设备线程原子复核身份后接纳同一份系数."""
         ...
 
     def cancel_arm_preparation(self, token, *, wait_for_stop=True):
-        """撤销本身份；可只等撤销接纳，停止确认仍由设备周期持有并推进。"""
+        """撤销本身份;可只等撤销接纳,停止确认仍由设备周期持有并推进."""
         ...
 
     def update_trajectory_scene(self, revision):
-        """约定交接已观察到的碰撞环境版本。"""
+        """约定交接已观察到的碰撞环境版本."""
         ...
 
     def arm_execution_status(self, task):
@@ -172,7 +172,7 @@ class ArmCommandPort(Protocol):
         ...
 
     def teleop_execution_status(self, task):
-        """查询本组合的两侧状态；不暴露执行器或可变任务缓存。"""
+        """查询本组合的两侧状态;不暴露执行器或可变任务缓存."""
         ...
 
     def safe_home(self, target=None, vlim=None, timeout_sec=None):

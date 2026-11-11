@@ -1,4 +1,4 @@
-"""使用假句柄和 POSIX 虚拟串口验证本地驱动与运行时。"""
+"""使用假句柄和 POSIX 虚拟串口验证本地驱动与运行时."""
 from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
@@ -173,7 +173,7 @@ def test_register_failure_aborts_mode_and_enable_path(monkeypatch):
 
 @pytest.mark.parametrize("mode", ["mit", "vel", "pos_vel"])
 def test_disabled_mode_settle_allows_new_verified_feedback(monkeypatch, mode):
-    """缓慢的模式操作不能阻塞共享反馈缓存。"""
+    """缓慢的模式操作不能阻塞共享反馈缓存."""
     manager, _ = make_local_manager(monkeypatch)
     manager.lifecycle.connect()
     driver = manager.runtime.driver
@@ -187,7 +187,7 @@ def test_disabled_mode_settle_allows_new_verified_feedback(monkeypatch, mode):
 
         def acquire_feedback():
             try:
-                # ROS 发布器在释放发布锁前读取该快照；此处阻塞也会阻碍后续刷新。
+                # ROS 发布器在释放发布锁前读取该快照;此处阻塞也会阻碍后续刷新.
                 assert manager.feedback.get_cached_joint_sample()[3] == [0] * 6
                 assert manager.gripper.get_cached_gripper_sample()[3] == 0
                 assert manager.feedback.get_feedback_status() == ([0] * 6, [])
@@ -457,7 +457,7 @@ def test_runtime_self_stop_and_bounded_queue_never_start_second_writer():
 ])
 def test_runtime_cycle_budget_includes_callback_without_catchup(
         monkeypatch, durations, intervals, faulted):
-    """真实调度器按 100 Hz 排期，超时后跳过旧拍且保留重力超时判据。"""
+    """真实调度器按 100 Hz 排期,超时后跳过旧拍且保留重力超时判据."""
     from rebotarmcontroller.runtime import controller_runtime
     from rebotarm_force_control.gravity_control import LoopTiming
 
@@ -568,7 +568,7 @@ def test_persistent_stale_feedback_requests_protection_once_until_verified_disab
     bus.feedback = False
     try:
         wait_until(lambda: bus.disables == 1)
-        # 在真实唯一设备线程推进多个空闲周期，不让一次暂时恢复掩盖重复失能。
+        # 在真实唯一设备线程推进多个空闲周期,不让一次暂时恢复掩盖重复失能.
         manager.runtime.call(lambda: [manager.cycle.feedback_tick() for _ in range(30)])
         assert bus.disables == 1
         assert manager.lifecycle.enabled and manager.lifecycle.state == 'DISABLING'
@@ -621,7 +621,7 @@ def test_invalid_passthrough_cannot_preempt_active_task(monkeypatch, resource, f
     command = SimpleNamespace(mode=1 if resource == 'arm' else 0,
         **{f'use_{key}': True for key in ('pos', 'vel', 'kp', 'kd', 'tau', 'vlim')},
         pos=0., vel=0., kp=1., kd=.1, tau=0., vlim=.3)
-    # MIT 增益与力矩只在 MIT 命令中约束；无效请求仍不得取消正在运行的轨迹。
+    # MIT 增益与力矩只在 MIT 命令中约束;无效请求仍不得取消正在运行的轨迹.
     if resource == 'arm' and field in ('kp', 'tau'):
         command.mode = 0
     setattr(command, field, value)
@@ -663,12 +663,12 @@ def test_valid_passthrough_preempt_uses_feedback_after_stop_confirmation(monkeyp
     original = ArmStop.update
     def stopped(owner, *args, **kwargs):
         result = original(owner, *args, **kwargs)
-        # 模拟停止确认后才收到的位置变化；未显式指定的位置不得沿用抢占前快照。
+        # 模拟停止确认后才收到的位置变化;未显式指定的位置不得沿用抢占前快照.
         if result.state == 'confirmed':
             bus.motors[0].state.pos = .012
             manager.feedback.refresh_feedback_if_due(force=True)
         return result
-    # 每个停止事务独立持有状态机，故在类入口注入确认后的新设备反馈。
+    # 每个停止事务独立持有状态机,故在类入口注入确认后的新设备反馈.
     monkeypatch.setattr(ArmStop, 'update', stopped)
     try:
         manager.arm.send_joint_motor_cmd('joint1', command, arbitration='preempt')
@@ -875,7 +875,7 @@ def test_safe_home_supersession_does_not_rewrite_new_target(monkeypatch):
     manager, opened = make_local_manager(monkeypatch)
     manager.lifecycle.connect(); manager.lifecycle.enable()
     successor = (0.2, -0.2, -0.2, 0., 0., 0.)
-    # 假电机不跟随，确保原任务仍在等待；替换目标后只允许新目标保留。
+    # 假电机不跟随,确保原任务仍在等待;替换目标后只允许新目标保留.
     monkeypatch.setattr(opened[0].motors[0], 'send_pos_vel', lambda *_: None)
     task = manager.arm.submit_home((.1,-.1,-.1,0.,0.,0.), (.3,)*6, 1.)
     manager.arm.set_joint_target(successor)

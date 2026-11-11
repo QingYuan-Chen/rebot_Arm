@@ -1,7 +1,7 @@
-# 文件职责：读取后端一致的规划起点快照，不预约资源、不下发设备命令。
-# 对外接口：/<namespace>/get_arm_planning_state；响应 JSON 遵循共享 planning 协议。
-# 安全约束：success 不是使能或执行许可；只有明确失能可返回仅预览状态。
-# 文件结构：空请求 / 状态和失败原因 / 版本化快照。
+# 文件职责:读取后端一致的规划起点快照,不预约资源,不下发设备命令.
+# 对外接口:/<namespace>/get_arm_planning_state;响应 JSON 遵循共享 planning 协议.
+# 安全约束:success 不是使能或执行许可;只有明确失能可返回仅预览状态.
+# 文件结构:空请求 / 状态和失败原因 / 版本化快照.
 ---
 bool success
 string message

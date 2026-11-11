@@ -174,7 +174,7 @@ class HardwareManager:
         # 组件全部存在后才完成一次绑定, 避免循环依赖要求构造中访问尚未就绪的对端.
         self.feedback.bind(gripper=gripper_acquisition_port)
         self.gripper.bind(feedback=gripper_feedback_port, protection=protection_port)
-        # 准备所需的夹爪快照仍由夹爪组件核验；manager 只绑定方法，不保存第二份状态。
+        # 准备所需的夹爪快照仍由夹爪组件核验;manager 只绑定方法,不保存第二份状态.
         arm_gripper_port = ArmGripperPort(snapshot=self.gripper.preparation_snapshot,
             start_position=self.gripper.start_reserved_position,
             position_state=self.gripper.gripper_execution_status,
@@ -206,7 +206,7 @@ class HardwareManager:
             confirm_disabled=self.protection.confirm_disabled,
             protect=self.protection.protect,
         )
-        # 全部端口绑定完成后才挂运行时回调，确保首次设备请求触发采集时各所有者均已就绪。
+        # 全部端口绑定完成后才挂运行时回调,确保首次设备请求触发采集时各所有者均已就绪.
         self.runtime.idle_callback = self.cycle.feedback_tick
         self.runtime.on_error = lambda exc: self.protection.protect(
             str(exc), category="CONTROLLER")

@@ -1,48 +1,48 @@
-# 网页遥操作状态可视化配置（RViz2 保存的 YAML 配置）。
+# 网页遥操作状态可视化配置(RViz2 保存的 YAML 配置).
 #
-# 用途：与网页遥操作入口配套，只显示“机器人模型 + TF”，作为操作者确认关节是否按预期
-# 运动的“只读状态窗”。配置里刻意不包含任何相机工具、选择工具、运动规划面板或交互
-# 标记：网页侧负责发命令，RViz 侧只负责显示，避免两个界面同时下发造成命令冲突。
+# 用途:与网页遥操作入口配套,只显示"机器人模型 + TF",作为操作者确认关节是否按预期
+# 运动的"只读状态窗".配置里刻意不包含任何相机工具,选择工具,运动规划面板或交互
+# 标记:网页侧负责发命令,RViz 侧只负责显示,避免两个界面同时下发造成命令冲突.
 #
-# 使用前提：需有节点发布 /robot_description 与关节状态；固定坐标系为 base_link，
-# 因此 TF 链必须从 base_link 出发。
+# 使用前提:需有节点发布 /robot_description 与关节状态;固定坐标系为 base_link,
+# 因此 TF 链必须从 base_link 出发.
 Panels:
-  # 只保留 Displays 面板：本配置不做视角保存与切换，省去 Views 面板。
+  # 只保留 Displays 面板:本配置不做视角保存与切换,省去 Views 面板.
   - Class: rviz_common/Displays
     Name: Displays
 Visualization Manager:
   Class: ""
   Displays:
-    # 地面网格：提供尺度参照。
+    # 地面网格:提供尺度参照.
     - Class: rviz_default_plugins/Grid
       Enabled: true
       Name: Grid
-      # Plane Cell Count：网格每边格数（无量纲，20 格），调大视野更广、绘制开销更高。
+      # Plane Cell Count:网格每边格数(无量纲,20 格),调大视野更广,绘制开销更高.
       Plane Cell Count: 20
       Reference Frame: base_link
-    # 机器人模型：从话题读取 URDF 描述，按关节状态绘制。
+    # 机器人模型:从话题读取 URDF 描述,按关节状态绘制.
     - Class: rviz_default_plugins/RobotModel
-      # Description Source=Topic 表示 URDF 从话题订阅。
+      # Description Source=Topic 表示 URDF 从话题订阅.
       Description Source: Topic
       Description Topic:
         Value: /robot_description
       Enabled: true
       Name: RobotModel
-      # Visual Enabled：显示视觉网格；Collision Enabled：显示碰撞体（关闭以免与视觉
-      # 网格重叠造成画面杂乱）。
+      # Visual Enabled:显示视觉网格;Collision Enabled:显示碰撞体(关闭以免与视觉
+      # 网格重叠造成画面杂乱).
       Visual Enabled: true
       Collision Enabled: false
-      # Alpha：模型不透明度 [0,1]，1 为完全不透明。
+      # Alpha:模型不透明度 [0,1],1 为完全不透明.
       Alpha: 1
-    # TF 显示：只勾选末端与抓取参考点，便于确认 TCP 的实际位姿。
+    # TF 显示:只勾选末端与抓取参考点,便于确认 TCP 的实际位姿.
     - Class: rviz_default_plugins/TF
       Enabled: true
-      # Frame Timeout（秒）：超过该时长没有更新的坐标系判为过期，不再绘制。
+      # Frame Timeout(秒):超过该时长没有更新的坐标系判为过期,不再绘制.
       Frame Timeout: 15
       Frames:
-        # All Enabled=false：默认不显示全部坐标系，只显示下面显式置 true 的两项。
-        # 这里与视觉候选显示配置的差别是 base_link 不勾选（避免基座坐标轴挡住模型），
-        # end_link（末端）与 grasp_tcp（抓取工具中心点）勾选。
+        # All Enabled=false:默认不显示全部坐标系,只显示下面显式置 true 的两项.
+        # 这里与视觉候选显示配置的差别是 base_link 不勾选(避免基座坐标轴挡住模型),
+        # end_link(末端)与 grasp_tcp(抓取工具中心点)勾选.
         All Enabled: false
         base_link:
           Value: false
@@ -50,31 +50,31 @@ Visualization Manager:
           Value: true
         grasp_tcp:
           Value: true
-      # Marker Scale：坐标轴箭头尺寸（米），0.08 便于近距离观察末端姿态。
+      # Marker Scale:坐标轴箭头尺寸(米),0.08 便于近距离观察末端姿态.
       Marker Scale: 0.08
       Name: TCP TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        # 展开树以 base_link 为根；空映射表示该根节点下没有额外展开的子项。
+        # 展开树以 base_link 为根;空映射表示该根节点下没有额外展开的子项.
         base_link:
           {}
-      # Update Interval：刷新周期（秒），0 表示每帧都刷新。
+      # Update Interval:刷新周期(秒),0 表示每帧都刷新.
       Update Interval: 0
   Enabled: true
   Global Options:
-    # Background Color：背景色 RGB（0-255 三分量，48;48;48 为深灰）。
+    # Background Color:背景色 RGB(0-255 三分量,48;48;48 为深灰).
     Background Color: 48; 48; 48
-    # Fixed Frame：全局固定坐标系，几乎所有显示项都相对它计算。
+    # Fixed Frame:全局固定坐标系,几乎所有显示项都相对它计算.
     Fixed Frame: base_link
   Name: root
   Tools:
-    # 只保留 Interact 工具；本窗口用于观察状态，不提供相机/选择/测距等工具。
+    # 只保留 Interact 工具;本窗口用于观察状态,不提供相机/选择/测距等工具.
     - Class: rviz_default_plugins/Interact
-  # Value：Visualization Manager 启用标志（RViz 持久化字段）。
+  # Value:Visualization Manager 启用标志(RViz 持久化字段).
   Value: true
 Window Geometry:
-  # 上次退出时的窗口像素尺寸，仅影响界面初始大小，不参与任何计算。
+  # 上次退出时的窗口像素尺寸,仅影响界面初始大小,不参与任何计算.
   Height: 900
   Width: 1200

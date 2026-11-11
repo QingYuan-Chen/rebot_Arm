@@ -1,10 +1,10 @@
-"""MuJoCo 独立夹爪的任务、限速和停止确认。
+"""MuJoCo 独立夹爪的任务,限速和停止确认.
 
-文件职责：拥有单个夹爪任务及预约身份，推进原有位置控制和中性释放。
-对外接口：reserve/start/cancel/advance/release_reservation；task 为具名任务句柄。
-安全约束：调用方按“活动目标锁→仿真访问锁”串行调用；本组件不创建线程或计时器，
-    不接收 ROS 消息。最终目标发送后要求新物理帧，到位/超时保持原预算。
-文件结构：任务数据 → 预约与登记 → 取消 → 物理周期推进。
+文件职责:拥有单个夹爪任务及预约身份,推进原有位置控制和中性释放.
+对外接口:reserve/start/cancel/advance/release_reservation;task 为具名任务句柄.
+安全约束:调用方按"活动目标锁→仿真访问锁"串行调用;本组件不创建线程或计时器,
+    不接收 ROS 消息.最终目标发送后要求新物理帧,到位/超时保持原预算.
+文件结构:任务数据 → 预约与登记 → 取消 → 物理周期推进.
 """
 
 from dataclasses import dataclass
@@ -13,7 +13,7 @@ import math
 
 @dataclass
 class GripperTask:
-    """每个字段由夹爪执行器写入；跨回调传递原句柄身份。"""
+    """每个字段由夹爪执行器写入;跨回调传递原句柄身份."""
 
     owner: object
     start: float
@@ -29,7 +29,7 @@ class GripperTask:
 
 
 class GripperExecution:
-    """复用现有仿真对象和活动目标；锁由上层协调器统一持有。"""
+    """复用现有仿真对象和活动目标;锁由上层协调器统一持有."""
 
     def __init__(self, sim, active, capability):
         self._sim, self._active = sim, active
@@ -53,7 +53,7 @@ class GripperExecution:
             self.reservation = None
 
     def start(self, owner, width, effort):
-        """输入已由协议适配层校验；内部目标仍受启动配置限速、限力矩。"""
+        """输入已由协议适配层校验;内部目标仍受启动配置限速,限力矩."""
         if self._sim.control_mode == 'joint_impedance':
             raise RuntimeError('joint impedance active; enter hold before gripper tasks')
         if self._active.busy and self._active.token is not owner:
@@ -70,7 +70,7 @@ class GripperExecution:
         return self.task
 
     def cancel(self, task, reason):
-        """本任务中性释放后等待静止；旧句柄对新任务无写权限。"""
+        """本任务中性释放后等待静止;旧句柄对新任务无写权限."""
         if task is not self.task or task.state != 'active':
             return
         self._sim.release_gripper_position()
@@ -78,7 +78,7 @@ class GripperExecution:
         task.released = self._sim.get_state().simulation_time
 
     def advance(self):
-        """每物理步推进一次；重复读取同一物理帧不会提前到位。"""
+        """每物理步推进一次;重复读取同一物理帧不会提前到位."""
         task = self.task
         if task is None or task.state not in ('active', 'releasing'):
             return

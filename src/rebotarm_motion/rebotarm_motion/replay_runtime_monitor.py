@@ -93,7 +93,7 @@ class ReplayRuntimeMonitor:
         - ``started_at``: 轨迹下发的起始时刻(秒, 与 ``now`` 同一时钟); ``None`` 表示
           尚未开始计时;
         - ``joints``: 最新关节状态, 形如 ``{关节名: {"position": rad, "velocity": rad/s}}``,
-          位置和速度均必填，缺字段按持续违规处理;
+          位置和速度均必填,缺字段按持续违规处理;
         - ``now``: 本次检查时刻(秒, 需单调时钟);
         - ``config``: 阈值配置, 见 :class:`ReplayRuntimeMonitorConfig`.
 

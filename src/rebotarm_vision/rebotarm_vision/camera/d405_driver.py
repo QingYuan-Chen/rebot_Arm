@@ -1,9 +1,9 @@
-"""D405 USB 采集：输出 BGR、毫米 uint16 深度、SDK 标定和帧元数据。
+"""D405 USB 采集:输出 BGR,毫米 uint16 深度,SDK 标定和帧元数据.
 
-对外提供 open/warmup/get_frame/close 与只读诊断查询，供视觉节点和独立预览使用。
-SDK 延迟导入；同一线程串行调用。只返回本次 frameset，超时或缺流均不复用旧帧。
-配置、标定及 SDK 异常直接上抛，超时由视觉节点的既有空帧策略处理。
-文件依次包含配置、会话管理、几何转换、采集及诊断接口，不接触 ROS 或运动控制。
+对外提供 open/warmup/get_frame/close 与只读诊断查询,供视觉节点和独立预览使用.
+SDK 延迟导入;同一线程串行调用.只返回本次 frameset,超时或缺流均不复用旧帧.
+配置,标定及 SDK 异常直接上抛,超时由视觉节点的既有空帧策略处理.
+文件依次包含配置,会话管理,几何转换,采集及诊断接口,不接触 ROS 或运动控制.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class D405Config:
-    """流尺寸、帧率必须命中设备档位；深度单位始终取 SDK 的实际比例尺。"""
+    """流尺寸,帧率必须命中设备档位;深度单位始终取 SDK 的实际比例尺."""
 
     color_width: int = 640
     color_height: int = 480
@@ -32,7 +32,7 @@ class D405Config:
 
 
 class D405Driver:
-    """拥有一次 pipeline 会话；关闭幂等，启动后的初始化失败会立即释放设备。"""
+    """拥有一次 pipeline 会话;关闭幂等,启动后的初始化失败会立即释放设备."""
 
     def __init__(self, config: D405Config) -> None:
         self._config = config
@@ -47,7 +47,7 @@ class D405Driver:
         self._last_debug_message = "driver_not_opened"
 
     def open(self) -> None:
-        """只选择 D405；显式档位不可用时由 SDK 报错，不降级到其他分辨率。"""
+        """只选择 D405;显式档位不可用时由 SDK 报错,不降级到其他分辨率."""
         import pyrealsense2 as rs
 
         if self._pipeline is not None:
@@ -80,7 +80,7 @@ class D405Driver:
         name = device.get_info(rs.camera_info.name)
         if name.split()[-1] != "D405":
             raise RuntimeError(f"camera.type=d405 requires D405; selected device: {name}")
-        # global_time 与主机墙钟同源；仅有硬件时钟时上层使用接收时间。
+        # global_time 与主机墙钟同源;仅有硬件时钟时上层使用接收时间.
         for sensor in device.query_sensors():
             if sensor.supports(rs.option.global_time_enabled):
                 sensor.set_option(rs.option.global_time_enabled, 1.0)
@@ -130,7 +130,7 @@ class D405Driver:
         import pyrealsense2 as rs
 
         intrinsic = profile.get_intrinsics()
-        # 与 RealSense ROS 的 CameraInfo 映射一致，保留 SDK 原模型供诊断。
+        # 与 RealSense ROS 的 CameraInfo 映射一致,保留 SDK 原模型供诊断.
         if intrinsic.model == rs.distortion.kannala_brandt4:
             model, coefficients = "equidistant", intrinsic.coeffs[:4]
         elif intrinsic.model in (
@@ -156,7 +156,7 @@ class D405Driver:
 
     @staticmethod
     def _extrinsic_payload(extrinsic) -> dict:
-        # SDK 的旋转按列存储、平移为米；诊断接口沿用行矩阵与毫米。
+        # SDK 的旋转按列存储,平移为米;诊断接口沿用行矩阵与毫米.
         return {
             "rotation": np.asarray(extrinsic.rotation).reshape(3, 3, order="F").tolist(),
             "translation_mm": (np.asarray(extrinsic.translation) * 1000.0).tolist(),
@@ -182,7 +182,7 @@ class D405Driver:
         }
 
     def get_frame(self, allow_partial: bool = False) -> tuple[np.ndarray | None, np.ndarray | None]:
-        """读取同步 frameset；部分模式返回可用流，完整模式拒绝残帧，均无历史补帧。"""
+        """读取同步 frameset;部分模式返回可用流,完整模式拒绝残帧,均无历史补帧."""
         if self._pipeline is None:
             raise RuntimeError("D405 pipeline is not opened")
         self._frame_metadata = {}
@@ -192,7 +192,7 @@ class D405Driver:
             return None, None
         color, depth = frames.get_color_frame(), frames.get_depth_frame()
         if self._align is not None:
-            # 对齐依赖两路；缺彩色时禁止把原生深度标成彩色坐标下的深度。
+            # 对齐依赖两路;缺彩色时禁止把原生深度标成彩色坐标下的深度.
             if color and depth:
                 frames = self._align.process(frames)
                 color, depth = frames.get_color_frame(), frames.get_depth_frame()
@@ -222,7 +222,7 @@ class D405Driver:
         return color_bgr, depth_mm
 
     def warmup(self, frames: int) -> bool:
-        """丢弃指定数量的启动帧，至少取得一次完整 RGB-D 才报告就绪。"""
+        """丢弃指定数量的启动帧,至少取得一次完整 RGB-D 才报告就绪."""
         ready = False
         for _ in range(max(0, frames)):
             color, depth = self.get_frame()
@@ -230,7 +230,7 @@ class D405Driver:
         return ready
 
     def close(self) -> None:
-        """释放 pipeline；停止失败直接上抛，保留句柄供调用方再次清理。"""
+        """释放 pipeline;停止失败直接上抛,保留句柄供调用方再次清理."""
         if self._pipeline is not None:
             self._pipeline.stop()
             self._pipeline = None

@@ -1,9 +1,9 @@
-# 仿真六轴静态关节阻抗，仅由 /<namespace>/sim/set_joint_impedance 提供。
-# 六轴顺序 joint1..joint6；整批校验通过后原子更新，续期使用仿真时间。
+# 仿真六轴静态关节阻抗,仅由 /<namespace>/sim/set_joint_impedance 提供.
+# 六轴顺序 joint1..joint6;整批校验通过后原子更新,续期使用仿真时间.
 float64[6] positions         # 平衡角 rad
 float64[6] stiffness         # 刚度 N·m/rad
 float64[6] damping           # 阻尼 N·m·s/rad
-float64 timeout_s           # 正的有限看门狗期限 s；到期保持当前姿态
+float64 timeout_s           # 正的有限看门狗期限 s;到期保持当前姿态
 ---
 bool success
 string message

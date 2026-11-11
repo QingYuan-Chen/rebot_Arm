@@ -3,45 +3,45 @@
 <package format="3">
   <name>rebotarm_dashboard</name>
   <version>0.1.0</version>
-  <!-- 包描述（保留英文原文，供包索引与 rosdep 展示） -->
+  <!-- 包描述(保留英文原文,供包索引与 rosdep 展示) -->
   <description>Web dashboard, SSE status, and API adapter for reBotArm.</description>
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 构建类型：ament_python，由 setup.py 安装 Python 包与控制台入口 -->
+  <!-- 构建类型:ament_python,由 setup.py 安装 Python 包与控制台入口 -->
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- 资源定位：按包名查找 share 目录，面板据此定位模型配置包中的 URDF 与网格目录 -->
+  <!-- 资源定位:按包名查找 share 目录,面板据此定位模型配置包中的 URDF 与网格目录 -->
   <exec_depend>ament_index_python</exec_depend>
-  <!-- 控制相关动作消息：跟随关节轨迹与夹爪命令（FollowJointTrajectory、GripperCommand） -->
+  <!-- 控制相关动作消息:跟随关节轨迹与夹爪命令(FollowJointTrajectory,GripperCommand) -->
   <exec_depend>control_msgs</exec_depend>
-  <!-- 运动规划消息（机器人状态、规划场景等）：随运动/回放接口链声明，本包源码未直接引用 -->
+  <!-- 运动规划消息(机器人状态,规划场景等):随运动/回放接口链声明,本包源码未直接引用 -->
   <exec_depend>moveit_msgs</exec_depend>
-  <!-- Python 客户端库：节点、参数声明、订阅、动作客户端与各类服务客户端 -->
+  <!-- Python 客户端库:节点,参数声明,订阅,动作客户端与各类服务客户端 -->
   <exec_depend>rclpy</exec_depend>
-  <!-- 本仓自定义接口：整臂状态、逐电机状态消息与示教记录路径服务 -->
+  <!-- 本仓自定义接口:整臂状态,逐电机状态消息与示教记录路径服务 -->
   <exec_depend>rebotarm_msgs</exec_depend>
-  <!-- 运动层（轨迹生成、MoveIt 适配、重定时与碰撞检查）：面板经示教/回放工作流间接依赖，不复制其实现 -->
+  <!-- 运动层(轨迹生成,MoveIt 适配,重定时与碰撞检查):面板经示教/回放工作流间接依赖,不复制其实现 -->
   <exec_depend>rebotarm_motion</exec_depend>
-  <!-- 模型与规划配置：URDF/SRDF 及其网格；面板读取关节限位并提供 /robot/urdf 资源 -->
+  <!-- 模型与规划配置:URDF/SRDF 及其网格;面板读取关节限位并提供 /robot/urdf 资源 -->
   <exec_depend>rebotarm_moveit_config</exec_depend>
-  <!-- 示教层：示教记录客户端、轨迹预览与回放工作流的接口来源 -->
+  <!-- 示教层:示教记录客户端,轨迹预览与回放工作流的接口来源 -->
   <exec_depend>rebotarm_teach</exec_depend>
-  <!-- 操作适配层：键盘/Web 点动命令的校验与执行入口 -->
+  <!-- 操作适配层:键盘/Web 点动命令的校验与执行入口 -->
   <exec_depend>rebotarm_teleop</exec_depend>
-  <!-- 传感器消息：关节状态反馈（JointState） -->
+  <!-- 传感器消息:关节状态反馈(JointState) -->
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- 基础消息：状态等字符串字段（String） -->
+  <!-- 基础消息:状态等字符串字段(String) -->
   <exec_depend>std_msgs</exec_depend>
-  <!-- 标准服务：Trigger 类型的使能/失能/回原点与轨迹停止服务 -->
+  <!-- 标准服务:Trigger 类型的使能/失能/回原点与轨迹停止服务 -->
   <exec_depend>std_srvs</exec_depend>
-  <!-- 轨迹消息：回放与点动执行时构造/校验轨迹目标（JointTrajectory、JointTrajectoryPoint） -->
+  <!-- 轨迹消息:回放与点动执行时构造/校验轨迹目标(JointTrajectory,JointTrajectoryPoint) -->
   <exec_depend>trajectory_msgs</exec_depend>
 
   <exec_depend>diagnostic_msgs</exec_depend>
   <export>
-    <!-- 诊断只读订阅，无设备访问。 -->
-    <!-- 声明构建类型，缺少时 ros2 run 无法定位本包的可执行入口 -->
+    <!-- 诊断只读订阅,无设备访问. -->
+    <!-- 声明构建类型,缺少时 ros2 run 无法定位本包的可执行入口 -->
     <build_type>ament_python</build_type>
   </export>
 </package>

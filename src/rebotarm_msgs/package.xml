@@ -1,36 +1,36 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<!-- 消息接口包清单：只声明接口定义与生成器依赖，不含运行期可执行程序。
-     本清单同时决定构建顺序——任何 <depend> 都会把该包排在 rebotarm_msgs 之前，
-     因此不要在这里加入仅测试或仅文档相关的包。 -->
+<!-- 消息接口包清单:只声明接口定义与生成器依赖,不含运行期可执行程序.
+     本清单同时决定构建顺序-任何 <depend> 都会把该包排在 rebotarm_msgs 之前,
+     因此不要在这里加入仅测试或仅文档相关的包. -->
 <package format="3">
-  <!-- 包名必需与 CMakeLists.txt 的 project() 一致。 -->
+  <!-- 包名必需与 CMakeLists.txt 的 project() 一致. -->
   <name>rebotarm_msgs</name>
   <version>0.1.0</version>
   <description>Custom ROS 2 interfaces for the reBotArm driver.</description>
-  <!-- 维护者与许可证：发布元数据，保持原样。 -->
+  <!-- 维护者与许可证:发布元数据,保持原样. -->
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- ament_cmake：构建系统本身。 -->
+  <!-- ament_cmake:构建系统本身. -->
   <buildtool_depend>ament_cmake</buildtool_depend>
-  <!-- rosidl_default_generators：把 .msg/.srv/.action 生成语言绑定的构建工具。 -->
+  <!-- rosidl_default_generators:把 .msg/.srv/.action 生成语言绑定的构建工具. -->
   <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
-  <!-- 以下四个是接口字段直接引用的类型来源，必须与 CMakeLists.txt 的
-       find_package/DEPENDENCIES 保持一致：builtin_interfaces 提供 Time 时间戳，
-       geometry_msgs 提供 Pose/PoseStamped，std_msgs 提供 Header，
-       trajectory_msgs 提供轨迹消息。 -->
+  <!-- 以下四个是接口字段直接引用的类型来源,必须与 CMakeLists.txt 的
+       find_package/DEPENDENCIES 保持一致:builtin_interfaces 提供 Time 时间戳,
+       geometry_msgs 提供 Pose/PoseStamped,std_msgs 提供 Header,
+       trajectory_msgs 提供轨迹消息. -->
   <depend>builtin_interfaces</depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
   <depend>trajectory_msgs</depend>
   <depend>sensor_msgs</depend>
 
-  <!-- rosidl 运行期支持：生成代码在 import 时需要它，属于运行期依赖而非构建依赖。 -->
+  <!-- rosidl 运行期支持:生成代码在 import 时需要它,属于运行期依赖而非构建依赖. -->
   <exec_depend>rosidl_default_runtime</exec_depend>
 
-  <!-- 声明本包属于 rosidl 接口包组，供 rosdep/构建工具识别接口包类型。 -->
+  <!-- 声明本包属于 rosidl 接口包组,供 rosdep/构建工具识别接口包类型. -->
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <export>

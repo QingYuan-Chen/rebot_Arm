@@ -129,7 +129,7 @@ def _run_torque(sim, values, *, timeout: float, observe: float):
 
 
 def _run_impedance(sim, positions, stiffness, damping, *, duration: float, timeout: float):
-    """按仿真时间续期，停止续期后验证看门狗实际返回保持。"""
+    """按仿真时间续期,停止续期后验证看门狗实际返回保持."""
     if timeout < 2 * sim.timestep:
         raise ValueError("impedance CLI timeout must cover at least two physics steps")
     start = float(sim.get_state().simulation_time)
@@ -144,7 +144,7 @@ def _run_impedance(sim, positions, stiffness, damping, *, duration: float, timeo
     active_control = sim.get_control_status()
     if active_control.mode != "joint_impedance":
         raise RuntimeError("joint impedance expired before the requested duration")
-    # 保留停止续期前的状态，随后只推进物理时间，检查真正的到期路径。
+    # 保留停止续期前的状态,随后只推进物理时间,检查真正的到期路径.
     observe_until = float(sim.get_state().simulation_time) + timeout + sim.timestep
     while float(sim.get_state().simulation_time) + 1e-15 < observe_until:
         sim.step()

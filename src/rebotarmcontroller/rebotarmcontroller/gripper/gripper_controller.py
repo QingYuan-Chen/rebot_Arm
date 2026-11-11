@@ -170,7 +170,7 @@ class GripperController:
         return self._gripper_mot is not None
 
     def preparation_snapshot(self):
-        """只复制新鲜、连续静止且空闲的夹爪状态，不能在准备时停止原有夹爪任务。"""
+        """只复制新鲜,连续静止且空闲的夹爪状态,不能在准备时停止原有夹爪任务."""
         sample = self.feedback.verified_sample('gripper')
         with self._gripper_execution._gripper_lock:
             if (self._gripper_execution._gripper_active
@@ -180,7 +180,7 @@ class GripperController:
                     or not self._stationary.confirmed(time.monotonic())):
                 raise RuntimeError('fresh stationary idle gripper required')
             width = float(np.clip(sample.state.pos / _G_ANGLE_OPEN * _G_MAX_DIST_M, 0., _G_MAX_DIST_M))
-            # 碰撞模型使用左右手指的米制坐标，原始电机角保留在快照中供诊断。
+            # 碰撞模型使用左右手指的米制坐标,原始电机角保留在快照中供诊断.
             return dict(positions=(width/2, -width/2), raw_position=sample.state.pos,
                         generation=self._gripper_execution._generation)
 
@@ -191,7 +191,7 @@ class GripperController:
             return bool(self._gripper_execution._gripper_active)
 
     def start_reserved_position(self, token, position_m, max_effort):
-        """仅供设备事务内的组合所有者接纳；令牌身份及目标均须与原预约一致。"""
+        """仅供设备事务内的组合所有者接纳;令牌身份及目标均须与原预约一致."""
         self._backend.assert_writer()
         if (self._backend.execution.reservation is not token or token.collision_policy != 1
                 or token.gripper_command != (position_m, max_effort)
@@ -419,7 +419,7 @@ class GripperController:
         return self._accept_position_target(position_m, max_effort)
 
     def _accept_position_target(self, position_m, max_effort):
-        """两类入口共用原位置逻辑；调用者已核验预约，实际输出仍由统一周期完成。"""
+        """两类入口共用原位置逻辑;调用者已核验预约,实际输出仍由统一周期完成."""
         self._backend.assert_writer()
         self._lifecycle.require_enabled()
         if not self._backend.control_loop_active:

@@ -5,15 +5,15 @@
 
 对外接口
     ArmExecution 接纳数值轨迹; sample 返回 ArmTarget 候选, acknowledge 在发送成功后提交游标.
-    submit_prepared 接纳已检查的多项式；last_sent_target
-    记录最后成功发送的位置，供准备事务绑定保持目标。
+    submit_prepared 接纳已检查的多项式;last_sent_target
+    记录最后成功发送的位置,供准备事务绑定保持目标.
 
 安全与并发约束
     锁内快照与代次防止旧发送确认污染接替目标; 发送进度不能用作物理到位证明.
 
 统一约定
-    六轴固定 joint1..joint6; 位置 rad, 轨迹时间为相对单调秒。
-    velocity_override 是固件使用的正速度上限 rad/s，不是参考曲线的有符号导数。
+    六轴固定 joint1..joint6; 位置 rad, 轨迹时间为相对单调秒.
+    velocity_override 是固件使用的正速度上限 rad/s,不是参考曲线的有符号导数.
 
 文件结构(按定义顺序)
     ArmTarget: 一次待发送的六轴目标; ``cursor`` 是发送成功后应确认的位置.
@@ -50,7 +50,7 @@ class ArmExecution:
         self._cursor = 0
         self._started = 0.
         self._curve = None
-        # 候选采样不能改写已发送证据；reservation 的释放则由六轴业务所有者决定。
+        # 候选采样不能改写已发送证据;reservation 的释放则由六轴业务所有者决定.
         self.last_sent_target = None
         self.reservation = None
         self.running = False
@@ -96,7 +96,7 @@ class ArmExecution:
         with self.lock:
             self.cancel()
             self._target, self._override = target, override
-            # 专属停靠同样等待一次完整发送回执，再由任务检查后续新反馈。
+            # 专属停靠同样等待一次完整发送回执,再由任务检查后续新反馈.
             self.moving = True
             return self._generation
 
@@ -115,7 +115,7 @@ class ArmExecution:
         with self.lock:
             # 代次变化使取消前产生的轨迹和待发送快照失效.
             self._generation += 1
-            # 这里只使曲线失效；停止确认前仍保留 reservation，避免夹爪提前改变几何。
+            # 这里只使曲线失效;停止确认前仍保留 reservation,避免夹爪提前改变几何.
             self._curve = None
             self._override = None
             self._cursor = 0
@@ -123,10 +123,10 @@ class ArmExecution:
             return self._generation
 
     def submit_prepared(self, curve, generation, *, now):
-        """接纳原样系数；调用方须先完成限位/碰撞及上下文的原子复核。
+        """接纳原样系数;调用方须先完成限位/碰撞及上下文的原子复核.
 
-        本层只检查首末位置与执行代次，不重新规范化、合并节点或拟合。
-        now 是后端确定的执行起时，不能使用准备开始时刻补发已经过去的采样。
+        本层只检查首末位置与执行代次,不重新规范化,合并节点或拟合.
+        now 是后端确定的执行起时,不能使用准备开始时刻补发已经过去的采样.
         """
         self.validate_target(curve.points[0].positions)
         self.validate_target(curve.points[-1].positions)
@@ -140,10 +140,10 @@ class ArmExecution:
             return True
 
     def sample(self, now):
-        """按当前单调时刻求值已检查曲线；采样只生成候选，发送成功后才确认进度。"""
+        """按当前单调时刻求值已检查曲线;采样只生成候选,发送成功后才确认进度."""
         with self.lock:
             if self._curve is not None and self.moving:
-                # 周期延迟时跳到当前参考，不追赶补发中间点；末点只有发送成功才转保持。
+                # 周期延迟时跳到当前参考,不追赶补发中间点;末点只有发送成功才转保持.
                 elapsed = now-self._started
                 q = self._curve.sample(elapsed)[0]
                 return ArmTarget(q, self._override, self._generation,
@@ -157,7 +157,7 @@ class ArmExecution:
             if target.generation!=self._generation: return
             self.last_sent_target = tuple(target.positions)
             if self._curve is not None:
-                # 正常完成继续保持最终命令，不能把瞬时反馈误差写成新的终点。
+                # 正常完成继续保持最终命令,不能把瞬时反馈误差写成新的终点.
                 self._target = self.last_sent_target
             self._cursor = target.cursor
             if self._curve is not None and self._cursor == len(self._curve.points):

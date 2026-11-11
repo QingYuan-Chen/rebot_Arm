@@ -9,20 +9,20 @@ from rebotarm_simulation.control.motor_control import MotorSpec, ArmControlParam
 def load_motor_control_parameters(
     repo_root: str | Path | None = None, *, calibration_path: Path | None = None, urdf_path: Path | None = None,
 ) -> MotorControlParameters:
-    """读取标定文件与 URDF 限幅，组装出完整控制参数。
+    """读取标定文件与 URDF 限幅,组装出完整控制参数.
 
-    参数（均为仅关键字）：
-        calibration_path: 电机标定 YAML 路径；默认取本包 config 目录下的标定文件。
-        urdf_path: 权威 URDF 路径；默认取运动规划配置包中的 rebotarm.urdf，
-            其 joint/limit@effort 作为各关节力矩上限。
+    参数(均为仅关键字):
+        calibration_path: 电机标定 YAML 路径;默认取本包 config 目录下的标定文件.
+        urdf_path: 权威 URDF 路径;默认取运动规划配置包中的 rebotarm.urdf,
+            其 joint/limit@effort 作为各关节力矩上限.
 
-    返回：组装好的 :class:`MotorControlParameters`。
+    返回:组装好的 :class:`MotorControlParameters`.
 
-    异常：标定值缺失或类型不符时由字典访问/``float()`` 抛出；
-    ``torque_lowpass_alpha`` 不在 (0, 1] 区间时抛 ``ValueError``。
+    异常:标定值缺失或类型不符时由字典访问/``float()`` 抛出;
+    ``torque_lowpass_alpha`` 不在 (0, 1] 区间时抛 ``ValueError``.
 
-    说明：这里同时读取「固件参考整定」与「仿真换算标定」两段，
-    关节顺序完全由 firmware_reference.arm 的键序决定。
+    说明:这里同时读取"固件参考整定"与"仿真换算标定"两段,
+    关节顺序完全由 firmware_reference.arm 的键序决定.
     """
     if repo_root is not None:
         root = Path(repo_root)
@@ -36,7 +36,7 @@ def load_motor_control_parameters(
         "rebotarm_moveit_config", "config/rebotarm.urdf",
     ))
 
-    # 电机型号规格：额定/峰值力矩与减速比，供换算与重力补偿使用
+    # 电机型号规格:额定/峰值力矩与减速比,供换算与重力补偿使用
     motor_specs = {
         name: MotorSpec(
             name=name,
@@ -47,7 +47,7 @@ def load_motor_control_parameters(
         for name, values in calibration["motor_specs"].items()
     }
 
-    # 按固件参考的关节顺序逐个展开成等长元组，保证索引对齐
+    # 按固件参考的关节顺序逐个展开成等长元组,保证索引对齐
     arm_calibration = calibration["arm"]
     joint_names: list[str] = []
     motor_models: list[str] = []
@@ -82,12 +82,12 @@ def load_motor_control_parameters(
             raise ValueError(f"torque_lowpass_alpha for {name} must be in (0, 1]")
         torque_lowpass_alpha.append(alpha)
 
-    # 夹爪：固件默认增益取自固件参考段，其余换算标定取自仿真标定段
+    # 夹爪:固件默认增益取自固件参考段,其余换算标定取自仿真标定段
     source_gripper = reference["gripper"]
     gripper_calibration = calibration["gripper"]
     modes = gripper_calibration["modes"]
     displacement_range = gripper_calibration["displacement_range_m"]
-    # 组装：控制周期取固件参考频率；积分限幅与重力补偿系数取自仿真标定段
+    # 组装:控制周期取固件参考频率;积分限幅与重力补偿系数取自仿真标定段
     return MotorControlParameters(
         control_rate_hz=float(reference["rate_hz"]),
         motor_specs=motor_specs,
@@ -135,7 +135,7 @@ def load_motor_control_parameters(
 
 
 def _read_yaml(path: Path) -> dict:
-    """读取 UTF-8 YAML 并要求顶层为映射，否则抛 ``ValueError``。"""
+    """读取 UTF-8 YAML 并要求顶层为映射,否则抛 ``ValueError``."""
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"expected YAML mapping in {path}")
@@ -143,7 +143,7 @@ def _read_yaml(path: Path) -> dict:
 
 
 def _load_urdf_efforts(path: Path) -> dict[str, float]:
-    """从 URDF 提取「关节名 → limit@effort（N·m）」，作为关节力矩硬上限。"""
+    """从 URDF 提取"关节名 → limit@effort(N·m)",作为关节力矩硬上限."""
     root = ET.parse(path).getroot()
     return {
         joint.attrib["name"]: float(limit.attrib["effort"])

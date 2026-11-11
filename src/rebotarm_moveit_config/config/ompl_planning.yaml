@@ -1,74 +1,74 @@
-# OMPL 规划流水线配置（MoveIt move_group 的 planning pipeline id 为 ompl）。
+# OMPL 规划流水线配置(MoveIt move_group 的 planning pipeline id 为 ompl).
 #
-# 本文件只描述"规划器插件 + 请求/响应适配器 + arm 规划组的规划器清单"。它由演示启动文件与
-# 上层启动组合包以 YAML 形式整体下发给 move_group，同时 moveit_demo.launch.py 还会把它打印到终端，
-# 便于排查"规划失败但看不出原因"的问题。任何键名拼错都会表现为规划插件为空，从而规划失败。
+# 本文件只描述"规划器插件 + 请求/响应适配器 + arm 规划组的规划器清单".它由演示启动文件与
+# 上层启动组合包以 YAML 形式整体下发给 move_group,同时 moveit_demo.launch.py 还会把它打印到终端,
+# 便于排查"规划失败但看不出原因"的问题.任何键名拼错都会表现为规划插件为空,从而规划失败.
 #
-# 三段结构：
-# - planning_plugins：本条流水线真正加载的规划器插件（只保留 OMPL）；
-# - request_adapters：规划前对请求做规范化与校验的适配器，顺序即执行顺序（列表顺序有语义）；
-# - response_adapters：规划后对轨迹做时间参数化、平滑与校验的适配器，顺序同样有语义
-#   （时间最优参数化必须先于 Ruckig 平滑，测试会断言这一先后关系）。
+# 三段结构:
+# - planning_plugins:本条流水线真正加载的规划器插件(只保留 OMPL);
+# - request_adapters:规划前对请求做规范化与校验的适配器,顺序即执行顺序(列表顺序有语义);
+# - response_adapters:规划后对轨迹做时间参数化,平滑与校验的适配器,顺序同样有语义
+#   (时间最优参数化必须先于 Ruckig 平滑,测试会断言这一先后关系).
 planning_plugins:
-  # OMPL 规划接口插件；删掉或改名会让 ompl 流水线找不到规划器，直接导致规划失败。
+  # OMPL 规划接口插件;删掉或改名会让 ompl 流水线找不到规划器,直接导致规划失败.
   - ompl_interface/OMPLPlanner
 request_adapters:
-  # 把约束里的坐标系解析成规划场景中真实存在的坐标系（TF），避免因坐标系别名导致约束失效。
+  # 把约束里的坐标系解析成规划场景中真实存在的坐标系(TF),避免因坐标系别名导致约束失效.
   - default_planning_request_adapters/ResolveConstraintFrames
-  # 检查并补全工作空间边界，防止规划器在无边界（无限大）空间里采样而永不出解。
+  # 检查并补全工作空间边界,防止规划器在无边界(无限大)空间里采样而永不出解.
   - default_planning_request_adapters/ValidateWorkspaceBounds
-  # 校验起点是否在关节限位内；越界时按限位截断而不是直接放弃规划。
+  # 校验起点是否在关节限位内;越界时按限位截断而不是直接放弃规划.
   - default_planning_request_adapters/CheckStartStateBounds
-  # 校验起点是否自碰撞/与环境碰撞：在规划前就拦住，避免"起点已经撞了"还去规划。
+  # 校验起点是否自碰撞/与环境碰撞:在规划前就拦住,避免"起点已经撞了"还去规划.
   - default_planning_request_adapters/CheckStartStateCollision
 response_adapters:
-  # TOTG 先为几何路径生成时间戳、速度和加速度。
+  # TOTG 先为几何路径生成时间戳,速度和加速度.
   - default_planning_response_adapters/AddTimeOptimalParameterization
-  # Ruckig 再按关节 jerk 限制平滑已参数化轨迹，避免后续 TOTG 重写平滑结果。
+  # Ruckig 再按关节 jerk 限制平滑已参数化轨迹,避免后续 TOTG 重写平滑结果.
   - default_planning_response_adapters/AddRuckigTrajectorySmoothing
-  # 最终解校验：确认返回的轨迹满足关节限位与约束，不满足则丢弃。
+  # 最终解校验:确认返回的轨迹满足关节限位与约束,不满足则丢弃.
   - default_planning_response_adapters/ValidateSolution
-  # 把成功路径发布到 /display_planned_path，供 RViz 显示（只影响可视化，不影响执行）。
+  # 把成功路径发布到 /display_planned_path,供 RViz 显示(只影响可视化,不影响执行).
   - default_planning_response_adapters/DisplayMotionPath
-# 允许规划起点关节角与"当前状态"的最大偏差，单位 rad。0.1 rad 约为 5.7 度；
-# 设得过小会因关节状态反馈抖动而频繁拒绝规划，设得过大则可能在明显偏离的位置起规划。
+# 允许规划起点关节角与"当前状态"的最大偏差,单位 rad.0.1 rad 约为 5.7 度;
+# 设得过小会因关节状态反馈抖动而频繁拒绝规划,设得过大则可能在明显偏离的位置起规划.
 start_state_max_bounds_error: 0.1
 
-# 非串联复合组使用联合关节约束；位姿目标须先对 arm 求 IK，不为复合组冒用 IK 插件。
+# 非串联复合组使用联合关节约束;位姿目标须先对 arm 求 IK,不为复合组冒用 IK 插件.
 gripper:
   planner_configs: [RRTConnectkConfigDefault]
   longest_valid_segment_fraction: 0.01
 
-# 可被规划组引用的规划器实例。arm 规划组通过下面的 planner_configs 列表选用其中若干项；
-# 只在这里声明而未列入某个规划组，RViz 里就不会出现该规划器选项。
+# 可被规划组引用的规划器实例.arm 规划组通过下面的 planner_configs 列表选用其中若干项;
+# 只在这里声明而未列入某个规划组,RViz 里就不会出现该规划器选项.
 planner_configs:
-  # 双向 RRT-Connect：默认规划器，速度快、实现成熟，适合大多数点到点运动。
+  # 双向 RRT-Connect:默认规划器,速度快,实现成熟,适合大多数点到点运动.
   RRTConnectkConfigDefault:
-    # OMPL 几何规划算法类型；geometric 表示只考虑几何路径，不考虑动力学。
+    # OMPL 几何规划算法类型;geometric 表示只考虑几何路径,不考虑动力学.
     type: geometric::RRTConnect
-    # 单次扩展步长。0.0 表示使用 OMPL/MoveIt 的默认步长（不在此处硬编码），
-    # 调大可加速探索但路径更粗糙，调小则更精细但更慢。
+    # 单次扩展步长.0.0 表示使用 OMPL/MoveIt 的默认步长(不在此处硬编码),
+    # 调大可加速探索但路径更粗糙,调小则更精细但更慢.
     range: 0.0
-  # RRT*（渐近最优）：路径更短更平滑，但耗时长，作为备选规划器。
+  # RRT*(渐近最优):路径更短更平滑,但耗时长,作为备选规划器.
   RRTstarkConfigDefault:
     type: geometric::RRTstar
-    # 同样为 0.0，表示用默认步长。
+    # 同样为 0.0,表示用默认步长.
     range: 0.0
-    # 目标偏置概率：以 5% 的概率直接朝目标采样，用于在开阔空间加速收敛；
-    # 调大收敛更快但在窄通道中更容易被障碍吸引。
+    # 目标偏置概率:以 5% 的概率直接朝目标采样,用于在开阔空间加速收敛;
+    # 调大收敛更快但在窄通道中更容易被障碍吸引.
     goal_bias: 0.05
-    # 是否延迟碰撞检测：1 表示先只对几何路径做粗略检查、后续再补细查，用少量正确性风险换速度。
+    # 是否延迟碰撞检测:1 表示先只对几何路径做粗略检查,后续再补细查,用少量正确性风险换速度.
     delay_collision_checking: 1
 
-# 规划组 arm（base_link -> end_link 串联链）的 OMPL 专属设置。
+# 规划组 arm(base_link -> end_link 串联链)的 OMPL 专属设置.
 arm:
-  # 该规划组可用的规划器，第一项为默认值；顺序会影响 RViz 下拉框中的排列与默认选择。
+  # 该规划组可用的规划器,第一项为默认值;顺序会影响 RViz 下拉框中的排列与默认选择.
   planner_configs:
     - RRTConnectkConfigDefault
     - RRTstarkConfigDefault
-  # 投影评估器：用 joint1、joint2 两个关节构成二维投影来评估"目标区域已覆盖"，
-  # 也就是用大臂的两个主要自由度近似判断覆盖率，避免在全部六维上重复采样。
+  # 投影评估器:用 joint1,joint2 两个关节构成二维投影来评估"目标区域已覆盖",
+  # 也就是用大臂的两个主要自由度近似判断覆盖率,避免在全部六维上重复采样.
   projection_evaluator: joints(joint1,joint2)
-  # 碰撞检测的离散粒度：以"路径总长度"为基准的最长有效段比例。0.01 表示路径被切成约
-  # 100 段逐段检查，属于偏精细的设置（越小越安全但规划越慢，越大越快但可能漏检薄壁障碍）。
+  # 碰撞检测的离散粒度:以"路径总长度"为基准的最长有效段比例.0.01 表示路径被切成约
+  # 100 段逐段检查,属于偏精细的设置(越小越安全但规划越慢,越大越快但可能漏检薄壁障碍).
   longest_valid_segment_fraction: 0.01

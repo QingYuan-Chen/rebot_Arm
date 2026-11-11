@@ -1,14 +1,14 @@
-# 职责：由 rebotarm_motion 提供 /<namespace>/move_to_pose_ik 兼容服务。
-# IK 结果经两点路径重定时及碰撞检查后提交唯一 FJT；要求显式使能和新鲜反馈。
-# 该服务会触发执行，不能用作只读 IK 预览；碰撞未知时拒绝，不做避障搜索。
+# 职责:由 rebotarm_motion 提供 /<namespace>/move_to_pose_ik 兼容服务.
+# IK 结果经两点路径重定时及碰撞检查后提交唯一 FJT;要求显式使能和新鲜反馈.
+# 该服务会触发执行,不能用作只读 IK 预览;碰撞未知时拒绝,不做避障搜索.
 
 # Request
-# 目标位姿，位置单位 m，姿态为单位四元数；使用规范 base_link 基坐标系，
-# 该服务不接受任意坐标系——不做 TF 变换。
+# 目标位姿,位置单位 m,姿态为单位四元数;使用规范 base_link 基坐标系,
+# 该服务不接受任意坐标系-不做 TF 变换.
 geometry_msgs/Pose target_pose
 ---
 # Response
-# 仅表示 FJT 已接纳，不表示到位；求解、校验、接纳失败均为 false。
+# 仅表示 FJT 已接纳,不表示到位;求解,校验,接纳失败均为 false.
 bool success
 # 接纳说明或失败原因。
 string message

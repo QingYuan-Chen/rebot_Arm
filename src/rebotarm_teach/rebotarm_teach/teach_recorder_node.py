@@ -1,40 +1,40 @@
 from __future__ import annotations
 
-# 示教录制节点：把操作者拖动机械臂期间的关节反馈逐行写入示教记录文件。
+# 示教录制节点:把操作者拖动机械臂期间的关节反馈逐行写入示教记录文件.
 #
 # 职责
 # ----
-# 本节点是示教数据链路的源头，只负责“采集并落盘原始示教数据”，不做任何轨迹
-# 预处理、回放校验或运动执行。
+# 本节点是示教数据链路的源头,只负责"采集并落盘原始示教数据",不做任何轨迹
+# 预处理,回放校验或运动执行.
 #
-# 对外接口（``arm_namespace`` 默认取 "rebotarm"，下列名称中的该段可被参数替换）
+# 对外接口(``arm_namespace`` 默认取 "rebotarm",下列名称中的该段可被参数替换)
 # ----------------------------------------------------------------------------
-# - 订阅 ``/{arm_namespace}/joint_states``：关节位置/速度/力矩，BEST_EFFORT + KEEP_LAST(depth=10)。
-# - 订阅 ``/{arm_namespace}/arm_status``：状态机名称，RELIABLE + TRANSIENT_LOCAL，
-# 以保证本节点晚于控制器启动时仍能收到最后一次状态（判断是否处于重力补偿）。
-# - 订阅 ``/{arm_namespace}/joints/{joint_name}/state``：每个关节的电机状态码，用于
-# 确认反馈健康（状态码必须为 0 或 1）。
-# - 发布 ``/{arm_namespace}/teleop/recording_status``：JSON 文本状态，含写入状态、
-# 已写样本数、实际采样率、文件大小等，供上层界面展示。
-# - 服务 ``/{arm_namespace}/teleop/teach_record/start``：显式开始录制（截断旧文件）。
-# - 服务 ``/{arm_namespace}/teleop/teach_record/set_path``：录制前设置记录文件路径。
-# - 服务 ``/{arm_namespace}/teleop/teach_record/stop``：停止录制并关闭文件。
-# - 客户端调用 ``/{arm_namespace}/gravity_compensation/start``：可选的自动进入重力补偿。
+# - 订阅 ``/{arm_namespace}/joint_states``:关节位置/速度/力矩,BEST_EFFORT + KEEP_LAST(depth=10).
+# - 订阅 ``/{arm_namespace}/arm_status``:状态机名称,RELIABLE + TRANSIENT_LOCAL,
+# 以保证本节点晚于控制器启动时仍能收到最后一次状态(判断是否处于重力补偿).
+# - 订阅 ``/{arm_namespace}/joints/{joint_name}/state``:每个关节的电机状态码,用于
+# 确认反馈健康(状态码必须为 0 或 1).
+# - 发布 ``/{arm_namespace}/teleop/recording_status``:JSON 文本状态,含写入状态,
+# 已写样本数,实际采样率,文件大小等,供上层界面展示.
+# - 服务 ``/{arm_namespace}/teleop/teach_record/start``:显式开始录制(截断旧文件).
+# - 服务 ``/{arm_namespace}/teleop/teach_record/set_path``:录制前设置记录文件路径.
+# - 服务 ``/{arm_namespace}/teleop/teach_record/stop``:停止录制并关闭文件.
+# - 客户端调用 ``/{arm_namespace}/gravity_compensation/start``:可选的自动进入重力补偿.
 #
 # 关键流程
 # --------
-# 定时器以 ``sample_rate_hz`` 周期触发 ``TeachRecorderNode._write_sample``，
-# 把缓存的关节状态转换为一条示教样本并追加写入记录文件（JSONL，每行一条 JSON）。
-# 写入门控依次为：录制已开启 -> 已收到 joint_states -> （可选）状态机为 GRAVITY_COMP
-# -> 反馈时间戳新鲜且来自同一批次 -> （可选）电机状态健康。任一门控不通过都只更新
-# 状态并跳过本次写入，不会中断录制。
+# 定时器以 ``sample_rate_hz`` 周期触发 ``TeachRecorderNode._write_sample``,
+# 把缓存的关节状态转换为一条示教样本并追加写入记录文件(JSONL,每行一条 JSON).
+# 写入门控依次为:录制已开启 -> 已收到 joint_states -> (可选)状态机为 GRAVITY_COMP
+# -> 反馈时间戳新鲜且来自同一批次 -> (可选)电机状态健康.任一门控不通过都只更新
+# 状态并跳过本次写入,不会中断录制.
 #
 # 安全约束
 # --------
-# 1. 示教依赖重力补偿：``require_gravity_comp`` 为真时，只有状态机报告 GRAVITY_COMP
-# 才写样本，避免把抱闸/失能状态的“假拖动”数据记进示教文件。
-# 2. 反馈新鲜度：拒绝过期或来自未来的时间戳，防止复写旧数据或错位对齐。
-# 3. 反馈同批次：要求关节状态与电机状态来自同一时间戳，避免位置与状态码不同步。
+# 1. 示教依赖重力补偿:``require_gravity_comp`` 为真时,只有状态机报告 GRAVITY_COMP
+# 才写样本,避免把抱闸/失能状态的"假拖动"数据记进示教文件.
+# 2. 反馈新鲜度:拒绝过期或来自未来的时间戳,防止复写旧数据或错位对齐.
+# 3. 反馈同批次:要求关节状态与电机状态来自同一时间戳,避免位置与状态码不同步.
 
 import json
 import select
@@ -58,35 +58,35 @@ from .teach_recording import encode_teach_sample, is_quit_key
 from .recording_feedback import feedback_teach_sample, stamp_nanoseconds
 
 class TeachRecorderNode(Node):
-    """示教录制节点。
+    """示教录制节点.
 
-    生命期：节点启动后声明参数、按需建立订阅/定时器；当 ``start_on_launch``
-    为真时立即开始录制（追加模式），否则等待 ``start`` 服务。节点销毁时关闭记录
-    文件并恢复终端属性。
+    生命期:节点启动后声明参数,按需建立订阅/定时器;当 ``start_on_launch``
+    为真时立即开始录制(追加模式),否则等待 ``start`` 服务.节点销毁时关闭记录
+    文件并恢复终端属性.
 
-    回调模型：所有服务回调与定时器回调都跑在同一个 executor 线程上，因此对
-    ``self._handle``、计数器和缓存状态的访问无需额外加锁；这也意味着任何回调都
-    不能长时间阻塞。
+    回调模型:所有服务回调与定时器回调都跑在同一个 executor 线程上,因此对
+    ``self._handle``,计数器和缓存状态的访问无需额外加锁;这也意味着任何回调都
+    不能长时间阻塞.
     """
 
     def __init__(self) -> None:
-        # 参数含义（声明顺序与下方 declare_parameter 一致）：
-        # arm_namespace：话题与服务名称中的机械臂命名空间前缀，会去掉首尾斜杠，
-        # 留空表示直接使用顶层名称。
+        # 参数含义(声明顺序与下方 declare_parameter 一致):
+        # arm_namespace:话题与服务名称中的机械臂命名空间前缀,会去掉首尾斜杠,
+        # 留空表示直接使用顶层名称.
         #
-        # record_path：示教记录文件路径（JSONL）。父目录不存在时会自动创建。
-        # sample_rate_hz：写样本的定时器频率（Hz），默认 50.0；写入门控不通过时该
-        #   周期只产生一次状态更新而不落盘。
-        # require_gravity_comp：为真时要求状态机处于 GRAVITY_COMP 才允许写入样本。
-        # require_motor_status：为真时要求同一反馈批次内每个关节的电机状态码为 0/1。
-        # feedback_timeout_sec：允许的反馈时延上限（秒），超过即视为过期数据。
-        # auto_start_gravity_comp：为真时本节点周期性尝试调用重力补偿启动服务。
-        # auto_start_gravity_comp_retry_sec：上述重试周期（秒），内部下限取 0.2 秒。
-        # auto_start_gravity_comp_max_attempts：重试次数上限，<=0 表示不限次数。
-        # keyboard_quit_enabled：为真时监听终端按键以退出（需要 TTY）。
-        # quit_key：触发退出的按键字符，与 ``keyboard_quit_enabled`` 配合使用。
-        # start_on_launch：为真时节点启动即开始录制，否则等待 start 服务。
-        # joint_names：期望记录的关节顺序，也是写入样本中各向量的顺序。
+        # record_path:示教记录文件路径(JSONL).父目录不存在时会自动创建.
+        # sample_rate_hz:写样本的定时器频率(Hz),默认 50.0;写入门控不通过时该
+        #   周期只产生一次状态更新而不落盘.
+        # require_gravity_comp:为真时要求状态机处于 GRAVITY_COMP 才允许写入样本.
+        # require_motor_status:为真时要求同一反馈批次内每个关节的电机状态码为 0/1.
+        # feedback_timeout_sec:允许的反馈时延上限(秒),超过即视为过期数据.
+        # auto_start_gravity_comp:为真时本节点周期性尝试调用重力补偿启动服务.
+        # auto_start_gravity_comp_retry_sec:上述重试周期(秒),内部下限取 0.2 秒.
+        # auto_start_gravity_comp_max_attempts:重试次数上限,<=0 表示不限次数.
+        # keyboard_quit_enabled:为真时监听终端按键以退出(需要 TTY).
+        # quit_key:触发退出的按键字符,与 ``keyboard_quit_enabled`` 配合使用.
+        # start_on_launch:为真时节点启动即开始录制,否则等待 start 服务.
+        # joint_names:期望记录的关节顺序,也是写入样本中各向量的顺序.
         super().__init__("teach_recorder_node")
 
         self.declare_parameter("arm_namespace", "rebotarm")
@@ -113,16 +113,16 @@ class TeachRecorderNode(Node):
         self._handle = None
         self._recording_active = False
         self._require_gravity_comp = bool(self.get_parameter("require_gravity_comp").value)
-        # 反馈缓存：由订阅回调不断刷新，写入定时器只读取最新一帧。
+        # 反馈缓存:由订阅回调不断刷新,写入定时器只读取最新一帧.
         self._latest_joint_state: JointState | None = None
         self._arm_state = ""
         self._motor_status: dict[str, int] = {}
         self._motor_stamps: dict[str, int] = {}
-        # 已落盘样本的关节时间戳（纳秒），用于保证记录内时间戳严格递增、不重写同一帧。
+        # 已落盘样本的关节时间戳(纳秒),用于保证记录内时间戳严格递增,不重写同一帧.
         self._last_written_stamp_ns: int | None = None
         self._recording_started_ns = 0
         self._samples_written = 0
-        # 样本 stamp 是相对录制开始时刻的秒数，因此这里的起止时间也用于统计实际采样率。
+        # 样本 stamp 是相对录制开始时刻的秒数,因此这里的起止时间也用于统计实际采样率.
         self._first_sample_stamp: float | None = None
         self._last_sample_stamp: float | None = None
         self._writing_state = "open"
@@ -133,7 +133,7 @@ class TeachRecorderNode(Node):
         self._keyboard_stream = None
         self._owns_keyboard_stream = False
         self._shutdown_requested = False
-        # 状态话题以 JSON 文本发布，深度 10 只保留最近若干条状态，丢失旧状态无影响。
+        # 状态话题以 JSON 文本发布,深度 10 只保留最近若干条状态,丢失旧状态无影响.
         self._status_pub = self.create_publisher(
             String,
             f"/{self._arm_namespace}/teleop/recording_status",
@@ -155,15 +155,15 @@ class TeachRecorderNode(Node):
             self._handle_stop_recording,
         )
         sensor_qos_spec = sensor_qos_kwargs()
-        # 关节/电机反馈按传感器流处理：BEST_EFFORT + KEEP_LAST，允许丢帧，
-        # 只要新数据持续到达即可，不重传历史帧。
+        # 关节/电机反馈按传感器流处理:BEST_EFFORT + KEEP_LAST,允许丢帧,
+        # 只要新数据持续到达即可,不重传历史帧.
         sensor_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=int(sensor_qos_spec["depth"]),
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
-        # 状态机信息必须可靠且保留最后一条：本节点可能晚于控制器启动，
-        # 若没有 TRANSIENT_LOCAL 就拿不到当前状态，重力补偿门控会一直不通过。
+        # 状态机信息必须可靠且保留最后一条:本节点可能晚于控制器启动,
+        # 若没有 TRANSIENT_LOCAL 就拿不到当前状态,重力补偿门控会一直不通过.
         arm_status_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
@@ -196,18 +196,18 @@ class TeachRecorderNode(Node):
             f"/{self._arm_namespace}/gravity_compensation/start",
         )
         if bool(self.get_parameter("auto_start_gravity_comp").value):
-            # 下限 0.2 秒，避免把重试周期压到过密而拖垮执行器线程。
+            # 下限 0.2 秒,避免把重试周期压到过密而拖垮执行器线程.
             retry_sec = max(float(self.get_parameter("auto_start_gravity_comp_retry_sec").value), 0.2)
             self.create_timer(retry_sec, self._try_auto_start_gravity_comp)
-        # 采样周期下限由 1 Hz 保护，防止 sample_rate_hz 被设为 0 或负数时除零。
+        # 采样周期下限由 1 Hz 保护,防止 sample_rate_hz 被设为 0 或负数时除零.
         period = 1.0 / max(float(self.get_parameter("sample_rate_hz").value), 1.0)
         self.create_timer(period, self._write_sample)
         if bool(self.get_parameter("keyboard_quit_enabled").value):
             self._setup_keyboard_quit()
-            # 按键轮询固定 20 Hz：足够灵敏，又不会明显占用执行器线程。
+            # 按键轮询固定 20 Hz:足够灵敏,又不会明显占用执行器线程.
             self.create_timer(0.05, self._poll_quit_key)
         if bool(self.get_parameter("start_on_launch").value):
-            # 启动即录制采用追加模式，避免同一次会话中的服务重启覆盖已有示教数据。
+            # 启动即录制采用追加模式,避免同一次会话中的服务重启覆盖已有示教数据.
             self._start_recording(truncate=False)
             message = f"recording to {self._record_path}; press q to stop"
         else:
@@ -215,11 +215,11 @@ class TeachRecorderNode(Node):
         self._publish_status("ready" if self._recording_active else "idle", message)
 
     def _start_recording(self, *, truncate: bool) -> None:
-        """打开记录文件并进入录制状态；文件已打开时直接返回（幂等）。
+        """打开记录文件并进入录制状态;文件已打开时直接返回(幂等).
 
-        ``truncate`` 为真表示覆盖写入（start 服务显式要求重录），为假表示追加写入
-        （节点启动自动录制）。同时把样本计数与时间基准清零，使新一段录制的 stamp
-        从 0 秒重新开始。
+        ``truncate`` 为真表示覆盖写入(start 服务显式要求重录),为假表示追加写入
+        (节点启动自动录制).同时把样本计数与时间基准清零,使新一段录制的 stamp
+        从 0 秒重新开始.
         """
         if self._handle is not None:
             return
@@ -236,12 +236,12 @@ class TeachRecorderNode(Node):
         self._last_write_error = ""
 
     def _normalize_record_path(self, value: str) -> Path:
-        """把服务请求里的路径规范化到 ``teleop_records/`` 目录下的 .jsonl 文件。
+        """把服务请求里的路径规范化到 ``teleop_records/`` 目录下的 .jsonl 文件.
 
-        只保留文件名部分（反斜杠统一按分隔符处理），因此调用方无法借该服务写到
-        目录之外，也避免覆盖工程里其他文件。名称为空时回退成 "teach_record"，
-        缺少扩展名时补 ".jsonl"；补全后若名称为空、恰为扩展名或含 ".." 片段，
-        则抛 ValueError 拒绝。
+        只保留文件名部分(反斜杠统一按分隔符处理),因此调用方无法借该服务写到
+        目录之外,也避免覆盖工程里其他文件.名称为空时回退成 "teach_record",
+        缺少扩展名时补 ".jsonl";补全后若名称为空,恰为扩展名或含 ".." 片段,
+        则抛 ValueError 拒绝.
         """
         raw = str(value).strip()
         if not raw:
@@ -255,7 +255,7 @@ class TeachRecorderNode(Node):
         return Path("teleop_records") / name
 
     def _stop_recording(self) -> None:
-        """关闭记录文件并标记停止；未在录制时也可安全调用。"""
+        """关闭记录文件并标记停止;未在录制时也可安全调用."""
         if self._handle is not None:
             self._handle.close()
             self._handle = None
@@ -263,7 +263,7 @@ class TeachRecorderNode(Node):
         self._writing_state = "stopped"
 
     def _handle_start_recording(self, _request, response):
-        """start 服务回调：开始录制（覆盖同名旧文件）。已在录制时视为成功并返回当前路径。"""
+        """start 服务回调:开始录制(覆盖同名旧文件).已在录制时视为成功并返回当前路径."""
         if self._recording_active:
             response.success = True
             response.message = f"teach recording already active: {self._record_path}"
@@ -281,10 +281,10 @@ class TeachRecorderNode(Node):
         return response
 
     def _handle_set_record_path(self, request, response):
-        """set_path 服务回调：设置下一次录制的记录文件路径。
+        """set_path 服务回调:设置下一次录制的记录文件路径.
 
-        录制过程中拒绝修改（否则同一段录制的数据会跨文件），失败时回填当前生效路径
-        供调用方参考。
+        录制过程中拒绝修改(否则同一段录制的数据会跨文件),失败时回填当前生效路径
+        供调用方参考.
         """
         if self._recording_active:
             response.success = False
@@ -305,7 +305,7 @@ class TeachRecorderNode(Node):
         return response
 
     def _handle_stop_recording(self, _request, response):
-        """stop 服务回调：停止录制并把本次落盘的样本数回给调用方；重复调用视为成功。"""
+        """stop 服务回调:停止录制并把本次落盘的样本数回给调用方;重复调用视为成功."""
         if not self._recording_active:
             response.success = True
             response.message = "teach recording already stopped"
@@ -318,13 +318,13 @@ class TeachRecorderNode(Node):
         return response
 
     def _setup_keyboard_quit(self) -> None:
-        """准备单键读取的终端环境。
+        """准备单键读取的终端环境.
 
-        启动方式不同会导致 stdin 不是终端（例如被 launch 重定向），此时改用
-        ``/dev/tty`` 直连控制终端，并记录“该流由本节点打开”以便销毁时关闭。
-        使用 cbreak 模式（而非 raw）保留信号处理，同时关闭行缓冲，使按键无需回车
-        即可被读到；原始终端属性保存在 ``_terminal_settings``，销毁时恢复。
-        任何失败都只降级为警告：没有键盘退出不影响录制本身。
+        启动方式不同会导致 stdin 不是终端(例如被 launch 重定向),此时改用
+        ``/dev/tty`` 直连控制终端,并记录"该流由本节点打开"以便销毁时关闭.
+        使用 cbreak 模式(而非 raw)保留信号处理,同时关闭行缓冲,使按键无需回车
+        即可被读到;原始终端属性保存在 ``_terminal_settings``,销毁时恢复.
+        任何失败都只降级为警告:没有键盘退出不影响录制本身.
         """
         try:
             self._keyboard_stream = sys.stdin
@@ -344,10 +344,10 @@ class TeachRecorderNode(Node):
             self._keyboard_stream = None
 
     def _poll_quit_key(self) -> None:
-        """轮询退出按键；命中后先停录再请求关闭 rclpy。
+        """轮询退出按键;命中后先停录再请求关闭 rclpy.
 
-        超时为 0 的 select 保证回调不被阻塞；读取到空字符串时直接返回，不会误判为
-        按键。命中退出键后先停录（关闭文件）、再关闭 rclpy，保证已写入的样本先落盘。
+        超时为 0 的 select 保证回调不被阻塞;读取到空字符串时直接返回,不会误判为
+        按键.命中退出键后先停录(关闭文件),再关闭 rclpy,保证已写入的样本先落盘.
         """
         if self._shutdown_requested:
             return
@@ -371,13 +371,13 @@ class TeachRecorderNode(Node):
                 rclpy.shutdown()
 
     def _try_auto_start_gravity_comp(self) -> None:
-        """尝试自动请求进入重力补偿；状态已是 GRAVITY_COMP 或已有请求在途时跳过。
+        """尝试自动请求进入重力补偿;状态已是 GRAVITY_COMP 或已有请求在途时跳过.
 
-        超时设为 0 表示非阻塞探测服务是否就绪，未就绪只累加尝试次数并发布等待状态，
-        不阻塞执行器线程。达到 ``auto_start_gravity_comp_max_attempts`` 上限后不再重试，
-        改为提示人工启动，避免无限重试掩盖真实故障。同一时刻只允许一个请求在途
-        （``_auto_start_in_flight``），避免重复触发启动流程；是否真的重复启动由被调用
-        服务一侧负责判定。
+        超时设为 0 表示非阻塞探测服务是否就绪,未就绪只累加尝试次数并发布等待状态,
+        不阻塞执行器线程.达到 ``auto_start_gravity_comp_max_attempts`` 上限后不再重试,
+        改为提示人工启动,避免无限重试掩盖真实故障.同一时刻只允许一个请求在途
+        (``_auto_start_in_flight``),避免重复触发启动流程;是否真的重复启动由被调用
+        服务一侧负责判定.
         """
         if self._shutdown_requested or self._arm_state == "GRAVITY_COMP":
             return
@@ -400,7 +400,7 @@ class TeachRecorderNode(Node):
         future.add_done_callback(self._on_auto_start_gravity_comp_done)
 
     def _on_auto_start_gravity_comp_done(self, future) -> None:
-        """重力补偿启动请求的完成回调：只发布状态，不做重试（重试由定时器负责）。"""
+        """重力补偿启动请求的完成回调:只发布状态,不做重试(重试由定时器负责)."""
         self._auto_start_in_flight = False
         try:
             response = future.result()
@@ -420,23 +420,23 @@ class TeachRecorderNode(Node):
         self._arm_state = str(msg.state_machine)
 
     def _on_motor_state(self, msg: JointMotorState) -> None:
-        # 与电机状态一起记录其时间戳，写入时要求与关节状态时间戳完全一致，
-        # 保证“位置”和“健康状态”属于同一帧反馈。
+        # 与电机状态一起记录其时间戳,写入时要求与关节状态时间戳完全一致,
+        # 保证"位置"和"健康状态"属于同一帧反馈.
         self._motor_status[str(msg.joint_name)] = int(msg.status_code)
         self._motor_stamps[str(msg.joint_name)] = stamp_nanoseconds(msg.header.stamp)
 
     def _write_sample(self) -> None:
-        """写样本定时器回调：门控通过时把最新反馈追加为一行 JSONL。
+        """写样本定时器回调:门控通过时把最新反馈追加为一行 JSONL.
 
-        门控顺序（任一不通过都只更新状态并返回，不写入、不报错）：
+        门控顺序(任一不通过都只更新状态并返回,不写入,不报错):
 
-        1. 录制已开启，否则状态置 idle；
-        2. 已收到关节状态，否则等待 joint_states；
-        3. ``require_gravity_comp`` 为真时必须处于 GRAVITY_COMP，否则等待状态机；
-        4. 交给反馈构造函数做时间戳与一致性校验，失败时抛出 ValueError 并降级为等待；
-        5. 构造返回 None 表示该帧已被写过或是录制开始前的旧帧，静默跳过。
+        1. 录制已开启,否则状态置 idle;
+        2. 已收到关节状态,否则等待 joint_states;
+        3. ``require_gravity_comp`` 为真时必须处于 GRAVITY_COMP,否则等待状态机;
+        4. 交给反馈构造函数做时间戳与一致性校验,失败时抛出 ValueError 并降级为等待;
+        5. 构造返回 None 表示该帧已被写过或是录制开始前的旧帧,静默跳过.
 
-        每行写完立即 flush，使异常退出时已落盘的样本仍可用（示教过程可随时中断）。
+        每行写完立即 flush,使异常退出时已落盘的样本仍可用(示教过程可随时中断).
         """
         if not self._recording_active:
             self._writing_state = "idle"
@@ -502,12 +502,12 @@ class TeachRecorderNode(Node):
         self._publish_status("recording", f"samples={self._samples_written}")
 
     def _publish_status(self, state: str, message: str) -> None:
-        """把当前录制状态以紧凑 JSON 发布到状态话题。
+        """把当前录制状态以紧凑 JSON 发布到状态话题.
 
-        ``state`` 是上层界面直接展示的状态串（如 recording/waiting/error），
-        ``writing_state`` 则记录更细的写入子状态，两者配合便于定位卡在哪个门控。
-        实际采样率按 (样本数 - 1) / 首末样本时间差估算，因此样本不足 2 条或时间跨度
-        为 0 时保持 0.0；文件大小读取失败（文件尚未创建）时按 0 处理。
+        ``state`` 是上层界面直接展示的状态串(如 recording/waiting/error),
+        ``writing_state`` 则记录更细的写入子状态,两者配合便于定位卡在哪个门控.
+        实际采样率按 (样本数 - 1) / 首末样本时间差估算,因此样本不足 2 条或时间跨度
+        为 0 时保持 0.0;文件大小读取失败(文件尚未创建)时按 0 处理.
         """
         msg = String()
         elapsed_sec = 0.0
@@ -543,10 +543,10 @@ class TeachRecorderNode(Node):
         self._status_pub.publish(msg)
 
     def destroy_node(self) -> bool:
-        """销毁节点前先收尾：停止录制、恢复终端属性、关闭自打开的终端流。
+        """销毁节点前先收尾:停止录制,恢复终端属性,关闭自打开的终端流.
 
-        ``TCSADRAIN`` 保证已提交的输出写完后再恢复，避免终端残留 cbreak 状态导致
-        后续命令无法正常回显。无论收尾过程如何，都要把异常交给父类销毁流程处理。
+        ``TCSADRAIN`` 保证已提交的输出写完后再恢复,避免终端残留 cbreak 状态导致
+        后续命令无法正常回显.无论收尾过程如何,都要把异常交给父类销毁流程处理.
         """
         try:
             self._stop_recording()
@@ -560,10 +560,10 @@ class TeachRecorderNode(Node):
 
 
 def main(args=None) -> None:
-    """进程入口：初始化 rclpy、创建节点并自旋，退出时保证节点销毁与 rclpy 关闭。
+    """进程入口:初始化 rclpy,创建节点并自旋,退出时保证节点销毁与 rclpy 关闭.
 
-    Ctrl-C 在自旋与收尾两个阶段都可能到达，因此分处捕获并抑制，确保记录文件仍被
-    正常关闭而不留下半行数据。
+    Ctrl-C 在自旋与收尾两个阶段都可能到达,因此分处捕获并抑制,确保记录文件仍被
+    正常关闭而不留下半行数据.
     """
     rclpy.init(args=args)
     node = TeachRecorderNode()

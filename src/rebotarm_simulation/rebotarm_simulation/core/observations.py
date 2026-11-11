@@ -1,7 +1,7 @@
-"""从原生状态提取不可变观测，供 ROS 发布、Viewer 和诊断使用。
+"""从原生状态提取不可变观测,供 ROS 发布,Viewer 和诊断使用.
 
-调用方持仿真锁完成复制；本模块只读 model/data，所有权与物理步进归仿真核心。
-先定义关节/末端/物体快照，再定义接触快照，输出坐标与单位由值对象约定。
+调用方持仿真锁完成复制;本模块只读 model/data,所有权与物理步进归仿真核心.
+先定义关节/末端/物体快照,再定义接触快照,输出坐标与单位由值对象约定.
 """
 from types import MappingProxyType
 import numpy as np
@@ -15,8 +15,8 @@ def read_state(mj, model, data, joint_ids, actuator_ids, ee_site_id, free_bodies
     for joint_id in joint_ids:
         positions.append(float(data.qpos[int(model.jnt_qposadr[joint_id])]))
         velocities.append(float(data.qvel[int(model.jnt_dofadr[joint_id])]))
-    # 自由关节 qpos 内部顺序为 (pos_x,pos_y,pos_z, qw,qx,qy,qz)；
-    # 这里重排为对外的 (x,y,z, qx,qy,qz,qw)，即把 w 分量从第 4 位挪到末位。
+    # 自由关节 qpos 内部顺序为 (pos_x,pos_y,pos_z, qw,qx,qy,qz);
+    # 这里重排为对外的 (x,y,z, qx,qy,qz,qw),即把 w 分量从第 4 位挪到末位.
     object_poses = {
         name: (
             *(float(value) for value in data.qpos[address : address + 3]),
@@ -35,13 +35,13 @@ def read_state(mj, model, data, joint_ids, actuator_ids, ee_site_id, free_bodies
         joint_velocities=tuple(velocities),
         actuator_forces=tuple(float(data.actuator_force[index]) for index in actuator_ids),
         end_effector_position=tuple(float(value) for value in data.site_xpos[ee_site_id]),
-        # mju_mat2Quat 输出 (w,x,y,z)，对外统一改排为 (x,y,z,w)。
+        # mju_mat2Quat 输出 (w,x,y,z),对外统一改排为 (x,y,z,w).
         end_effector_orientation=(
             *(float(value) for value in ee_quaternion_wxyz[1:]),
             float(ee_quaternion_wxyz[0]),
         ),
-        # 张开宽度 = 左指位置 - 右指位置，并按夹爪机械行程 [0, 0.09] m 夹紧，
-        # 以吸收数值抖动与接触穿透带来的瞬时越界。
+        # 张开宽度 = 左指位置 - 右指位置,并按夹爪机械行程 [0, 0.09] m 夹紧,
+        # 以吸收数值抖动与接触穿透带来的瞬时越界.
         gripper_width=max(0.0, min(0.09, positions[-2] - positions[-1])),
         object_poses=MappingProxyType(object_poses),
         simulation_time=float(data.time),

@@ -1,7 +1,7 @@
-"""协调 ROS 执行器与原生 Viewer 关闭，确认借用结束后释放仿真资源。
+"""协调 ROS 执行器与原生 Viewer 关闭,确认借用结束后释放仿真资源.
 
-关闭超时或生命周期信号读取失败时，保留完整所有权图并向调用者抛错。
-接口按资源保留、执行器关闭、Viewer 关闭顺序组织；等待预算使用单调时钟。
+关闭超时或生命周期信号读取失败时,保留完整所有权图并向调用者抛错.
+接口按资源保留,执行器关闭,Viewer 关闭顺序组织;等待预算使用单调时钟.
 """
 from __future__ import annotations
 import time
@@ -11,17 +11,17 @@ _RETAINED_UNSAFE_VIEWERS = []
 
 
 def retain_unsafe_resources(viewer, sim, model, data, *owners) -> None:
-    """保持仍被原生查看器或执行线程使用的所有权图。"""
+    """保持仍被原生查看器或执行线程使用的所有权图."""
     _RETAINED_UNSAFE_VIEWERS.append((viewer, sim, model, data, *owners))
 
 
 def stop_executor(executor, thread, *, multi_threaded: bool = False) -> None:
-    """等待执行器和自旋线程结束，再允许释放其访问的模型。"""
+    """等待执行器和自旋线程结束,再允许释放其访问的模型."""
     if executor is None:
         return
     deadline = time.monotonic() + 2.0
     if multi_threaded:
-        # Jazzy shutdown 会先销毁 guard。先停止派发、唤醒并结束自旋，再排空工作线程。
+        # Jazzy shutdown 会先销毁 guard.先停止派发,唤醒并结束自旋,再排空工作线程.
         with executor._shutdown_lock:
             executor._is_shutdown = True
         executor.wake()
@@ -59,30 +59,30 @@ def _close_viewer_then_sim(
     sleep: Callable[[float], None] = time.sleep,
     timeout: float = 5.0,
 ) -> None:
-    """只有在被动查看器线程释放原生状态之后，才释放仿真资源。
+    """只有在被动查看器线程释放原生状态之后,才释放仿真资源.
 
-    `viewer.m` 是查看器公开的生命周期信号：它变为 None 表示查看器已不再持有
-    MuJoCo 模型。在确认之前释放 MjModel/MjData 属于 use-after-free，会直接让
-    进程崩溃，因此这里宁可等待或保留引用，也不提前释放。
+    `viewer.m` 是查看器公开的生命周期信号:它变为 None 表示查看器已不再持有
+    MuJoCo 模型.在确认之前释放 MjModel/MjData 属于 use-after-free,会直接让
+    进程崩溃,因此这里宁可等待或保留引用,也不提前释放.
 
-    `clock`/`sleep`/`timeout` 均可注入，便于测试中不真正睡眠。超时（默认 5 s）
-    后抛出 `TimeoutError`，同时把整套所有权图登记到 `_RETAINED_UNSAFE_VIEWERS`
-    以保持引用存活。
+    `clock`/`sleep`/`timeout` 均可注入,便于测试中不真正睡眠.超时(默认 5 s)
+    后抛出 `TimeoutError`,同时把整套所有权图登记到 `_RETAINED_UNSAFE_VIEWERS`
+    以保持引用存活.
     """
     if viewer is None:
-        # 查看器未启动（例如构造阶段就失败）：没有共享句柄，直接关闭仿真。
+        # 查看器未启动(例如构造阶段就失败):没有共享句柄,直接关闭仿真.
         sim.close()
         return
     try:
         viewer.close()
     except BaseException:
-        # 关闭本身抛错时，只能依据 `viewer.m` 判断查看器是否已放手；
-        # 若连这个公开信号都取不到，释放原生状态就是危险的猜测。
+        # 关闭本身抛错时,只能依据 `viewer.m` 判断查看器是否已放手;
+        # 若连这个公开信号都取不到,释放原生状态就是危险的猜测.
         model_is_released = False
         try:
             model_is_released = viewer.m is None
         except BaseException:
-            # 若这个公开的生命周期信号本身不可用，释放原生状态就只是危险的猜测。
+            # 若这个公开的生命周期信号本身不可用,释放原生状态就只是危险的猜测.
             pass
         if model_is_released:
             sim.close()
@@ -99,7 +99,7 @@ def _close_viewer_then_sim(
             sleep(0.01)
             viewer_model = viewer.m
     except BaseException:
-        # 无法确认原生线程释放时，保留模型和数据并向调用方传递错误。
+        # 无法确认原生线程释放时,保留模型和数据并向调用方传递错误.
         retain_unsafe_resources(viewer, sim, model, data)
         raise
     sim.close()
@@ -115,7 +115,7 @@ def close_passive_viewer_safely(
     sleep: Callable[[float], None] = time.sleep,
     timeout: float = 5.0,
 ) -> None:
-    """先确认被动 Viewer 释放模型，再关闭仿真；资源保留细节由本包统一维护。"""
+    """先确认被动 Viewer 释放模型,再关闭仿真;资源保留细节由本包统一维护."""
     _close_viewer_then_sim(
         viewer,
         sim,

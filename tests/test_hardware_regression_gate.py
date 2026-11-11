@@ -1,4 +1,4 @@
-"""现场回归门禁只用模拟 future，绝不连接设备。"""
+"""现场回归门禁只用模拟 future,绝不连接设备."""
 import concurrent.futures
 import threading
 
@@ -352,11 +352,11 @@ def test_cancel_in_flight_blocks_shutdown_even_after_action_terminal():
     try:
         assert cancel_entered.wait(1)
         handle.result.set_result('terminal')
-        assert gate.has_pending  # Action 虽已结束，取消调用仍未返回。
+        assert gate.has_pending  # Action 虽已结束,取消调用仍未返回.
     finally:
         release_cancel.set()
     assert cancel_returned.wait(1)
-    assert gate.has_pending  # 调用返回后仍要等待取消结果。
+    assert gate.has_pending  # 调用返回后仍要等待取消结果.
     cancel_response.set_result('cancel response')
     for _ in range(1000):
         if not gate.has_pending: break

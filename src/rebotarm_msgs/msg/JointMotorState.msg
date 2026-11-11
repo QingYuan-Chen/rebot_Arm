@@ -1,9 +1,9 @@
-# 单关节（或夹爪）电机状态。发布在 /<namespace>/joints/<joint>/state 与
-# /<namespace>/gripper/state，属于"只读反馈"，上层据此观测硬件而不是发命令。
-# 数值来自已校验的反馈缓存：读取失败时宁可不发新帧，也不把陈旧位置伪装成当前样本。
+# 单关节(或夹爪)电机状态.发布在 /<namespace>/joints/<joint>/state 与
+# /<namespace>/gripper/state,属于"只读反馈",上层据此观测硬件而不是发命令.
+# 数值来自已校验的反馈缓存:读取失败时宁可不发新帧,也不把陈旧位置伪装成当前样本.
 
-# 时间戳与坐标系。frame_id 通常为空（关节量不在任何笛卡尔坐标系下）；
-# stamp 沿用其所属反馈批次的接收时刻，同一批次重复发布时保持不变。
+# 时间戳与坐标系.frame_id 通常为空(关节量不在任何笛卡尔坐标系下);
+# stamp 沿用其所属反馈批次的接收时刻,同一批次重复发布时保持不变.
 std_msgs/Header header
 # 关节名，取值与硬件的 joint_names 一致（joint1..joint6，夹爪固定为 "gripper"）。
 string joint_name

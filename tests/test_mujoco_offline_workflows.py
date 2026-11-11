@@ -34,7 +34,7 @@ def test_teach_preview_uses_prepared_path_without_touching_record(tmp_path: Path
     original = path.read_bytes()
     result = preview_record(path)
     assert result["raw_samples"] == 20
-    # C1 修订保留控制节点；重采样仅用于显示/质量分析，不再细分为新控制点。
+    # C1 修订保留控制节点;重采样仅用于显示/质量分析,不再细分为新控制点.
     assert result["prepared_points"] == 20
     assert result["simulation_only"] is True
     assert result["initial_bottle_xyz_m"] == pytest.approx((0.28, 0.0, 0.0))

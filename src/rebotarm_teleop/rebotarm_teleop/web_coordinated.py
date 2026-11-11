@@ -1,11 +1,11 @@
-"""网页六轴预览与独立夹爪目标的一次性执行令牌适配。
+"""网页六轴预览与独立夹爪目标的一次性执行令牌适配.
 
-文件职责：校验操作员关键点，调用运动层生成及重定时，保存可预览的准确最终消息。
-对外接口：CoordinatedWebPlans.preview/take；take 只交接原消息，不发送或重建轨迹。
-安全约束：无设备访问；能力变化拒绝；固定时长不自动延长。
-    夹爪只保存单次开合目标与独立接口力矩，不插值、不参与机械臂重定时。
-    执行准入与闭合模型碰撞检查仍由正式后端负责。
-文件结构：计划缓存 → 六轴预览及夹爪目标 → 单次交接与能力复核。
+文件职责:校验操作员关键点,调用运动层生成及重定时,保存可预览的准确最终消息.
+对外接口:CoordinatedWebPlans.preview/take;take 只交接原消息,不发送或重建轨迹.
+安全约束:无设备访问;能力变化拒绝;固定时长不自动延长.
+    夹爪只保存单次开合目标与独立接口力矩,不插值,不参与机械臂重定时.
+    执行准入与闭合模型碰撞检查仍由正式后端负责.
+文件结构:计划缓存 → 六轴预览及夹爪目标 → 单次交接与能力复核.
 """
 from dataclasses import replace
 import math
@@ -24,7 +24,7 @@ class CoordinatedWebPlans:
         self._lock = threading.Lock()
 
     def preview(self, payload, current, *, max_delta, min_duration, max_duration, max_speed):
-        """预览不获得执行资源；新关键点必须逐点满足现有位移/位置门限。"""
+        """预览不获得执行资源;新关键点必须逐点满足现有位移/位置门限."""
         capability = self.capability()
         if capability['mode'] != 'continuous':
             raise ValueError('coordinated motion requires explicit continuous mode')
@@ -51,7 +51,7 @@ class CoordinatedWebPlans:
             arm_keyframes=payload.get('arm_keyframes'))
         message = curve_message(curve,trajectory_factory=self.trajectory_factory,point_factory=self.point_factory)
         message = self.retime(message,capability, bool(payload.get('fixed_duration',False)),max_speed)
-        # 显示和执行均用服务返回后的六轴纳秒点，夹爪预览只表示独立目标。
+        # 显示和执行均用服务返回后的六轴纳秒点,夹爪预览只表示独立目标.
         from rebotarm_motion.polynomial_trajectory import build_curve, TrajectoryPoint
         final = build_curve(message.joint_names,tuple(TrajectoryPoint(
             p.time_from_start.sec+p.time_from_start.nanosec*1e-9,p.positions,p.velocities,p.accelerations)
@@ -79,10 +79,10 @@ class CoordinatedWebPlans:
                 '按闭合夹爪模型检查；夹爪独立开合，不保证与机械臂同时到达')
 
     def take(self, token):
-        """单次交接原计划；准备只复核，不能修改已绑定的节点与时间。"""
+        """单次交接原计划;准备只复核,不能修改已绑定的节点与时间."""
         capability = self.capability()
         with self._lock:
-            # 先消费令牌再复核：并发提交只交接一次，复核失败后须重新预览取得新令牌。
+            # 先消费令牌再复核:并发提交只交接一次,复核失败后须重新预览取得新令牌.
             plan = self._plans.pop(str(token),None)
         if plan is None:
             raise ValueError('coordinated preview missing; preview again')

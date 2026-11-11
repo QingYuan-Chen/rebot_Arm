@@ -1,4 +1,4 @@
-"""消费端反馈交接：空档保留、快照隔离、撤销顺序及真实 ROS 并发。"""
+"""消费端反馈交接:空档保留,快照隔离,撤销顺序及真实 ROS 并发."""
 from concurrent.futures import Future
 import os
 from pathlib import Path

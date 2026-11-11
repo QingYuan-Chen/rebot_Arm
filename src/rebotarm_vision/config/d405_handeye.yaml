@@ -1,23 +1,23 @@
-# D405 手眼标定结果（候选外参，显式加载后生效）。
-# 来源：上游 2993845045zhy/ur3-visual-servoing 的 src/hand_eye.py（提交 fe36ed8dc8f8b5987bafad132831c7761d443406）。
-# 数据：会话 ba3e4c65899d4c8bb823880d5401c8a3，SHA256 03b42e40b817c6fd3b58bbe58782aa26cb82de0989709bf02ec6a7929389cc6a。
-# 采集：75 mm ArUco，20 训练 / 5 验证，J5、J2–J4 置零之后采集。
-# 质量：RANSAC 有效运动对 188/189（内点率 0.995）；训练位置/旋转 RMS 3.138 mm / 0.728°，
-# 独立验证位置/旋转 RMS 4.151 mm / 0.777°、最大 5.980 mm / 1.243°，现有质量门通过。
-# 说明：本文件由上游方法结果写入，尚未完成操作员物理精度验收，也未自动部署。
-# 坐标约定：ROS TF 中发布 end_link -> camera_color_frame；D405 已把深度对齐到彩色光学系，
-# launch 会用恒等变换连接 camera_color_frame 与 camera_depth_frame，不能再叠加出厂彩色/深度外参。
+# D405 手眼标定结果(候选外参,显式加载后生效).
+# 来源:上游 2993845045zhy/ur3-visual-servoing 的 src/hand_eye.py(提交 fe36ed8dc8f8b5987bafad132831c7761d443406).
+# 数据:会话 ba3e4c65899d4c8bb823880d5401c8a3,SHA256 03b42e40b817c6fd3b58bbe58782aa26cb82de0989709bf02ec6a7929389cc6a.
+# 采集:75 mm ArUco,20 训练 / 5 验证,J5,J2-J4 置零之后采集.
+# 质量:RANSAC 有效运动对 188/189(内点率 0.995);训练位置/旋转 RMS 3.138 mm / 0.728°,
+# 独立验证位置/旋转 RMS 4.151 mm / 0.777°,最大 5.980 mm / 1.243°,现有质量门通过.
+# 说明:本文件由上游方法结果写入,尚未完成操作员物理精度验收,也未自动部署.
+# 坐标约定:ROS TF 中发布 end_link -> camera_color_frame;D405 已把深度对齐到彩色光学系,
+# launch 会用恒等变换连接 camera_color_frame 与 camera_depth_frame,不能再叠加出厂彩色/深度外参.
 handeye:
-  # 父坐标系：机械臂末端连杆。
+  # 父坐标系:机械臂末端连杆.
   parent_frame: end_link
-  # 子坐标系：D405 彩色光学坐标系，与相机消息 frame_id 一致。
+  # 子坐标系:D405 彩色光学坐标系,与相机消息 frame_id 一致.
   child_frame: camera_color_frame
-  # 子坐标系原点在父坐标系中的平移，单位 m。
+  # 子坐标系原点在父坐标系中的平移,单位 m.
   translation:
     x: -0.078712990
     y: 0.009825018
     z: 0.061181004
-  # 父坐标系到子坐标系的姿态：四元数 (x, y, z, w)。
+  # 父坐标系到子坐标系的姿态:四元数 (x, y, z, w).
   rotation:
     x: -0.571217571
     y: 0.570349032

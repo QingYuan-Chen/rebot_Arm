@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<!-- rebotarmcontroller：真机硬件包。
+<!-- rebotarmcontroller:真机硬件包.
 
-     职责：电机 SDK/串口通道访问、机械臂与夹爪状态发布、轨迹执行、夹爪执行，
-     以及拒绝不安全或畸形的底层命令，是最后一道执行安全。真机上电默认失能，
-     必须有新鲜反馈与显式 enable 才允许运动。
-     边界：不负责 Web UI、示教文件管理、视觉抓取策略与运动规划策略。 -->
+     职责:电机 SDK/串口通道访问,机械臂与夹爪状态发布,轨迹执行,夹爪执行,
+     以及拒绝不安全或畸形的底层命令,是最后一道执行安全.真机上电默认失能,
+     必须有新鲜反馈与显式 enable 才允许运动.
+     边界:不负责 Web UI,示教文件管理,视觉抓取策略与运动规划策略. -->
 <package format="3">
   <name>rebotarmcontroller</name>
   <version>0.1.0</version>
@@ -13,42 +13,42 @@
   <maintainer email="support@example.com">reBotArm Maintainers</maintainer>
   <license>Apache-2.0</license>
 
-  <!-- 构建工具：Python 包使用 ament_python，不用 CMake -->
+  <!-- 构建工具:Python 包使用 ament_python,不用 CMake -->
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <!-- 以下全部为运行期依赖（本包只提供 Python 节点，没有编译期依赖） -->
-  <!-- 标准动作接口：FollowJointTrajectory 轨迹执行、GripperCommand 夹爪动作 -->
+  <!-- 以下全部为运行期依赖(本包只提供 Python 节点,没有编译期依赖) -->
+  <!-- 标准动作接口:FollowJointTrajectory 轨迹执行,GripperCommand 夹爪动作 -->
   <exec_depend>control_msgs</exec_depend>
-  <!-- 基础时间类型（Time/Duration），经动作与消息定义间接引用 -->
+  <!-- 基础时间类型(Time/Duration),经动作与消息定义间接引用 -->
   <exec_depend>builtin_interfaces</exec_depend>
-  <!-- 刚体动力学库：计算重力补偿所需的重力广义力与雅可比 -->
+  <!-- 刚体动力学库:计算重力补偿所需的重力广义力与雅可比 -->
   <exec_depend>pinocchio</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
-  <!-- 重力补偿与规划/仿真共用权威模型资源，不导入规划实现。 -->
+  <!-- 重力补偿与规划/仿真共用权威模型资源,不导入规划实现. -->
   <exec_depend>rebotarm_moveit_config</exec_depend>
-  <!-- 几何消息：位姿 Pose 用于笛卡尔目标下发与反馈 -->
+  <!-- 几何消息:位姿 Pose 用于笛卡尔目标下发与反馈 -->
   <exec_depend>geometry_msgs</exec_depend>
-  <!-- ROS 2 Python 客户端库：节点、服务、动作、参数与 QoS -->
+  <!-- ROS 2 Python 客户端库:节点,服务,动作,参数与 QoS -->
   <exec_depend>rclpy</exec_depend>
-  <!-- 本仓库自定义接口：JointMotorCmd、ArmStatus、JointMotorState、SetGripper、MoveToPose 等 -->
+  <!-- 本仓库自定义接口:JointMotorCmd,ArmStatus,JointMotorState,SetGripper,MoveToPose 等 -->
   <exec_depend>rebotarm_msgs</exec_depend>
-  <!-- 传感器消息：sensor_msgs/JointState 关节状态发布 -->
+  <!-- 传感器消息:sensor_msgs/JointState 关节状态发布 -->
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- 标准消息库：std_msgs/Header 等通用字段，经接口定义间接引用 -->
+  <!-- 标准消息库:std_msgs/Header 等通用字段,经接口定义间接引用 -->
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
-  <!-- 标准服务：std_srvs/Trigger 用于 enable/disable/safe_home/trajectory_stop 等无参服务 -->
+  <!-- 标准服务:std_srvs/Trigger 用于 enable/disable/safe_home/trajectory_stop 等无参服务 -->
   <exec_depend>std_srvs</exec_depend>
-  <!-- 四元数与欧拉角/旋转矩阵互转（RPY 约定），见 conversions 模块 -->
+  <!-- 四元数与欧拉角/旋转矩阵互转(RPY 约定),见 conversions 模块 -->
   <exec_depend>tf_transformations</exec_depend>
-  <!-- 轨迹消息：JointTrajectory / JointTrajectoryPoint 的点位构造与解析 -->
+  <!-- 轨迹消息:JointTrajectory / JointTrajectoryPoint 的点位构造与解析 -->
   <exec_depend>trajectory_msgs</exec_depend>
 
-  <!-- 导出构建类型，供 ament/colcon 识别本包的安装方式 -->
+  <!-- 导出构建类型,供 ament/colcon 识别本包的安装方式 -->
   <exec_depend>rebotarm_trajectory</exec_depend>
-  <!-- 共享力控算法、重力模型与补偿配置；设备事务仍归本包。 -->
+  <!-- 共享力控算法,重力模型与补偿配置;设备事务仍归本包. -->
   <exec_depend>rebotarm_force_control</exec_depend>
 
   <export>

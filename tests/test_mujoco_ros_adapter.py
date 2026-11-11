@@ -61,7 +61,7 @@ class _Simulation:
 
 @pytest.mark.parametrize('residual',[.003,.01])
 def test_sim_stationary_snapshot_accepts_hold_residual_but_still_requires_quiet_fresh_window(residual):
-    """不构造 ROS 节点或物理模型，只调用正式方法核对准入条件。"""
+    """不构造 ROS 节点或物理模型,只调用正式方法核对准入条件."""
     snapshot=TrajectoryExecution._stationary_snapshot
     hold=(0.,)*6
     positions=(residual,0.,0.,0.,0.,0.,.01,-.01)
@@ -73,7 +73,7 @@ def test_sim_stationary_snapshot_accepts_hold_residual_but_still_requires_quiet_
     owner=SimpleNamespace(_sample_history=samples,_last_physics_wall=time.monotonic(),clock=time.monotonic)
     state,returned_hold=snapshot(owner,sim)
     assert state is samples[-1] and returned_hold==hold
-    # 六轴与双指位置跨越旧量化门限，只要速度窗口合格仍可继续。
+    # 六轴与双指位置跨越旧量化门限,只要速度窗口合格仍可继续.
     samples[1].joint_positions=(.02,)*6+(.012,-.012)
     assert snapshot(owner,sim)[1]==hold
     samples[-1].joint_velocities=(.1,)+(0.,)*7
@@ -94,7 +94,7 @@ def test_ros_mode_surface_excludes_raw_torque():
 
 
 def test_independent_gripper_requires_a_new_physics_frame_after_final_target():
-    """即使小开口已在到位容差内，也不能用最终目标发送前的反馈报告成功。"""
+    """即使小开口已在到位容差内,也不能用最终目标发送前的反馈报告成功."""
     state = SimpleNamespace(simulation_time=1.,gripper_width=0.)
     events = []
     sim = SimpleNamespace(get_state=lambda:state,
@@ -104,7 +104,7 @@ def test_independent_gripper_requires_a_new_physics_frame_after_final_target():
     owner = GripperExecution(sim,ActiveTrajectory(),{})
     owner.task = task
     owner.advance()
-    owner.advance()  # 重读同一物理帧不算新反馈。
+    owner.advance()  # 重读同一物理帧不算新反馈.
     assert task.state == 'active' and all(e[0]=='target' for e in events)
     state.simulation_time=1.002
     state.gripper_width=.0001
@@ -460,7 +460,7 @@ def test_execution_components_own_state_and_have_no_ros_dependencies():
 
 
 def _execution_fixture():
-    """确定性仿真替身：复用正式执行组件，记录命令和物理时间。"""
+    """确定性仿真替身:复用正式执行组件,记录命令和物理时间."""
     from rebotarm_trajectory.capability import make_capability
     from rebotarm_motion.polynomial_trajectory import JOINT_NAMES, build_curve
     from rebotarm_motion.trajectory_preparation import point_to_point
@@ -534,14 +534,14 @@ def test_component_samples_exact_curve_and_waits_for_both_children(width):
     assert execution.status_snapshot().phase == 'TRAJ_PREPARING'
     sampler = execution.admit(token,payload,'scene-a',lambda:False)
     start,grip = execution.accepted_context(token)
-    assert len(sim.events) == before  # 两侧只登记，尚未发送。
+    assert len(sim.events) == before  # 两侧只登记,尚未发送.
     trace = []
     execution.step(1,lambda *args:trace.append(args))
     sends = sim.events[before:]
     assert sends[0][:2] == ('arm',start)
     if grip:
         assert sends[1][:2] == ('finger',start)
-    # 周期延迟直接采样当前时刻，没有补发积压点。
+    # 周期延迟直接采样当前时刻,没有补发积压点.
     sim.time += .1
     before = len(sim.events)
     execution.step(1,lambda *args:trace.append(args))
@@ -556,7 +556,7 @@ def test_component_samples_exact_curve_and_waits_for_both_children(width):
     assert sim.time-start >= max(curve.duration,0. if width is None else width/.009)
     notifications = []
     def notify():
-        assert execution.active.token is token  # 先通知，再释放预约。
+        assert execution.active.token is token  # 先通知,再释放预约.
         notifications.append(True)
     assert execution.complete(token,sampler,lambda:False,notify) is GateOutcome.SUCCEEDED
     assert notifications == [True] and not execution.active.busy
@@ -578,7 +578,7 @@ def test_preparation_failure_and_late_reply_never_start_children(change):
     elif change == 'context':
         payload['context']['generation'] += 1
     else:
-        # 准备失败直接进入停止清理，未调用接纳。
+        # 准备失败直接进入停止清理,未调用接纳.
         execution.stop(token)
     with pytest.raises(RuntimeError):
         execution.admit(token,payload,'scene-a',lambda:False)
@@ -622,7 +622,7 @@ def test_unconfirmed_stop_retains_resources_and_old_wait_cannot_release_new_goal
     assert execution.active.token is token and execution.status_snapshot().stop_unconfirmed
     with pytest.raises(RuntimeError,match='trajectory active'):
         execution.change_mode('gravity_comp')
-    # 新物理帧确认之后，由显式 Stop 收尾保留的原身份。
+    # 新物理帧确认之后,由显式 Stop 收尾保留的原身份.
     execution.step(120,lambda *args:None)
     assert execution.poll_stop(wait)
     assert not execution.active.busy and execution.gripper.task.state == 'failed'
@@ -764,7 +764,7 @@ def test_ros_goal_transport_binding_prevents_late_cancel_from_stopping_next_goal
 
 
 def _continuous_failure_callback_fixture(monkeypatch, *, hold_fails, abort_failure, web=False):
-    """使用真实执行组件和 ROS 消息，仅替换物理故障及 Action 传输句柄。"""
+    """使用真实执行组件和 ROS 消息,仅替换物理故障及 Action 传输句柄."""
     import rclpy
     from action_msgs.msg import GoalStatus
     from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
@@ -911,7 +911,7 @@ def test_continuous_ros_failure_finally_keeps_new_goal_ownership(monkeypatch):
 
 @pytest.mark.parametrize('abort_failure', [None, 'before_once', 'before_always', 'after'])
 def test_trajectory_action_server_delivers_failure_even_if_abort_keeps_failing(monkeypatch, abort_failure):
-    """运行安装版 ActionServer 外层；结果 Future 代表传输层待发送结果，无 DDS 节点。"""
+    """运行安装版 ActionServer 外层;结果 Future 代表传输层待发送结果,无 DDS 节点."""
     import asyncio
     from action_msgs.msg import GoalStatus
     from control_msgs.action import FollowJointTrajectory

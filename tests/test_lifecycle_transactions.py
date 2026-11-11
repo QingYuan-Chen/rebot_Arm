@@ -1,7 +1,7 @@
-"""生命周期组件的独立事务测试。
+"""生命周期组件的独立事务测试.
 
-直接装配设备、反馈与执行器接口，不构造 manager、ROS 或 SDK。用事件记录和
-故障注入核对设备回执、状态迁移及清理顺序，保留跨语言复用所需的行为断言。
+直接装配设备,反馈与执行器接口,不构造 manager,ROS 或 SDK.用事件记录和
+故障注入核对设备回执,状态迁移及清理顺序,保留跨语言复用所需的行为断言.
 """
 from dataclasses import replace
 from types import SimpleNamespace
@@ -13,7 +13,7 @@ from controller_fake_backend import WriterRuntime
 
 
 class Session:
-    """最小设备会话；反馈状态与命令状态分离，便于模拟确认失败。"""
+    """最小设备会话;反馈状态与命令状态分离,便于模拟确认失败."""
 
     def __init__(self):
         self.calls = []
@@ -141,7 +141,7 @@ def test_each_enable_failure_rolls_back_or_preserves_unknown_state(failure):
     with pytest.raises(RuntimeError, match="enable failed"):
         owner.enable()
     assert "disable" in device.calls
-    # 失能确认也失败时不能把输出未知标记为安全失能。
+    # 失能确认也失败时不能把输出未知标记为安全失能.
     if failure == "feedback_0":
         assert owner.enabled and owner.state == "DISABLING"
         assert "ENABLE_ROLLBACK_FAILED" in owner.errors

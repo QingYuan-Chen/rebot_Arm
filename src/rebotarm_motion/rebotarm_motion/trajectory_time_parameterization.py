@@ -1,22 +1,22 @@
-"""示教派生曲线的导数重建、完整曲线重定时及后端策略报告。
+"""示教派生曲线的导数重建,完整曲线重定时及后端策略报告.
 
 职责与位置
-    运动层按输入等级生成参考导数、整体时间缩放及拼接后模型限值复核。
-    不负责录制文件、界面、执行或碰撞场景；输入为共享数值点，输出为同等级六轴曲线。
+    运动层按输入等级生成参考导数,整体时间缩放及拼接后模型限值复核.
+    不负责录制文件,界面,执行或碰撞场景;输入为共享数值点,输出为同等级六轴曲线.
 
 对外接口
     parameterize_teach_samples 返回 TimeParameterizationResult.
     requested_method 与 used_method 分别记录请求方法和实际方法.
-    teach_input_grade 校验原始字段；prepare_teach_reference 保持等级生成参考约束；
-    parameterize_teach_waypoints 生成六轴候选；
-    finalize_teach_curve 检查模型及示教限值，并复核纳秒编码后的实际曲线。
+    teach_input_grade 校验原始字段;prepare_teach_reference 保持等级生成参考约束;
+    parameterize_teach_waypoints 生成六轴候选;
+    finalize_teach_curve 检查模型及示教限值,并复核纳秒编码后的实际曲线.
 
 安全与并发约束
-    不对中间点一律补零，不静默删除已有 MoveIt 导数。滤波/重建可能改变节点间路径，
-    调用者须检查实际生成曲线的碰撞；时间缩放不能修复位置越界。这里只生成数据，不执行。
+    不对中间点一律补零,不静默删除已有 MoveIt 导数.滤波/重建可能改变节点间路径,
+    调用者须检查实际生成曲线的碰撞;时间缩放不能修复位置越界.这里只生成数据,不执行.
 
 文件结构(按定义顺序)
-    输入分级与参考导数 → 六轴重定时 → 完整曲线复核 → 方法记录。
+    输入分级与参考导数 → 六轴重定时 → 完整曲线复核 → 方法记录.
     normalize_time_parameterization_method: 把外部传入的方法名归一化为三种合法取值之一.
     parameterize_teach_samples: 按策略选择时间参数化方法并产出轨迹点.
 """
@@ -31,7 +31,7 @@ from .polynomial_trajectory import TrajectoryPoint
 
 
 def teach_input_grade(points):
-    """在任何滤波/字段变换之前校验结构，返回 q、q/v 或 q/v/a，不补造缺失字段。"""
+    """在任何滤波/字段变换之前校验结构,返回 q,q/v 或 q/v/a,不补造缺失字段."""
     points = tuple(points)
     if not points:
         raise ValueError('teach trajectory points required')
@@ -57,11 +57,11 @@ def teach_input_grade(points):
 
 
 def prepare_teach_reference(points, *, derive_velocity=False, zero_endpoints=True):
-    """保留输入等级；位置处理后仅重建该等级已有的导数约束。
+    """保留输入等级;位置处理后仅重建该等级已有的导数约束.
 
-    q/v 用非均匀三点差分生成派生参考 v，绝不补 a。q/v/a 才允许重建 a；
-    未处理位置时保留中间原导数。端点已有导数归零用于连接保持，缺项仍为空。
-    这只是候选，调用方必须检查重建后实际路径的解析极值和碰撞。
+    q/v 用非均匀三点差分生成派生参考 v,绝不补 a.q/v/a 才允许重建 a;
+    未处理位置时保留中间原导数.端点已有导数归零用于连接保持,缺项仍为空.
+    这只是候选,调用方必须检查重建后实际路径的解析极值和碰撞.
     """
     points = tuple(points)
     grade = teach_input_grade(points)
@@ -71,7 +71,7 @@ def prepare_teach_reference(points, *, derive_velocity=False, zero_endpoints=Tru
     def differentiate(values):
         result = [zeros]*len(points)
         for i in range(1, len(points)-1):
-            # 左右采样间隔可能不同；用各自间隔加权，保留原录制时间轴的导数尺度。
+            # 左右采样间隔可能不同;用各自间隔加权,保留原录制时间轴的导数尺度.
             left, right = points[i].time-points[i-1].time, points[i+1].time-points[i].time
             result[i] = tuple((right*(b-a)/left + left*(c-b)/right)/(left+right)
                 for a,b,c in zip(values[i-1], values[i], values[i+1]))
@@ -91,11 +91,11 @@ def prepare_teach_reference(points, *, derive_velocity=False, zero_endpoints=Tru
 
 def parameterize_teach_waypoints(names, points, velocity_limits, acceleration_limit, jerk_limit,
                                  *, replay_speed, initial_delay, zero_endpoints=True):
-    """按参考节点的原等级构建曲线并整体放慢，避免逐段改时造成导数失真。
+    """按参考节点的原等级构建曲线并整体放慢,避免逐段改时造成导数失真.
 
-    参考导数已由调用方按位置处理策略生成，不能在这里升级输入等级。
-    所有位置节点保留；只缩放时间及已有导数。这里检查段内动态极值，完整位置限位和拼接后的
-    纳秒曲线检查由回放工作流再做；重采样不额外增加路径控制节点。
+    参考导数已由调用方按位置处理策略生成,不能在这里升级输入等级.
+    所有位置节点保留;只缩放时间及已有导数.这里检查段内动态极值,完整位置限位和拼接后的
+    纳秒曲线检查由回放工作流再做;重采样不额外增加路径控制节点.
     """
     from .polynomial_trajectory import build_curve
     base = prepare_teach_reference(tuple(TrajectoryPoint(
@@ -111,7 +111,7 @@ def parameterize_teach_waypoints(names, points, velocity_limits, acceleration_li
                 if not math.isfinite(bound) or bound <= 0:
                     raise ValueError('positive finite teach dynamic limits required')
                 peak = max(abs(segment.at(u,order)[j]) for u in segment.candidates(j,order))
-                # 全曲线共用时间倍率；一/二/三阶导数分别按倍率的一/二/三次方下降。
+                # 全曲线共用时间倍率;一/二/三阶导数分别按倍率的一/二/三次方下降.
                 scale = max(scale,(peak/bound)**(1/order))
     scale *= 1.+1e-6
     return tuple(TrajectoryPoint(initial_delay+p.time*scale, p.positions,
@@ -119,7 +119,7 @@ def parameterize_teach_waypoints(names, points, velocity_limits, acceleration_li
 
 
 def finalize_teach_curve(names, points, config_directory, velocity_limits, acceleration_limit, jerk_limit, *, fixed=False):
-    """拼接完成后按模型和示教限值的较小值重定时并复核纳秒编码后的整曲线。"""
+    """拼接完成后按模型和示教限值的较小值重定时并复核纳秒编码后的整曲线."""
     from dataclasses import replace
     from .trajectory_preparation import load_reference_limits
     from .coordinated_trajectory import retime_curve
@@ -131,7 +131,7 @@ def finalize_teach_curve(names, points, config_directory, velocity_limits, accel
 
 
 def teach_curve_analysis(curve):
-    """报告实际曲线的段内解析峰值及节点左右加速度差，不把差分尖峰当作 jerk。"""
+    """报告实际曲线的段内解析峰值及节点左右加速度差,不把差分尖峰当作 jerk."""
     peaks = {kind: max((abs(segment.at(u, order)[j])
         for segment in curve.segments for j in range(len(curve.joint_names))
         for u in segment.candidates(j, order)),
@@ -152,10 +152,10 @@ def teach_curve_analysis(curve):
 class TimeParameterizationResult:
     """时间参数化结果与"请求/实际"方法记录.
 
-    - ``points``：共享 TrajectoryPoint 数值点；时间单位秒。
-    - ``requested_method``：保留归一化的历史配置请求值。
-    - ``used_method``：实际使用的 c0/c1/c2_waypoint_retime。
-    - ``message``：实际分级方法及历史配置适配说明，透传到状态面板。
+    - ``points``:共享 TrajectoryPoint 数值点;时间单位秒.
+    - ``requested_method``:保留归一化的历史配置请求值.
+    - ``used_method``:实际使用的 c0/c1/c2_waypoint_retime.
+    - ``message``:实际分级方法及历史配置适配说明,透传到状态面板.
     """
 
     points: list[TrajectoryPoint]
@@ -167,8 +167,8 @@ class TimeParameterizationResult:
 def normalize_time_parameterization_method(method: str | None) -> str:
     """把外部传入的方法名归一化为三种合法取值之一.
 
-    ``None``/空串/``"default"`` 使用 ``"auto"``；未知方法名显式报错。
-    比较前去掉首尾空白并转小写。
+    ``None``/空串/``"default"`` 使用 ``"auto"``;未知方法名显式报错.
+    比较前去掉首尾空白并转小写.
     """
     value = ("auto" if method is None else method).strip().lower()
     if value in ("", "default"):
@@ -185,7 +185,7 @@ def parameterize_teach_samples(
     max_acceleration_rad_s2: float, max_jerk_rad_s3: float,
     initial_delay_sec: float = 0., boundary_zero_velocity: bool = True,
 ) -> TimeParameterizationResult:
-    """统一六轴分级重定时；历史方法配置只影响报告，实际算法由输入字段决定。"""
+    """统一六轴分级重定时;历史方法配置只影响报告,实际算法由输入字段决定."""
     from .polynomial_trajectory import JOINT_NAMES
     if tuple(names) != JOINT_NAMES:
         raise ValueError('teach retiming requires canonical joint1..joint6')

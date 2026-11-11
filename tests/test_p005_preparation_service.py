@@ -1,9 +1,9 @@
-"""轨迹准备服务的场景和覆盖边界回归。
+"""轨迹准备服务的场景和覆盖边界回归.
 
-文件职责：验证碰撞版本、整批只读锁、附着物副本、固定双指状态及失败响应边界。
-对外接口：pytest 用例；LockedMonitor 为检查锁和 RobotState 使用方式的场景替身。
-安全约束：不启动真实 MoveIt 或设备；替身只能证明调用范围，不能替代真实场景集成验收。
-文件结构：场景版本测试 → 状态/锁替身 → 完整请求工厂 → 覆盖与拒绝用例。
+文件职责:验证碰撞版本,整批只读锁,附着物副本,固定双指状态及失败响应边界.
+对外接口:pytest 用例;LockedMonitor 为检查锁和 RobotState 使用方式的场景替身.
+安全约束:不启动真实 MoveIt 或设备;替身只能证明调用范围,不能替代真实场景集成验收.
+文件结构:场景版本测试 → 状态/锁替身 → 完整请求工厂 → 覆盖与拒绝用例.
 """
 import copy
 import json
@@ -53,7 +53,7 @@ class FakeState:
 
 
 class LockedMonitor:
-    """每次查询同时断言锁、附着物和全机器人范围；不能以单纯计数掩盖检查对象错误。"""
+    """每次查询同时断言锁,附着物和全机器人范围;不能以单纯计数掩盖检查对象错误."""
     def __init__(self):
         self.locked = False
         self.entries = 0
@@ -70,7 +70,7 @@ class LockedMonitor:
         finally:
             self.locked=False
     def collision(self, state, group, verbose):
-        # 空 group 才覆盖完整机器人；复制状态必须保留附着物，同时不得污染场景当前状态。
+        # 空 group 才覆盖完整机器人;复制状态必须保留附着物,同时不得污染场景当前状态.
         assert self.locked
         assert state is not self.scene.current_state
         assert state.attached_body=='held_object'

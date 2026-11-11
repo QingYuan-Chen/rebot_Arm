@@ -1,4 +1,4 @@
-"""将配置文件先合并为普通参数字典，保证显式覆盖的优先级。"""
+"""将配置文件先合并为普通参数字典,保证显式覆盖的优先级."""
 
 from pathlib import Path
 
@@ -18,7 +18,7 @@ def read_section(path, section, field):
 
 
 def merged_parameters(context, node_name, profiles, overrides):
-    """Profile 顺序合并后，显式 launch 覆盖最后写入；不依赖 ROS YAML 特异性。"""
+    """Profile 顺序合并后,显式 launch 覆盖最后写入;不依赖 ROS YAML 特异性."""
     values = {}
     for profile in profiles:
         path = profile.perform(context)

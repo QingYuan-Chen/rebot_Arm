@@ -1,9 +1,9 @@
-"""版本化执行能力的数值协议。
+"""版本化执行能力的数值协议.
 
-文件职责：规范后端生效的速度、力矩、会话及系数版本，生成配置摘要。
-对外接口：make_capability、decode_capability、constraint_revision；调用方负责发布和接收时刻。
-安全约束：摘要只标识配置与会话，不代表使能或运动许可；不读取任何时钟。
-文件结构：资源摘要 → 能力构造及校验；最终计划绑定由 planning 模块负责。
+文件职责:规范后端生效的速度,力矩,会话及系数版本,生成配置摘要.
+对外接口:make_capability,decode_capability,constraint_revision;调用方负责发布和接收时刻.
+安全约束:摘要只标识配置与会话,不代表使能或运动许可;不读取任何时钟.
+文件结构:资源摘要 → 能力构造及校验;最终计划绑定由 planning 模块负责.
 """
 
 import hashlib
@@ -13,7 +13,7 @@ from .polynomial import JOINT_NAMES
 
 
 def constraint_revision(*documents):
-    """对调用方提供的模型/限值原始字节求摘要；本库不定位或读取资源文件。"""
+    """对调用方提供的模型/限值原始字节求摘要;本库不定位或读取资源文件."""
     digest = hashlib.sha256()
     for document in documents:
         digest.update(len(document).to_bytes(8, 'big'))
@@ -22,7 +22,7 @@ def constraint_revision(*documents):
 
 
 def make_capability(session, speed, torque, limits_revision):
-    """速度为夹爪电机 rad/s，力矩为 N·m；与开口单位的转换必须显式。"""
+    """速度为夹爪电机 rad/s,力矩为 N·m;与开口单位的转换必须显式."""
     if type(session) is not int or session < 0:
         raise ValueError('invalid capability identity')
     if not all(math.isfinite(v) and v > 0 for v in (speed, torque)):
@@ -41,7 +41,7 @@ def make_capability(session, speed, torque, limits_revision):
 
 
 def decode_capability(value):
-    """重新构造并比对全部字段，拒绝未知版本、漏字段和伪造的摘要。"""
+    """重新构造并比对全部字段,拒绝未知版本,漏字段和伪造的摘要."""
     data = json.loads(value) if isinstance(value, str) else value
     expected = make_capability(data['session'],
         data['gripper_motor_speed_rad_s'], data['gripper_torque_cap_nm'], data['limits_revision'])

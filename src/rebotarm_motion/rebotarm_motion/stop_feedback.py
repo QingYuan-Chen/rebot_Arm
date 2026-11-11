@@ -1,4 +1,4 @@
-"""运动停止确认的线程安全证据；保留源时间、连续性与速度窗口。
+"""运动停止确认的线程安全证据;保留源时间,连续性与速度窗口.
 
 职责与位置
     接收线程与停止编排之间共享的证据容器, 不读取设备, 不发出控制命令.
@@ -7,7 +7,7 @@
     update 保存去重样本, ready 供新请求建立起点, stationary 验证固定请求的连续静止.
 
 安全与并发约束
-    重复源时间戳不累计，断流锁存为该请求失败；不按位置变化设置门限。
+    重复源时间戳不累计,断流锁存为该请求失败;不按位置变化设置门限.
     内部锁只保护短事务, 禁止持此锁反向调用接收缓存或同步等待 ROS.
 
 文件结构(按定义顺序)
@@ -76,7 +76,7 @@ class StopFeedback:
         """查询 since 之后是否已有连续静止全窗口, 不以恢复帧消除旧请求失败.
 
         since / now 为单调秒, now_ns 与消息时间戳处于同一 ROS 时钟域.
-        至少三帧覆盖窗口，逐帧速度需达标；不检查位置极差或首帧偏差。
+        至少三帧覆盖窗口,逐帧速度需达标;不检查位置极差或首帧偏差.
         发现新的过期也锁存 broken_at, 同一请求之后不能因新帧恢复而确认.
         """
         with self.lock:
@@ -85,7 +85,7 @@ class StopFeedback:
                 self._since, self._first_received = since, None
             if samples and self._first_received is None:
                 if samples[0][0]-since > self.max_age:
-                    return False  # 请求起点证据已丢失，不能用较晚的新帧跨过空档。
+                    return False  # 请求起点证据已丢失,不能用较晚的新帧跨过空档.
                 self._first_received = samples[0][0]
             if since <= self.broken_at or len(samples) < 3:
                 return False

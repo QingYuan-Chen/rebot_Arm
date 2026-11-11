@@ -1,4 +1,4 @@
-"""不构造硬件管理器，验证反馈组件及可供跨语言复用的固定样本。"""
+"""不构造硬件管理器,验证反馈组件及可供跨语言复用的固定样本."""
 import json
 import threading
 from pathlib import Path
@@ -66,7 +66,7 @@ def test_new_invalid_frame_preserves_old_sample_but_marks_failure():
 
 @pytest.mark.parametrize('reply_at,oversleep', [(.11, False), (None, False), (.16, False), (.11, True)])
 def test_force_refresh_waits_for_last_request_inside_existing_deadline(monkeypatch, reply_at, oversleep):
-    """第三次请求的延迟应答可用；缺路或原有 150 ms 窗口外的应答仍失败。"""
+    """第三次请求的延迟应答可用;缺路或原有 150 ms 窗口外的应答仍失败."""
     clock = [0.]
     monkeypatch.setattr(acquisition.time, 'monotonic', lambda: clock[0])
     def sleep(delay):

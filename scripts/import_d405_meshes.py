@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""核对 D405 输入摘要后，将 CAD 毫米转换为米制 STL，保留源坐标轴。
+"""核对 D405 输入摘要后,将 CAD 毫米转换为米制 STL,保留源坐标轴.
 
-依赖见 docs/setup/dependencies/cad.md；装配变换归规范 URDF，说明见
-docs/implemented/features/d405_wrist_model.md。运行会写入输出网格及源目录的几何报告。
+依赖见 docs/setup/dependencies/cad.md;装配变换归规范 URDF,说明见
+docs/implemented/features/d405_wrist_model.md.运行会写入输出网格及源目录的几何报告.
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def main() -> None:
             path.write_bytes(data)
             print(f"{path}: {len(triangles)} triangles")
 
-    # 按单位质量计算几何惯量，实际质量和材料填充由物理测量另行确定。
+    # 按单位质量计算几何惯量,实际质量和材料填充由物理测量另行确定.
     from OCP.STEPControl import STEPControl_Reader
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps

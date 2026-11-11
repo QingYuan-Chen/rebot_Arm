@@ -1,4 +1,4 @@
-"""不启动 ROS 节点或连接设备，验证组件边界。"""
+"""不启动 ROS 节点或连接设备,验证组件边界."""
 import ast
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -10,7 +10,7 @@ import yaml
 from rebotarmcontroller.configuration import HardwareSettings, load_configuration, default_config
 from rebotarmcontroller.contracts.controller_contracts import MotorFeedback
 
-# 批次 2 切换时，用相同输入对照旧模型和规范模型的正运动学结果。
+# 批次 2 切换时,用相同输入对照旧模型和规范模型的正运动学结果.
 FK_SAMPLES = ((0.,0.,0.,0.,0.,0.), (0.,0.,-.017453292519943295,0.,0.,0.),
               (.2,-.8,-1.1,.3,-.2,.4), (-.4,-1.4,-.5,-.5,.5,-.8))
 
@@ -61,7 +61,7 @@ def test_manager_and_ros_have_no_legacy_private_access():
             if not isinstance(node, ast.Attribute):
                 continue
             assert node.attr not in ('_endpos_ctrl', 'endpos_ctrl', '_motor_map', '_ctrl_map')
-            # _arm 现在是六轴职责端口，不再是旧 SDK 对象；禁止穿透其私有成员。
+            # _arm 现在是六轴职责端口,不再是旧 SDK 对象;禁止穿透其私有成员.
             if (isinstance(node.value, ast.Attribute) and node.value.attr == '_arm'
                     and isinstance(node.value.value, ast.Name) and node.value.value.id == 'self'):
                 assert not node.attr.startswith('_'), (name, node.lineno, node.attr)

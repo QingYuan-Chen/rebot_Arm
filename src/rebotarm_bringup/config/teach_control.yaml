@@ -1,10 +1,10 @@
-# 示教录制、示教回放及网页示教卡片使用的工作流参数。（得修改）
+# 示教录制,示教回放及网页示教卡片使用的工作流参数.(得修改)
 #
-# 这是示教包的配置，不是遥操作配置。网页面板会加载本文件的镜像参数，用于回显和向 TeachReplayWorkflow 发出一致的 dry-run/execute 设置。
+# 这是示教包的配置,不是遥操作配置.网页面板会加载本文件的镜像参数,用于回显和向 TeachReplayWorkflow 发出一致的 dry-run/execute 设置.
 
 /**:
   ros__parameters:
-    # 记录文件与录制前置条件。
+    # 记录文件与录制前置条件.
     record_path: teleop_records/teach_record.jsonl
     sample_rate_hz: 150.0
     require_gravity_comp: true
@@ -17,7 +17,7 @@
     quit_key: q
     start_on_launch: true
 
-    # 回放启动方式与起点分类/对齐。
+    # 回放启动方式与起点分类/对齐.
     speed: 1.0
     replay_speed: 1.0
     direct_threshold: 0.01
@@ -29,7 +29,7 @@
     align_max_duration: 10.0
     align_steps: 30
 
-    # 轨迹质量与动力学上限。
+    # 轨迹质量与动力学上限.
     green_jump_rad: 0.03
     yellow_jump_rad: 0.05
     yellow_max_speed: 0.6
@@ -47,7 +47,7 @@
     large_motion_total_rad: 2.5
     large_motion_max_speed: 1.0
 
-    # 起停保持、软启动与回放延时。
+    # 起停保持,软启动与回放延时.
     start_hold_sec: 0.8
     soft_start_duration: 1.0
     soft_start_steps: 30
@@ -55,7 +55,7 @@
     final_hold_sec: 1.0
     initial_replay_delay_sec: 0.2
 
-    # MoveIt 起点对齐与碰撞预检。
+    # MoveIt 起点对齐与碰撞预检.
     use_moveit_start_align: true
     moveit_start_skip_threshold: 0.005
     moveit_group_name: arm
@@ -70,11 +70,11 @@
     moveit_acceleration_scaling: 0.1
     collision_check_enabled: true
     collision_check_service: /check_state_validity
-    # 实际参考曲线含全部节点与内部极值；预算不足时拒绝，不抽稀。
+    # 实际参考曲线含全部节点与内部极值;预算不足时拒绝,不抽稀.
     collision_check_max_samples: 10000
     collision_check_timeout_sec: 2.0
 
-    # 录制后的平滑、滤波、重采样和重定时。
+    # 录制后的平滑,滤波,重采样和重定时.
     smoothing_enabled: true
     smoothing_window: 7
     filter_enabled: true
@@ -85,7 +85,7 @@
     time_parameterization_method: auto
     max_prepared_jump_rad: 0.02
 
-    # 回放运行期跟踪保护。
+    # 回放运行期跟踪保护.
     replay_monitor_enabled: true
     replay_monitor_period_sec: 0.05
     replay_monitor_start_grace_sec: 1.0

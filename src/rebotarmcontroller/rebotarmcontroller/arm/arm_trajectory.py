@@ -4,7 +4,7 @@
     六轴任务所有者, 将数值执行器的发送状态与反馈收敛组合为任务终态.
 
 对外接口
-    ArmTask 保存身份与事件, ArmResult 是查询快照; ArmTrajectory 负责连续曲线接纳、停靠、update 和 finish.
+    ArmTask 保存身份与事件, ArmResult 是查询快照; ArmTrajectory 负责连续曲线接纳,停靠,update 和 finish.
 
 安全与并发约束
     任务句柄跨线程保留身份; 成功要求末点发送后的新反馈. 健康超差保留使能并交回当前位置保持.
@@ -62,9 +62,9 @@ class ArmTrajectory:
         self.lock = threading.RLock()
 
     def submit_home(self, target, velocity, timeout):
-        """登记限速停靠目标；只用于显式 safe_home，成功后交回反馈保持。
+        """登记限速停靠目标;只用于显式 safe_home,成功后交回反馈保持.
 
-        停靠没有轨迹时间轴，由固件速度上限控制接近；仍等待发送后的新反馈确认到位。
+        停靠没有轨迹时间轴,由固件速度上限控制接近;仍等待发送后的新反馈确认到位.
         """
         with self.lock:
             if self.task is not None and not self.task.event.is_set():
@@ -83,11 +83,11 @@ class ArmTrajectory:
             return replace(task.result)
 
     def submit_prepared(self, curve, generation, *, settle=2., tolerance=.03):
-        """在同一任务事务内接纳已检查曲线，末点发送仍需后续新帧到位确认。
+        """在同一任务事务内接纳已检查曲线,末点发送仍需后续新帧到位确认.
 
-        调用前由六轴所有者复核预约上下文；这里建立任务事件与后端完成期限。
-        settle 是控制器自身的终点等待，不改变 MoveIt 客户端的执行预算。
-        默认不启用 hold_on_success，正常结束继续保持曲线终点命令。
+        调用前由六轴所有者复核预约上下文;这里建立任务事件与后端完成期限.
+        settle 是控制器自身的终点等待,不改变 MoveIt 客户端的执行预算.
+        默认不启用 hold_on_success,正常结束继续保持曲线终点命令.
         """
         with self.lock:
             if self.task is not None and not self.task.event.is_set():

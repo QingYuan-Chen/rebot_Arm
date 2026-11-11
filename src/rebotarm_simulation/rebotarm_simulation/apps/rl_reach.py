@@ -1,4 +1,4 @@
-"""Reach API 检查、CUDA PPO 训练和独立种子评估入口。"""
+"""Reach API 检查,CUDA PPO 训练和独立种子评估入口."""
 import argparse
 import json
 from pathlib import Path

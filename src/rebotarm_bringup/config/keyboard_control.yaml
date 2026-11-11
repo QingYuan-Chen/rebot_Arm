@@ -1,16 +1,16 @@
-# 终端键盘遥操作参数。
+# 终端键盘遥操作参数.
 #
-# 仅由 rebotarm_teleop/TeleopKeyboardNode 读取。网页端的键盘按钮不是这个节点，
-# 不使用 deadman_required/deadman_key；网页参数在 web_teleop.yaml 中维护。
+# 仅由 rebotarm_teleop/TeleopKeyboardNode 读取.网页端的键盘按钮不是这个节点,
+# 不使用 deadman_required/deadman_key;网页参数在 web_teleop.yaml 中维护.
 
 /**:
   ros__parameters:
-    # 单次按键的关节增量（rad）。时长使用节点按轨迹模式选择的默认值：
-    # 默认 0.4 s；自定义 YAML 可显式设置 trajectory_duration。
+    # 单次按键的关节增量(rad).时长使用节点按轨迹模式选择的默认值:
+    # 默认 0.4 s;自定义 YAML 可显式设置 trajectory_duration.
     joint_step_rad: 0.02
-    # 终端轮询周期（s）与输入静默超时（s）。
+    # 终端轮询周期(s)与输入静默超时(s).
     poll_period: 0.05
     input_timeout: 0.5
-    # 仅终端键盘的事务键保护；默认 false 保持现有“按键即动”行为。
+    # 仅终端键盘的事务键保护;默认 false 保持现有"按键即动"行为.
     deadman_required: false
     deadman_key: z

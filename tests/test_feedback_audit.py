@@ -1,4 +1,4 @@
-"""有界审计、真实 PTY 字节转发和生产假设备停止事务；不接触真机串口。"""
+"""有界审计,真实 PTY 字节转发和生产假设备停止事务;不接触真机串口."""
 import importlib.util
 import json
 import logging
@@ -93,7 +93,7 @@ def test_relay_splits_coalesced_commands_and_waits_for_fragment_completion(monke
         try:
             os.write(relay.slave, frame[:9])
             time.sleep(.02)
-            assert not writes  # 不把半帧送到 USB 适配器。
+            assert not writes  # 不把半帧送到 USB 适配器.
             os.write(relay.slave, frame[9:] + frame * 6)
             wait_until(lambda: len(writes) == 7 or bool(relay.error))
             assert not relay.error
@@ -125,7 +125,7 @@ def test_relay_invalid_or_incomplete_command_marks_evidence_incomplete(payload):
         relay.close()
         assert relay.error
         assert not select.select([master], [], [], .01)[0]
-        relay.close()  # 清理入口可以重复调用。
+        relay.close()  # 清理入口可以重复调用.
     finally:
         relay.close()
         os.close(master)
@@ -177,7 +177,7 @@ def test_entrypoint_drains_writer_when_node_startup_or_relay_cleanup_fails(tmp_p
 
 @pytest.mark.parametrize('through_relay', [False, True])
 def test_installed_sdk_seven_motor_startup_on_virtual_serial(through_relay):
-    """使用真实 ABI 和生产反馈组件；虚拟响应端含分段及粘包，不触碰硬件。"""
+    """使用真实 ABI 和生产反馈组件;虚拟响应端含分段及粘包,不触碰硬件."""
     motorbridge = pytest.importorskip('motorbridge')
     if motorbridge.__version__ != '0.4.7+rebotarm.1':
         pytest.skip('requires the verified MotorBridge wheel')
@@ -292,7 +292,7 @@ def test_duplicate_stop_joins_one_transaction_and_moving_cancel_retargets(monkey
             errors.append(str(exc))
     workers = [threading.Thread(target=stop) for _ in range(2)]
     try:
-        # 正在运动的轨迹不能保留远处目标。
+        # 正在运动的轨迹不能保留远处目标.
         task = submit_curve(manager, (.1, -.1, -.1, 0., 0., 0.), 10.)
         for motor in opened[0].motors[:6]:
             motor.state.vel = .2

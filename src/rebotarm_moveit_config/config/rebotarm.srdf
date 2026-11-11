@@ -1,43 +1,43 @@
 <?xml version="1.0" ?>
-<!-- reBotArm 实际使用的 MoveIt 语义模型（SRDF）：MoveIt 规划组、末端执行器、
-     命名姿态与自碰撞禁用矩阵都在这里定义，纯几何描述在 config/rebotarm.urdf 中。
-     两者的 <robot name> 必须保持一致，MoveIt 才会把它们当作同一个模型。
-     本包的定位是「MoveIt 模型与规划配置」，不承载任何可执行业务逻辑。 -->
+<!-- reBotArm 实际使用的 MoveIt 语义模型(SRDF):MoveIt 规划组,末端执行器,
+     命名姿态与自碰撞禁用矩阵都在这里定义,纯几何描述在 config/rebotarm.urdf 中.
+     两者的 <robot name> 必须保持一致,MoveIt 才会把它们当作同一个模型.
+     本包的定位是"MoveIt 模型与规划配置",不承载任何可执行业务逻辑. -->
 <robot name="reBot-DevArm_fixend">
-  <!-- 虚拟关节：把固定基座机械臂挂到世界坐标系上，parent_frame=world、child_link=base_link，
-       type="fixed" 表示二者无相对自由度，同时定义了规划场景中的世界连接点。
-       与之配对的 TF 由启动文件用 static_transform_publisher 发布。 -->
+  <!-- 虚拟关节:把固定基座机械臂挂到世界坐标系上,parent_frame=world,child_link=base_link,
+       type="fixed" 表示二者无相对自由度,同时定义了规划场景中的世界连接点.
+       与之配对的 TF 由启动文件用 static_transform_publisher 发布. -->
   <virtual_joint name="world_joint" type="fixed" parent_frame="world" child_link="base_link" />
 
-  <!-- 主规划组 arm：base_link 到 end_link 的串联链，覆盖 joint1~joint6 六个转动关节；
-       IK 求解与 OMPL 规划默认都针对该组。 -->
+  <!-- 主规划组 arm:base_link 到 end_link 的串联链,覆盖 joint1~joint6 六个转动关节;
+       IK 求解与 OMPL 规划默认都针对该组. -->
   <group name="arm">
     <chain base_link="base_link" tip_link="end_link" />
   </group>
 
-  <!-- 夹爪规划组 gripper：两个镜像平移关节（左指 +Y、右指 -Y），
-       用于夹爪碰撞检查与抓取规划；开口量由两指位移合成。 -->
+  <!-- 夹爪规划组 gripper:两个镜像平移关节(左指 +Y,右指 -Y),
+       用于夹爪碰撞检查与抓取规划;开口量由两指位移合成. -->
   <group name="gripper">
     <joint name="left_finger_joint" />
     <joint name="right_finger_joint" />
   </group>
 
-  <!-- 末端执行器声明：名称 gripper，安装于 end_link，所属组 gripper，父规划组 arm；
-       MoveIt 据此计算抓取姿态并支持附着物体。 -->
+  <!-- 末端执行器声明:名称 gripper,安装于 end_link,所属组 gripper,父规划组 arm;
+       MoveIt 据此计算抓取姿态并支持附着物体. -->
   <end_effector name="gripper" parent_link="end_link" group="gripper" parent_group="arm" />
 
-  <!-- 命名状态与仿真关键帧的约定：以下 group_state 的名称与数值和 MuJoCo 模型配置
-       （rebotarm_simulation/models/rebotarm/scene.xml）中的 keyframe 保持一致，使同一个姿态名在仿真与真机上
-       含义相同。
+  <!-- 命名状态与仿真关键帧的约定:以下 group_state 的名称与数值和 MuJoCo 模型配置
+       (rebotarm_simulation/models/rebotarm/scene.xml)中的 keyframe 保持一致,使同一个姿态名在仿真与真机上
+       含义相同.
 
-       本文件提供 safe_home 和 home 两个机械臂命名状态。零位附近的碰撞对关节角敏感，
-       使用实际反馈和当前场景完成起点及路径检查；现场对照记录见 docs/reference/project_status.md。
+       本文件提供 safe_home 和 home 两个机械臂命名状态.零位附近的碰撞对关节角敏感,
+       使用实际反馈和当前场景完成起点及路径检查;现场对照记录见 docs/reference/project_status.md.
 
-       仿真另外提供 "zero" keyframe，供 RebotArmMujoco.reset() 按配置选择复位状态；
-       该 keyframe 的具体关节值以 MuJoCo 场景文件为准。 -->
-  <!-- safe_home：安全停机/复位姿态，单位弧度。仅 joint3 = -0.017453292519943295（即 -1°）
-       非零，其余全为 0。驱动侧停靠默认值、Web 侧安全姿态与仿真 keyframe 均沿用此值；
-       从实际起点到该目标的运动仍需按当前场景检查。 -->
+       仿真另外提供 "zero" keyframe,供 RebotArmMujoco.reset() 按配置选择复位状态;
+       该 keyframe 的具体关节值以 MuJoCo 场景文件为准. -->
+  <!-- safe_home:安全停机/复位姿态,单位弧度.仅 joint3 = -0.017453292519943295(即 -1°)
+       非零,其余全为 0.驱动侧停靠默认值,Web 侧安全姿态与仿真 keyframe 均沿用此值;
+       从实际起点到该目标的运动仍需按当前场景检查. -->
   <group_state name="safe_home" group="arm">
     <joint name="joint1" value="0.0" />
     <joint name="joint2" value="0.0" />
@@ -47,8 +47,8 @@
     <joint name="joint6" value="0.0" />
   </group_state>
 
-  <!-- home：常规作业起始姿态，单位弧度。joint2=-0.8（抬肩）、joint3=-1.2（屈肘）、
-       joint4=0.6（转腕），其余为 0；整体为抬臂前伸、夹爪朝前的准备位。 -->
+  <!-- home:常规作业起始姿态,单位弧度.joint2=-0.8(抬肩),joint3=-1.2(屈肘),
+       joint4=0.6(转腕),其余为 0;整体为抬臂前伸,夹爪朝前的准备位. -->
   <group_state name="home" group="arm">
     <joint name="joint1" value="0.0" />
     <joint name="joint2" value="-0.8" />
@@ -58,22 +58,22 @@
     <joint name="joint6" value="0.0" />
   </group_state>
 
-  <!-- open：夹爪张开命名状态，单位米。左指 +0.045、右指 -0.045，合计行程 0.09 m。
-       新软指真实净开口仍需标定，不能把行程直接当作指面间距。 -->
+  <!-- open:夹爪张开命名状态,单位米.左指 +0.045,右指 -0.045,合计行程 0.09 m.
+       新软指真实净开口仍需标定,不能把行程直接当作指面间距. -->
   <group_state name="open" group="gripper">
     <joint name="left_finger_joint" value="0.045" />
     <joint name="right_finger_joint" value="-0.045" />
   </group_state>
 
-  <!-- closed：保留的关节零位命名状态，两指均回到 0；新软指仍有间隙，不表示完全夹紧。 -->
+  <!-- closed:保留的关节零位命名状态,两指均回到 0;新软指仍有间隙,不表示完全夹紧. -->
   <group_state name="closed" group="gripper">
     <joint name="left_finger_joint" value="0.0" />
     <joint name="right_finger_joint" value="0.0" />
   </group_state>
 
-  <!-- 自碰撞禁用矩阵：相邻 link 在结构上本就贴在一起（关节处必然接触），
-       若不禁用会产生大量假碰撞导致规划全部失败，因此统一以 reason="Adjacent" 禁用。
-       link2-link4、link2-link5 保持参与检查，按每次请求的关节状态计算。 -->
+  <!-- 自碰撞禁用矩阵:相邻 link 在结构上本就贴在一起(关节处必然接触),
+       若不禁用会产生大量假碰撞导致规划全部失败,因此统一以 reason="Adjacent" 禁用.
+       link2-link4,link2-link5 保持参与检查,按每次请求的关节状态计算. -->
   <disable_collisions link1="base_link" link2="link1" reason="Adjacent" />
   <disable_collisions link1="link1" link2="link2" reason="Adjacent" />
   <disable_collisions link1="link2" link2="link3" reason="Adjacent" />
@@ -83,10 +83,10 @@
   <disable_collisions link1="link6" link2="end_link" reason="Adjacent" />
   <disable_collisions link1="end_link" link2="left_finger_link" reason="Adjacent" />
   <disable_collisions link1="end_link" link2="right_finger_link" reason="Adjacent" />
-  <!-- 左右手指互碰：两指沿同一轴线相向运动，夹持时必然接近或接触，属结构性接触，
-       因此用 reason="Never"（永不检查）禁用。 -->
+  <!-- 左右手指互碰:两指沿同一轴线相向运动,夹持时必然接近或接触,属结构性接触,
+       因此用 reason="Never"(永不检查)禁用. -->
   <disable_collisions link1="left_finger_link" link2="right_finger_link" reason="Never" />
-  <!-- 固定腕部装配接合面按下列规则排除；相机与其余机械臂部件继续参与碰撞检查。 -->
+  <!-- 固定腕部装配接合面按下列规则排除;相机与其余机械臂部件继续参与碰撞检查. -->
   <disable_collisions link1="end_link" link2="d405_mount_link" reason="Adjacent" />
   <disable_collisions link1="link6" link2="d405_mount_link" reason="Adjacent" />
   <disable_collisions link1="d405_mount_link" link2="d405_link" reason="Adjacent" />

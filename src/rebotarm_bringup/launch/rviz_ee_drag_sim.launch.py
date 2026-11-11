@@ -1,4 +1,4 @@
-"""RViz 末端拖动入口：复用唯一 MuJoCo continuous 后端与完整 MoveIt 场景。"""
+"""RViz 末端拖动入口:复用唯一 MuJoCo continuous 后端与完整 MoveIt 场景."""
 
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription

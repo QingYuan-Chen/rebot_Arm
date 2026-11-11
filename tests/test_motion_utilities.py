@@ -1,4 +1,4 @@
-"""活动运动工具的数值和参数契约回归。"""
+"""活动运动工具的数值和参数契约回归."""
 import pytest
 
 from rebotarm_motion.pose_math import quaternion_to_rpy, rpy_to_quaternion
