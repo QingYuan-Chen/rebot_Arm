@@ -302,21 +302,10 @@ python3 -m rebotarm_simulation.diagnostics.mujoco_ros_acceptance --timeout 15
 
 ## MoveIt 联调验收
 
-终端 1：
+单终端启动 MuJoCo、MoveIt 与准备服务：
 
 ```bash
-ros2 launch rebotarm_simulation mujoco_sim.launch.py
-```
-
-终端 2：
-
-```bash
-ros2 launch rebotarm_bringup interactive_system.launch.py \
-  use_moveit_preview:=true \
-  use_hardware:=false \
-  use_moveit_fake_joint_states:=false \
-  start_passive_joint_state_publisher:=false \
-  use_sim_time:=true
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_mujoco_viewer:=false
 ```
 
 验收点：
@@ -328,7 +317,7 @@ ros2 launch rebotarm_bringup interactive_system.launch.py \
 4. 没有启动任何实机驱动
 ```
 
-自动化等价命令需要先保持终端 1 和终端 2 正在运行，然后在第三个终端执行：
+自动化等价命令需要在上述组合保持运行时另开终端执行：
 
 ```bash
 python3 -m rebotarm_simulation.diagnostics.mujoco_moveit_acceptance --timeout 30

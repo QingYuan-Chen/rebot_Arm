@@ -102,20 +102,20 @@ def test_operator_configs_are_split_by_consumer() -> None:
     )
     assert 'DeclareLaunchArgument("joint_state_rate", default_value="100.0")' in hardware_launch
 
-    for launch_path in (
-        "src/rebotarm_bringup/launch/interactive_system.launch.py",
-        "src/rebotarm_bringup/launch/bringup.launch.py",
-    ):
-        assert "hardware_controller.launch.py" in _read(launch_path)
+    assert "hardware_controller.launch.py" in _read(
+        "src/rebotarm_bringup/launch/interactive_system.launch.py"
+    )
     moveit_hardware = _read(
         "src/rebotarm_bringup/launch/moveit_hardware.launch.py"
     )
     assert "interactive_system.launch.py" in moveit_hardware
     assert "hardware_controller.launch.py" not in moveit_hardware
     interactive = _read("src/rebotarm_bringup/launch/interactive_system.launch.py")
-    assert '"prepare_trajectories": prepare_trajectories' in interactive
-    assert "condition=IfCondition(use_moveit_stack)" in interactive
-    assert interactive.count("condition=UnlessCondition(use_moveit_stack)") == 2
+    assert '"prepare_trajectories": "true"' in interactive
+    assert '"use_fake_joint_states": "false"' in interactive
+    assert "UnlessCondition" not in interactive
+    assert "use_moveit_preview" not in interactive
+    assert "start_passive_joint_state_publisher" not in interactive
 
 
 def test_launches_reference_consumer_specific_operator_configs() -> None:
@@ -144,7 +144,6 @@ def test_keyboard_no_hardware_mode_uses_one_simulated_trajectory_backend() -> No
     assert 'executable="joint_state_publisher"' not in keyboard
     assert 'executable="reBotArmController"' not in keyboard
     assert '"use_sim_time": use_sim_time' in keyboard
-    assert '"use_moveit_fake_joint_states": "false"' in keyboard
 
 
 def test_teleop_system_forwards_execution_mode_to_dashboard() -> None:
@@ -217,21 +216,21 @@ def test_launches_have_no_selectable_trajectory_mode():
     assert "TrajectoryRetimingNode" in demo and "TrajectoryPreparationNode" in demo
 
 
-def test_interactive_stack_condition_evaluates_hardware_and_passive_combinations():
+def test_interactive_stack_always_composes_hardware_and_moveit() -> None:
     import importlib.util
-    from launch import LaunchContext
-    from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+    from launch.actions import IncludeLaunchDescription
     spec = importlib.util.spec_from_file_location('interactive_contract',
         ROOT / 'src/rebotarm_bringup/launch/interactive_system.launch.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    entities = module.generate_launch_description().entities
-    stack = next(entity for entity in entities if isinstance(entity, IncludeLaunchDescription))
-    for hardware in ('false', 'true'):
-        for preview in ('false', 'true'):
-            context = LaunchContext()
-            context.launch_configurations.update(use_hardware=hardware, use_moveit_preview=preview)
-            for entity in entities:
-                if isinstance(entity, DeclareLaunchArgument):
-                    entity.execute(context)
-            assert stack.condition.evaluate(context) == (hardware == 'true' or preview == 'true')
+    includes = [
+        entity for entity in module.generate_launch_description().entities
+        if isinstance(entity, IncludeLaunchDescription)
+    ]
+    assert len(includes) == 2
+    assert all(include.condition is None for include in includes)
+    sources = " ".join(
+        str(include.launch_description_source.location) for include in includes
+    )
+    assert "moveit_demo.launch.py" in sources
+    assert "hardware_controller.launch.py" in sources

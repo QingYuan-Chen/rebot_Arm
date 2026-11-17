@@ -12,12 +12,20 @@
 ros2 launch rebotarm_bringup hardware_controller.launch.py
 ```
 
+`bringup.launch.py` 与 `rviz_ee_drag_sim.launch.py` 也已删除：前者与
+`moveit_hardware.launch.py` 的节点集合相同，只差 RViz 默认值和布局；后者只是
+`mujoco_moveit_sim.launch.py use_mujoco_viewer:=false` 的参数别名。原命令分别改为：
+
+```bash
+ros2 launch rebotarm_bringup moveit_hardware.launch.py use_rviz:=false
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_mujoco_viewer:=false
+```
+
 ## 结构总览
 
 ```text
 src/rebotarm_bringup/launch/
 ├── hardware_controller.launch.py
-├── bringup.launch.py
 ├── moveit_hardware.launch.py
 ├── moveit_demo.launch.py
 ├── mujoco_moveit_sim.launch.py
@@ -25,7 +33,6 @@ src/rebotarm_bringup/launch/
 ├── rebotarm_app.launch.py
 ├── teleop_keyboard.launch.py
 ├── teleop_system.launch.py
-├── rviz_ee_drag_sim.launch.py
 └── visual_perception_system.launch.py  # 感知、抓取候选生成、筛选与显示（离线或外部环境）
 ```
 
@@ -61,36 +68,32 @@ hardware_controller 由下方入口按需加载。相机只读诊断使用 scrip
 
 ```text
 hardware_controller.launch.py                  唯一真实硬件控制器定义
-├── bringup.launch.py                          + MoveIt + 准备服务 + 状态发布 + RViz
-├── interactive_system.launch.py               状态源/MoveIt/RViz 的共享实现
-│   ├── moveit_hardware.launch.py              固定真机后端的薄入口
-│   │   └── rebotarm_app.launch.py             + 示教录制 + Dashboard + 状态 RViz（不含键盘）
-└── teleop_keyboard.launch.py                  真机键盘分支 + MoveIt + RViz
-    └── teleop_system.launch.py                + 示教录制 + Dashboard
+└── interactive_system.launch.py               真机硬件 + MoveIt + RViz 的共享实现
+    ├── moveit_hardware.launch.py              固定真机后端的薄入口
+    │   └── rebotarm_app.launch.py             + 示教录制 + Dashboard + 状态 RViz（不含键盘）
+    └── teleop_keyboard.launch.py              真机键盘分支 + MoveIt + RViz
+        └── teleop_system.launch.py            + 示教录制 + Dashboard
 
 mujoco_moveit_sim.launch.py                    MuJoCo + MoveIt + 准备服务
-├── rviz_ee_drag_sim.launch.py                  仿真 MotionPlanning 入口
 └── teleop_keyboard.launch.py                  无硬件键盘分支 + RViz
     └── teleop_system.launch.py                + 示教录制 + Dashboard
 ```
 
-`interactive_system.launch.py` 只有在 `use_hardware=true` 时才包含硬件片段；纯预览和仿真
-分支不会打开串口。上层入口必须确保同一命名空间只有一个真实或仿真轨迹执行后端。
+`interactive_system.launch.py` 只组合真机后端，无硬件规划统一使用
+`mujoco_moveit_sim.launch.py`。上层入口必须确保同一命名空间只有一个真实或仿真轨迹执行后端。
 
 ## 文件功能
 
 | 文件 | 类型 | 功能和边界 |
 |---|---|---|
 | `hardware_controller.launch.py` | 底层片段 | 唯一直接启动 `reBotArmController` 的文件；统一串口、反馈频率、夹爪保护、仲裁、命名空间和坐标系参数 |
-| `bringup.launch.py` | 基础真机入口 | 硬件、MoveIt、轨迹准备服务、夹爪可视化状态桥、TF 和可选 RViz |
 | `moveit_hardware.launch.py` | 唯一真机 MoveIt 用户入口 | 薄包装 `interactive_system.launch.py`，固定真机、MoveIt、真实关节状态和唯一状态源；启动后仍需显式 Enable |
 | `moveit_demo.launch.py` | 离线 MoveIt 演示入口 | 使用 `rebotarm_moveit_config` 的模型与规划参数，启动 MoveIt、RViz 和夹爪可视化桥；不接真机 |
 | `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 唯一 MuJoCo 后端、MoveIt 与轨迹准备服务；使用 continuous，可选 Dashboard |
-| `interactive_system.launch.py` | 共享实现 | 统一拥有状态发布、MoveIt、RViz 以及真机/无硬件状态源的互斥选择；不建议用户手写其内部组合参数启动真机 |
+| `interactive_system.launch.py` | 共享实现 | 真机硬件片段与 MoveIt 组合的唯一接线；负责可选 RViz，不再保留无硬件分支 |
 | `rebotarm_app.launch.py` | 完整真机入口 | 包含真机 MoveIt 组合，再增加示教录制、Dashboard 和状态 RViz；不启动键盘节点 |
 | `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认使用 MuJoCo。两类后端均提供 MoveIt 场景与准备服务 |
 | `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；默认使用 MuJoCo |
-| `rviz_ee_drag_sim.launch.py` | 仿真规划入口 | 复用 MuJoCo、MoveIt 与准备服务，在 RViz 中提供 Plan/Execute |
 | `visual_perception_system.launch.py` | 唯一视觉入口 | 感知、抓取候选生成、筛选及显示；默认 `robot_context=offline`，也可接入外部环境 |
 
 无硬件执行统一由 MuJoCo 推进物理时间和轨迹，RViz 负责显示模型、规划及反馈。
@@ -102,7 +105,7 @@ mujoco_moveit_sim.launch.py                    MuJoCo + MoveIt + 准备服务
 能力不匹配或未知时拒绝；契约与验收见
 [P005 执行接入](../../../docs/implemented/features/p005_prepared_trajectory.md)。
 
-`bringup`、`moveit_hardware`、`rebotarm_app`、`teleop_keyboard`（及 `teleop_system`）自动提供准备服务。
+`moveit_hardware`、`rebotarm_app`、`teleop_keyboard`（及 `teleop_system`）自动提供准备服务。
 底层 `hardware_controller` 和 `mujoco_sim` 片段的准备服务由上层组合提供。
 所有真机入口继续默认失能。
 随包 YAML 不覆盖键盘时长：默认 0.02 rad / 0.4 s；

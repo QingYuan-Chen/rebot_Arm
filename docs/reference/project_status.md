@@ -1,6 +1,6 @@
 # 当前项目状态与关键决定
 
-> 状态：REFERENCE；类型：项目状态；适用范围：当前工作空间及强化学习远端部署；最后核对：2026-11-11（三方成果整合及本地发布验收通过；统一 continuous，13 包；力控新增入口用于仿真，真机默认失能；实机定量及整机硬件全项验收另行安排）。
+> 状态：REFERENCE；类型：项目状态；适用范围：当前工作空间及强化学习远端部署；最后核对：2026-11-17（三方成果整合及本地发布验收通过；统一 continuous，13 包；bringup 冗余启动入口已清理；真机默认失能；实机定量及整机硬件全项验收另行安排）。
 
 本文件是项目状态与进展的唯一文档，保留已完成进展、当前有效决定、验证范围和未解决问题。
 功能、架构、参数与启动命令分别链接到对应手册；不维护历史任务阶段、进度百分比或重复流水。
@@ -11,6 +11,8 @@
 P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控制器使用组合句柄、MuJoCo 执行职责已拆分；功能关闭状态保留。
 
 ## 当前基线
+
+- 2026-11-17 清理 bringup 冗余启动入口：删除 `bringup.launch.py`（与 `moveit_hardware.launch.py` 节点集合相同，仅 RViz 默认值和布局不同）、`rviz_ee_drag_sim.launch.py`（仅转发 `mujoco_moveit_sim` 并关闭原生 Viewer）及无引用的 `rviz/rebotarm.rviz`；`interactive_system.launch.py` 收窄为真机硬件＋MoveIt＋可选 RViz，删除无调用方的非 MoveIt 分支和 `use_hardware`、`use_moveit_preview`、`use_moveit_fake_joint_states`、`start_passive_joint_state_publisher` 参数。替代命令分别为 `moveit_hardware.launch.py use_rviz:=false` 和 `mujoco_moveit_sim.launch.py use_mujoco_viewer:=false`；无硬件 MoveIt 联调统一使用后者。展开对照显示保留入口的节点/包集合不变（moveit_hardware 8、teleop_keyboard 真机 9/仿真 8、teleop_system 10、mujoco 7、app 9）。分层 **28 passed**，launch/解释器/资源/文档定向 **85 passed**，规定编译与文档链接通过；bringup 重建并清理安装区旧文件，保留入口 `--show-args` 通过。隔离域 202 的 `mujoco_moveit_sim` 无窗口验收 `ok=true`（37 点，终点误差 **0.008683 rad**）；该 launch 收到 SIGINT 后仍以 143 退出并留下子进程，需另行排查（本次未改 MuJoCo 启动）。按用户指示未重跑完整回归；证据在 `log/bringup_launch_cleanup_20261117/`。
 
 - 2026-11-11 按用户修订撤销全角标点提交 `d302ebb`：以新增回滚提交 `30a4eb9` 精确恢复到 `3bd1a86` 文件树，保留视觉入口重命名、显示片段和退役参数检查清理。随后将第一方源码、脚本、测试及配置中的注释和 Python 文档字符串统一为英文半角标点，共 **385 个文件**（bringup **31 个**）；运行时字符串、参数、接口、数值及配置数据保持，单位中的 `N·m` 等数学记号保留。**306 个 Python 文件**的去文档字符串 AST、可执行 token 与编译检查通过，**79 个其他文件**非注释 token 一致，**27 份 YAML/RViz 数据**及 **19 份 XML 结构**一致，**4 份 shell 脚本**语法检查通过。视觉、分层、解释器及资源定向检查 **79 passed**，规定两组编译和差异检查通过；按已有发布授权，以追加回滚和半角整理提交同步 `origin/main`，保留原有历史，回执保存在 `log/ascii_punctuation_20261111/`。本次未运行完整回归、相机或真机联调。
 

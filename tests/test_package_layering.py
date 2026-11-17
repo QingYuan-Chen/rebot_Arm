@@ -131,10 +131,9 @@ def test_retired_preview_backend_has_no_package_or_entrypoint() -> None:
     assert not (ROOT / "src/rebotarm_preview/package.xml").exists()
     bringup = ET.parse(ROOT / "src/rebotarm_bringup/package.xml").getroot()
     assert not any(child.text == "rebotarm_preview" for child in bringup)
-    for name in ("teleop_keyboard.launch.py", "rviz_ee_drag_sim.launch.py"):
-        source = (ROOT / "src/rebotarm_bringup/launch" / name).read_text()
-        assert "mujoco_moveit_sim.launch.py" in source
-        assert "rebotarm_preview" not in source
+    source = (ROOT / "src/rebotarm_bringup/launch/teleop_keyboard.launch.py").read_text()
+    assert "mujoco_moveit_sim.launch.py" in source
+    assert "rebotarm_preview" not in source
 
 
 def test_motion_does_not_import_teach_implementation() -> None:
@@ -247,7 +246,6 @@ def test_bringup_has_one_real_hardware_controller_owner() -> None:
     assert direct_owners == ["hardware_controller.launch.py"]
 
     hardware_consumers = {
-        "bringup.launch.py",
         "interactive_system.launch.py",
     }
     for name in hardware_consumers:
@@ -291,7 +289,6 @@ def test_retired_interactive_control_config_is_not_loaded() -> None:
     assert not config.exists()
     assert "interactive_control.yaml" not in launch
     assert "interactive_config" not in launch
-    assert 'parameters=[{"arm_namespace": arm_namespace}]' in launch
 
 
 def test_architecture_document_defines_package_responsibilities_and_rules() -> None:
@@ -322,26 +319,23 @@ def test_architecture_document_defines_package_responsibilities_and_rules() -> N
     assert "rebotarm_interactive_control" not in agents
 
 
-def test_rviz_moveit_drag_entrypoints_use_visible_native_goal_marker() -> None:
+def test_rviz_moveit_drag_entrypoints_use_mujoco_without_wrapper() -> None:
     feature_doc = (ROOT / "docs/reference/commands/rebotarm_feature_commands.md").read_text(
         encoding="utf-8"
     )
     rviz_config = (
         ROOT / "src/rebotarm_bringup/rviz/interactive_system.rviz"
     ).read_text(encoding="utf-8")
-    sim_launch = (
-        ROOT / "src/rebotarm_bringup/launch/rviz_ee_drag_sim.launch.py"
-    ).read_text(encoding="utf-8")
 
     assert "rviz_ee_drag_real.launch.py" in feature_doc
     assert "已移除" in feature_doc.split("rviz_ee_drag_real.launch.py", 1)[1][:20]
     assert "moveit_hardware.launch.py" in feature_doc
-    assert "rviz_ee_drag_sim.launch.py" in feature_doc
+    assert "mujoco_moveit_sim.launch.py" in feature_doc
+    assert "use_mujoco_viewer:=false" in feature_doc
+    for retired in ("rviz_ee_drag_sim.launch.py", "bringup.launch.py"):
+        assert retired not in feature_doc
+        assert not (ROOT / "src/rebotarm_bringup/launch" / retired).exists()
     assert not (ROOT / "src/rebotarm_bringup/launch/rviz.launch.py").exists()
-    assert '"mujoco_moveit_sim.launch.py"' in sim_launch
-    assert '"use_rviz": "true"' in sim_launch
-    assert 'rebotarm_sim_trajectory_controller' not in sim_launch
-    assert "start_interaction_nodes" not in sim_launch
     assert "interactive_control/ee_target" not in feature_doc
     assert "EndEffectorTarget" not in rviz_config
     assert "InteractiveMarkers" not in rviz_config
@@ -359,6 +353,13 @@ def test_rviz_moveit_drag_entrypoints_use_visible_native_goal_marker() -> None:
     assert "InteractiveTargetNode" not in (
         ROOT / "src/rebotarm_teleop/setup.py"
     ).read_text(encoding="utf-8")
+
+
+def test_retired_bringup_and_rviz_wrapper_are_absent() -> None:
+    launch_dir = ROOT / "src/rebotarm_bringup/launch"
+    assert not (launch_dir / "bringup.launch.py").exists()
+    assert not (launch_dir / "rviz_ee_drag_sim.launch.py").exists()
+    assert not (ROOT / "src/rebotarm_bringup/rviz/rebotarm.rviz").exists()
 
 
 def test_legacy_custom_interactive_preview_entrypoints_are_removed() -> None:

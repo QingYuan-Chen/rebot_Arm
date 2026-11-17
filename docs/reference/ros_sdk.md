@@ -198,25 +198,25 @@ rebot_Arm/
 
 ### 启动基础驱动
 
-启动控制节点、`robot_state_publisher`，可选RViz；不包含网页或视觉。
+启动真机控制器、MoveIt、`robot_state_publisher`，可选RViz；不包含网页或视觉。
 该入口会连接真机，使用前确认本轮授权和串口归属。
 完整网页遥操作入口为`rebotarm_app.launch.py`，见
 [功能命令参考](commands/rebotarm_feature_commands.md)。
 
 ```bash
-ros2 launch rebotarm_bringup bringup.launch.py
+ros2 launch rebotarm_bringup moveit_hardware.launch.py
 ```
 
 如果机械臂不在默认串口 `/dev/ttyACM0`：
 
 ```bash
-ros2 launch rebotarm_bringup bringup.launch.py channel:=/dev/ttyACM1
+ros2 launch rebotarm_bringup moveit_hardware.launch.py channel:=/dev/ttyACM1
 ```
 
-启用 RViz：
+RViz 默认随入口启动；不需要可视化时显式关闭：
 
 ```bash
-ros2 launch rebotarm_bringup bringup.launch.py use_rviz:=true
+ros2 launch rebotarm_bringup moveit_hardware.launch.py use_rviz:=false
 ```
 
 ### 只启动控制节点
@@ -242,7 +242,7 @@ ros2 run rebotarmcontroller reBotArmController
 # 在当前仓库根目录执行
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-ros2 launch rebotarm_bringup bringup.launch.py channel:=/dev/ttyACM0
+ros2 launch rebotarm_bringup moveit_hardware.launch.py channel:=/dev/ttyACM0
 ```
 
 然后在另一个终端执行控制命令：
@@ -292,7 +292,7 @@ ros2 service call /rebotarm/disable std_srvs/srv/Trigger "{}"
 # 在当前仓库根目录执行
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-ros2 launch rebotarm_bringup bringup.launch.py channel:=/dev/ttyACM0
+ros2 launch rebotarm_bringup moveit_hardware.launch.py channel:=/dev/ttyACM0
 ```
 
 示例已注册为 ROS2 可执行入口，可以直接通过 `ros2 run` 调用。
@@ -541,7 +541,7 @@ ls /dev/ttyACM*
 然后用 `channel:=...` 覆盖：
 
 ```bash
-ros2 launch rebotarm_bringup bringup.launch.py channel:=/dev/ttyACM1
+ros2 launch rebotarm_bringup moveit_hardware.launch.py channel:=/dev/ttyACM1
 ```
 
 ### 权限不足

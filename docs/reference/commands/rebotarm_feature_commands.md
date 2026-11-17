@@ -4,7 +4,7 @@
 
 ## 前置条件
 
-旧的 `rviz_ee_drag_real.launch.py` 已移除；当前真机入口是 `moveit_hardware.launch.py`，仿真入口是 `rviz_ee_drag_sim.launch.py`。
+旧的 `rviz_ee_drag_real.launch.py` 已移除；当前真机入口是 `moveit_hardware.launch.py`，仿真入口是 `mujoco_moveit_sim.launch.py`（关闭原生 Viewer）。
 
 ```bash
 cd /home/a/project/rebot_Arm
@@ -18,7 +18,7 @@ source install/setup.bash
 ## 仿真 RViz 拖动
 
 ```bash
-ros2 launch rebotarm_bringup rviz_ee_drag_sim.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_mujoco_viewer:=false
 ```
 
 该入口复用 MuJoCo 物理后端及 MoveIt 准备服务，在 RViz 中显示反馈。

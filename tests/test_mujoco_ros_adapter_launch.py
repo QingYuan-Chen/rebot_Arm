@@ -72,15 +72,13 @@ def test_rviz_execution_uses_the_same_continuous_physics_backend():
     physics_launch = (
         ROOT / "src/rebotarm_bringup/launch/mujoco_moveit_sim.launch.py"
     ).read_text(encoding="utf-8")
-    preview_launch = (
-        ROOT / "src/rebotarm_bringup/launch/rviz_ee_drag_sim.launch.py"
-    ).read_text(encoding="utf-8")
 
     assert 'executable="rebotarm_mujoco_node"' in physics_launch
     assert 'executable="rebotarm_sim_trajectory_controller"' not in physics_launch
-    assert 'rebotarm_preview' not in preview_launch
-    assert 'rebotarm_sim_trajectory_controller' not in preview_launch
-    assert 'mujoco_moveit_sim.launch.py' in preview_launch
+    assert "rebotarm_preview" not in physics_launch
+    assert not (
+        ROOT / "src/rebotarm_bringup/launch/rviz_ee_drag_sim.launch.py"
+    ).exists()
 
 
 def test_upstream_mujoco_ros_node_owns_required_ros_interfaces():

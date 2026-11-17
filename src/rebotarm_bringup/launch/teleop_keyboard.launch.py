@@ -44,9 +44,6 @@ def generate_launch_description():
                 share, "launch", "interactive_system.launch.py"])),
             condition=IfCondition(hardware),
             launch_arguments={
-                "use_hardware": "true", "use_moveit_preview": "true",
-                "use_moveit_fake_joint_states": "false",
-                "start_passive_joint_state_publisher": "false",
                 "arm_namespace": namespace, "use_local_rviz": rviz,
                 "arm_config": LaunchConfiguration("arm_config"),
                 "gripper_config": LaunchConfiguration("gripper_config"),

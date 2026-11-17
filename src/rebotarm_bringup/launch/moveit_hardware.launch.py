@@ -1,9 +1,8 @@
 # 真机 MoveIt 启动入口:interactive_system.launch.py 的真机专用包装.
 #
 # 本文件不复制硬件控制器,状态发布器或 MoveIt 的节点定义.
-# interactive_system.launch.py 负责共享实现,本文件只固定选择真机,MoveIt,
-# 真实关节状态和唯一状态源.启动后仍保持失能,执行前须显式调用
-# /rebotarm/enable.
+# interactive_system.launch.py 负责真机硬件与 MoveIt 的共享实现, 本文件只固定真机
+# 入口. 启动后仍保持失能, 执行前须显式调用 /rebotarm/enable.
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -45,11 +44,7 @@ def generate_launch_description():
         "cmd_arbitration": LaunchConfiguration("cmd_arbitration"),
         "frame_id": LaunchConfiguration("frame_id"),
         "ee_frame_id": LaunchConfiguration("ee_frame_id"),
-        "use_hardware": "true",
-        "use_moveit_preview": "true",
         "use_local_rviz": LaunchConfiguration("use_rviz"),
-        "start_passive_joint_state_publisher": "false",
-        "use_moveit_fake_joint_states": "false",
         "rviz_config": interactive_rviz,
     }
 

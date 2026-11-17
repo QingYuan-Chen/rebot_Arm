@@ -24,12 +24,10 @@ rebotarm_bringup/
 | 入口 | 用途 |
 |---|---|
 | `hardware_controller.launch.py` | 唯一直接启动真实 `reBotArmController` 的底层入口 |
-| `bringup.launch.py` | 硬件、MoveIt、轨迹准备、状态发布和可选 RViz |
 | `moveit_hardware.launch.py` | 真机 MoveIt 规划/执行入口 |
 | `rebotarm_app.launch.py` | 真机 MoveIt、示教录制和 Dashboard 工作台 |
 | `teleop_keyboard.launch.py` | 键盘点动、MoveIt 和 RViz，默认使用 MuJoCo |
 | `teleop_system.launch.py` | 键盘点动、示教和 Dashboard 组合 |
-| `rviz_ee_drag_sim.launch.py` | 无硬件仿真规划与 RViz 拖动 |
 | `visual_perception_system.launch.py` | 视觉感知、候选筛选和显示组合 |
 
 日常可复制命令统一维护在 [`docs/reference/commands/`](../../docs/reference/commands/README.md)，

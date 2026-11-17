@@ -39,7 +39,7 @@ ros2 launch rebotarm_bringup moveit_demo.launch.py use_rviz:=true
 | 用途 | 入口 |
 | --- | --- |
 | MuJoCo 物理执行、MoveIt 与 RViz | `mujoco_moveit_sim.launch.py` |
-| RViz 末端拖动与 MuJoCo 执行 | `rviz_ee_drag_sim.launch.py` |
+| RViz 末端拖动与 MuJoCo 执行 | `mujoco_moveit_sim.launch.py use_mujoco_viewer:=false` |
 | 真机 MoveIt 规划与执行 | `moveit_hardware.launch.py` |
 | 真机网页、示教与 MoveIt | `rebotarm_app.launch.py` |
 

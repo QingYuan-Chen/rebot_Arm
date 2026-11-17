@@ -39,15 +39,15 @@ ros2 service list | grep -E '/rebotarm/(enable|disable|safe_home|trajectory_stop
 
 只有在本次操作明确授权后，才可另行调用 `/rebotarm/enable`；停止、回位、静止确认和失能顺序见 [功能命令](rebotarm_feature_commands.md)。
 
-如果只需要基础状态发布和可选基础 RViz，不需要 MoveIt，使用基础 bringup 入口：
+需要真机 MoveIt、状态发布与可选 RViz 时使用统一入口：
 
 ```bash
-ros2 launch rebotarm_bringup bringup.launch.py \
+ros2 launch rebotarm_bringup moveit_hardware.launch.py \
   channel:=/dev/ttyACM0 \
-  use_rviz:=true
+  use_rviz:=false
 ```
 
-它仍然默认失能；需要规划或执行时改用 `moveit_hardware.launch.py`，不要在同一命名空间
+启动后仍默认失能，规划或执行前必须显式调用 `/rebotarm/enable`。不要在同一命名空间
 重复启动两套真机入口。
 
 ## 操作步骤：仿真后端
@@ -64,10 +64,10 @@ ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=false use_muj
 ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_rviz:=true
 ```
 
-RViz 末端拖动专用入口（包含仿真轨迹控制器）：
+RViz 末端拖动复用 MuJoCo 入口，关闭原生 Viewer 即可：
 
 ```bash
-ros2 launch rebotarm_bringup rviz_ee_drag_sim.launch.py
+ros2 launch rebotarm_bringup mujoco_moveit_sim.launch.py use_mujoco_viewer:=false
 ```
 
 MuJoCo Viewer 与单独 ROS 后端也可以分别启动。它们不会打开真实串口：

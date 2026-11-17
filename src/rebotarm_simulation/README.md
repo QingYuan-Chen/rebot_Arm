@@ -44,7 +44,7 @@ MJLab 训练任务和策略配对评估位于独立工程 `/home/a/project/rebot
 
 ### ROS 执行入口
 
-无硬件键盘、网页和 `rviz_ee_drag_sim.launch.py` 统一使用 MuJoCo continuous 后端。
+无硬件键盘、网页和 RViz 拖动统一使用 MuJoCo continuous 后端。
 完整 `mujoco_moveit_sim.launch.py` 组合提供 MuJoCo、MoveIt、重定时和准备服务，
 通过 `use_rviz` 和 `use_mujoco_viewer` 控制窗口。
 底层 `mujoco_sim.launch.py` 只启动物理节点，六轴执行需配套同域的规划与准备服务。

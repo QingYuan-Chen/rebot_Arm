@@ -28,14 +28,12 @@
 | 入口 | 分类 | 权威说明 |
 |---|---|---|
 | `rebotarm_bringup hardware_controller.launch.py` | 用户入口：真机底层连接 | [system_runtime.md](system_runtime.md) |
-| `rebotarm_bringup bringup.launch.py` | 用户入口：硬件 + 基础状态/RViz | [system_runtime.md](system_runtime.md) |
 | `rebotarm_bringup moveit_hardware.launch.py` | 用户入口：真机 MoveIt | [rebotarm_feature_commands.md](rebotarm_feature_commands.md) |
 | `rebotarm_bringup rebotarm_app.launch.py` | 用户入口：完整工作台 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
 | `rebotarm_bringup teleop_keyboard.launch.py` | 用户入口：键盘点动 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
 | `rebotarm_bringup teleop_system.launch.py` | 用户入口：键盘 + Dashboard + 示教 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
-| `rebotarm_bringup rviz_ee_drag_sim.launch.py` | 用户入口：仿真 RViz 拖动 | [rebotarm_feature_commands.md](rebotarm_feature_commands.md) |
 | `rebotarm_bringup visual_perception_system.launch.py` | 用户入口：视觉候选生成、筛选与显示 | [visual_grasp_commands.md](visual_grasp_commands.md) |
-| `rebotarm_bringup interactive_system.launch.py` | 组合内部：真机/无硬件状态源和 MoveIt 共享实现 | [src/rebotarm_bringup/launch/README.md](../../../src/rebotarm_bringup/launch/README.md) |
+| `rebotarm_bringup interactive_system.launch.py` | 组合内部：真机硬件与 MoveIt 共享实现 | [src/rebotarm_bringup/launch/README.md](../../../src/rebotarm_bringup/launch/README.md) |
 | `rebotarm_bringup moveit_demo.launch.py` | 组合内部：MoveIt 配置实现 | [src/rebotarm_bringup/launch/README.md](../../../src/rebotarm_bringup/launch/README.md) |
 | `rebotarm_vision vision.launch.py` / `vision_ubuntu.launch.py` | 组合内部：由视觉总入口包含 | [ubuntu_vision_readonly_test_zh.md](ubuntu_vision_readonly_test_zh.md) |
 | `rebotarm_bringup mujoco_moveit_sim.launch.py` | 用户入口：MuJoCo + MoveIt/RViz | [system_runtime.md](system_runtime.md) |
