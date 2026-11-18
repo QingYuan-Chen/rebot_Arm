@@ -6,11 +6,15 @@ import pytest
 
 from rebotarm_force_control.joint_impedance import JointImpedanceCommand
 from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
+from rebotarm_simulation.diagnostics.impedance_gain_budget import (
+    RECOMMENDED_DAMPING, RECOMMENDED_STIFFNESS,
+)
 from rebotarm_simulation.sim2real.randomization import RandomizationSample
 
 
-STIFFNESS = (80., 80., 80., 20., 10., 5.)
-DAMPING = (8., 8., 8., 1., .5, .1)
+# 增益取自按额定力矩推导的预算常量,详见 joint_impedance_gains.md.
+STIFFNESS = RECOMMENDED_STIFFNESS
+DAMPING = RECOMMENDED_DAMPING
 
 
 @pytest.fixture
@@ -38,16 +42,18 @@ def test_impedance_gravity_holds_three_poses(sim, pose):
 
 
 def test_step_and_external_disturbance_return_to_equilibrium(sim):
+    # 增益按额定力矩与协议上限取值后比旧配置软,观测窗口相应延长;
+    # 判定阈值保持原值,只说明"能回稳",不因此放宽精度要求.
     target = np.asarray(sim.get_state().joint_positions[:6]) + (.05, .02, -.02, .03, 0., 0.)
     sim.command_joint_impedance(target, STIFFNESS, DAMPING, timeout_s=10.)
-    state = advance(sim, 2.)
+    state = advance(sim, 6.)
     assert max(abs(np.asarray(state.joint_positions[:6]) - target)) < .003
     model, data = sim.borrow_viewer_handles()
     data.qfrc_applied[model.jnt_dofadr[0]] = 2.
-    disturbed = advance(sim, .3)
+    disturbed = advance(sim, .5)
     data.qfrc_applied[:] = 0.
     displaced = abs(disturbed.joint_positions[0] - target[0])
-    restored = advance(sim, 2.)
+    restored = advance(sim, 4.)
     assert displaced > .005
     assert abs(restored.joint_positions[0] - target[0]) < .002
     assert max(abs(np.asarray(restored.joint_positions[:6]) - target)) < .003

@@ -24,6 +24,7 @@ MuJoCo、视觉和 GraspNet 解释器另遵循显式参数/环境变量优先级
 | D405、YOLO、GraspNet | `src/rebotarm_vision/config/` | `rebotarm_vision`；新手眼结果显式传入 |
 | 视觉候选跨节点接口 | `src/rebotarm_bringup/config/visual_grasp_interfaces.yaml` | `rebotarm_bringup` |
 | MuJoCo 模型、动力学和 CPU RL | `src/rebotarm_simulation/config/`、`docs/setup/dependencies/mujoco.md`、`docs/setup/dependencies/rl.md` | `rebotarm_simulation` |
+| 关节阻抗示例增益与力矩预算 | `rebotarm_simulation.diagnostics.impedance_gain_budget` 的常量、[关节阻抗增益整定](../../implemented/features/joint_impedance_gains.md) | `rebotarm_simulation`（算法归 `rebotarm_force_control`） |
 | 标定会话和手眼输入 | `src/rebotarm_vision/config/handeye.yaml`、标定 launch 参数 | `rebotarm_calibration` |
 
 直接构造控制器的默认周期为 500 Hz，bringup 配置为 100 Hz。内存 channel 覆盖

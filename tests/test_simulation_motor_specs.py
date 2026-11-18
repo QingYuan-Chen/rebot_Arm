@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_24v_specs_preserve_urdf_simulation_limits():
     params = load_motor_control_parameters(repo_root=ROOT)
     assert params.arm.effort_limit == (27.,27.,27.,7.,7.,7.)
-    assert params.arm.rated_torque == (12.,12.,12.,3.5,3.5,3.5)
+    assert params.arm.rated_torque == (9.,9.,9.,3.5,3.5,3.5)
     assert params.arm.velocity_limit == (5.,5.,5.,3.,3.,3.)
     root = ET.parse(ROOT/'src/rebotarm_simulation/models/rebotarm/robot.xml')
     urdf = ET.parse(ROOT/'src/rebotarm_moveit_config/config/rebotarm.urdf')

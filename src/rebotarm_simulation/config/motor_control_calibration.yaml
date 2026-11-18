@@ -21,14 +21,16 @@ firmware_reference:
 
 # 电机型号规格,供按型号取额定/峰值力矩与减速比.键名即 arm.<关节>.motor_model 的取值.
 motor_specs:
-  # 大关节(joint1~joint3)所用型号:额定 12 N·m,峰值 40 N·m(关节侧),减速比 40.
+  # 大关节(joint1~joint3)所用型号:额定 9 N·m,峰值 27 N·m(关节侧),减速比 40.
+  # 数值取自达妙 DM-J4340P-2EC 使用说明书 V1.2(24V);V1.1 为 12/40 N·m,本机经用户确认为 V1.2.
+  # 峰值与 URDF effort=27 一致.这些字段只供整定与诊断读取,不进入仿真控制回路.
   DM4340P:
-    hardware_revision: DM-J4340P-2EC V1.1
+    hardware_revision: DM-J4340P-2EC V1.2
     rated_voltage_v: 24
     rated_speed_rpm: 36
-    no_load_speed_rpm: 56
-    rated_torque_nm: 12.0
-    peak_torque_nm: 40.0
+    no_load_speed_rpm: 52.5
+    rated_torque_nm: 9.0
+    peak_torque_nm: 27.0
     reduction_ratio: 40.0
   # 小关节(joint4~joint6)与夹爪所用型号:额定 3.5 N·m,峰值 12.5 N·m,减速比 10.
   DM4310_V1_2:

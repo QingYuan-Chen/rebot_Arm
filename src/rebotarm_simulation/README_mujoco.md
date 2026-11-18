@@ -123,15 +123,22 @@ Raw torque 只用于无实机诊断，按关节峰值限幅；看门狗超时后
 ```bash
 ros2 run rebotarm_simulation rebotarm_mujoco_cli impedance \
   --positions 0 -0.8 -1.0 0.3 0 0 \
-  --stiffness 80 80 80 20 10 5 --damping 8 8 8 1 0.5 0.1 \
+  --stiffness 45 45 45 17.5 17.5 17.5 --damping 3.32 5 5 1.28 0.78 0.34 \
   --duration 2 --timeout 0.1
 ```
 
 CLI 创建独立仿真实例并复位到 Home+Hold，在 `duration` 内每 `timeout/2` 仿真秒续期；
 随后停止续期并继续步进，输出到期前 `active_control`、到期后 `control` 及
 `watchdog_entered_hold=true`。CLI 的 timeout 至少覆盖两个物理步，默认 0.1 s。
-上述六轴增益用于当前模型和 100 Hz 控制周期；模型惯量或控制周期变化后须重新整定，
-特别是低惯量腕关节的阻尼应通过响应与振荡检查确认。
+示例增益来自[关节阻抗增益整定](../../docs/implemented/features/joint_impedance_gains.md)：
+刚度按电机额定力矩除以 0.2 rad 参考偏角取，阻尼按目标阻尼比换算并受达妙 MIT 协议
+`Kp<=500 / Kd<=5` 约束。模型惯量、末端负载或控制周期变化后须重新整定，
+可用下面的诊断命令复算力矩预算，低惯量腕关节的阻尼仍须通过响应与振荡检查确认：
+
+```bash
+PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control \
+  python3 -m rebotarm_simulation.diagnostics.impedance_gain_budget
+```
 
 Python 接口同样使用仿真时间续期；以下示例保持当前姿态，然后验证超时回到 Hold：
 
@@ -141,8 +148,8 @@ from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 with RebotArmMujoco() as sim:
     state = sim.reset_home()
     sim.command_joint_impedance(
-        state.joint_positions[:6], [80, 80, 80, 20, 10, 5],
-        [8, 8, 8, 1, 0.5, 0.1], timeout_s=0.1,
+        state.joint_positions[:6], [45, 45, 45, 17.5, 17.5, 17.5],
+        [3.32, 5, 5, 1.28, 0.78, 0.34], timeout_s=0.1,
     )
     sim.step(round(0.05 / sim.timestep))
     assert sim.control_mode == "joint_impedance"
@@ -155,7 +162,7 @@ with RebotArmMujoco() as sim:
 ```bash
 ros2 service call /rebotarm/sim/set_mode rebotarm_msgs/srv/SetMode "{mode: hold}"
 ros2 service call /rebotarm/sim/set_joint_impedance rebotarm_msgs/srv/SetJointImpedance \
-  "{positions: [0.0, -0.8, -1.0, 0.3, 0.0, 0.0], stiffness: [80.0, 80.0, 80.0, 20.0, 10.0, 5.0], damping: [8.0, 8.0, 8.0, 1.0, 0.5, 0.1], timeout_s: 1.0}"
+  "{positions: [0.0, -0.8, -1.0, 0.3, 0.0, 0.0], stiffness: [45.0, 45.0, 45.0, 17.5, 17.5, 17.5], damping: [3.32, 5.0, 5.0, 1.28, 0.78, 0.34], timeout_s: 1.0}"
 ```
 
 看门狗按**仿真时间**到期；暂停物理步进时期限暂停推进。持续控制客户端须在期限内重复

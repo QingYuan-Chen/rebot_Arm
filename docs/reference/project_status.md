@@ -12,6 +12,8 @@ P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控�
 
 ## 当前基线
 
+- 2026-11-18 关节阻抗示例增益按额定力矩重新整定：旧默认 `K=[80,80,80,20,10,5]`、`D=[8,8,8,1,0.5,0.1]` 在偏差 0.2 rad 时弹簧项达 J1–J4 额定的 1.78/1.78/1.78/1.14 倍，`D=8` 使 1 rad/s 阻尼项占 J1–J3 额定 89%，且 joint1–joint3 的 `kd=8` 超出达妙 MIT 协议上限 5。新默认按「额定力矩 ÷ 0.2 rad」取刚度、按 ζ=0.7 换算阻尼并截断到协议上限，为 `K=[45,45,45,17.5,17.5,17.5]`、`D=[3.32,5,5,1.28,0.78,0.34]`；0.3 rad 阶跃峰值需求由 24 降到 13.5 N·m，代价是回稳由约 4.5 s 增至约 6 s。同步将 `motor_specs.DM4340P` 修正为 V1.2（额定 9、峰值 27、空载 52.5 rpm），与 URDF effort=27 及验收文档一致；这些字段只供整定与诊断读取，不进入控制回路。新增 `rebotarm_simulation.diagnostics.impedance_gain_budget`（边界：弹簧项≤额定、弹簧+重力≤URDF 限幅、K≤500/D≤5）与对应测试，README 三处示例改用新增益。定向 **11 + 31 + 49 + 9 passed**，分层与规定编译通过；本次为仿真整定，未操作真机、未运行完整回归。依据与同类实现对照见[关节阻抗增益整定](../implemented/features/joint_impedance_gains.md)。
+
 - 2026-11-17 清理 bringup 冗余启动入口：删除 `bringup.launch.py`（与 `moveit_hardware.launch.py` 节点集合相同，仅 RViz 默认值和布局不同）、`rviz_ee_drag_sim.launch.py`（仅转发 `mujoco_moveit_sim` 并关闭原生 Viewer）及无引用的 `rviz/rebotarm.rviz`；`interactive_system.launch.py` 收窄为真机硬件＋MoveIt＋可选 RViz，删除无调用方的非 MoveIt 分支和 `use_hardware`、`use_moveit_preview`、`use_moveit_fake_joint_states`、`start_passive_joint_state_publisher` 参数。替代命令分别为 `moveit_hardware.launch.py use_rviz:=false` 和 `mujoco_moveit_sim.launch.py use_mujoco_viewer:=false`；无硬件 MoveIt 联调统一使用后者。展开对照显示保留入口的节点/包集合不变（moveit_hardware 8、teleop_keyboard 真机 9/仿真 8、teleop_system 10、mujoco 7、app 9）。分层 **28 passed**，launch/解释器/资源/文档定向 **85 passed**，规定编译与文档链接通过；bringup 重建并清理安装区旧文件，保留入口 `--show-args` 通过。隔离域 202 的 `mujoco_moveit_sim` 无窗口验收 `ok=true`（37 点，终点误差 **0.008683 rad**）；该 launch 收到 SIGINT 后仍以 143 退出并留下子进程，需另行排查（本次未改 MuJoCo 启动）。按用户指示未重跑完整回归；证据在 `log/bringup_launch_cleanup_20261117/`。
 
 - 2026-11-11 按用户修订撤销全角标点提交 `d302ebb`：以新增回滚提交 `30a4eb9` 精确恢复到 `3bd1a86` 文件树，保留视觉入口重命名、显示片段和退役参数检查清理。随后将第一方源码、脚本、测试及配置中的注释和 Python 文档字符串统一为英文半角标点，共 **385 个文件**（bringup **31 个**）；运行时字符串、参数、接口、数值及配置数据保持，单位中的 `N·m` 等数学记号保留。**306 个 Python 文件**的去文档字符串 AST、可执行 token 与编译检查通过，**79 个其他文件**非注释 token 一致，**27 份 YAML/RViz 数据**及 **19 份 XML 结构**一致，**4 份 shell 脚本**语法检查通过。视觉、分层、解释器及资源定向检查 **79 passed**，规定两组编译和差异检查通过；按已有发布授权，以追加回滚和半角整理提交同步 `origin/main`，保留原有历史，回执保存在 `log/ascii_punctuation_20261111/`。本次未运行完整回归、相机或真机联调。
@@ -375,6 +377,10 @@ P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控�
 - 参数以当前包内配置和显式 launch 覆盖为准，见[参数来源](parameters/current_parameter_sources.md)，不从旧任务记录复制。
 
 ## 当前限制与待解决问题
+
+- 2026-11-18 关节阻抗新增益为仿真推导，真机摩擦、回差与 MIT 链路未验证，J6 固有频率约 11 Hz 在 100 Hz 控制拍下须做振荡检查。依据见[关节阻抗增益整定](../implemented/features/joint_impedance_gains.md)。仿真模型中 joint3 的重力读数偏高，但现场实测未观察到超负载，按用户反馈不作为问题项。
+
+- 2026-11-18 真机 `src/rebotarmcontroller/config/arm.yaml` 与 `src/rebotarm_bringup/config/arm.yaml` 中 joint1–joint3 的 MIT `kd=8.0` 超出达妙协议上限 5，且 `configuration.py` 只校验非负与有限，不像 `GravitySettings` 那样检查 `kp<=500 / kd<=5`。该值只在单关节低层直通命令未显式给出 kp/kd 时作为字段回落默认值，经 `arm_controller.py` 下发；重力补偿使用 `gravity_compensation.yaml` 的 kp/kd，不读该段。电机端如何编码或截断未确认。按用户决定本次只记录、不整改。
 
 - 2026-11-11 关闭期 `Destroyable` 竞争和持续 abort 失败导致的结果等待已修复，见当前基线。底层 Action 终态迁移持续失败时，故障服务端明确拒绝新目标，恢复需要重启 MuJoCo 节点并重新规划；失败结果保留原执行、清理及终态原因，详见[MuJoCo 说明](../../src/rebotarm_simulation/README_mujoco.md)。
 

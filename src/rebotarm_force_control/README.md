@@ -14,6 +14,11 @@
 MuJoCo 接入和 Python、CLI、ROS 用法见 [仿真说明](../rebotarm_simulation/README_mujoco.md)。
 新阻抗模式从静态关节平衡点开始，重力来自当前仿真质量模型的零速度动力学计算。
 
+示例刚度/阻尼不是随意取值：刚度按电机额定力矩除以参考偏角推导，阻尼按目标阻尼比换算
+并受达妙 MIT 协议 `Kp<=500 / Kd<=5` 约束。整定依据、力矩预算和同类实现对照见
+[关节阻抗增益整定](../../docs/implemented/features/joint_impedance_gains.md)；
+可用 `python3 -m rebotarm_simulation.diagnostics.impedance_gain_budget` 复算。
+
 六轴顺序为 `joint1..joint6`，单位为 rad、rad/s、N·m 和 s。模型使用 `rebotarm_moveit_config` 的规范 URDF。`GravityModel` 内部计算缓存须串行调用；每个执行实例单独持有 `GravityExecutionState`。
 
 `rebotarmcontroller/gravity/gravity_controller.py` 持有硬件门控、反馈验证、模式交接、唯一设备线程调度、发送确认及保护。发送全部成功后才更新上一周期总力矩。仿真后端持有物理时间、生命周期和执行接口。

@@ -9,6 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 from rebotarm_simulation.apps import mujoco_cli
+from rebotarm_simulation.diagnostics.impedance_gain_budget import (
+    RECOMMENDED_DAMPING, RECOMMENDED_STIFFNESS,
+)
 from rebotarm_simulation.execution.control_api import SimulationControlApi, normalize_ros_control_mode
 from rebotarm_simulation.execution.simulation_access import SerializedSimulationAccess
 from rebotarm_simulation.execution.trajectory_execution import TrajectoryExecution
@@ -16,8 +19,9 @@ from rebotarm_simulation.execution.trajectory_state import ActiveTrajectory
 
 
 TARGET = (0., -.8, -1., .3, 0., 0.)
-STIFFNESS = (80., 80., 80., 20., 10., 5.)
-DAMPING = (8., 8., 8., 1., .5, .1)
+# 与物理测试和 README 示例共用同一组推荐增益,避免协议层与文档漂移.
+STIFFNESS = RECOMMENDED_STIFFNESS
+DAMPING = RECOMMENDED_DAMPING
 
 
 class ImpedanceSim:
