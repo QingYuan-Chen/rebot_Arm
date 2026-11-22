@@ -18,17 +18,15 @@ class ReachEnvConfig:
     action_scale_rad: float = 0.02
     gripper_action_scale_m: float = 0.002
     target_tolerance_m: float = 0.03
-    home_on_reset: bool = True
 
 
 class RebotArmReachEnv:
     """Small Gym-style Reach task wrapper around the MuJoCo simulator.
 
     It intentionally avoids depending on gymnasium so the ROS 2 simulation
-    package remains lightweight. The default method signatures mirror
-    Gymnasium: reset() -> (obs, info), step(action) -> (obs, reward,
-    terminated, truncated, info). step_done(action) returns the older Gym
-    shape: (obs, reward, done, info).
+    package remains lightweight. Method signatures mirror Gymnasium:
+    reset() -> (obs, info), step(action) -> (obs, reward, terminated,
+    truncated, info).
     """
 
     def __init__(
@@ -82,10 +80,7 @@ class RebotArmReachEnv:
         self._action_history = []
         self._randomization_rng = np.random.default_rng(seed)
         self.set_randomization_sample(None)
-        if self.config.home_on_reset:
-            self._sim.reset_home(seed=seed)
-        else:
-            self._sim.reset(seed=seed)
+        self._sim.reset(seed=seed)
         self.set_randomization_sample(randomization)
         if randomize:
             scene = self._sim.randomize_scene(seed=seed)
@@ -113,10 +108,10 @@ class RebotArmReachEnv:
         applied_action = self._apply_randomized_action(action_vector)
         current_targets = np.asarray(self._sim.control_targets[:6], dtype=float)
         target = current_targets + applied_action[:6] * self.config.action_scale_rad
-        self._sim.set_joint_position_targets(target)
+        self._sim.command_joint_positions(target)
         if len(applied_action) >= 7:
             current_width = float(self._sim.control_targets[-2] - self._sim.control_targets[-1])
-            self._sim.set_gripper_width(
+            self._sim.command_gripper_width(
                 current_width + applied_action[6] * self.config.gripper_action_scale_m
             )
         self._sim.step(self.config.physics_steps_per_action)
@@ -170,10 +165,6 @@ class RebotArmReachEnv:
                 default=0.0,
             ),
         )
-
-    def step_done(self, action: Sequence[float]):
-        obs, reward, terminated, truncated, info = self.step(action)
-        return obs, reward, bool(terminated or truncated), info
 
     def close(self) -> None:
         if self._randomization_sample is not None:

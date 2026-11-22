@@ -12,7 +12,7 @@ def test_upstream_mujoco_entrypoint_and_launch_are_installed():
 
     assert "rebotarm_mujoco_node = rebotarm_simulation.ros.mujoco_ros_node:main" in setup_text
     assert "rebotarm_mujoco_adapter = rebotarm_simulation.mujoco_ros_adapter_node:main" not in setup_text
-    assert 'glob("launch/*.launch.py")' in setup_text
+    assert 'install_resources("launch/*.launch.py")' in setup_text
     assert "<exec_depend>control_msgs</exec_depend>" in package_text
     assert "<exec_depend>rebotarm_msgs</exec_depend>" in package_text
 

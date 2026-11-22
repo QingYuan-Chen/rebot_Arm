@@ -4,19 +4,11 @@ from dataclasses import dataclass
 import math
 from typing import Any, Mapping
 
+from rebotarm_simulation.core.validation import finite_vector
+
 
 def _finite_tuple(values, *, length: int, label: str) -> tuple[float, ...]:
-    if isinstance(values, (str, bytes)):
-        raise TypeError(f"{label} must be a numeric sequence")
-    try:
-        result = tuple(float(value) for value in values)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"{label} must be a numeric sequence") from exc
-    if len(result) != length:
-        raise ValueError(f"{label} must contain exactly {length} values")
-    if not all(math.isfinite(value) for value in result):
-        raise ValueError(f"{label} values must be finite")
-    return result
+    return finite_vector(values, length, label)
 
 
 def _finite_scalar(value: Any, label: str) -> float:

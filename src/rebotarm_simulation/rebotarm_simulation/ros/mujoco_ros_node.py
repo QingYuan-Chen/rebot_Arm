@@ -92,10 +92,6 @@ def create_node_class():
             self.declare_parameter("diagnostic_rate_hz", 1.0)
             self.declare_parameter("max_contact_force_n", 200.0)
             self.declare_parameter("max_contact_penetration_m", 0.005)
-            for name in ("diagnostic_rate_hz", "max_contact_force_n", "max_contact_penetration_m"):
-                value = float(self.get_parameter(name).value)
-                if not math.isfinite(value) or value <= 0.0:
-                    raise ValueError(f"{name} must be positive and finite")
             # 以下三项是启动前的硬门:参数不合法直接抛错终止,绝不带着错误配置跑仿真.
             if self.get_parameter("backend").value != "mujoco":
                 raise ValueError("simulation backend must be mujoco")
@@ -119,9 +115,9 @@ def create_node_class():
                 float(self.get_parameter("goal_velocity_tolerance").value),
                 float(self.get_parameter("goal_time_tolerance_sec").value),
             )
-            self._feedback_rate_hz = float(self.get_parameter("feedback_rate_hz").value)
-            # Constructor performs finite/positive/range validation.
-            FeedbackRateLimiter(self._feedback_rate_hz)
+            self._feedback_rate_hz = FeedbackRateLimiter(
+                self.get_parameter("feedback_rate_hz").value
+            ).rate_hz
             self._execute_wait_sec = min(0.01, 1.0 / self._feedback_rate_hz)
             initial = tuple(float(v) for v in self.get_parameter("initial_joint_positions").value)
             if len(initial) != 6 or any(not math.isfinite(v) for v in initial):
@@ -131,15 +127,13 @@ def create_node_class():
             self._max_contact_penetration = float(
                 self.get_parameter("max_contact_penetration_m").value
             )
-            if (
-                not math.isfinite(diagnostic_rate)
-                or diagnostic_rate <= 0.0
-                or not math.isfinite(self._max_contact_force)
-                or self._max_contact_force <= 0.0
-                or not math.isfinite(self._max_contact_penetration)
-                or self._max_contact_penetration <= 0.0
+            for name, value in (
+                ("diagnostic_rate_hz", diagnostic_rate),
+                ("max_contact_force_n", self._max_contact_force),
+                ("max_contact_penetration_m", self._max_contact_penetration),
             ):
-                raise ValueError("diagnostic rates and contact thresholds must be positive finite values")
+                if not math.isfinite(value) or value <= 0.0:
+                    raise ValueError(f"{name} must be positive and finite")
 
             model_path = str(self.get_parameter("model_path").value).strip()
             self._sim = RebotArmMujoco(model_path or None)
@@ -285,9 +279,6 @@ def create_node_class():
             received = time.monotonic()
             token = object()
             try:
-                names = tuple(goal_request.trajectory.joint_names)
-                if len(names) != 6 or set(names) != set(ARM_JOINT_NAMES):
-                    raise ValueError('FJT requires exactly six arm joints; use independent gripper command')
                 if not self._prepare_client.service_is_ready():
                     raise RuntimeError('preparation service unavailable')
                 command = None
@@ -414,8 +405,8 @@ def create_node_class():
                 state=state,
                 status=status,
                 contacts=contacts,
-                max_contact_force_n=self.get_parameter("max_contact_force_n").value,
-                max_contact_penetration_m=self.get_parameter("max_contact_penetration_m").value,
+                max_contact_force_n=self._max_contact_force,
+                max_contact_penetration_m=self._max_contact_penetration,
             )
             msg = DiagnosticArray()
             msg.header.stamp = self.get_clock().now().to_msg()
@@ -680,8 +671,7 @@ def create_node_class():
             self._action_server.destroy()
             for server in self._gripper_servers:
                 server.destroy()
-            if hasattr(self,'_teleop_server'):
-                self._teleop_server.destroy()
+            self._teleop_server.destroy()
             self._trace.close()
             if not self._retain_simulation:
                 self.close()

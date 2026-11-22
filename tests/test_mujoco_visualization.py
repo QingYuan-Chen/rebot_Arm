@@ -137,13 +137,6 @@ def test_figures_switch_and_best_effort_attach() -> None:
         figures.select("invalid")
 
 
-def test_figures_degrade_when_mujoco_figure_api_is_unavailable() -> None:
-    figures = TelemetryFigures(mujoco_module=object())
-    assert figures.available is False
-    assert figures.update(_snapshot()) is False
-    assert figures.attach_active(EmptyViewer()) is False
-
-
 def test_figures_use_viewer_viewport_and_degrade_if_it_is_missing() -> None:
     pytest.importorskip("mujoco")
     figures = TelemetryFigures()

@@ -1,10 +1,9 @@
 """供 MuJoCo 各前端共用的纯电机控制数学库.
 
 本模块不访问仿真运行时,也不访问真实硬件,只负责把"固件速度环输出"换算为物理力矩:
-
 - 机械臂:串级位置/速度 PI 控制器(位置环输出目标速度,速度环输出力矩),
   带条件式抗积分饱和,力矩变化率限幅与一阶低通平滑;
-- 夹爪:MIT 模式下的位置-速度 PD 控制,并按传动比折算指尖力.
+- 夹爪:标定与物理力伺服参数数据类(实际指尖力由仿真运行时按米制 PD 计算).
 
 固件整定增益(pos_kp/pos_ki/vel_kp/vel_ki 等)以原始形式保留自标定文件;
 而把固件输出换算成物理力矩的比例系数等属于"仿真标定"的参数,单独放在
@@ -12,7 +11,7 @@
 重新整定不会悄悄改变已经冻结的仿真标定结果.
 
 对外主要接口:参数加载由 control_config 模块负责;
-``PosVelController`` 与 ``GripperMitController`` 负责逐控制周期计算控制量.
+``PosVelController`` 负责机械臂逐控制周期计算控制量.
 """
 
 from __future__ import annotations
@@ -62,15 +61,7 @@ class ArmControlParameters:
 class GripperControlParameters:
     """夹爪控制与标定参数(标定文件 gripper 段)."""
 
-    firmware_default_kp: float        # 固件侧夹爪默认位置增益(仅作参考,仿真不直接使用)
-    firmware_default_kd: float        # 固件侧夹爪默认速度增益(仅作参考,仿真不直接使用)
     motor_model: str                  # 夹爪电机型号,键指向 MotorSpec
-    move_kp: float                    # move 模式位置增益:正常开合,跟踪目标开口
-    move_kd: float                    # move 模式速度增益:抑制超调
-    closing_kp: float                 # closing 模式位置增益:标定为 0,纯阻尼式力控闭合
-    closing_kd: float                 # closing 模式速度增益:控制闭合速度与接触力
-    hold_kp: float                    # hold 模式位置增益:保持夹持位置
-    hold_kd: float                    # hold 模式速度增益:保持夹持阻尼
     motor_radians_per_opening_m: float  # 开口位移→电机转角换算(rad/m),负号表示旋转方向与开口增大的方向相反
     transmission_efficiency: float      # 传动效率(0~1),用于由电机力矩估算指尖力
     motor_torque_limit_nm: float        # 电机侧力矩上限(N·m),先于指尖力上限生效
@@ -91,19 +82,6 @@ class MotorControlParameters:
     motor_specs: dict[str, MotorSpec]     # 电机型号 → 规格
     arm: ArmControlParameters             # 机械臂参数
     gripper: GripperControlParameters     # 夹爪参数
-
-
-@dataclass(frozen=True)
-class GripperCommand:
-    """单个控制周期夹爪求解结果,供仿真侧换算成手指执行器控制量."""
-
-    mode: str                     # 实际使用的控制模式:move / closing / hold
-    target_displacement_m: float  # 限幅后的目标开口位移(m)
-    motor_target_rad: float       # 换算到电机侧的目标转角(rad)
-    kp: float                     # 本周期实际使用的比例增益
-    kd: float                     # 本周期实际使用的微分增益
-    motor_torque_nm: float        # 限幅后的电机力矩指令(N·m)
-    finger_force_n: float         # 由电机力矩与传动效率折算的指尖力(N)
 
 
 class PosVelController:
@@ -209,68 +187,6 @@ class PosVelController:
         smoothed = self.applied_torque + alpha * (rate_limited - self.applied_torque)
         self.applied_torque = np.clip(smoothed, -effort, effort)
         return self.applied_torque.copy()
-
-
-class GripperMitController:
-    """夹爪 MIT 模式 PD 控制器:以开口位移为输入,输出电机力矩与折算指尖力.
-
-    无内部积分状态,因此无需 reset;三种模式共用同一套换算,只是增益不同,
-    ``closing`` 模式 kp 标定为 0,实际是纯阻尼闭合,靠接触被动产生夹持力.
-    """
-
-    def __init__(self, parameters: GripperControlParameters):
-        self.parameters = parameters
-
-    def compute(
-        self,
-        target: float,
-        position: float,
-        velocity: float,
-        mode: str = "move",
-        feedforward_torque: float = 0.0,
-    ) -> GripperCommand:
-        """求解一个控制周期的夹爪指令.
-
-        参数(长度单位均为米):
-            target: 目标开口位移(会先被限幅到 displacement_min_m..displacement_max_m).
-            position: 当前开口位移(同样限幅).
-            velocity: 当前开口速度(m/s),正方向为开口增大.
-            mode: ``move`` / ``closing`` / ``hold`` 之一,其他值抛 ``ValueError``.
-            feedforward_torque: 电机侧前馈力矩(N·m),叠加在 PD 输出上.
-
-        返回 :class:`GripperCommand`;其中电机力矩已按 motor_torque_limit_nm 限幅,
-        指尖力由"电机力矩 × 换算比 × 传动效率"折算,是理想上界而非实测值.
-        """
-        p = self.parameters
-        gains = {
-            "move": (p.move_kp, p.move_kd),
-            "closing": (p.closing_kp, p.closing_kd),
-            "hold": (p.hold_kp, p.hold_kd),
-        }
-        if mode not in gains:
-            raise ValueError(f"unsupported gripper mode: {mode}")
-        kp, kd = gains[mode]
-        target_m = float(np.clip(target, p.displacement_min_m, p.displacement_max_m))
-        position_m = float(np.clip(position, p.displacement_min_m, p.displacement_max_m))
-        # 开口位移 → 电机转角:负换算比表示电机正转对应开口减小
-        ratio = float(p.motor_radians_per_opening_m)
-        motor_target = target_m * ratio
-        motor_position = position_m * ratio
-        motor_velocity = float(velocity) * ratio
-        raw_torque = kp * (motor_target - motor_position) - kd * motor_velocity
-        raw_torque += float(feedforward_torque)
-        motor_torque = float(
-            np.clip(raw_torque, -p.motor_torque_limit_nm, p.motor_torque_limit_nm)
-        )
-        return GripperCommand(
-            mode=mode,
-            target_displacement_m=target_m,
-            motor_target_rad=motor_target,
-            kp=kp,
-            kd=kd,
-            motor_torque_nm=motor_torque,
-            finger_force_n=motor_torque * ratio * p.transmission_efficiency,
-        )
 
 
 def _vector6(value, name: str) -> np.ndarray:

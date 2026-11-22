@@ -86,9 +86,9 @@ def dispatch_sim_command(sim, line: str, *, paused: bool = False) -> CommandResu
             mutated=True,
         )
     if command == "home":
-        if arguments or not hasattr(sim, "reset_home"):
+        if arguments:
             raise ValueError("usage: home")
-        state = sim.reset_home()
+        state = sim.reset()
         sim.set_mode("hold")
         return CommandResult(paused, state, mutated=True)
     if command == "step":

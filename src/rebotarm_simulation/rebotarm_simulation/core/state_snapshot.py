@@ -105,14 +105,14 @@ class StateSnapshot:
             mj.mj_setState(model, candidate, np.asarray(state.state, dtype=float), self._state_spec)
             if state.last_control_time > float(candidate.time):
                 raise ValueError("saved control time exceeds simulation time")
-            torque = np.asarray(candidate.ctrl)[list(control._actuator_ids[:6])]
+            torque = np.asarray(candidate.ctrl)[list(control.arm_actuator_ids)]
             if np.any(abs(torque) > control.impedance_effort_limits(model)):
                 raise ValueError("saved impedance torque exceeds effort limits")
             if state.impedance_deadline is not None and state.impedance_deadline <= float(candidate.time):
                 raise ValueError("saved impedance command has expired")
             if state.impedance_command is not None:
                 control.compute_impedance_output(model, candidate, state.impedance_command,
-                    torque, 1.0 / control._motor_parameters.control_rate_hz)
+                    torque, 1.0 / control.control_rate_hz)
         mj.mj_setState(
             model, data, np.asarray(state.state, dtype=float), self._state_spec
         )

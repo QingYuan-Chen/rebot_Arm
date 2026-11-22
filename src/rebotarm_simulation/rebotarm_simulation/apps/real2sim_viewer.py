@@ -48,7 +48,7 @@ def main(
             node_factory = build_node_class()
         node = node_factory()
         simulation = node.simulation
-        model, data = simulation._unsafe_viewer_handles()
+        model, data = simulation.borrow_viewer_handles()
         if launch_passive is None:
             launch_passive = importlib.import_module("mujoco.viewer").launch_passive
 

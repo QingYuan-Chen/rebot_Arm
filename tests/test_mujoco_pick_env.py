@@ -53,7 +53,7 @@ class FakePickSim:
     def control_targets(self):
         return tuple(self.targets[:6]) + (self.width / 2.0, -self.width / 2.0)
 
-    def reset_home(self, seed=None):
+    def reset(self, seed=None):
         self.positions[:] = 0.0
         self.targets[:] = 0.0
         self.width = 0.08
@@ -62,17 +62,14 @@ class FakePickSim:
         self.contacts = []
         return self.get_state()
 
-    def reset(self, seed=None):
-        return self.reset_home(seed)
-
     def randomize_scene(self, seed=None):
         self.cube_pose[:] = [0.28, 0.0, 0.02, 0.0, 0.0, 0.0, 1.0]
         return RandomizedScene(tuple(self.cube_pose), (0.28, 0.0, 0.12), seed)
 
-    def set_joint_position_targets(self, targets):
+    def command_joint_positions(self, targets):
         self.targets[:6] = np.asarray(targets)
 
-    def set_gripper_width(self, width):
+    def command_gripper_width(self, width):
         self.width = min(0.09, max(0.0, float(width)))
 
     def step(self, n_steps=1):

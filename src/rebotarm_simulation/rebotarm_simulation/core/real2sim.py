@@ -8,8 +8,9 @@ from typing import Mapping, Sequence
 import numpy as np
 import yaml
 
-from rebotarm_simulation.core.mujoco_sim import ARM_JOINT_NAMES
+from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES
 from rebotarm_simulation.core.resource_paths import package_resource
+from rebotarm_simulation.core.validation import finite_vector
 
 
 REAL2SIM_MODES = ("mirror", "physics")
@@ -20,14 +21,7 @@ def default_real2sim_mapping_path() -> Path:
 
 
 def _finite_tuple(values, *, length: int, label: str) -> tuple[float, ...]:
-    if isinstance(values, (str, bytes)):
-        raise TypeError(f"{label} must be a numeric sequence")
-    result = tuple(float(value) for value in values)
-    if len(result) != length:
-        raise ValueError(f"{label} must contain exactly {length} values")
-    if not all(math.isfinite(value) for value in result):
-        raise ValueError(f"{label} values must be finite")
-    return result
+    return finite_vector(values, length, label)
 
 
 @dataclass(frozen=True)
@@ -243,9 +237,9 @@ class Real2SimSynchronizer:
                 gripper_width=mapped.gripper_width,
             )
         else:
-            self.simulation.set_joint_position_targets(mapped.positions)
+            self.simulation.command_joint_positions(mapped.positions)
             if mapped.gripper_width is not None:
-                self.simulation.set_gripper_width(mapped.gripper_width)
+                self.simulation.command_gripper_width(mapped.gripper_width)
             state = self.simulation.step(self.physics_steps_per_update)
         simulated = tuple(float(value) for value in state.joint_positions[:6])
         error = max(

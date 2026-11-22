@@ -5,8 +5,7 @@
 """
 from __future__ import annotations
 import time
-import math
-from typing import Callable, Sequence
+from typing import Callable
 _RETAINED_UNSAFE_VIEWERS = []
 
 
@@ -49,7 +48,7 @@ def stop_executor(executor, thread, *, multi_threaded: bool = False) -> None:
             raise ExceptionGroup('ROS executor callbacks failed during shutdown', errors)
 
 
-def _close_viewer_then_sim(
+def close_passive_viewer_safely(
     viewer,
     sim,
     model,
@@ -103,25 +102,3 @@ def _close_viewer_then_sim(
         retain_unsafe_resources(viewer, sim, model, data)
         raise
     sim.close()
-
-
-def close_passive_viewer_safely(
-    viewer,
-    sim,
-    model,
-    data,
-    *,
-    clock: Callable[[], float] = time.monotonic,
-    sleep: Callable[[float], None] = time.sleep,
-    timeout: float = 5.0,
-) -> None:
-    """先确认被动 Viewer 释放模型,再关闭仿真;资源保留细节由本包统一维护."""
-    _close_viewer_then_sim(
-        viewer,
-        sim,
-        model,
-        data,
-        clock=clock,
-        sleep=sleep,
-        timeout=timeout,
-    )

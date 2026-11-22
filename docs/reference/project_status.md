@@ -1,6 +1,6 @@
 # 当前项目状态与关键决定
 
-> 状态：REFERENCE；类型：项目状态；适用范围：当前工作空间及强化学习远端部署；最后核对：2026-11-17（三方成果整合及本地发布验收通过；统一 continuous，13 包；bringup 冗余启动入口已清理；真机默认失能；实机定量及整机硬件全项验收另行安排）。
+> 状态：REFERENCE；类型：项目状态；适用范围：当前工作空间及强化学习远端部署；最后核对：2026-11-22（补充交互式 GUI MuJoCo Viewer 与 RViz 桌面渲染验收；统一 continuous，13 包；真机默认失能；实机定量及整机硬件全项验收另行安排）。
 
 本文件是项目状态与进展的唯一文档，保留已完成进展、当前有效决定、验证范围和未解决问题。
 功能、架构、参数与启动命令分别链接到对应手册；不维护历史任务阶段、进度百分比或重复流水。
@@ -11,6 +11,17 @@
 P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控制器使用组合句柄、MuJoCo 执行职责已拆分；功能关闭状态保留。
 
 ## 当前基线
+
+- 2026-11-22 完成交互式 GUI MuJoCo Viewer 与 RViz 桌面渲染验收（`DISPLAY=:1`，X11 窗口抓帧与视觉核对）：
+  - **渲染健康检查**：`rebotarm_mujoco_health --renderer-timeout 30` 在 `MUJOCO_GL=egl`（64×64×3）与桌面默认 GL 后端下均返回 `ok=true`、`renderer_available=true`（`mujoco_version=3.3.0`，8 关节 / 8 执行器）。
+  - **三种 MuJoCo 桌面 Viewer 启停与同步**（隔离域 205）：`rebotarm_mujoco_viewer`（1706×960 窗口渲染桌面与红方块场景；经 PTY 发送 `joints 0.45 -0.45 -0.60 -0.10 0.25 0.0`、`gripper 0.03`、`state`、`quit`，帧间像素平均绝对差 2.07，正常退出 `rc=0`）；`rebotarm_mujoco_node` 以 `show_viewer:=true` 启动（1706×960 窗口渲染，单次 `SIGINT` 0.26 s `rc=0` 退出）并由只读 `real2sim_viewer` 同步镜像（121/121 条状态 `ok=true`、`read_only=true`、`hardware_commands_sent=false`、`max_tracking_error_rad=0.0`，`rc=0`）。另记录 MuJoCo 3.3.0 `Handle` 无 `set_texts` 属性，叠加文字面板保持既有按能力降级逻辑。
+  - **MuJoCo Viewer + MoveIt + RViz 联调渲染**（隔离域 206，`mujoco_moveit_sim.launch.py use_rviz:=true use_mujoco_viewer:=true`）：RViz2（3292×2056，OpenGL 4.6 / GLSL 4.6，`Global Status: Ok`，~31 fps，`Grid`/`RobotModel`/`MotionPlanning` 正常显示）与 MuJoCo Viewer（1706×960，`rebotarm_tabletop_scene`）同步渲染；`mujoco_moveit_acceptance` `ok=true`（37 点规划，终点误差 **0.007235 rad**），执行前后截图确认 MuJoCo 实体与 RViz `RobotModel` 同步到达同一目标姿态（帧差分别 2.32 / 1.02）；向会话进程组发送单次 `SIGINT` 后全部 8 个进程在 **0.314 s** 内 `rc=0` 退出、窗口关闭且 0 残留进程。本次仅覆盖桌面 GUI 渲染与仿真联调，未操作真机。
+
+- 2026-11-21 完成 MuJoCo 启动退出核查与 `rebotarm_simulation` 深度清理（P0～P4）：
+  - **SIGINT/143 退出核查**：确认 2026-11-17 `mujoco_moveit_sim.launch.py` 以 143 退出并遗留子进程系非交互 bash 后台作业 `&` 将子进程 `SIGINT` 设为 `SIG_IGN` 所致（ROS 2 Jazzy `AsyncSafeSignalManager` 仅用 `signal.set_wakeup_fd` 不覆写 `SIG_IGN`，导致 `kill -INT` 被内核丢弃，30 s 后 `kill -TERM` 直接以 143 杀掉 launch 主进程）。在隔离域 203 以正常 `SIGINT` 处置复测，空闲态与 `mujoco_moveit_acceptance` 后单次 `SIGINT` 均在 **0.20～0.24 s** 内 `rc=0` 退出、全部 7 个节点干净结束、0 残留进程；启动规范已写入[启动说明](../../src/rebotarm_bringup/launch/README.md#非交互脚本启停约束)。
+  - **100 Hz 控制拍缺陷修复**：删除 `SimulationControlApi.command_joint_positions` 冗余二次调用 `set_mode("position")`，避免轨迹执行期间每 2 ms（500 Hz）额外重入一次 100 Hz `PosVelController.compute()`，并补充回归测试；合并 `mujoco_ros_node.py` 重复参数校验、删除冗余 `hasattr` 与重复六轴检查；补齐 `command_gripper_position`/`release_gripper_position` 的 `_ensure_open()`。
+  - **冗余/废弃实现与防御性编程清理**：按用户确认删除运行时结果被丢弃的 `GripperMitController`/`GripperCommand` 及未用夹爪增益字段（保留 `motor_control_calibration.yaml` 原文件与 `models/rebotarm/assets/gemini2/` 眼在手外相机资产不变）；删除 `RebotArmMujoco`/`SimControlRuntime`/`viewer_lifecycle` 纯转发方法别名（`set_joint_position_targets`/`set_gripper_width`/`set_control_mode`/`reset_home`/`_unsafe_viewer_handles`/`_close_viewer_then_sim`/`pos_vel`），收敛私有字段写入到 `SimControlRuntime` 公开方法；统一 6 处 `ARM_JOINT_NAMES` 与 4 处 `finite_vector`；清理 `TrajectorySampler` 历史取消接口、`TrajectoryCommandGate` 零生产调用布尔包装、`RebotArmReachEnv.step_done()`、`ViewerControlState` 失效点动字段与 `--jog-hold-time`、`mujoco_visualization.py`/`mujoco_health.py`/`offline_trajectory.py`/`mujoco_commands.py` 过度防御探测，并清理根 `__pycache__` 50 个旧平铺 `.pyc`。
+  - **验证结果**：`rebotarm_simulation` 重建通过；分层 **28 passed**，规定及仿真 `compileall` 通过，simulation 定向回归 **564 passed / 1 skipped**（0 warnings）；P005 冻结物理对照与基线逐位一致（最大跟踪误差 **0.0033982 rad**、收敛观察 **0.504 s**、hold 漂移 **0.00002664 rad**、切换力矩跳变 **0.0043524 N·m**）；安装版 `rebotarm_mujoco_cli` 与 `rebotarm_mujoco_health` 冒烟通过；隔离域 203 `mujoco_moveit_acceptance` `ok=true`（37 点，终点误差 **0.009466 rad**），单次 `SIGINT` 0.24 s 返回 0、0 残留。按用户确认未运行全仓完整回归、未操作真机；`rebotarm_teleop` `GripperVisualJointStateNode` 偶发 `rclpy` SIGINT 退出 `take_message` 竞态（退出码 1、无进程残留）另行记录。
 
 - 2026-11-18 关节阻抗示例增益按额定力矩重新整定：旧默认 `K=[80,80,80,20,10,5]`、`D=[8,8,8,1,0.5,0.1]` 在偏差 0.2 rad 时弹簧项达 J1–J4 额定的 1.78/1.78/1.78/1.14 倍，`D=8` 使 1 rad/s 阻尼项占 J1–J3 额定 89%，且 joint1–joint3 的 `kd=8` 超出达妙 MIT 协议上限 5。新默认按「额定力矩 ÷ 0.2 rad」取刚度、按 ζ=0.7 换算阻尼并截断到协议上限，为 `K=[45,45,45,17.5,17.5,17.5]`、`D=[3.32,5,5,1.28,0.78,0.34]`；0.3 rad 阶跃峰值需求由 24 降到 13.5 N·m，代价是回稳由约 4.5 s 增至约 6 s。同步将 `motor_specs.DM4340P` 修正为 V1.2（额定 9、峰值 27、空载 52.5 rpm），与 URDF effort=27 及验收文档一致；这些字段只供整定与诊断读取，不进入控制回路。新增 `rebotarm_simulation.diagnostics.impedance_gain_budget`（边界：弹簧项≤额定、弹簧+重力≤URDF 限幅、K≤500/D≤5）与对应测试，README 三处示例改用新增益。定向 **11 + 31 + 49 + 9 passed**，分层与规定编译通过；本次为仿真整定，未操作真机、未运行完整回归。依据与同类实现对照见[关节阻抗增益整定](../implemented/features/joint_impedance_gains.md)。
 

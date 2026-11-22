@@ -111,7 +111,7 @@ def _run_headless(sim, duration: float | None, steps: int | None):
 
 
 def _prepare_simulation(sim) -> None:
-    sim.reset_home()
+    sim.reset()
     sim.set_mode("hold")
 
 

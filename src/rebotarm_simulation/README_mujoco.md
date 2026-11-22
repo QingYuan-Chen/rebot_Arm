@@ -146,7 +146,7 @@ Python 接口同样使用仿真时间续期；以下示例保持当前姿态，�
 from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
 with RebotArmMujoco() as sim:
-    state = sim.reset_home()
+    state = sim.reset()
     sim.command_joint_impedance(
         state.joint_positions[:6], [45, 45, 45, 17.5, 17.5, 17.5],
         [3.32, 5, 5, 1.28, 0.78, 0.34], timeout_s=0.1,
@@ -445,14 +445,12 @@ from rebotarm_simulation.core.mujoco_env import RebotArmReachEnv
 with RebotArmReachEnv() as env:
     obs, info = env.reset(seed=7)
     obs, reward, terminated, truncated, info = env.step([0.0] * 7)
-    obs, reward, done, info = env.step_done([0.0] * 7)
 ```
 
 `obs` 包含 `joint_positions`、`joint_velocities`、`gripper_width`、
 `ee_position`、`target_position`、`cube_pose` 和 `max_contact_force`。
 `step(action)` 接受 6 维关节增量或 7 维关节+夹爪增量，内部裁剪到 `[-1, 1]`。
-默认 `step()` 使用 Gymnasium 的 `terminated/truncated` 形状，同时在 `info` 里提供
-`done`；旧 Gym 风格代码可直接调用 `step_done()` 获取 `(obs, reward, done, info)`。
+`step()` 使用 Gymnasium 的 `terminated/truncated` 形状，同时在 `info` 里提供 `done`。
 
 ## Sim2Real / Real2Sim 基础层
 

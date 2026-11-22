@@ -11,18 +11,16 @@ import numpy as np
 from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES, JOINT_NAMES
 from rebotarm_simulation.core.validation import finite_vector as _finite_vector
 from rebotarm_simulation.core.mujoco_types import ControlStatus
-from rebotarm_simulation.control.motor_control import PosVelController, GripperMitController
+from rebotarm_simulation.control.motor_control import PosVelController
 from rebotarm_simulation.control.sim_gripper import gripper_joint_positions_for_width
 from rebotarm_force_control.joint_impedance import JointImpedanceCommand, compute_joint_impedance
 
 CONTROL_MODES = ("position", "hold", "gravity_comp", "raw_torque", "joint_impedance")
-_CONTROL_MODE_ALIASES = {"pos_vel": "position"}
 
 class SimControlRuntime:
     def __init__(self, parameters, timestep, joint_ids, actuator_ids, gravity_torque):
         self._motor_parameters = parameters
         self._arm_controller = PosVelController(parameters.arm)
-        self._gripper_controller = GripperMitController(parameters.gripper)
         self._control_steps_per_update = max(1, int(round((1.0 / parameters.control_rate_hz) / timestep)))
         self._control_phase = 0
         self._position_targets = np.zeros(len(JOINT_NAMES), dtype=float)
@@ -51,6 +49,63 @@ class SimControlRuntime:
     @property
     def control_mode(self):
         return self._control_mode
+
+    @property
+    def control_rate_hz(self) -> float:
+        return float(self._motor_parameters.control_rate_hz)
+
+    @property
+    def arm_actuator_ids(self) -> tuple[int, ...]:
+        return tuple(self._actuator_ids[:6])
+
+    @property
+    def randomization_torque_scale(self) -> float:
+        return self._randomization_torque_scale
+
+    @randomization_torque_scale.setter
+    def randomization_torque_scale(self, scale: float) -> None:
+        self._randomization_torque_scale = float(scale)
+
+    def reset_from_physics(self, mj, model, data, *, gripper_targets: Sequence[float] | None = None) -> None:
+        """物理状态复位后,将目标对齐 qpos,清零控制器/力矩/阻抗记忆并以重力前馈进入 hold."""
+        for index, joint_id in enumerate(self._joint_ids):
+            qpos_address = int(model.jnt_qposadr[joint_id])
+            self._position_targets[index] = data.qpos[qpos_address]
+        if gripper_targets is not None:
+            self._position_targets[-2:] = gripper_targets
+        data.ctrl[:] = 0.0
+        self._arm_controller.reset()
+        self._control_mode = "hold"
+        self._raw_torque_command.fill(0.0)
+        self._raw_torque_requested.fill(0.0)
+        self._raw_torque_deadline = None
+        self._impedance_command = None
+        self._impedance_deadline = None
+        self._impedance_handoff = False
+        self._last_control_time = float(data.time)
+        self._requested_arm_torque.fill(0.0)
+        self._applied_arm_torque.fill(0.0)
+        self._arm_torque_saturated.fill(False)
+        self._gripper_max_force_n = None
+        self._gripper_control_force.fill(0.0)
+        self._control_phase = 0
+        mj.mj_forward(model, data)
+        self._seed_arm_torque_from_gravity(model, data)
+        self._apply_motor_control(model, data)
+        mj.mj_forward(model, data)
+
+    def sync_after_mirror(self, mj, model, data, *, include_gripper: bool) -> None:
+        """运动学镜像写入 qpos 后对齐目标,重置 PI 与控制相位并刷新重力前馈."""
+        indices = range(len(self._joint_ids)) if include_gripper else range(len(ARM_JOINT_NAMES))
+        for index in indices:
+            joint_id = self._joint_ids[index]
+            self._position_targets[index] = float(data.qpos[int(model.jnt_qposadr[joint_id])])
+        self._arm_controller.reset()
+        self._control_phase = 0
+        mj.mj_forward(model, data)
+        self._seed_arm_torque_from_gravity(model, data)
+        self._apply_motor_control(model, data)
+        mj.mj_forward(model, data)
 
     def before_step(self, model, data):
         """物理步开始前检查期限,在控制相位起点更新输出,其余步保持上一拍控制量."""
@@ -156,7 +211,7 @@ class SimControlRuntime:
 
 
     def set_mode(self, model, data, mode: str) -> str:
-        mode = _CONTROL_MODE_ALIASES.get(str(mode), str(mode))
+        mode = str(mode)
         if mode not in CONTROL_MODES:
             raise ValueError(f"control mode must be one of {CONTROL_MODES}")
         if mode == "joint_impedance":
@@ -194,11 +249,6 @@ class SimControlRuntime:
         return self._control_mode
 
 
-    def set_control_mode(self, model, data, mode: str) -> str:
-        """保留 set_mode 的兼容入口,历史拼写 pos_vel 规范化为 position."""
-        return self.set_mode(model, data, mode)
-
-
     def command_joint_positions(
         self, model, data, targets: Mapping[str, float] | Sequence[float]
     ) -> tuple[float, ...]:
@@ -228,12 +278,6 @@ class SimControlRuntime:
         if self._control_mode != 'position':
             self.set_mode(model, data, "position")
         return tuple(current)
-
-
-    def set_joint_position_targets(
-        self, model, data, targets: Mapping[str, float] | Sequence[float]
-    ) -> tuple[float, ...]:
-        return self.command_joint_positions(model, data, targets)
 
 
     def command_joint_torques(
@@ -333,10 +377,6 @@ class SimControlRuntime:
         self._position_targets[-1] = right
         return reached
 
-
-    def set_gripper_width(self, model, data, width: float) -> float:
-        return self.command_gripper_width(model, data, width)
-
     def command_gripper_position(self, model, data, width, torque_cap):
         """独立夹爪开口命令,电机限矩按冻结传动参数折算;时间生命周期由调用者持有."""
         if not math.isfinite(width) or not 0 <= width <= .09:
@@ -380,17 +420,8 @@ class SimControlRuntime:
             requested_torque = gravity
             arm_torque = requested_torque.copy()
             self._arm_controller.applied_torque[:] = arm_torque
-        elif self._control_mode == "hold":
-            # hold 固定进入模式时捕获的位置,复用 position 的控制器和积分状态.
-            arm_torque = self._arm_controller.compute(
-                target=self._position_targets[:6],
-                position=position,
-                velocity=velocity,
-                dt=1.0 / self._motor_parameters.control_rate_hz,
-                feedforward=gravity,
-            )
-            requested_torque = arm_torque.copy()
         else:
+            # position 与 hold 共用同一串级 PI 控制器;hold 固定进入时捕获的位置目标.
             arm_torque = self._arm_controller.compute(
                 target=self._position_targets[:6],
                 position=position,
@@ -428,14 +459,16 @@ class SimControlRuntime:
         right_qpos = float(data.qpos[int(model.jnt_qposadr[self._joint_ids[-1]])])
         left_qvel = float(data.qvel[int(model.jnt_dofadr[self._joint_ids[-2]])])
         right_qvel = float(data.qvel[int(model.jnt_dofadr[self._joint_ids[-1]])])
-        command = self._gripper_controller.compute(
-            target=float(self._position_targets[-2] - self._position_targets[-1]),
-            position=left_qpos - right_qpos,
-            velocity=left_qvel - right_qvel,
-            mode="move",
-        )
-        finger_force = self._stable_gripper_force(model, data,
-            target_width=command.target_displacement_m,
+        gripper_params = self._motor_parameters.gripper
+        target_width = float(np.clip(
+            float(self._position_targets[-2] - self._position_targets[-1]),
+            gripper_params.displacement_min_m,
+            gripper_params.displacement_max_m,
+        ))
+        finger_force = self._stable_gripper_force(
+            model,
+            data,
+            target_width=target_width,
             current_width=left_qpos - right_qpos,
             current_velocity=left_qvel - right_qvel,
         )

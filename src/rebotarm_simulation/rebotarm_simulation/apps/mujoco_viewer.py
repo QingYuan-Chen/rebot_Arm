@@ -1,64 +1,34 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import importlib
-import json
 import math
-from queue import Empty, SimpleQueue
+from queue import SimpleQueue
 import sys
-import threading
 import time
 from typing import Callable, Sequence
 import warnings
 
-from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
-from rebotarm_simulation.apps.mujoco_commands import dispatch_sim_command
-from rebotarm_simulation.apps.mujoco_dashboard import (
-    DASHBOARD_PAGES,
-    PLOT_PAGES,
-    compose_dashboard,
-)
-from rebotarm_simulation.control.mujoco_jog import JOG_SPEED_LEVELS
-from rebotarm_simulation.core.mujoco_sim import ARM_JOINT_NAMES, RebotArmMujoco
+from rebotarm_simulation.control.mujoco_cartesian import MujocoCartesianController
+from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 from rebotarm_simulation.diagnostics.mujoco_telemetry import MujocoTelemetryHistory
 from rebotarm_simulation.apps.mujoco_visualization import GhostArmOverlay, TelemetryFigures
-
-
-HELP = (
-    "M JOINT/XYZ/RPY | Z/X select | J/K start jog | C/O gripper | S stop\n"
-    "-/+ speed | G gravity | H hold | P position | V collision | F6 page | F7 help\n"
-    "F8 world/tool | F9 plots | T home | R reset | Q quit\n"
-    "Terminal: joints J1..J6 | joint NAME VALUE | gripper WIDTH | state"
-)
-TELEMETRY_SAMPLE_HZ = 50.0
-TELEMETRY_WINDOW_S = 10.0
-VISUAL_UPDATE_HZ = 30.0
-DASHBOARD_UPDATE_HZ = 10.0
-
-
-
 from rebotarm_simulation.apps.viewer_interaction import (
+    DASHBOARD_UPDATE_HZ,
+    HELP,
+    TELEMETRY_SAMPLE_HZ,
+    TELEMETRY_WINDOW_S,
+    VISUAL_UPDATE_HZ,
     ViewerControlState,
     reduce_key,
-    _take_key_snapshot,
-    _take_line_snapshot,
     start_command_reader,
-    drain_key_events,
     process_command_events,
-    _command_value_text,
-    _jsonable,
     process_key_events,
     _state_from_sim,
     _quaternion_xyzw_to_rpy,
     _quaternion_wxyz_to_rpy,
-    _control_status,
-    _contact_summary,
     _refresh_observed_state,
-    _set_mode,
-    _command_positions,
-    _command_gripper,
     apply_pending_commands,
     apply_continuous_jog,
     overlay_text,
@@ -70,7 +40,7 @@ from rebotarm_simulation.apps.viewer_interaction import (
     process_cartesian_target,
     _decode_key,
 )
-from rebotarm_simulation.apps.viewer_lifecycle import _close_viewer_then_sim
+from rebotarm_simulation.apps.viewer_lifecycle import close_passive_viewer_safely
 
 def _positive_float(value: str) -> float:
     number = float(value)
@@ -82,8 +52,6 @@ def _positive_float(value: str) -> float:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Control reBotArm in the MuJoCo viewer")
     parser.add_argument("--model", default=None, help="MuJoCo scene XML path")
-    parser.add_argument("--joint-step", type=_positive_float, default=0.01, help="joint jog in radians")
-    parser.add_argument("--gripper-step", type=_positive_float, default=0.001, help="gripper jog in metres")
     parser.add_argument(
         "--joint-rate",
         type=_positive_float,
@@ -95,12 +63,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_float,
         default=0.02,
         help="normal-gear gripper jog rate in m/s",
-    )
-    parser.add_argument(
-        "--jog-hold-time",
-        type=_positive_float,
-        default=0.18,
-        help="seconds to keep jogging after the latest key-repeat event",
     )
     parser.add_argument(
         "--duration",
@@ -155,8 +117,8 @@ def main(
     viewer = None
     model = data = None
     try:
-        sim.reset_home()
-        _set_mode(sim, "hold")
+        sim.reset()
+        sim.set_mode("hold")
         if launch_passive is None:
             launch_passive = importlib.import_module("mujoco.viewer").launch_passive
 
@@ -200,8 +162,8 @@ def main(
         def on_key(keycode: int) -> None:
             events.put(keycode)
 
-        model, data = sim._unsafe_viewer_handles()
-        ghost = GhostArmOverlay(model)
+        model, data = sim.borrow_viewer_handles()
+        ghost = GhostArmOverlay(model) if isinstance(sim, RebotArmMujoco) else None
         figures = TelemetryFigures(max_points=500)
         target_mocap_id = None
         target_pose = None
@@ -231,14 +193,7 @@ def main(
                 state = process_command_events(sim, command_events, state, status_stream)
                 if state.quit:
                     break
-                state = process_key_events(
-                    sim,
-                    events,
-                    state,
-                    args.joint_step,
-                    args.gripper_step,
-                    args.jog_hold_time,
-                )
+                state = process_key_events(sim, events, state)
                 if state.quit:
                     break
                 if cartesian_controller is not None and state.cartesian_target_reset:
@@ -302,11 +257,11 @@ def main(
                     >= 1.0 / VISUAL_UPDATE_HZ
                 )
                 if visual_update_due:
-                    if state.interaction_mode != "joint":
+                    if ghost is not None and state.interaction_mode != "joint":
                         ghost_visible = update_ghost_overlay(
                             ghost, viewer, state.joint_targets
                         )
-                    elif ghost_visible:
+                    elif ghost is not None and ghost_visible:
                         clear_ghost_overlay(ghost, viewer)
                         ghost_visible = False
                     if state.plot_page != "off":
@@ -340,7 +295,7 @@ def main(
         except KeyboardInterrupt:
             return 130
     finally:
-        _close_viewer_then_sim(
+        close_passive_viewer_safely(
             viewer,
             sim,
             model,

@@ -311,11 +311,7 @@ def collect_health(
             ),
             "python_version": platform.python_version(),
             "mujoco_version": (
-                mujoco_version
-                if mujoco_version is not None
-                # 未显式传入版本号时尝试从仿真后端的 MuJoCo 模块读取;
-                # 注入的测试替身没有该属性,则回退为 "injected-simulation" 标记
-                else str(getattr(getattr(sim, "_mj", None), "__version__", "injected-simulation"))
+                mujoco_version if mujoco_version is not None else _version()
             ),
             "model_path": str(sim.model_path),
             "model_loaded": True,

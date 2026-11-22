@@ -30,14 +30,11 @@ class FakeSim:
     def control_targets(self):
         return tuple(self.targets[:6]) + (self.width / 2.0, -self.width / 2.0)
 
-    def reset_home(self, seed=None):
+    def reset(self, seed=None):
         self.targets[:] = 0.0
         self.positions[:] = 0.0
         self.ee[:] = [0.2, 0.0, 0.2]
         return self.get_state()
-
-    def reset(self, seed=None):
-        return self.reset_home(seed=seed)
 
     def randomize_scene(self, seed=None):
         target = (0.21 + 0.01 * float(seed or 0), 0.0, 0.2)
@@ -47,11 +44,11 @@ class FakeSim:
             seed=seed,
         )
 
-    def set_joint_position_targets(self, targets):
+    def command_joint_positions(self, targets):
         self.targets[:6] = np.asarray(targets, dtype=float)
         return tuple(self.targets[:6])
 
-    def set_gripper_width(self, width):
+    def command_gripper_width(self, width):
         self.width = min(0.09, max(0.0, float(width)))
         return self.width
 
@@ -117,17 +114,6 @@ def test_reach_env_step_clips_action_and_reports_termination_shape():
         assert info["terminated"] is terminated
         assert info["truncated"] is True
         assert info["step_count"] == 1
-
-
-def test_reach_env_step_done_returns_legacy_gym_shape():
-    with RebotArmReachEnv(config=ReachEnvConfig(max_steps=1), sim_factory=FakeSim) as env:
-        env.reset(seed=0)
-        obs, reward, done, info = env.step_done([0.0] * 6)
-
-        assert obs["joint_positions"].shape == (6,)
-        assert isinstance(reward, float)
-        assert done is True
-        assert info["done"] is True
 
 
 @pytest.mark.parametrize("action", [[0.0] * 5, [0.0] * 8, [float("nan")] * 6])

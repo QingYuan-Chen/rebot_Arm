@@ -6,10 +6,7 @@ import numpy as np
 import pytest
 from rebotarm_simulation.control.control_config import load_motor_control_parameters
 
-from rebotarm_simulation.control.motor_control import (
-    GripperMitController,
-    PosVelController,
-)
+from rebotarm_simulation.control.motor_control import PosVelController
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,11 +33,6 @@ def test_parameters_come_from_existing_motor_yaml_and_urdf() -> None:
     assert parameters.arm.torque_rate_limit_nm_s == pytest.approx((180, 180, 180, 90, 90, 90))
     assert parameters.arm.torque_lowpass_alpha == pytest.approx((0.35,) * 6)
     assert parameters.arm.gravity_compensation_scale == pytest.approx(1.0)
-    assert parameters.gripper.firmware_default_kp == pytest.approx(8.0)
-    assert parameters.gripper.firmware_default_kd == pytest.approx(1.0)
-    assert parameters.gripper.move_kp == pytest.approx(5.0)
-    assert parameters.gripper.closing_kp == pytest.approx(0.0)
-    assert parameters.gripper.hold_kp == pytest.approx(5.0)
     assert parameters.gripper.motor_model == "DM4310_V1_2"
     assert parameters.gripper.finger_force_limit_n == pytest.approx(1.5)
     assert parameters.gripper.sim_force_kp_n_per_m == pytest.approx(250.0)
@@ -103,48 +95,3 @@ def test_pos_vel_controller_saturates_and_reset_clears_integrators() -> None:
     controller.reset()
     assert controller.position_integral == pytest.approx(np.zeros(6))
     assert controller.velocity_integral == pytest.approx(np.zeros(6))
-
-
-def test_gripper_mit_uses_state_gains_and_transmission_conversion() -> None:
-    parameters = load_motor_control_parameters(ROOT).gripper
-    controller = GripperMitController(parameters)
-
-    command = controller.compute(
-        target=0.03,
-        position=0.02,
-        velocity=0.0,
-        mode="move",
-    )
-
-    assert command.kp == pytest.approx(5.0)
-    assert command.kd == pytest.approx(1.0)
-    assert command.motor_target_rad == pytest.approx(-1.6666666667)
-    assert command.motor_torque_nm == pytest.approx(-1.5)
-    assert command.finger_force_n == pytest.approx(66.6666666667)
-
-
-def test_gripper_mit_supports_closing_and_hold_modes() -> None:
-    parameters = load_motor_control_parameters(ROOT).gripper
-    controller = GripperMitController(parameters)
-
-    closing = controller.compute(
-        target=0.0,
-        position=0.02,
-        velocity=-0.01,
-        mode="closing",
-        feedforward_torque=0.3,
-    )
-    hold = controller.compute(
-        target=0.0,
-        position=0.02,
-        velocity=0.0,
-        mode="hold",
-        feedforward_torque=0.3,
-    )
-
-    assert closing.kp == pytest.approx(0.0)
-    assert closing.kd == pytest.approx(0.5)
-    assert closing.motor_torque_nm == pytest.approx(0.0222222222)
-    assert hold.kp == pytest.approx(5.0)
-    assert hold.kd == pytest.approx(1.0)
-    assert hold.motor_torque_nm == pytest.approx(1.5)

@@ -115,10 +115,6 @@ class TrajectoryCommandGate:
     def __init__(self, active: ActiveTrajectory) -> None:
         self._active = active
 
-    def apply_if_active(self, token, cancel_requested, apply, hold) -> bool:
-        """下发目标的布尔封装;未下发时返回 False."""
-        return self.apply_with_reason(token, cancel_requested, apply, hold) is GateOutcome.APPLIED
-
     def apply_with_reason(self, token, action_cancel_requested, apply, hold) -> GateOutcome:
         """在确认目标仍有效且未取消时执行 apply,否则执行 hold 并给出原因."""
         with self._active._lock:
@@ -147,12 +143,6 @@ class TrajectoryCommandGate:
                 self._active._cancel_requested = True
                 hold()
             return stopped
-
-    def complete_if_active(self, token, cancel_requested, hold, succeed) -> bool:
-        """完成目标的布尔封装;真正成功收敛时返回 True."""
-        return self.complete_with_reason(
-            token, cancel_requested, hold, succeed
-        ) is GateOutcome.SUCCEEDED
 
     def complete_with_reason(self, token, action_cancel_requested, hold, succeed) -> GateOutcome:
         """把"取消"与"成功终态迁移"线性化,保证二者互斥."""

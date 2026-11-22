@@ -82,10 +82,8 @@ def load_motor_control_parameters(
             raise ValueError(f"torque_lowpass_alpha for {name} must be in (0, 1]")
         torque_lowpass_alpha.append(alpha)
 
-    # 夹爪:固件默认增益取自固件参考段,其余换算标定取自仿真标定段
-    source_gripper = reference["gripper"]
+    # 夹爪:仿真只读取传动,限幅与力伺服参数;固件参考段增益保留在 YAML 中供溯源
     gripper_calibration = calibration["gripper"]
-    modes = gripper_calibration["modes"]
     displacement_range = gripper_calibration["displacement_range_m"]
     # 组装:控制周期取固件参考频率;积分限幅与重力补偿系数取自仿真标定段
     return MotorControlParameters(
@@ -109,15 +107,7 @@ def load_motor_control_parameters(
             velocity_integral_limit=float(arm_calibration["velocity_integral_limit_rad"]),
         ),
         gripper=GripperControlParameters(
-            firmware_default_kp=float(source_gripper["kp"]),
-            firmware_default_kd=float(source_gripper["kd"]),
             motor_model=str(gripper_calibration["motor_model"]),
-            move_kp=float(modes["move"]["kp"]),
-            move_kd=float(modes["move"]["kd"]),
-            closing_kp=float(modes["closing"]["kp"]),
-            closing_kd=float(modes["closing"]["kd"]),
-            hold_kp=float(modes["hold"]["kp"]),
-            hold_kd=float(modes["hold"]["kd"]),
             motor_radians_per_opening_m=float(
                 gripper_calibration["motor_radians_per_opening_m"]
             ),

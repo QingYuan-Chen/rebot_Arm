@@ -41,7 +41,7 @@ class FakeSim:
             simulation_time=self.time,
         )
 
-    def set_joint_position_targets(self, targets):
+    def command_joint_positions(self, targets):
         self.calls.append(("joints", targets))
         if isinstance(targets, dict):
             for name, value in targets.items():
@@ -50,13 +50,13 @@ class FakeSim:
             self.targets[:] = list(map(float, targets))
         return tuple(self.targets)
 
-    def set_gripper_width(self, width):
+    def command_gripper_width(self, width):
         self.calls.append(("gripper", float(width)))
         self.width = float(width)
         return self.width
 
-    command_joint_positions = set_joint_position_targets
-    command_gripper_width = set_gripper_width
+    command_joint_positions = command_joint_positions
+    command_gripper_width = command_gripper_width
 
     def set_mode(self, mode):
         self.calls.append(("mode", mode))
@@ -89,7 +89,7 @@ class FakeSim:
         self.time = 0.0
         return self.get_state()
 
-    reset_home = reset
+    reset = reset
 
     def get_contacts(self):
         self.calls.append(("contacts",))

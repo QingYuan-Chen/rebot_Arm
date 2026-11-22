@@ -12,12 +12,12 @@ def sim():
         yield instance
 
 
-@pytest.mark.parametrize("mode", ["pos_vel", "hold", "gravity_comp"])
+@pytest.mark.parametrize("mode", ["position", "hold", "gravity_comp"])
 def test_snapshot_replays_physics_and_controller_at_nonzero_phase(sim, mode):
-    sim.reset_home()
-    sim.set_joint_position_targets((.1, -.1, -.2, .2, 0, .1))
-    sim.set_gripper_width(.03)
-    sim.set_control_mode(mode)
+    sim.reset()
+    sim.command_joint_positions((.1, -.1, -.2, .2, 0, .1))
+    sim.command_gripper_width(.03)
+    sim.set_mode(mode)
     sim.step(7)
     checkpoint = sim.save_state()
     first = sim.step(23)
@@ -54,8 +54,8 @@ def test_forged_nonfinite_snapshot_is_rejected_before_physics_write(sim):
 
 
 def test_reset_positions_aligns_all_six_targets_and_preserves_gripper(sim):
-    sim.set_joint_position_targets((.2, -.2, -.3, .3, .1, .2))
-    sim.set_gripper_width(.04)
+    sim.command_joint_positions((.2, -.2, -.3, .3, .1, .2))
+    sim.command_gripper_width(.04)
     targets = (.1, -.1, -.2, .2, 0, .1)
     state = sim.reset_joint_positions(targets)
     assert state.joint_positions[:6] == targets

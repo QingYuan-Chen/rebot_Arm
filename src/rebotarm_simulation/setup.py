@@ -45,9 +45,6 @@ def install_resources(pattern):
     ]
 
 
-launch_files = glob("launch/*.launch.py")
-
-
 setup(
     name=package_name,
     version="0.1.0",
@@ -83,7 +80,6 @@ setup(
             "rebotarm_real2sim_viewer = rebotarm_simulation.apps.real2sim_viewer:main",
             "rebotarm_sim2real = rebotarm_simulation.apps.sim2real_cli:main",
             "rebotarm_mujoco_cli = rebotarm_simulation.apps.mujoco_cli:main",
-            "rebotarm_mujoco = rebotarm_simulation.apps.mujoco_cli:main",
             "rebotarm_mujoco_viewer = rebotarm_simulation.apps.mujoco_viewer:main",
             "rebotarm_mujoco_teach_preview = rebotarm_simulation.apps.teach_preview:main",
             "rebotarm_mujoco_node = rebotarm_simulation.ros.mujoco_ros_node:main",

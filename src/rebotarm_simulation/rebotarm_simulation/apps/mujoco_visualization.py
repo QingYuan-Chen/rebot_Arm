@@ -6,29 +6,21 @@ import math
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
+import mujoco
+
+from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES
 from rebotarm_simulation.diagnostics.mujoco_telemetry import TelemetrySnapshot
 
 
-ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
 FIGURE_NAMES = ("tracking", "torque")
-
-
-def _mujoco_module(explicit=None):
-    if explicit is not None:
-        return explicit
-    try:
-        import mujoco
-    except ImportError:
-        return None
-    return mujoco
 
 
 class GhostArmOverlay:
     """Append a transparent target-pose arm to ``viewer.user_scn``.
 
     Only geom group 2 is requested from MuJoCo, so collision proxies and scene
-    fixtures cannot become part of the ghost.  Unsupported/fake viewers simply
-    return ``False`` instead of failing the simulation loop.
+    fixtures cannot become part of the ghost.  Minimal headless/test viewers
+    without ``user_scn`` return ``False`` instead of failing the simulation loop.
     """
 
     def __init__(
@@ -37,9 +29,7 @@ class GhostArmOverlay:
         *,
         joint_names: Sequence[str] = ARM_JOINT_NAMES,
         rgba: Sequence[float] = (0.15, 0.75, 1.0, 0.28),
-        mujoco_module=None,
     ) -> None:
-        self._mj = _mujoco_module(mujoco_module)
         self._model = model
         color = tuple(float(value) for value in rgba)
         if len(color) != 4 or not all(math.isfinite(value) for value in color):
@@ -50,52 +40,33 @@ class GhostArmOverlay:
         self._joint_names = tuple(str(name) for name in joint_names)
         if len(self._joint_names) != 6 or any(not name for name in self._joint_names):
             raise ValueError("joint_names must contain six non-empty names")
-        self._data = None
-        self._option = None
-        self._perturb = None
-        self._qpos_addresses: tuple[int, ...] = ()
+        addresses = []
+        for name in self._joint_names:
+            joint_id = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if joint_id < 0:
+                raise ValueError(f"MuJoCo model is missing arm joint {name}")
+            addresses.append(int(self._model.jnt_qposadr[joint_id]))
+        self._data = mujoco.MjData(self._model)
+        self._option = mujoco.MjvOption()
+        self._option.geomgroup[:] = 0
+        self._option.geomgroup[2] = 1
+        # Sites and joint decorators are also emitted by mjv_addGeoms;
+        # disable them so the overlay contains arm visual geoms only.
+        self._option.sitegroup[:] = 0
+        self._option.jointgroup[:] = 0
+        self._perturb = mujoco.MjvPerturb()
+        self._qpos_addresses: tuple[int, ...] = tuple(addresses)
         self._scene = None
         self._start = 0
         self._count = 0
-        if self._mj is not None:
-            self._initialize_mujoco_state()
 
     @property
     def available(self) -> bool:
-        return self._data is not None and hasattr(self._mj, "mjv_addGeoms")
+        return True
 
     @property
     def geom_count(self) -> int:
         return self._count
-
-    def _initialize_mujoco_state(self) -> None:
-        required = ("MjData", "MjvOption", "MjvPerturb", "mj_name2id")
-        if any(not hasattr(self._mj, name) for name in required):
-            return
-        try:
-            addresses = []
-            for name in self._joint_names:
-                joint_id = self._mj.mj_name2id(
-                    self._model, self._mj.mjtObj.mjOBJ_JOINT, name
-                )
-                if joint_id < 0:
-                    raise ValueError(f"MuJoCo model is missing arm joint {name}")
-                addresses.append(int(self._model.jnt_qposadr[joint_id]))
-            self._data = self._mj.MjData(self._model)
-            self._option = self._mj.MjvOption()
-            self._option.geomgroup[:] = 0
-            self._option.geomgroup[2] = 1
-            # Sites and joint decorators are also emitted by mjv_addGeoms;
-            # disable them so the overlay contains arm visual geoms only.
-            self._option.sitegroup[:] = 0
-            self._option.jointgroup[:] = 0
-            self._perturb = self._mj.MjvPerturb()
-            self._qpos_addresses = tuple(addresses)
-        except (AttributeError, TypeError):
-            self._data = None
-            self._option = None
-            self._perturb = None
-            self._qpos_addresses = ()
 
     def clear(self, viewer) -> bool:
         scene = getattr(viewer, "user_scn", None)
@@ -111,8 +82,6 @@ class GhostArmOverlay:
         return True
 
     def update(self, viewer, target_qpos: Sequence[float]) -> bool:
-        if not self.available:
-            return False
         scene = getattr(viewer, "user_scn", None)
         if scene is None or not hasattr(scene, "ngeom") or not hasattr(scene, "geoms"):
             return False
@@ -126,19 +95,16 @@ class GhostArmOverlay:
         self.clear(viewer)
         for address, value in zip(self._qpos_addresses, values):
             self._data.qpos[address] = value
-        self._mj.mj_forward(self._model, self._data)
+        mujoco.mj_forward(self._model, self._data)
         start = int(scene.ngeom)
-        try:
-            self._mj.mjv_addGeoms(
-                self._model,
-                self._data,
-                self._option,
-                self._perturb,
-                self._mj.mjtCatBit.mjCAT_ALL,
-                scene,
-            )
-        except (AttributeError, TypeError):
-            return False
+        mujoco.mjv_addGeoms(
+            self._model,
+            self._data,
+            self._option,
+            self._perturb,
+            mujoco.mjtCatBit.mjCAT_ALL,
+            scene,
+        )
         end = int(scene.ngeom)
         for index in range(start, end):
             scene.geoms[index].rgba[:] = self._rgba
@@ -151,28 +117,25 @@ class GhostArmOverlay:
 class TelemetryFigures:
     """Maintain switchable joint-tracking and torque ``MjvFigure`` objects."""
 
-    def __init__(self, *, max_points: int = 500, mujoco_module=None) -> None:
+    def __init__(self, *, max_points: int = 500) -> None:
         if isinstance(max_points, bool) or not isinstance(max_points, int) or max_points <= 1:
             raise ValueError("max_points must be an integer greater than one")
-        self._mj = _mujoco_module(mujoco_module)
         self._max_points = min(max_points, 1001)
         self._selected = "tracking"
-        self._figures: dict[str, object] = {}
-        if self._mj is not None and hasattr(self._mj, "MjvFigure"):
-            self._figures = {
-                "tracking": self._new_figure(
-                    "Joint tracking [rad, rad/s]",
-                    ("actual [rad]", "target [rad]", "error [rad]", "velocity [rad/s]"),
-                ),
-                "torque": self._new_figure(
-                    "Effort [N.m, N]",
-                    ("requested [N.m]", "applied [N.m]", "max contact [N]"),
-                ),
-            }
+        self._figures: dict[str, object] = {
+            "tracking": self._new_figure(
+                "Joint tracking [rad, rad/s]",
+                ("actual [rad]", "target [rad]", "error [rad]", "velocity [rad/s]"),
+            ),
+            "torque": self._new_figure(
+                "Effort [N.m, N]",
+                ("requested [N.m]", "applied [N.m]", "max contact [N]"),
+            ),
+        }
 
     @property
     def available(self) -> bool:
-        return len(self._figures) == 2
+        return True
 
     @property
     def selected(self) -> str:
@@ -197,7 +160,7 @@ class TelemetryFigures:
         return self.select(FIGURE_NAMES[index])
 
     def _new_figure(self, title: str, lines: Sequence[str]):
-        figure = self._mj.MjvFigure()
+        figure = mujoco.MjvFigure()
         figure.title = title
         figure.xlabel = "simulation time (s)"
         figure.flg_legend = 1
@@ -286,12 +249,7 @@ class TelemetryFigures:
         """Attach the selected figure through MuJoCo's official Handle API."""
         figure = self.active_figure
         set_figures = getattr(viewer, "set_figures", None)
-        if (
-            figure is None
-            or not callable(set_figures)
-            or self._mj is None
-            or not hasattr(self._mj, "MjrRect")
-        ):
+        if figure is None or not callable(set_figures):
             return False
         try:
             width, height = self._viewport_size(
@@ -302,7 +260,7 @@ class TelemetryFigures:
         margin = min(10, width - 1, height - 1)
         figure_width = max(1, min(480, round(width * 0.40)))
         figure_height = max(1, min(320, round(height * 0.35)))
-        rectangle = self._mj.MjrRect(
+        rectangle = mujoco.MjrRect(
             max(0, width - figure_width - margin),
             margin,
             min(figure_width, width),

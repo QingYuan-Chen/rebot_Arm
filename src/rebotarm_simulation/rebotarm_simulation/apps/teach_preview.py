@@ -70,13 +70,15 @@ def preview_record(record_path: str | Path, *, viewer: bool = False) -> dict[str
                 if all(body.startswith("link") or body == "end_link" for body in bodies):
                     contact_counts["arm_self"] += 1
 
+        model = data = None
         try:
             if viewer:
                 import mujoco.viewer
 
                 from rebotarm_simulation.apps.viewer_lifecycle import close_passive_viewer_safely
 
-                window = mujoco.viewer.launch_passive(sim._model, sim._data)
+                model, data = sim.borrow_viewer_handles()
+                window = mujoco.viewer.launch_passive(model, data)
             def on_step(_sim):
                 if window is not None:
                     window.sync()
@@ -91,7 +93,7 @@ def preview_record(record_path: str | Path, *, viewer: bool = False) -> dict[str
                 # The helper owns closing or retaining sim on every outcome.
                 # The outer finally must never close it a second time.
                 release_sim = False
-                close_passive_viewer_safely(window, sim, sim._model, sim._data)
+                close_passive_viewer_safely(window, sim, model, data)
         return {
             "record_path": str(Path(record_path).resolve()),
             "raw_samples": len(samples),

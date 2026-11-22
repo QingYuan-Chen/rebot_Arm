@@ -18,7 +18,7 @@ class FakeSimulation:
         self.width = 0.06
         self.time = 0.0
 
-    def reset_home(self):
+    def reset(self):
         self.positions = HOME.copy()
         return self.get_state()
 
@@ -28,10 +28,10 @@ class FakeSimulation:
             self.width = gripper_width
         return self.get_state()
 
-    def set_joint_position_targets(self, positions):
+    def command_joint_positions(self, positions):
         self.targets[:] = positions
 
-    def set_gripper_width(self, width):
+    def command_gripper_width(self, width):
         self.width = width
 
     def step(self, count):

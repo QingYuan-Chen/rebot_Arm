@@ -36,7 +36,7 @@ def test_contact_details_are_bounded_and_finite(bottle_scene):
     from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 
     with RebotArmMujoco(bottle_scene) as sim:
-        sim.reset_home()
+        sim.reset()
         sim.step(300)
         contacts = sim.get_contacts()
         assert contacts

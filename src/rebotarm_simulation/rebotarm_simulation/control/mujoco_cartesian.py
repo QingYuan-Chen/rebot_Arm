@@ -14,24 +14,16 @@ from typing import Literal, Protocol, Sequence
 
 import numpy as np
 
+from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES as _ARM_JOINT_NAMES
+from rebotarm_simulation.core.validation import finite_vector
+
 
 CartesianFrame = Literal["world", "tool"]
 IkStatus = Literal["converged", "max_iterations", "unreachable", "numerical_failure"]
-_ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
 
 
 def _vector3(values: Sequence[float], label: str) -> tuple[float, float, float]:
-    if isinstance(values, (str, bytes)):
-        raise TypeError(f"{label} must be a numeric sequence")
-    try:
-        result = tuple(float(value) for value in values)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"{label} must be a numeric sequence") from exc
-    if len(result) != 3:
-        raise ValueError(f"{label} must contain exactly 3 values")
-    if not all(math.isfinite(value) for value in result):
-        raise ValueError(f"{label} values must be finite")
-    return result  # type: ignore[return-value]
+    return finite_vector(values, 3, label)  # type: ignore[return-value]
 
 
 def _unit_quaternion_wxyz(values: Sequence[float]) -> tuple[float, float, float, float]:
@@ -121,7 +113,7 @@ class IkResult:
 
 
 class _Simulation(Protocol):
-    def _unsafe_viewer_handles(self): ...
+    def borrow_viewer_handles(self): ...
     def command_joint_positions(self, values: Sequence[float]) -> tuple[float, ...]: ...
 
 
@@ -132,7 +124,7 @@ class MujocoCartesianController:
         self._simulation = simulation
         self.options = options or IkOptions()
         self._mj = importlib.import_module("mujoco")
-        self._model, live_data = simulation._unsafe_viewer_handles()
+        self._model, live_data = simulation.borrow_viewer_handles()
         self._data = self._mj.MjData(self._model)
         self._site_id = self._required_id(self._mj.mjtObj.mjOBJ_SITE, "ee_site")
         self._joint_ids = tuple(
@@ -157,7 +149,7 @@ class MujocoCartesianController:
         """Solve an incremental pose command without changing live simulation state."""
         if not isinstance(delta, CartesianDelta):
             raise TypeError("delta must be a CartesianDelta")
-        _model, live_data = self._simulation._unsafe_viewer_handles()
+        _model, live_data = self._simulation.borrow_viewer_handles()
         if _model is not self._model:
             raise RuntimeError("simulation model changed after Cartesian controller creation")
         self._copy_live_kinematics(live_data)
@@ -185,7 +177,7 @@ class MujocoCartesianController:
         target_position = np.asarray(_vector3(position_m, "position_m"), dtype=float)
         quaternion = _unit_quaternion_wxyz(quaternion_wxyz)
         target_rotation = _rotation_from_quaternion_wxyz(quaternion)
-        _model, live_data = self._simulation._unsafe_viewer_handles()
+        _model, live_data = self._simulation.borrow_viewer_handles()
         if _model is not self._model:
             raise RuntimeError("simulation model changed after Cartesian controller creation")
         self._copy_live_kinematics(live_data)

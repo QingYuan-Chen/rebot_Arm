@@ -88,7 +88,7 @@ def test_real2sim_executor_failure_is_reported_after_safe_cleanup(monkeypatch):
     events = []
     executor = _Executor()
     viewer = _Viewer(executor, events)
-    sim = SimpleNamespace(_unsafe_viewer_handles=lambda: (object(), object()),
+    sim = SimpleNamespace(borrow_viewer_handles=lambda: (object(), object()),
                           close=lambda: events.append("sim.close"))
     node = SimpleNamespace(simulation=sim, simulation_lock=threading.Lock(),
                            destroy_node=lambda: events.append("node.destroy"))
@@ -105,7 +105,7 @@ def test_executor_timeout_retains_node_and_simulation(monkeypatch):
     events = []
     executor = _Executor(shutdown_result=False)
     viewer = _Viewer(executor, events)
-    sim = SimpleNamespace(_unsafe_viewer_handles=lambda: (object(), object()),
+    sim = SimpleNamespace(borrow_viewer_handles=lambda: (object(), object()),
                           close=lambda: events.append("sim.close"))
     node = SimpleNamespace(simulation=sim, simulation_lock=threading.Lock(),
                            destroy_node=lambda: events.append("node.destroy"))

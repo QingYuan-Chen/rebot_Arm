@@ -8,7 +8,7 @@ import mujoco
 import numpy as np
 
 from rebotarm_simulation.core.gym_reach import RebotArmReachEnv, _rotate_points
-from rebotarm_simulation.apps.mujoco_viewer import _close_viewer_then_sim
+from rebotarm_simulation.apps.viewer_lifecycle import close_passive_viewer_safely
 
 
 def _draw_goal(viewer, env):
@@ -58,7 +58,7 @@ def main():
     policy = PPO.load(args.model, device="cuda")
     env = RebotArmReachEnv(curriculum_stage=args.curriculum_stage)
     viewer = None
-    model, data = env.sim._unsafe_viewer_handles()
+    model, data = env.sim.borrow_viewer_handles()
     records = []
     try:
         obs, _ = env.reset(seed=args.seed)
@@ -97,7 +97,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        _close_viewer_then_sim(viewer, env.sim, model, data)
+        close_passive_viewer_safely(viewer, env.sim, model, data)
 
 
 if __name__ == "__main__":

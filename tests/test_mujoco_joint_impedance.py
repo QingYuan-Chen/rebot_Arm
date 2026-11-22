@@ -203,7 +203,7 @@ def test_impedance_snapshot_replays_across_deadline_and_rejects_forgery(sim):
 def test_reset_clears_impedance_command_and_history(sim):
     sim.command_joint_impedance(sim.get_state().joint_positions[:6], STIFFNESS, DAMPING)
     sim.step(7)
-    sim.reset_home()
+    sim.reset()
     status = sim.get_control_status()
     assert status.mode == 'hold' and status.impedance_command is None
     assert status.watchdog_remaining_s is None

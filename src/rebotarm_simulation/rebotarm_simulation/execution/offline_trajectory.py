@@ -14,16 +14,22 @@ from rebotarm_simulation.execution.trajectory_sampler import NamedTrajectoryPoin
 
 
 def _point_time(point) -> float:
-    value = getattr(point, "time_from_start", None)
-    if value is None:
+    if isinstance(point, tuple) and len(point) == 2:
         return float(point[0])
+    if not hasattr(point, "time_from_start"):
+        raise TypeError("trajectory point must provide time_from_start or be a (time, positions) pair")
+    value = point.time_from_start
     if isinstance(value, (int, float)):
         return float(value)
     return float(value.sec) + float(value.nanosec) * 1e-9
 
 
 def _point_positions(point) -> tuple[float, ...]:
-    return tuple(float(value) for value in getattr(point, "positions", point[1] if isinstance(point, tuple) else ()))
+    if isinstance(point, tuple) and len(point) == 2:
+        return tuple(float(value) for value in point[1])
+    if not hasattr(point, "positions"):
+        raise TypeError("trajectory point must provide positions or be a (time, positions) pair")
+    return tuple(float(value) for value in point.positions)
 
 
 def normalized_path(points: Sequence, joint_names: Sequence[str]) -> list[tuple[float, tuple[float, ...]]]:
@@ -54,7 +60,7 @@ def play_path(
     while elapsed < path[-1][0] - 1e-12:
         elapsed = min(elapsed + sim.timestep, path[-1][0])
         target = sampler.sample(elapsed)
-        sim.set_joint_position_targets(target)
+        sim.command_joint_positions(target)
         state = sim.step()
         contacts = sim.get_contacts()
         max_error = max(max_error, max(abs(a - b) for a, b in zip(target, state.joint_positions[:6])))

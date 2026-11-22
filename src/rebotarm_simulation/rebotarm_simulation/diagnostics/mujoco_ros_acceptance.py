@@ -14,8 +14,7 @@ import threading
 import time
 from typing import Sequence
 
-
-ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
+from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES
 
 
 def _positive_float(value: str) -> float:
@@ -117,91 +116,91 @@ def run_acceptance(*, timeout: float = 15.0, gripper_width: float = 0.05) -> dic
             raise RuntimeError(f'unique MuJoCo FJT owner required: {owners}')
         if probe.count_publishers('/rebotarm/joint_states') != 1:
             raise RuntimeError('unique simulation joint state publisher required')
-        if not topics_ready or not state_client.wait_for_service(timeout_sec=timeout) or not retime_client.wait_for_service(timeout_sec=timeout):
-            raise RuntimeError('simulation feedback and continuous planning services required')
+        if (
+            not topics_ready
+            or not service_ready
+            or not action_ready
+            or not state_client.wait_for_service(timeout_sec=timeout)
+            or not retime_client.wait_for_service(timeout_sec=timeout)
+        ):
+            raise RuntimeError('simulation feedback, gripper/FJT and continuous planning services required')
 
         service_success = False
         gripper_reached = None
-        if service_ready:
-            request = SetGripper.Request()
-            request.position = float(gripper_width)
-            response_future = gripper_client.call_async(request)
-            if _wait_future(response_future, timeout):
-                response = response_future.result()
-                service_success = bool(response.success)
-                gripper_reached = float(response.reached_position)
+        request = SetGripper.Request()
+        request.position = float(gripper_width)
+        response_future = gripper_client.call_async(request)
+        if _wait_future(response_future, timeout):
+            response = response_future.result()
+            service_success = bool(response.success)
+            gripper_reached = float(response.reached_position)
 
         action_accepted = False
         action_success = False
         action_error_code = None
         target_positions = None
-        if action_ready:
-            # 夹爪动作后等待新物理帧满足准备准入,再获取规划起点.
-            deadline = time.monotonic()+timeout
-            while True:
-                state_future = state_client.call_async(GetArmPlanningState.Request())
-                if not _wait_future(state_future, max(0., deadline-time.monotonic())):
-                    raise TimeoutError('planning state timeout')
-                state_response = state_future.result()
-                if state_response.success:
-                    snapshot = json.loads(state_response.state_json)
-                    break
-                if time.monotonic() >= deadline:
-                    raise RuntimeError(state_response.message)
-                time.sleep(.02)
-            if not snapshot['executable']:
-                raise RuntimeError('simulation planning state is not executable')
-            goal = FollowJointTrajectory.Goal()
-            goal.trajectory.joint_names = list(ARM_JOINT_NAMES)
-            target_positions = list(snapshot['hold'])
-            target_positions[0] += .02
-            goal.trajectory.points = [JointTrajectoryPoint(positions=list(q),
-                velocities=[0.]*6, accelerations=[0.]*6, time_from_start=Duration(sec=stamp))
-                for stamp, q in ((0,snapshot['hold']),(1,target_positions))]
-            request = RetimeArmTrajectory.Request(trajectory=goal.trajectory,
-                velocity_scaling=1., acceleration_scaling=1.,
-                capability_revision=snapshot['capability_revision'])
-            planned = retime_client.call_async(request)
-            if not _wait_future(planned, timeout):
-                raise TimeoutError('continuous planning timeout')
-            plan = planned.result()
-            if not plan.success or not plan.executable:
-                raise RuntimeError(plan.message)
-            goal.trajectory = plan.trajectory
-            send_future = action_client.send_goal_async(goal)
-            if _wait_future(send_future, timeout):
-                goal_handle = send_future.result()
-                action_accepted = bool(goal_handle.accepted)
-                if action_accepted:
-                    result_future = goal_handle.get_result_async()
-                    if _wait_future(result_future, timeout):
-                        terminal = result_future.result()
-                        result = terminal.result
-                        action_error_code = int(result.error_code)
-                        action_success = terminal.status == 4 and action_error_code == int(
-                            FollowJointTrajectory.Result.SUCCESSFUL
-                        )
+        # 夹爪动作后等待新物理帧满足准备准入,再获取规划起点.
+        deadline = time.monotonic() + timeout
+        while True:
+            state_future = state_client.call_async(GetArmPlanningState.Request())
+            if not _wait_future(state_future, max(0., deadline - time.monotonic())):
+                raise TimeoutError('planning state timeout')
+            state_response = state_future.result()
+            if state_response.success:
+                snapshot = json.loads(state_response.state_json)
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError(state_response.message)
+            time.sleep(.02)
+        if not snapshot['executable']:
+            raise RuntimeError('simulation planning state is not executable')
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory.joint_names = list(ARM_JOINT_NAMES)
+        target_positions = list(snapshot['hold'])
+        target_positions[0] += .02
+        goal.trajectory.points = [JointTrajectoryPoint(positions=list(q),
+            velocities=[0.] * 6, accelerations=[0.] * 6, time_from_start=Duration(sec=stamp))
+            for stamp, q in ((0, snapshot['hold']), (1, target_positions))]
+        request = RetimeArmTrajectory.Request(trajectory=goal.trajectory,
+            velocity_scaling=1., acceleration_scaling=1.,
+            capability_revision=snapshot['capability_revision'])
+        planned = retime_client.call_async(request)
+        if not _wait_future(planned, timeout):
+            raise TimeoutError('continuous planning timeout')
+        plan = planned.result()
+        if not plan.success or not plan.executable:
+            raise RuntimeError(plan.message)
+        goal.trajectory = plan.trajectory
+        send_future = action_client.send_goal_async(goal)
+        if _wait_future(send_future, timeout):
+            goal_handle = send_future.result()
+            action_accepted = bool(goal_handle.accepted)
+            if action_accepted:
+                result_future = goal_handle.get_result_async()
+                if _wait_future(result_future, timeout):
+                    terminal = result_future.result()
+                    result = terminal.result
+                    action_error_code = int(result.error_code)
+                    action_success = terminal.status == 4 and action_error_code == int(
+                        FollowJointTrajectory.Result.SUCCESSFUL
+                    )
 
-        final_joint = joint_messages[-1] if joint_messages else None
-        final_clock = clock_messages[-1] if clock_messages else None
+        final_joint = joint_messages[-1]
+        final_clock = clock_messages[-1]
         clock_progress = (
-            len(clock_messages) >= 2
-            and _stamp_seconds(clock_messages[-1].clock) > _stamp_seconds(clock_messages[0].clock)
+            _stamp_seconds(final_clock.clock) > _stamp_seconds(clock_messages[0].clock)
         )
         joint_schema_ok = (
-            final_joint is not None
-            and tuple(final_joint.name) == ARM_JOINT_NAMES + ("left_finger_joint", "right_finger_joint")
+            tuple(final_joint.name) == ARM_JOINT_NAMES + ("left_finger_joint", "right_finger_joint")
             and len(final_joint.position) == 8
             and len(final_joint.velocity) == 8
             and len(final_joint.effort) == 8
             and all(math.isfinite(value) for value in final_joint.position)
         )
-        final_error = None
-        if final_joint is not None and target_positions is not None and len(final_joint.position) >= 6:
-            final_error = max(
-                abs(float(actual) - target)
-                for actual, target in zip(final_joint.position[:6], target_positions)
-            )
+        final_error = max(
+            abs(float(actual) - target)
+            for actual, target in zip(final_joint.position[:6], target_positions)
+        )
         ok = bool(
             topics_ready
             and clock_progress
@@ -209,7 +208,6 @@ def run_acceptance(*, timeout: float = 15.0, gripper_width: float = 0.05) -> dic
             and service_success
             and action_accepted
             and action_success
-            and final_error is not None
             and final_error <= 0.04
         )
         return {
@@ -228,7 +226,7 @@ def run_acceptance(*, timeout: float = 15.0, gripper_width: float = 0.05) -> dic
             "trajectory_error_code": action_error_code,
             "target_positions": target_positions,
             "final_max_joint_error_rad": final_error,
-            "final_clock_sec": _stamp_seconds(final_clock.clock) if final_clock is not None else None,
+            "final_clock_sec": _stamp_seconds(final_clock.clock),
         }
     finally:
         if executor is not None:

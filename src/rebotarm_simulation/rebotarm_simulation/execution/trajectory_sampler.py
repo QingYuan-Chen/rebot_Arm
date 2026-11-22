@@ -6,7 +6,7 @@ ROS 执行已准备多项式,通过轻量适配交给共享数值内核求值.
 对外接口:TrajectorySampler 处理离线具名/部分关节位置输入;PreparedTrajectorySampler
 只包装完整的已检查曲线,统一提供 duration 和 sample(elapsed) 的位置接口.
 
-安全约束:以下兼容输入与 cancel 规则适用于 TrajectorySampler;prepared 路径的取消和
+安全约束:以下兼容输入规则适用于 TrajectorySampler;prepared 路径的取消和
 身份校验由后端执行所有者负责,适配器本身不拥有任务或发送权限.
 
 - 关节名必须属于六个机械臂关节的规范集合(joint1..joint6,顺序固定,见 ``ARM_JOINT_NAMES``).
@@ -14,13 +14,12 @@ ROS 执行已准备多项式,通过轻量适配交给共享数值内核求值.
   会在构造阶段直接拒绝,不做任何默认补齐;
 - 轨迹点时间以秒为单位,必须有限,非负且严格递增(不允许出现重复时间戳);
 - 位置值必须有限;非法输入一律抛异常,绝不静默裁剪,截断或丢弃轨迹点;
-- 采样为线性插值:第一个轨迹点之前从 t=0 的初始位置线性插值,最后一个点之后保持终点位置(不超调);
-- ``cancel()`` 之后继续采样会抛异常,用于保证停止指令与后续目标下发之间没有竞态窗口.
+- 采样为线性插值:第一个轨迹点之前从 t=0 的初始位置线性插值,最后一个点之后保持终点位置(不超调).
 
 本模块刻意不导入任何 ROS 依赖,因此可以在未安装 ROS 的开发主机上对轨迹输入做单元测试与
 模糊测试.
 
-文件结构:已准备曲线适配器 → 具名轨迹点 → 离线位置点规范化,取消及共享线性采样.
+文件结构:已准备曲线适配器 → 具名轨迹点 → 离线位置点规范化及共享线性采样.
 """
 
 from __future__ import annotations
@@ -144,7 +143,6 @@ class TrajectorySampler:
         self._initial = initial
         self._times = tuple(time for time, _ in normalized_points)
         self._positions = tuple(positions for _, positions in normalized_points)
-        self._cancelled = False
 
     @staticmethod
     def _validate_names(names: tuple[str, ...]) -> None:
@@ -203,38 +201,13 @@ class TrajectorySampler:
         """轨迹总时长(秒),即最后一个轨迹点的时刻."""
         return self._times[-1]
 
-    @property
-    def is_cancelled(self) -> bool:
-        """是否已收到取消请求;取消状态下 ``sample()`` 会拒绝继续采样."""
-        return self._cancelled
-
-    def is_complete(self, simulation_time: float) -> bool:
-        """仿真时间是否已到达或超过轨迹终点(用于判断"该发成功结果了")."""
-        time = self._validate_sample_time(simulation_time)
-        return time >= self.duration
-
-    def cancel(self) -> None:
-        """标记轨迹被取消;只置标志位,不修改已规范化的轨迹数据."""
-        self._cancelled = True
-
-    def clear_cancel(self) -> None:
-        """撤销取消标志,使轨迹可再次被采样."""
-        self._cancelled = False
-
-    def reset(self) -> None:
-        """把采样器恢复到"未取消"状态(当前语义等同于 ``clear_cancel()``)."""
-        self.clear_cancel()
-
     def sample(self, simulation_time: float) -> tuple[float, ...]:
         """按仿真时间采样,返回规范顺序的六关节目标角(rad).
 
         插值规则:早于第一个轨迹点时从 t=0 的初始位置线性插值;
         到达或超过终点时保持最后一个点(不超调);其余情况在相邻两点之间做线性插值.
-        取消状态下调用会抛 RuntimeError,以保证停止请求生效后不再产生新的运动目标.
         """
         time = self._validate_sample_time(simulation_time)
-        if self._cancelled:
-            raise RuntimeError("trajectory sampling was cancelled")
         return linear_sample(self._times, self._positions, self._initial, time)
 
     @staticmethod

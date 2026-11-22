@@ -99,10 +99,10 @@ class FakeSimulation:
         self.mirror_calls += 1
         return self._state()
 
-    def set_joint_position_targets(self, positions):
+    def command_joint_positions(self, positions):
         self.targets[:] = positions
 
-    def set_gripper_width(self, width):
+    def command_gripper_width(self, width):
         self.width = width
 
     def step(self, count):

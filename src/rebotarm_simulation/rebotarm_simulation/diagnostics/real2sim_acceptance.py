@@ -71,7 +71,7 @@ def run_acceptance(
     gripper_errors = []
     finite = True
     with sim_factory(model) as simulation:
-        simulation.reset_home()
+        simulation.reset()
         synchronizer = Real2SimSynchronizer(
             simulation,
             Real2SimMapper(config),

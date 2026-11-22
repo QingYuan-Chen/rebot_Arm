@@ -68,7 +68,7 @@ class RebotArmReachEnv(gym.Env):
             raise ValueError("Only goal_q reset option is supported")
         super().reset(seed=seed)
         self._done = True
-        state = self.sim.reset_home(seed=seed)
+        state = self.sim.reset(seed=seed)
         self._home = np.asarray(state.joint_positions[:6])
         saved = self.sim.save_state()
         candidates = []
@@ -130,7 +130,7 @@ class RebotArmReachEnv(gym.Env):
             raise ValueError("action must be six finite values in [-1, 1]")
         targets = np.asarray(self.sim.control_targets[:6]) + self.action_scale * action
         targets = np.clip(targets, self._home - 0.25, self._home + 0.25)
-        self.sim.set_joint_position_targets(targets)
+        self.sim.command_joint_positions(targets)
         for _ in range(self.frame_skip):
             state = self.sim.step()
         self._steps += 1

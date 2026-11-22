@@ -122,39 +122,10 @@ def test_duration_comes_from_last_point() -> None:
     assert trajectory.duration == pytest.approx(2.5)
 
 
-def test_completion_changes_at_duration() -> None:
-    trajectory = sampler(points=[point(2.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)])
-
-    assert not trajectory.is_complete(2.499)
-    assert trajectory.is_complete(2.5)
-
-
 def test_sampling_after_duration_holds_final_point() -> None:
     trajectory = sampler(points=[point(2.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)])
 
     assert trajectory.sample(99.0) == (1.0,) * 6
-
-
-def test_cancel_blocks_sampling_until_cancel_is_cleared() -> None:
-    trajectory = sampler()
-
-    trajectory.cancel()
-    assert trajectory.is_cancelled
-    with pytest.raises(RuntimeError, match="cancelled"):
-        trajectory.sample(0.5)
-    trajectory.clear_cancel()
-
-    assert not trajectory.is_cancelled
-    assert trajectory.sample(0.0) == START
-
-
-def test_reset_clears_cancelled_state() -> None:
-    trajectory = sampler()
-    trajectory.cancel()
-
-    trajectory.reset()
-
-    assert not trajectory.is_cancelled
 
 
 def test_sampling_rejects_negative_or_nonfinite_time() -> None:

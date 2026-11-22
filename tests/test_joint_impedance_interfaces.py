@@ -35,7 +35,7 @@ class ImpedanceSim:
         self.deadline = None
         self.closed = False
 
-    def reset_home(self):
+    def reset(self):
         self.time = 0.
 
     def set_mode(self, mode):

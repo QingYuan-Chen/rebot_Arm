@@ -34,8 +34,7 @@ from statistics import fmean
 from typing import Mapping, Sequence
 
 
-# 手臂 6 个旋转关节的规范顺序:命令,真机反馈与仿真样本都按此顺序解释.
-ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
+from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES
 
 
 def analyze_run(run: Mapping[str, object]) -> dict[str, object]:

@@ -58,7 +58,7 @@ def test_world_translation_converges_without_mutating_live_simulation(simulation
 def test_tool_translation_uses_current_end_effector_axes(simulation) -> None:
     from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
 
-    model, data = simulation._unsafe_viewer_handles()
+    model, data = simulation.borrow_viewer_handles()
     mujoco = pytest.importorskip("mujoco")
     site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "ee_site")
     rotation = np.asarray(data.site_xmat[site_id]).reshape(3, 3)

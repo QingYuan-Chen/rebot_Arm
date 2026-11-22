@@ -168,7 +168,7 @@ def run_step_response(
     with RebotArmMujoco(xml_path) as sim:
         targets = list(sim.get_state().joint_positions[:6])
         targets[index] = float(target)
-        applied = sim.set_joint_position_targets(targets)
+        applied = sim.command_joint_positions(targets)
         if applied[index] != float(target):
             raise ValueError("step target exceeds joint position limits")
         errors = []
@@ -282,14 +282,3 @@ def _positive_seconds(seconds):
     if not math.isfinite(seconds) or seconds <= 0:
         raise ValueError("seconds must be finite and positive")
     return seconds
-
-
-def benchmark_wall_time(command) -> tuple[float, object]:
-    """执行无参可调用对象并返回 (真实耗时秒数, 其返回值).
-
-    用单调时钟测量墙钟时间,专门用来把"仿真时长"与"实际算力开销"区分开;
-    被调用对象的异常照常向上抛出,不做捕获.
-    """
-    start = time.monotonic()
-    result = command()
-    return time.monotonic() - start, result

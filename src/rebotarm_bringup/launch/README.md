@@ -152,3 +152,12 @@ MoveIt 对象仍执行正常清理，不捕获段错误或改写退出码。
 | `grasp_candidate.launch.py` | GraspNet、原始候选 Marker、可选 Open3D | IK 筛选 |
 | `candidate_filter.launch.py` | TF、工作空间、IK 和碰撞筛选 | 运动控制 |
 | `candidate_markers.launch.py` | 筛选结果 Marker | 运动控制 |
+
+## 非交互脚本启停约束
+
+在非交互 `bash` 脚本中使用 `ros2 launch ... &` 后台启动时，POSIX shell 会将子进程 `SIGINT` 设为 `SIG_IGN`；
+ROS 2 Jazzy `AsyncSafeSignalManager` 仅通过 `signal.set_wakeup_fd` 监听信号而不覆盖 `SIG_IGN`，导致 `kill -INT` 被内核忽略，
+后续 `kill -TERM` 会以退出码 143 直接终止 launch 主进程并遗留孤儿子进程。
+
+自动化验收脚本应保证子进程拥有正常 `SIGINT` 处置（例如使用 Python `subprocess.Popen(..., start_new_session=True)`
+或 `bash` 下 `set -m` / `setsid`），并在结束时向 `ros2 launch` 主进程发送单次 `SIGINT` 等待其返回 0。

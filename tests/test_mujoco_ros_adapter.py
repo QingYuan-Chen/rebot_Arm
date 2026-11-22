@@ -33,8 +33,9 @@ class _Simulation:
         self.positions = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.03, -0.03)
         self.events = []
 
-    def reset_home(self):
-        self.events.append(("reset_home",))
+    def reset(self):
+        self.control_mode = "hold"
+        self.events.append(("reset",))
 
     def set_mode(self, mode):
         self.control_mode = mode
@@ -116,10 +117,40 @@ def test_ros_control_api_starts_home_hold_and_tracks_positions():
     simulation = _Simulation()
     control = SimulationControlApi(simulation)
     control.reset_home_and_hold()
-    assert simulation.events[:2] == [("reset_home",), ("mode", "hold")]
+    assert simulation.events == [("reset",)]
+    assert control.get_control_status().mode == "hold"
     assert control.command_joint_positions((1, 2, 3, 4, 5, 6)) == (1, 2, 3, 4, 5, 6)
-    assert simulation.events[-1] == ("mode", "position")
+    assert simulation.events[-1] == ("positions", (1, 2, 3, 4, 5, 6))
     assert control.get_control_status().mode == "position"
+
+
+def test_ros_control_api_high_rate_position_commands_preserve_100hz_control_cadence():
+    """轨迹期间高频写目标不得重入 set_mode 或额外推进 100 Hz 控制拍."""
+    pytest.importorskip("mujoco")
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
+
+    with RebotArmMujoco() as sim:
+        control = SimulationControlApi(sim)
+        target = sim.get_state().joint_positions[:6]
+        control.command_joint_positions(target)
+        calls = 0
+        original = sim._control._apply_motor_control
+
+        def counted(model, data):
+            nonlocal calls
+            calls += 1
+            return original(model, data)
+
+        sim._control._apply_motor_control = counted
+        for index in range(5):
+            shifted = (target[0] + 0.001 * (index + 1), *target[1:])
+            control.command_joint_positions(shifted)
+        assert calls == 0
+        for index in range(5):
+            shifted = (target[0] + 0.001 * (index + 1), *target[1:])
+            control.command_joint_positions(shifted)
+            sim.step()
+        assert calls == 1
 
 
 def test_ros_control_api_hold_captures_current_position_and_gripper_is_width_based():
@@ -261,9 +292,9 @@ def test_cancel_between_iterations_cannot_be_overwritten_and_reholds():
     applied = []
     held = []
     assert active.try_start(token)
-    assert gate.apply_if_active(token, lambda: False, lambda: applied.append(1), lambda: held.append(1))
+    assert gate.apply_with_reason(token, lambda: False, lambda: applied.append(1), lambda: held.append(1)) is GateOutcome.APPLIED
     gate.stop_and_hold(lambda: held.append(1))
-    assert not gate.apply_if_active(token, lambda: False, lambda: applied.append(2), lambda: held.append(1))
+    assert gate.apply_with_reason(token, lambda: False, lambda: applied.append(2), lambda: held.append(1)) is GateOutcome.SERVICE_STOP
     assert applied == [1]
     assert held == [1, 1]
 
@@ -315,9 +346,9 @@ def test_terminal_completion_rechecks_cancel_and_never_succeeds_after_stop():
         # declared ready but during the final terminal recheck.
         active.stop()
         return False
-    assert not gate.complete_if_active(
+    assert gate.complete_with_reason(
         token, cancel_hook, lambda: events.append("hold"), lambda: events.append("success")
-    )
+    ) is GateOutcome.SERVICE_STOP
     assert events == ["hold"]
 
 
@@ -327,9 +358,9 @@ def test_terminal_success_linearizes_before_later_stop():
     token = object()
     events = []
     assert active.try_start(token)
-    assert gate.complete_if_active(
+    assert gate.complete_with_reason(
         token, lambda: False, lambda: events.append("hold"), lambda: events.append("success")
-    )
+    ) is GateOutcome.SUCCEEDED
     assert events == ["success"]
     assert not active.busy
     assert not gate.stop_and_hold(lambda: events.append("late hold"))
@@ -360,7 +391,7 @@ def test_gate_timer_and_stop_sim_calls_are_serialized_on_one_sim_lock():
         def get_state(self):
             self._record()
 
-        def set_joint_position_targets(self):
+        def command_joint_positions(self):
             self._record()
 
         def step(self):
@@ -369,10 +400,10 @@ def test_gate_timer_and_stop_sim_calls_are_serialized_on_one_sim_lock():
     sim = InstrumentedSim()
     access = SerializedSimulationAccess(sim)
     apply_call = lambda: access.run(
-        lambda guarded: (guarded.get_state(), guarded.set_joint_position_targets())
+        lambda guarded: (guarded.get_state(), guarded.command_joint_positions())
     )
     hold_call = lambda: access.run(
-        lambda guarded: (guarded.get_state(), guarded.set_joint_position_targets())
+        lambda guarded: (guarded.get_state(), guarded.command_joint_positions())
     )
     step_call = lambda: access.run(lambda guarded: guarded.step())
     active = ActiveTrajectory()
@@ -384,7 +415,7 @@ def test_gate_timer_and_stop_sim_calls_are_serialized_on_one_sim_lock():
         start.wait()
         operation()
     threads = [
-        threading.Thread(target=lambda: together(lambda: gate.apply_if_active(token, lambda: False, apply_call, hold_call))),
+        threading.Thread(target=lambda: together(lambda: gate.apply_with_reason(token, lambda: False, apply_call, hold_call))),
         threading.Thread(target=lambda: together(lambda: gate.stop_and_hold(hold_call))),
         threading.Thread(target=lambda: together(step_call)),
     ]

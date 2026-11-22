@@ -17,14 +17,14 @@ class FakeContactSim:
         self.width = 0.09
         self.cube_pose = (0.31, 0.04, 0.04, 0.0, 0.0, 0.0, 1.0)
 
-    def reset_home(self):
+    def reset(self):
         return self.get_state()
 
-    def set_gripper_width(self, width):
+    def command_gripper_width(self, width):
         self.width = float(width)
         return self.width
 
-    def set_joint_position_targets(self, targets):
+    def command_joint_positions(self, targets):
         self.targets = tuple(targets)
         return self.targets
 

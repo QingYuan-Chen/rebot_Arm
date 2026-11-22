@@ -208,7 +208,7 @@ def test_reset_is_deterministic_and_returns_finite_state(runtime_sim) -> None:
 
 
 def test_reset_home_uses_the_scene_home_keyframe(runtime_sim) -> None:
-    state = runtime_sim.reset_home()
+    state = runtime_sim.reset()
 
     assert state.joint_positions == pytest.approx(
         (0.0, -0.8, -1.0, 0.3, 0.0, 0.0, 0.03, -0.03)
@@ -216,10 +216,10 @@ def test_reset_home_uses_the_scene_home_keyframe(runtime_sim) -> None:
     assert state.object_poses["test_cube"][:3] == pytest.approx((0.28, 0.0, 0.04))
 
 
-def test_control_modes_use_public_names_and_accept_legacy_pos_vel_alias(runtime_sim) -> None:
-    runtime_sim.reset_home()
+def test_control_modes_use_public_names_and_reject_legacy_pos_vel_alias(runtime_sim) -> None:
+    runtime_sim.reset()
     assert runtime_sim.control_mode == "hold"
-    assert runtime_sim.set_control_mode("gravity_comp") == "gravity_comp"
+    assert runtime_sim.set_mode("gravity_comp") == "gravity_comp"
     assert runtime_sim.control_mode == "gravity_comp"
     before = runtime_sim.get_state().joint_positions[:6]
     runtime_sim.step(50)
@@ -227,17 +227,18 @@ def test_control_modes_use_public_names_and_accept_legacy_pos_vel_alias(runtime_
     assert all(math.isfinite(value) for value in after)
     assert max(abs(a - b) for a, b in zip(after, before)) < 0.4
 
-    assert runtime_sim.set_control_mode("hold") == "hold"
+    assert runtime_sim.set_mode("hold") == "hold"
     assert runtime_sim.control_mode == "hold"
     runtime_sim.command_joint_positions((0.05, -0.85, -1.05, 0.25, 0.0, 0.0))
     assert runtime_sim.control_mode == "position"
-    assert runtime_sim.set_control_mode("pos_vel") == "position"
     with pytest.raises(ValueError):
-        runtime_sim.set_control_mode("unknown")
+        runtime_sim.set_mode("pos_vel")
+    with pytest.raises(ValueError):
+        runtime_sim.set_mode("unknown")
 
 
 def test_reentering_hold_is_an_exact_noop(runtime_sim) -> None:
-    runtime_sim.reset_home()
+    runtime_sim.reset()
     runtime_sim.step(200)
     targets_before = tuple(runtime_sim.control_targets)
     status_before = runtime_sim.get_control_status()
@@ -260,7 +261,7 @@ def test_reentering_hold_is_an_exact_noop(runtime_sim) -> None:
 
 
 def test_entering_hold_from_gravity_comp_captures_pose(runtime_sim) -> None:
-    runtime_sim.reset_home()
+    runtime_sim.reset()
     runtime_sim.set_mode("gravity_comp")
     runtime_sim.step(20)
     position_before_hold = runtime_sim.get_state().joint_positions[:6]
@@ -313,7 +314,7 @@ def test_raw_torque_rejects_invalid_commands(runtime_sim, torques, timeout) -> N
 
 
 def test_home_pose_stays_stable_under_motor_control(runtime_sim) -> None:
-    state = runtime_sim.reset_home()
+    state = runtime_sim.reset()
     target = np.asarray(runtime_sim.control_targets[:6])
     max_error = 0.0
     max_speed = 0.0
@@ -331,9 +332,9 @@ def test_home_pose_stays_stable_under_motor_control(runtime_sim) -> None:
 
 
 def test_small_joint_step_settles_under_motor_control(runtime_sim) -> None:
-    runtime_sim.reset_home()
+    runtime_sim.reset()
     target = np.asarray((0.05, -0.85, -1.05, 0.25, 0.0, 0.0))
-    runtime_sim.set_joint_position_targets(target)
+    runtime_sim.command_joint_positions(target)
     max_speed = 0.0
 
     for _ in range(3000):
@@ -379,10 +380,10 @@ def test_end_effector_orientation_comes_from_site_frame_in_xyzw_order(tmp_path: 
 def test_joint_targets_accept_mapping_or_arm_sequence_and_reject_limits(runtime_sim) -> None:
     before = runtime_sim.control_targets
     with pytest.raises(ValueError, match="outside"):
-        runtime_sim.set_joint_position_targets({"joint1": 99.0, "joint2": -1.0})
+        runtime_sim.command_joint_positions({"joint1": 99.0, "joint2": -1.0})
     assert runtime_sim.control_targets == before
 
-    reached = runtime_sim.set_joint_position_targets([0.1, -0.2, -0.3, 0.4, 0.5, 0.6])
+    reached = runtime_sim.command_joint_positions([0.1, -0.2, -0.3, 0.4, 0.5, 0.6])
     assert reached == pytest.approx((0.1, -0.2, -0.3, 0.4, 0.5, 0.6))
 
 
@@ -394,18 +395,18 @@ def test_joint_targets_accept_mapping_or_arm_sequence_and_reject_limits(runtime_
 ])
 def test_joint_targets_reject_invalid_inputs(runtime_sim, targets) -> None:
     with pytest.raises((ValueError, TypeError)):
-        runtime_sim.set_joint_position_targets(targets)
+        runtime_sim.command_joint_positions(targets)
 
 
 def test_gripper_width_uses_equal_and_opposite_joint_targets(runtime_sim) -> None:
-    assert runtime_sim.set_gripper_width(0.20) == pytest.approx(0.09)
+    assert runtime_sim.command_gripper_width(0.20) == pytest.approx(0.09)
     assert runtime_sim.control_targets[-2:] == pytest.approx((0.045, -0.045))
     runtime_sim.step(50)
     state = runtime_sim.get_state()
     assert 0.0 <= state.gripper_width <= 0.09
-    assert runtime_sim.set_gripper_width(-1.0) == pytest.approx(0.0)
+    assert runtime_sim.command_gripper_width(-1.0) == pytest.approx(0.0)
     with pytest.raises(ValueError):
-        runtime_sim.set_gripper_width(float("nan"))
+        runtime_sim.command_gripper_width(float("nan"))
 
 
 def test_gripper_public_command_applies_optional_force_limit(runtime_sim) -> None:
@@ -420,9 +421,9 @@ def test_gripper_public_command_applies_optional_force_limit(runtime_sim) -> Non
 
 
 def test_gripper_motor_control_is_clamped_before_viewer_exposes_ctrl(runtime_sim) -> None:
-    runtime_sim.reset_home()
-    runtime_sim.set_gripper_width(0.09)
-    model, data = runtime_sim._unsafe_viewer_handles()
+    runtime_sim.reset()
+    runtime_sim.command_gripper_width(0.09)
+    model, data = runtime_sim.borrow_viewer_handles()
 
     runtime_sim.step()
 
@@ -434,9 +435,9 @@ def test_gripper_motor_control_is_clamped_before_viewer_exposes_ctrl(runtime_sim
 
 
 def test_gripper_opening_force_does_not_flip_sign_while_below_target(runtime_sim) -> None:
-    runtime_sim.reset_home()
-    runtime_sim.set_gripper_width(0.09)
-    _, data = runtime_sim._unsafe_viewer_handles()
+    runtime_sim.reset()
+    runtime_sim.command_gripper_width(0.09)
+    _, data = runtime_sim.borrow_viewer_handles()
 
     left_forces = []
     widths = []
@@ -463,7 +464,7 @@ def test_step_advances_exact_number_of_physics_steps(runtime_sim) -> None:
 
 
 def test_save_restore_recovers_full_runtime_state(runtime_sim) -> None:
-    runtime_sim.set_joint_position_targets([0.2, -0.3, -0.4, 0.2, 0.1, -0.2])
+    runtime_sim.command_joint_positions([0.2, -0.3, -0.4, 0.2, 0.1, -0.2])
     runtime_sim.step(10)
     saved = runtime_sim.save_state()
     expected = runtime_sim.get_state()
@@ -490,8 +491,8 @@ def test_saved_state_rejects_a_different_model_instance(runtime_sim) -> None:
 
 def test_saved_state_restores_arm_and_gripper_control_targets(runtime_sim) -> None:
     arm_a = (0.2, -0.4, -0.5, 0.3, -0.2, 0.4)
-    runtime_sim.set_joint_position_targets(arm_a)
-    runtime_sim.set_gripper_width(0.04)
+    runtime_sim.command_joint_positions(arm_a)
+    runtime_sim.command_gripper_width(0.04)
     controls_a = runtime_sim.control_targets
     saved = runtime_sim.save_state()
     mujoco = pytest.importorskip("mujoco")
@@ -500,8 +501,8 @@ def test_saved_state_restores_arm_and_gripper_control_targets(runtime_sim) -> No
         mujoco.mjtState.mjSTATE_USER
     )
 
-    runtime_sim.set_joint_position_targets((-0.3, -1.0, -1.2, -0.4, 0.6, -0.7))
-    runtime_sim.set_gripper_width(0.08)
+    runtime_sim.command_joint_positions((-0.3, -1.0, -1.2, -0.4, 0.6, -0.7))
+    runtime_sim.command_gripper_width(0.08)
     assert runtime_sim.control_targets != pytest.approx(controls_a)
     runtime_sim.restore_state(saved)
 
@@ -526,8 +527,8 @@ def test_saved_state_restores_raw_torque_watchdog(runtime_sim) -> None:
 
 
 def test_saved_integration_state_replays_deterministically(runtime_sim) -> None:
-    runtime_sim.set_joint_position_targets([0.2, -0.4, -0.5, 0.3, -0.2, 0.4])
-    runtime_sim.set_gripper_width(0.04)
+    runtime_sim.command_joint_positions([0.2, -0.4, -0.5, 0.3, -0.2, 0.4])
+    runtime_sim.command_gripper_width(0.04)
     runtime_sim.step(15)
     saved = runtime_sim.save_state()
     assert isinstance(saved.state, tuple)
@@ -599,7 +600,7 @@ def test_randomize_scene_is_seeded_and_keeps_objects_inside_bounds(runtime_sim) 
         cube_z=0.05,
         reach_target_bounds=target_bounds,
     )
-    runtime_sim.reset_home(seed=99)
+    runtime_sim.reset(seed=99)
     second = runtime_sim.randomize_scene(
         seed=11,
         cube_xy_bounds=cube_xy_bounds,
@@ -634,7 +635,7 @@ def test_randomize_scene_rejects_invalid_bounds(runtime_sim, kwargs, message: st
 def test_randomization_session_changes_and_restores_model_parameters(runtime_sim) -> None:
     from rebotarm_simulation.sim2real.randomization import RandomizationSample
 
-    model, _data = runtime_sim._unsafe_viewer_handles()
+    model, _data = runtime_sim.borrow_viewer_handles()
     baseline_mass = np.asarray(model.body_mass).copy()
     baseline_damping = np.asarray(model.dof_damping).copy()
     baseline_friction = np.asarray(model.geom_friction).copy()

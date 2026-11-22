@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import argparse
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 import importlib
 import json
 import math
 from queue import Empty, SimpleQueue
-import sys
 import threading
-import time
-from typing import Callable, Sequence
-import warnings
+from typing import Sequence
 
-from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta, MujocoCartesianController
+from rebotarm_simulation.control.mujoco_cartesian import CartesianDelta
 from rebotarm_simulation.apps.mujoco_commands import dispatch_sim_command
 from rebotarm_simulation.apps.mujoco_dashboard import (
     DASHBOARD_PAGES,
@@ -21,9 +17,7 @@ from rebotarm_simulation.apps.mujoco_dashboard import (
     compose_dashboard,
 )
 from rebotarm_simulation.control.mujoco_jog import JOG_SPEED_LEVELS
-from rebotarm_simulation.core.mujoco_sim import ARM_JOINT_NAMES, RebotArmMujoco
-from rebotarm_simulation.diagnostics.mujoco_telemetry import MujocoTelemetryHistory
-from rebotarm_simulation.apps.mujoco_visualization import GhostArmOverlay, TelemetryFigures
+from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES
 
 
 HELP = (
@@ -36,7 +30,6 @@ TELEMETRY_SAMPLE_HZ = 50.0
 TELEMETRY_WINDOW_S = 10.0
 VISUAL_UPDATE_HZ = 30.0
 DASHBOARD_UPDATE_HZ = 10.0
-
 
 
 @dataclass(frozen=True)
@@ -55,11 +48,8 @@ class ViewerControlState:
     watchdog_remaining_s: float = 0.0
     collision_visible: bool = False
     paused: bool = False
-    joint_delta: int = 0
-    gripper_delta: int = 0
     joint_jog_direction: int = 0
     gripper_jog_direction: int = 0
-    jog_time_remaining: float = 0.0
     single_step: bool = False
     reset: bool = False
     home: bool = False
@@ -146,7 +136,6 @@ def reduce_key(state: ViewerControlState, key: str) -> ViewerControlState:
             state,
             joint_jog_direction=0,
             gripper_jog_direction=0,
-            jog_time_remaining=0.0,
             stop_jog=True,
         )
     if key == " ":
@@ -192,17 +181,7 @@ def reduce_key(state: ViewerControlState, key: str) -> ViewerControlState:
     return state
 
 
-def _take_key_snapshot(events: SimpleQueue) -> tuple[int, ...]:
-    snapshot = []
-    for _ in range(events.qsize()):
-        try:
-            snapshot.append(events.get_nowait())
-        except Empty:
-            break
-    return tuple(snapshot)
-
-
-def _take_line_snapshot(events: SimpleQueue) -> tuple[str, ...]:
+def _take_queue_snapshot(events: SimpleQueue) -> tuple:
     snapshot = []
     for _ in range(events.qsize()):
         try:
@@ -222,17 +201,10 @@ def start_command_reader(command_stream, command_events: SimpleQueue) -> threadi
     return thread
 
 
-def drain_key_events(events: SimpleQueue, state: ViewerControlState) -> ViewerControlState:
-    """Consume a finite FIFO snapshot, leaving new events for the next cycle."""
-    for keycode in _take_key_snapshot(events):
-        state = reduce_key(state, _decode_key(keycode))
-    return state
-
-
 def process_command_events(
     sim, events: SimpleQueue, state: ViewerControlState, status_stream
 ) -> ViewerControlState:
-    for line in _take_line_snapshot(events):
+    for line in _take_queue_snapshot(events):
         if not line:
             continue
         try:
@@ -241,16 +213,16 @@ def process_command_events(
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             print(f"command error: {exc}", file=status_stream, flush=True)
             continue
-        state = replace(state, paused=result.paused, quit=state.quit or result.should_quit)
+        quit_requested = state.quit or result.should_quit
         if result.value is not None:
             print(f"command result: {_command_value_text(result.value)}", file=status_stream, flush=True)
         state = _state_from_sim(
             sim,
-            paused=state.paused,
+            paused=result.paused,
             selected_joint=state.selected_joint,
             previous=state,
         )
-        state = replace(state, quit=state.quit)
+        state = replace(state, quit=quit_requested)
         if command_name in {"home", "reset"}:
             state = replace(state, cartesian_target_reset=True)
         if state.quit:
@@ -283,16 +255,11 @@ def process_key_events(
     sim,
     events: SimpleQueue,
     state: ViewerControlState,
-    joint_step: float,
-    gripper_step: float,
-    jog_hold_time: float = 0.18,
 ) -> ViewerControlState:
     """Execute one finite event snapshot sequentially on the simulation thread."""
-    for keycode in _take_key_snapshot(events):
+    for keycode in _take_queue_snapshot(events):
         state = reduce_key(state, _decode_key(keycode))
-        state = apply_pending_commands(
-            sim, state, joint_step, gripper_step, jog_hold_time=jog_hold_time
-        )
+        state = apply_pending_commands(sim, state)
         if state.quit:
             break
         if state.single_step:
@@ -402,35 +369,14 @@ def _refresh_observed_state(sim, state: ViewerControlState) -> ViewerControlStat
     )
 
 
-def _set_mode(sim, mode: str) -> str:
-    return str(sim.set_mode(mode))
-
-
-def _command_positions(sim, targets):
-    return sim.command_joint_positions(targets)
-
-
-def _command_gripper(sim, width: float) -> float:
-    return float(sim.command_gripper_width(width))
-
-
 def apply_pending_commands(
     sim,
     state: ViewerControlState,
-    joint_step: float,
-    gripper_step: float,
-    *,
-    jog_hold_time: float = 0.18,
 ) -> ViewerControlState:
     if state.reset or state.home:
-        pending_joint_delta = state.joint_delta
-        pending_gripper_delta = state.gripper_delta
         quit_requested = state.quit
-        if state.home:
-            sim.reset_home()
-        else:
-            sim.reset()
-        _set_mode(sim, "hold")
+        sim.reset()
+        sim.set_mode("hold")
         state = _state_from_sim(
             sim,
             paused=state.paused,
@@ -439,8 +385,6 @@ def apply_pending_commands(
         )
         state = replace(
             state,
-            joint_delta=pending_joint_delta,
-            gripper_delta=pending_gripper_delta,
             quit=quit_requested,
             cartesian_target_reset=True,
             dashboard_page="overview",
@@ -449,31 +393,15 @@ def apply_pending_commands(
         )
 
     if state.mode is not None:
-        active_mode = _set_mode(sim, state.mode)
+        active_mode = str(sim.set_mode(state.mode))
     else:
         active_mode = sim.control_mode
 
-    targets = state.joint_targets
-    if state.joint_delta:
-        name = ARM_JOINT_NAMES[state.selected_joint]
-        requested = targets[state.selected_joint] + state.joint_delta * joint_step
-        targets = tuple(_command_positions(sim, {name: requested}))
-        active_mode = sim.control_mode
-
-    width = state.gripper_width
-    if state.gripper_delta:
-        width = _command_gripper(sim, width + state.gripper_delta * gripper_step)
-
     if state.stop_jog:
-        active_mode = _set_mode(sim, "hold")
+        active_mode = str(sim.set_mode("hold"))
 
     state = replace(
         state,
-        joint_targets=targets,
-        gripper_width=width,
-        joint_delta=0,
-        gripper_delta=0,
-        jog_time_remaining=0.0,
         reset=False,
         home=False,
         mode=None,
@@ -509,7 +437,7 @@ def apply_continuous_jog(
             targets[state.selected_joint]
             + state.joint_jog_direction * joint_rate * speed_scale * dt
         )
-        targets = tuple(_command_positions(sim, {name: requested}))
+        targets = tuple(sim.command_joint_positions({name: requested}))
     elif state.joint_jog_direction and cartesian_controller is not None:
         cartesian_accumulator += dt
         rate = gripper_rate if state.interaction_mode == "xyz" else joint_rate
@@ -538,31 +466,21 @@ def apply_continuous_jog(
             ik_error = max(result.position_error_m, result.orientation_error_rad)
             if result.success:
                 targets = tuple(result.joint_positions)
-                _set_mode(sim, "position")
+                sim.set_mode("position")
                 target_position = tuple(result.target_position_m)
                 target_rpy = tuple(result.target_rpy_rad)
-            else:
-                target_position = state.target_position
-                target_rpy = state.target_rpy
             cartesian_accumulator = 0.0
-        else:
-            target_position = state.target_position
-            target_rpy = state.target_rpy
-    else:
-        target_position = state.target_position
-        target_rpy = state.target_rpy
 
     width = state.gripper_width
     if state.gripper_jog_direction:
-        width = _command_gripper(
-            sim, width + state.gripper_jog_direction * gripper_rate * speed_scale * dt
-        )
+        width = float(sim.command_gripper_width(
+            width + state.gripper_jog_direction * gripper_rate * speed_scale * dt
+        ))
 
     state = replace(
         state,
         joint_targets=targets,
         gripper_width=width,
-        jog_time_remaining=0.0,
         active_mode=str(sim.control_mode),
         cartesian_accumulator_s=cartesian_accumulator,
         ik_status=ik_status,

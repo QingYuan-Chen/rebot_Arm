@@ -60,13 +60,13 @@ def run_contact_check(
     sim_factory: Callable = RebotArmMujoco,
 ) -> dict:
     with sim_factory(model) as sim:
-        sim.reset_home()
-        sim.set_gripper_width(0.09)
-        sim.set_joint_position_targets(CONTACT_TEST_ARM_TARGET)
+        sim.reset()
+        sim.command_gripper_width(0.09)
+        sim.command_joint_positions(CONTACT_TEST_ARM_TARGET)
         sim.step(settle_steps)
         sim.set_object_pose("test_cube", CONTACT_TEST_CUBE_POSE, (0.0, 0.0, 0.0, 1.0))
         sim.step(50)
-        sim.set_gripper_width(0.025)
+        sim.command_gripper_width(0.025)
 
         cube_positions = []
         finger_contact_steps = 0

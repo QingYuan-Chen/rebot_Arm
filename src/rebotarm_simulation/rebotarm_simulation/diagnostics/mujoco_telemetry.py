@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Iterable
 
 from rebotarm_simulation.core.mujoco_types import ContactInfo, ControlStatus
+from rebotarm_simulation.core.validation import finite_vector
 
 
 ARM_DOF = 6
@@ -28,12 +29,7 @@ SCALAR_FIELDS = frozenset(
 
 
 def _finite_tuple(values: Iterable[float], *, field: str) -> tuple[float, ...]:
-    result = tuple(float(value) for value in values)
-    if len(result) != ARM_DOF:
-        raise ValueError(f"{field} must contain exactly {ARM_DOF} values")
-    if not all(math.isfinite(value) for value in result):
-        raise ValueError(f"{field} values must be finite")
-    return result
+    return finite_vector(tuple(values), ARM_DOF, field)
 
 
 @dataclass(frozen=True)

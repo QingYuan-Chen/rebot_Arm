@@ -26,7 +26,7 @@ def test_offline_execution_samples_same_trajectory_as_ros_execution():
             self.commands = []
         def get_state(self):
             return SimpleNamespace(joint_positions=self.target)
-        def set_joint_position_targets(self, target):
+        def command_joint_positions(self, target):
             self.target = target
             self.commands.append(target)
         def step(self):

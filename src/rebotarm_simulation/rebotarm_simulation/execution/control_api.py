@@ -1,7 +1,9 @@
 """仿真 ROS 执行接口:位置,保持,重力与具期限的关节阻抗命令.
 
 职责:只转发到仿真核心;调用方持有目标锁和仿真锁,核心原子校验数值.
-结构:模式校验 → 仿真命令适配;raw torque 仍由本地诊断入口拥有.
+对外接口:normalize_ros_control_mode, SimulationControlApi.
+安全约束:写目标不得在已处于 position 模式时额外触发 set_mode,避免高频轨迹采样重入 100 Hz 控制拍.
+文件结构:模式校验 → 仿真命令适配;raw torque 仍由本地诊断入口拥有.
 """
 from typing import Any, Sequence
 ROS_CONTROL_MODES = ("position", "hold", "gravity_comp")
@@ -24,17 +26,16 @@ class SimulationControlApi:
         self.simulation = simulation
 
     def reset_home_and_hold(self) -> None:
-        self.simulation.reset_home()
-        self.set_mode("hold")
+        """复位到 home 姿态并进入 hold;核心 reset 已完成重力前馈预置与 hold 模式."""
+        self.simulation.reset()
 
     def set_mode(self, mode: str) -> str:
         public_mode = normalize_ros_control_mode(mode)
         return str(self.simulation.set_mode(public_mode))
 
     def command_joint_positions(self, values: Sequence[float]) -> tuple[float, ...]:
-        reached = self.simulation.command_joint_positions(values)
-        self.set_mode("position")
-        return tuple(float(value) for value in reached)
+        """仅写入六轴目标;首次切入 position 由核心按需完成,避免每物理步重入控制拍."""
+        return tuple(float(value) for value in self.simulation.command_joint_positions(values))
 
     def command_joint_impedance(self, positions, stiffness, damping, *, timeout_s):
         """完整命令同时设置平衡点,增益和期限;裸模式切换保持原接口."""
