@@ -8,7 +8,8 @@
 rebotarm_teleop/
 ├── rebotarm_teleop/
 │   ├── teleop_core.py                  # 键盘/Web 命令映射、限位和限速纯逻辑
-│   ├── teleop_keyboard_node.py         # 终端按键 -> 关节增量轨迹
+│   ├── keyboard_force_tuning.py        # 终端键盘分模式路由、阻抗调参草稿与参数隔离校验
+│   ├── teleop_keyboard_node.py         # 终端按键 -> FJT点动 / 重力补偿 / 关节阻抗调参
 │   ├── web_execute.py                  # Web 关节/夹爪请求校验
 │   ├── web_teleop_client.py            # Web 命令 -> controller Action/service
 │   ├── trajectory_capability.py       # continuous 声明与后端能力快照校验
@@ -23,7 +24,8 @@ rebotarm_teleop/
 ## 关键流程
 
 - `teleop_core.py` 是键盘和 Web 共用的纯逻辑层，负责步长、目标关节、限位和限速判断。
-- `teleop_keyboard_node.py` 轮询终端输入，调用 `TeleopTargetPlanner` 形成关节目标；由 motion 构造完整首末约束并完成规划绑定，再交给 continuous 后端执行。
+- `keyboard_force_tuning.py` 是纯逻辑力控模式路由与阻抗调参模块：根据 `/<ns>/arm_status` 状态机区分 `IDLE`（`1..6`/`q..y` 点动、`g` 进重力补偿、`i` 进关节阻抗）、`GRAVITY_COMP` 与 `JOINT_IMPEDANCE`（`1..6` 选轴、`[`/`]` 调 Kp、`,`/`. ` 调 Kd、`-`/`=` 调 `q_ref`、`0`/`l` 对齐当前角、`h`/空格退出、`p` 打印遥测），并强制 `use_hardware` 与 `impedance_profile`（`simulation`/`hardware`）匹配。
+- `teleop_keyboard_node.py` 轮询终端输入，在 `IDLE` 模式调用 `TeleopTargetPlanner` 经 motion 重定时发送 FJT，在力控模式通过异步服务驱动后端启停与热更新（绝不内置默认刚度/阻尼）。
 - `web_execute.py` 校验 Web payload；`web_teleop_client.py` 复用 motion 的轨迹生成和最终绑定，通过 `ExecuteTeleopMotion` 提交六轴及可选独立夹爪目标。
 - `trajectory_capability.py` 核对后端的 continuous 声明与版本化能力，能力缺失、模式不匹配或数据损坏时拒绝执行。活动目标及 future 的状态由 Dashboard 调用方持有。
 - `gripper_visual_joint_state_node.py` 只为 RViz 把真实夹爪的一路开口反馈映射成 URDF 的左右手指关节，不会改变真实夹爪。

@@ -1,7 +1,7 @@
 """六轴关节阻抗安全准入上限配置与 YAML 加载校验.
 
 职责与位置
-    加载并核对后端无关的关节阻抗准入安全边界(最大允许刚度/阻尼,力矩变化率与超时范围);
+    加载并核对后端无关的关节阻抗准入安全边界(最大允许刚度/阻尼与力矩变化率上限);
     独立于纯控制律公式与运行期状态机.
 
 对外接口
@@ -23,7 +23,7 @@ from typing import Mapping
 
 import yaml
 
-from .contracts import JOINT_NAMES, finite_scalar, six_vector
+from .contracts import JOINT_NAMES, six_vector
 from .joint_impedance import JointImpedanceCommand
 from .mit_command import PROTOCOL_KD_MAX, PROTOCOL_KP_MAX
 
@@ -35,8 +35,6 @@ class JointImpedanceSettings:
     max_stiffness_nm_rad: tuple[float, ...] = (PROTOCOL_KP_MAX,) * 6
     max_damping_nm_s_rad: tuple[float, ...] = (PROTOCOL_KD_MAX,) * 6
     torque_rate_limits_nm_s: tuple[float, ...] = (108.0, 108.0, 108.0, 28.0, 28.0, 28.0)
-    min_timeout_s: float = 0.02
-    max_timeout_s: float = 10.0
 
     def __post_init__(self) -> None:
         stiffness = six_vector(self.max_stiffness_nm_rad, "max_stiffness_nm_rad")
@@ -48,15 +46,9 @@ class JointImpedanceSettings:
             raise ValueError(f"max_damping_nm_s_rad must be within (0, {PROTOCOL_KD_MAX}]")
         if (rates <= 0.0).any():
             raise ValueError("torque_rate_limits_nm_s must be positive")
-        min_timeout = finite_scalar(self.min_timeout_s, "min_timeout_s")
-        max_timeout = finite_scalar(self.max_timeout_s, "max_timeout_s")
-        if min_timeout > max_timeout:
-            raise ValueError("min_timeout_s must not exceed max_timeout_s")
         object.__setattr__(self, "max_stiffness_nm_rad", tuple(float(v) for v in stiffness))
         object.__setattr__(self, "max_damping_nm_s_rad", tuple(float(v) for v in damping))
         object.__setattr__(self, "torque_rate_limits_nm_s", tuple(float(v) for v in rates))
-        object.__setattr__(self, "min_timeout_s", min_timeout)
-        object.__setattr__(self, "max_timeout_s", max_timeout)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> JointImpedanceSettings:
@@ -69,15 +61,10 @@ class JointImpedanceSettings:
             raise ValueError(f"unknown joint impedance settings: {sorted(unknown)}")
         return cls(**values)
 
-    def validate_command(self, command: JointImpedanceCommand, timeout_s: float) -> None:
-        """核对命令增益及看门狗期限不超过安全准入边界."""
+    def validate_command(self, command: JointImpedanceCommand) -> None:
+        """核对命令增益不超过安全准入边界."""
         if not isinstance(command, JointImpedanceCommand):
             raise TypeError("command must be JointImpedanceCommand")
-        timeout = finite_scalar(timeout_s, "timeout_s")
-        if not self.min_timeout_s <= timeout <= self.max_timeout_s:
-            raise ValueError(
-                f"timeout_s must be within [{self.min_timeout_s}, {self.max_timeout_s}]"
-            )
         for index, name in enumerate(JOINT_NAMES):
             if command.stiffness[index] > self.max_stiffness_nm_rad[index]:
                 raise ValueError(

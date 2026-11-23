@@ -41,6 +41,8 @@ def generate_launch_description():
     record_path = LaunchConfiguration("record_path")
     common_config = LaunchConfiguration("common_config")
     keyboard_config = LaunchConfiguration("keyboard_config")
+    sim_impedance_config = LaunchConfiguration("sim_impedance_config")
+    hardware_impedance_config = LaunchConfiguration("hardware_impedance_config")
     web_config = LaunchConfiguration("web_config")
     teach_config = LaunchConfiguration("teach_config")
     keyboard_prefix = LaunchConfiguration("keyboard_prefix")
@@ -87,6 +89,16 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument(
+                "sim_impedance_config",
+                default_value=PathJoinSubstitution(
+                    [config_share, "config", "keyboard_impedance_sim.yaml"]
+                ),
+            ),
+            DeclareLaunchArgument(
+                "hardware_impedance_config",
+                default_value="",
+            ),
+            DeclareLaunchArgument(
                 "web_config",
                 default_value=PathJoinSubstitution(
                     [config_share, "config", "web_teleop.yaml"]
@@ -111,6 +123,8 @@ def generate_launch_description():
                     "channel": channel,
                     "common_config": common_config,
                     "keyboard_config": keyboard_config,
+                    "sim_impedance_config": sim_impedance_config,
+                    "hardware_impedance_config": hardware_impedance_config,
                     "keyboard_prefix": keyboard_prefix,
                 }.items(),
             ),

@@ -124,8 +124,10 @@ def test_launches_reference_consumer_specific_operator_configs() -> None:
     app = _read("src/rebotarm_bringup/launch/rebotarm_app.launch.py")
 
     assert "keyboard_control.yaml" in keyboard
+    assert "keyboard_impedance_sim.yaml" in keyboard
     assert "operator_common.yaml" in keyboard
     assert "keyboard_control.yaml" in system
+    assert "keyboard_impedance_sim.yaml" in system
     for text in (system, app):
         assert "web_teleop.yaml" in text
         assert "teach_control.yaml" in text
@@ -142,8 +144,62 @@ def test_keyboard_no_hardware_mode_uses_one_simulated_trajectory_backend() -> No
     assert "condition=IfCondition(hardware)" in keyboard
     assert "interactive_system.launch.py" in keyboard
     assert 'executable="joint_state_publisher"' not in keyboard
+    assert "_build_keyboard_node" in keyboard
+    assert 'if hardware:' in keyboard and 'elif sim_impedance_config:' in keyboard
+    assert 'executable="joint_state_publisher"' not in keyboard
     assert 'executable="reBotArmController"' not in keyboard
     assert '"use_sim_time": use_sim_time' in keyboard
+
+
+def test_keyboard_launch_isolates_sim_impedance_yaml_from_hardware_mode() -> None:
+    import importlib.util
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+    from launch_ros.actions import Node
+    from launch_ros.utilities import evaluate_parameters
+
+    spec = importlib.util.spec_from_file_location(
+        "teleop_keyboard_launch_contract",
+        ROOT / "src/rebotarm_bringup/launch/teleop_keyboard.launch.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def expanded_params(use_hardware: str) -> list:
+        context = LaunchContext()
+        for entity in module.generate_launch_description().entities:
+            if isinstance(entity, DeclareLaunchArgument):
+                entity.execute(context)
+        context.launch_configurations["use_hardware"] = use_hardware
+        nodes = module._build_keyboard_node(context)
+        assert len(nodes) == 1 and isinstance(nodes[0], Node)
+        return evaluate_parameters(context, nodes[0]._Node__parameters)
+
+    sim_params = expanded_params("false")
+    assert any("keyboard_impedance_sim.yaml" in str(p) for p in sim_params)
+    hw_params = expanded_params("true")
+    assert not any("keyboard_impedance_sim.yaml" in str(p) for p in hw_params)
+    assert any(isinstance(p, dict) and p.get("use_hardware") is True for p in hw_params)
+
+    default_ctx = LaunchContext()
+    for entity in module.generate_launch_description().entities:
+        if isinstance(entity, DeclareLaunchArgument):
+            entity.execute(default_ctx)
+    assert default_ctx.launch_configurations["use_mujoco_viewer"] == "true"
+    assert default_ctx.launch_configurations["use_rviz"] == "false"
+    assert default_ctx.launch_configurations["use_local_rviz"] == "false"
+
+    rviz_ctx = LaunchContext()
+    rviz_ctx.launch_configurations["use_rviz"] = "true"
+    for entity in module.generate_launch_description().entities:
+        if isinstance(entity, DeclareLaunchArgument):
+            entity.execute(rviz_ctx)
+    assert rviz_ctx.launch_configurations["use_local_rviz"] == "true"
+
+    sim_impedance = yaml.safe_load(_read("src/rebotarm_bringup/config/keyboard_impedance_sim.yaml"))[
+        "/**"
+    ]["ros__parameters"]
+    assert sim_impedance["impedance_profile"] == "simulation"
 
 
 def test_teleop_system_forwards_execution_mode_to_dashboard() -> None:

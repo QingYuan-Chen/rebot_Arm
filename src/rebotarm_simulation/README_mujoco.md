@@ -114,9 +114,13 @@ Raw torque 只用于无实机诊断，按关节峰值限幅；看门狗超时后
 关节阻抗使用六轴平衡角、刚度与阻尼，期望速度为零，控制式为
 `tau = gravity(q) + stiffness * (positions - q) - damping * qd`。
 六轴按 `joint1..joint6` 排列，单位依次为 rad、N·m/rad、N·m·s/rad。
-首次接纳要求 `hold`；`joint_impedance` 中的完整请求更新平衡点、增益并续期。
-输入整批校验后生效，力矩遵守仿真电机限幅。活动六轴/夹爪任务及待确认停止期间拒绝请求。
-阻抗活动期间，ROS 夹爪服务和动作同样拒绝新任务，持续续期可保持机械臂模式。
+仿真采用双频 MIT 内环：**100 Hz 外环**通过 `JointImpedanceSession.compute_mit_step`
+计算并锁存有界 `(q_ref, Kp, Kd, tau_ff)`（严格遵守达妙协议上限 `Kp<=500 / Kd<=5` 及幅值/变化率限制），
+**500 Hz 物理步内环**按实时反馈 `(q, qd)` 求值并写入执行器。
+Python 底层入口要求先处于 `hold`，ROS 入口支持从 `hold` 或空闲 `position` 进入；
+`joint_impedance` 运行期间可再次请求以原地热更新平衡点与增益，并持续保持直到显式退出或切回 Hold。
+输入整批校验后生效，力矩遵守仿真电机限幅。活动六轴/夹爪任务、重力补偿与待确认停止期间拒绝请求；
+阻抗活动期间，ROS 夹爪服务/动作及重力补偿启动同样拒绝新任务。
 
 在已经构建并 source 新副本的终端中执行：
 
@@ -124,12 +128,12 @@ Raw torque 只用于无实机诊断，按关节峰值限幅；看门狗超时后
 ros2 run rebotarm_simulation rebotarm_mujoco_cli impedance \
   --positions 0 -0.8 -1.0 0.3 0 0 \
   --stiffness 45 45 45 17.5 17.5 17.5 --damping 3.32 5 5 1.28 0.78 0.34 \
-  --duration 2 --timeout 0.1
+  --duration 2
 ```
 
-CLI 创建独立仿真实例并复位到 Home+Hold，在 `duration` 内每 `timeout/2` 仿真秒续期；
-随后停止续期并继续步进，输出到期前 `active_control`、到期后 `control` 及
-`watchdog_entered_hold=true`。CLI 的 timeout 至少覆盖两个物理步，默认 0.1 s。
+CLI 创建独立仿真实例并复位到 Home+Hold，进入 `joint_impedance` 并持续推进 `duration`
+后显式 `hold` 退出，输出激活态 `active_control`、退出后 `control` 及
+`explicit_stop_entered_hold=true`。
 示例增益来自[关节阻抗增益整定](../../docs/implemented/features/joint_impedance_gains.md)：
 刚度按电机额定力矩除以 0.2 rad 参考偏角取，阻尼按目标阻尼比换算并受达妙 MIT 协议
 `Kp<=500 / Kd<=5` 约束。模型惯量、末端负载或控制周期变化后须重新整定，
@@ -140,7 +144,7 @@ PYTHONPATH=src/rebotarm_simulation:src/rebotarm_force_control \
   python3 -m rebotarm_simulation.diagnostics.impedance_gain_budget
 ```
 
-Python 接口同样使用仿真时间续期；以下示例保持当前姿态，然后验证超时回到 Hold：
+Python 接口持续保持当前模式，直至显式调用 `set_mode("hold")`：
 
 ```python
 from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
@@ -149,26 +153,28 @@ with RebotArmMujoco() as sim:
     state = sim.reset()
     sim.command_joint_impedance(
         state.joint_positions[:6], [45, 45, 45, 17.5, 17.5, 17.5],
-        [3.32, 5, 5, 1.28, 0.78, 0.34], timeout_s=0.1,
+        [3.32, 5, 5, 1.28, 0.78, 0.34],
     )
-    sim.step(round(0.05 / sim.timestep))
+    sim.step(round(0.2 / sim.timestep))
     assert sim.control_mode == "joint_impedance"
-    sim.step(round(0.1 / sim.timestep))
+    sim.set_mode("hold")
+    sim.step(round(0.02 / sim.timestep))
     assert sim.control_mode == "hold"
 ```
 
-运行 ROS 仿真节点时，先显式进入 Hold，再提交完整阻抗请求：
+运行 ROS 仿真节点时，可通过以下服务启动、热更新与退出关节阻抗（与重力补偿 `/gravity_compensation/start|stop` 对称）：
 
 ```bash
-ros2 service call /rebotarm/sim/set_mode rebotarm_msgs/srv/SetMode "{mode: hold}"
-ros2 service call /rebotarm/joint_impedance/set rebotarm_msgs/srv/SetJointImpedance \
-  "{positions: [0.0, -0.8, -1.0, 0.3, 0.0, 0.0], stiffness: [45.0, 45.0, 45.0, 17.5, 17.5, 17.5], damping: [3.32, 5.0, 5.0, 1.28, 0.78, 0.34], timeout_s: 1.0}"
+ros2 service call /rebotarm/joint_impedance/start rebotarm_msgs/srv/SetJointImpedance \
+  "{positions: [0.0, -0.8, -1.0, 0.3, 0.0, 0.0], stiffness: [45.0, 45.0, 45.0, 17.5, 17.5, 17.5], damping: [3.32, 5.0, 5.0, 1.28, 0.78, 0.34]}"
+ros2 service call /rebotarm/joint_impedance/stop std_srvs/srv/Trigger "{}"
 ```
 
-看门狗按**仿真时间**到期；暂停物理步进时期限暂停推进。持续控制客户端须在期限内重复
-发送完整请求，停止发送后自动捕获当前位置并进入 Hold。`/diagnostics` 显示实际控制模式；
-立即退出可再次调用 `/sim/set_mode {mode: hold}`。阻抗期间位置命令及两种模式的 FJT
-都会被拒绝；先切回 Hold 后可继续原位置流程。服务由仿真节点提供，使用本地仿真时钟。
+`/rebotarm/arm_status` 会随状态机实时发布 `mode`（`pos_vel` / `mit`）和 `state_machine`
+（`IDLE` / `TRAJ_PREPARING` / `TRAJ_RUNNING` / `GRAVITY_COMP` / `JOINT_IMPEDANCE`），
+`/diagnostics` 显示控制健康状态；退出可调用 `/rebotarm/joint_impedance/stop` 或
+`/rebotarm/sim/set_mode {mode: hold}`。阻抗期间位置命令、FJT 与重力补偿启动都会被拒绝；
+先切回 Hold 后可继续原位置流程或进入重力补偿。
 
 无界面 Reach 随机策略批量 rollout：
 
@@ -345,7 +351,9 @@ ros2 launch rebotarm_simulation mujoco_sim.launch.py
 - Topic：`/rebotarm/gripper/state`
 - Service：`/rebotarm/trajectory_stop`
 - Service：`/rebotarm/sim/set_mode`（只接受 `position/hold/gravity_comp`）
-- Service：`/rebotarm/joint_impedance/set`（完整六轴平衡点、增益与看门狗期限，仿真使用仿真时间）
+- Service：`/rebotarm/gravity_compensation/start`、`/rebotarm/gravity_compensation/stop`（`Trigger`，进入/退出重力补偿）
+- Service：`/rebotarm/joint_impedance/start`（`SetJointImpedance` 启动/热更新）、`/rebotarm/joint_impedance/stop`（`Trigger` 退出）
+- Topic：`/rebotarm/arm_status`（`ArmStatus`：`mode` 为 `pos_vel`/`mit`，`state_machine` 为 `IDLE`/`TRAJ_PREPARING`/`TRAJ_RUNNING`/`GRAVITY_COMP`/`JOINT_IMPEDANCE`）
 - Topic：`/diagnostics`
 - Topic：`/clock`
 

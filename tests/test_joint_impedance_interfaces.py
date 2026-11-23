@@ -1,4 +1,4 @@
-"""关节阻抗入口回归:假仿真核对期限,资源互斥和协议错误,零硬件访问."""
+"""关节阻抗与力控生命周期入口回归:持续态,资源互斥,ArmStatus 与服务协议检查."""
 from __future__ import annotations
 
 import io
@@ -25,31 +25,31 @@ DAMPING = RECOMMENDED_DAMPING
 
 
 class ImpedanceSim:
-    """推进物理时钟和看门狗的替身;核心数值校验由独立物理测试覆盖."""
+    """推进物理时钟的替身;核心数值校验由独立物理测试覆盖."""
     timestep = .01
 
     def __init__(self):
         self.time = 0.
         self.control_mode = 'hold'
         self.calls = []
-        self.deadline = None
         self.closed = False
 
     def reset(self):
         self.time = 0.
+        self.control_mode = 'hold'
 
     def set_mode(self, mode):
         self.control_mode = mode
         return mode
 
-    def command_joint_impedance(self, positions, stiffness, damping, timeout_s=.1):
-        if not math.isfinite(timeout_s) or timeout_s <= 0:
-            raise ValueError('invalid timeout_s')
-        if self.control_mode not in ('hold', 'joint_impedance'):
+    def command_joint_impedance(self, positions, stiffness, damping, *, allow_from_position=False):
+        if any(not math.isfinite(float(v)) or float(v) < 0. for v in (*stiffness, *damping)):
+            raise ValueError('invalid stiffness or damping')
+        allowed = ('hold', 'joint_impedance', 'position') if allow_from_position else ('hold', 'joint_impedance')
+        if self.control_mode not in allowed:
             raise RuntimeError('enter hold before joint_impedance')
-        self.calls.append((self.time, tuple(positions), tuple(stiffness), tuple(damping), timeout_s))
+        self.calls.append((self.time, tuple(positions), tuple(stiffness), tuple(damping)))
         self.control_mode = 'joint_impedance'
-        self.deadline = self.time + timeout_s
         return tuple(positions)
 
     def get_state(self):
@@ -58,10 +58,8 @@ class ImpedanceSim:
     def get_control_status(self):
         return SimpleNamespace(mode=self.control_mode)
 
-    def step(self):
-        self.time += self.timestep
-        if self.control_mode == 'joint_impedance' and self.time + 1e-15 >= self.deadline:
-            self.control_mode = 'hold'
+    def step(self, n_steps=1):
+        self.time += self.timestep * n_steps
 
     def close(self):
         self.closed = True
@@ -77,54 +75,77 @@ def execution_fixture():
     execution.gripper = SimpleNamespace(busy=False)
     execution.stop_unconfirmed = False
     execution.planning_generation = 4
+    execution.preparation = None
+    execution.scene_revision = 'scene-a'
     return execution, sim
 
 
-def command(execution, **kwargs):
-    return execution.command_joint_impedance(TARGET, STIFFNESS, DAMPING,
-        timeout_s=kwargs.get('timeout_s', .1))
+def command(execution, *, stiffness=STIFFNESS):
+    return execution.command_joint_impedance(TARGET, stiffness, DAMPING)
 
 
-def test_cli_renews_during_duration_and_observes_unassisted_watchdog_hold():
+def test_cli_runs_continuously_then_stops_explicitly_to_hold():
     sim = ImpedanceSim()
     output = io.StringIO()
     arguments = ['impedance', '--positions', *map(str, TARGET), '--stiffness', *map(str, STIFFNESS),
-        '--damping', *map(str, DAMPING), '--duration', '.22', '--timeout', '.1']
+        '--damping', *map(str, DAMPING), '--duration', '.05']
     assert mujoco_cli.main(arguments, sim_factory=lambda _: sim, stdout=output) == 0
     payload = json.loads(output.getvalue())
-    assert [call[0] for call in sim.calls] == pytest.approx([0., .05, .1, .15, .2])
+    assert [call[0] for call in sim.calls] == pytest.approx([0.])
     assert payload['active_control']['mode'] == 'joint_impedance'
     assert payload['control']['mode'] == 'hold'
-    assert payload['watchdog_entered_hold']
+    assert payload['explicit_stop_entered_hold'] is True
     assert sim.closed
 
 
-def test_cli_rejects_timeout_shorter_than_renewal_resolution():
-    sim = ImpedanceSim()
-    with pytest.raises(ValueError, match='two physics steps'):
-        mujoco_cli._run_impedance(sim, TARGET, STIFFNESS, DAMPING, duration=.1, timeout=.001)
-    assert sim.calls == []
-
-
-@pytest.mark.parametrize('flag,value', [('--duration', 'nan'), ('--duration', '0'),
-    ('--timeout', 'inf'), ('--timeout', '-1')])
-def test_cli_rejects_invalid_duration_or_timeout(flag, value):
+@pytest.mark.parametrize('flag,value', [('--duration', 'nan'), ('--duration', '0')])
+def test_cli_rejects_invalid_duration(flag, value):
     args = ['impedance', '--positions', *map(str, TARGET), '--stiffness', *map(str, STIFFNESS),
         '--damping', *map(str, DAMPING), flag, value]
     with pytest.raises(SystemExit):
         mujoco_cli.build_parser().parse_args(args)
 
 
-def test_execution_acceptance_and_renewal_invalidate_previous_planning_binding():
+def test_execution_acceptance_hot_update_and_stop_invalidate_planning_binding():
     execution, sim = execution_fixture()
     assert command(execution) == TARGET
     assert sim.control_mode == 'joint_impedance'
     assert execution.planning_generation == 5
     command(execution)
     assert execution.planning_generation == 6
-    execution.change_mode('hold')
+    assert execution.stop_joint_impedance() is True
     assert sim.control_mode == 'hold'
     assert execution.planning_generation == 7
+    assert execution.stop_joint_impedance() is False
+    assert execution.planning_generation == 7
+
+
+def test_execution_admits_impedance_from_idle_position_and_forbids_gravity_jump():
+    execution, sim = execution_fixture()
+    sim.control_mode = 'position'
+    assert command(execution) == TARGET
+    assert sim.control_mode == 'joint_impedance'
+    status = execution.status_snapshot()
+    assert status.phase == 'JOINT_IMPEDANCE' and status.arm_mode == 'mit'
+
+    with pytest.raises(RuntimeError, match='joint impedance active'):
+        execution.start_gravity_compensation()
+    assert sim.control_mode == 'joint_impedance'
+
+    assert execution.stop_joint_impedance() is True
+    assert execution.status_snapshot().phase == 'IDLE'
+    assert execution.start_gravity_compensation() == 'gravity_comp'
+    assert execution.status_snapshot().phase == 'GRAVITY_COMP'
+    assert execution.status_snapshot().arm_mode == 'mit'
+
+    with pytest.raises(RuntimeError, match='enter hold'):
+        command(execution)
+    assert sim.control_mode == 'gravity_comp'
+
+    assert execution.stop_gravity_compensation() is True
+    assert execution.stop_gravity_compensation() is False
+    assert execution.status_snapshot().phase == 'IDLE'
+    assert execution.status_snapshot().arm_mode == 'pos_vel'
 
 
 @pytest.mark.parametrize('busy', ['arm', 'gripper', 'stop'])
@@ -144,8 +165,8 @@ def test_impedance_rejects_active_resource_or_unconfirmed_stop_without_mutation(
 
 def test_failed_impedance_command_keeps_mode_and_planning_generation():
     execution, sim = execution_fixture()
-    with pytest.raises(ValueError, match='timeout_s'):
-        command(execution, timeout_s=float('nan'))
+    with pytest.raises(ValueError, match='stiffness'):
+        command(execution, stiffness=(-1.,) * 6)
     assert execution.planning_generation == 4
     assert sim.control_mode == 'hold' and sim.calls == []
 
@@ -178,29 +199,44 @@ def test_bare_ros_mode_requires_complete_impedance_service_request():
         normalize_ros_control_mode('joint_impedance')
 
 
-def test_ros_service_forwards_complete_request_and_reports_failure():
+def test_ros_services_forward_force_modes_and_publish_status():
     from rebotarm_msgs.srv import SetJointImpedance
+    from std_srvs.srv import Trigger
     from rebotarm_simulation.ros.mujoco_ros_node import create_node_class
     node_class = create_node_class()
     execution, sim = execution_fixture()
-    node = SimpleNamespace(_execution=execution)
-    request = SetJointImpedance.Request(positions=TARGET, stiffness=STIFFNESS,
-        damping=DAMPING, timeout_s=.1)
-    response = node_class._impedance_service(node, request, SetJointImpedance.Response())
+    published = []
+    node = SimpleNamespace(_execution=execution, _publish_arm_status=lambda: published.append(execution.status_snapshot().phase))
+    request = SetJointImpedance.Request(positions=TARGET, stiffness=STIFFNESS, damping=DAMPING)
+    response = node_class._impedance_start_service(node, request, SetJointImpedance.Response())
     assert response.success and response.message == 'simulation mode: joint_impedance'
-    assert sim.calls[-1][1:] == (TARGET, STIFFNESS, DAMPING, .1)
+    assert sim.calls[-1][1:] == (TARGET, STIFFNESS, DAMPING)
+    assert published[-1] == 'JOINT_IMPEDANCE'
+
+    stop_res = node_class._impedance_stop_service(node, Trigger.Request(), Trigger.Response())
+    assert stop_res.success and published[-1] == 'IDLE'
+
+    grav_res = node_class._gravity_start_service(node, Trigger.Request(), Trigger.Response())
+    assert grav_res.success and published[-1] == 'GRAVITY_COMP'
+    grav_stop = node_class._gravity_stop_service(node, Trigger.Request(), Trigger.Response())
+    assert grav_stop.success and published[-1] == 'IDLE'
+
     execution.stop_unconfirmed = True
-    response = node_class._impedance_service(node, request, SetJointImpedance.Response())
+    response = node_class._impedance_start_service(node, request, SetJointImpedance.Response())
     assert not response.success and 'stop unconfirmed' in response.message
     assert len(sim.calls) == 1
 
 
-def test_mujoco_node_registers_unified_joint_impedance_service_name():
+def test_mujoco_node_registers_unified_force_control_service_names():
     source = (
         __import__('pathlib').Path(__file__).resolve().parents[1]
         / 'src/rebotarm_simulation/rebotarm_simulation/ros/mujoco_ros_node.py'
     ).read_text(encoding='utf-8')
-    assert '/{self._arm_namespace}/joint_impedance/set' in source
+    assert '/{self._arm_namespace}/joint_impedance/start' in source
+    assert '/{self._arm_namespace}/joint_impedance/stop' in source
+    assert '/{self._arm_namespace}/gravity_compensation/start' in source
+    assert '/{self._arm_namespace}/gravity_compensation/stop' in source
+    assert 'joint_impedance/set' not in source
     assert 'sim/set_joint_impedance' not in source
 
 
@@ -219,7 +255,7 @@ def test_gripper_entry_rejects_impedance_before_reserving_resources(entry):
         invoke()
     assert not execution.gripper.busy
     assert execution.gripper.task is None and execution.gripper.reservation is None
-    command(execution)  # 夹爪拒绝后仍允许正常续期.
+    command(execution)  # 夹爪拒绝后仍允许热更新.
     execution.change_mode('hold')
     invoke()
     assert execution.gripper.busy

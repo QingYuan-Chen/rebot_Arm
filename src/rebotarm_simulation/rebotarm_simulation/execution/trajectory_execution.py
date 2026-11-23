@@ -74,6 +74,8 @@ class ExecutionStatus:
     phase: str
     scene_revision: str
     stop_unconfirmed: bool
+    control_mode: str = "hold"
+    arm_mode: str = "pos_vel"
 
 
 class TrajectoryExecution:
@@ -355,18 +357,78 @@ class TrajectoryExecution:
             self.planning_generation += 1
             return result
 
-    def command_joint_impedance(self, positions, stiffness, damping, *, timeout_s):
-        """在目标锁→仿真锁内原子接纳;参数失败保留旧模式与规划代次."""
+    def command_joint_impedance(self, positions, stiffness, damping):
+        """在目标锁→仿真锁内原子接纳/热更新;参数失败保留旧模式与规划代次."""
         with self.lock:
             if self.active.busy or self.gripper.busy or self.stop_unconfirmed:
                 raise RuntimeError('arm/gripper resources reserved or stop unconfirmed')
             result = self.access.run(lambda _sim: self.control.command_joint_impedance(
-                positions, stiffness, damping, timeout_s=timeout_s))
+                positions, stiffness, damping))
             # 与显式模式切换一致,每个成功命令作废此前生成的规划起点绑定.
             self.planning_generation += 1
             return result
 
+    def stop_joint_impedance(self) -> bool:
+        """退出关节阻抗并经平滑交接回到 hold;未激活时幂等返回 False."""
+        with self.lock:
+            if self.active.busy or self.gripper.busy or self.stop_unconfirmed:
+                raise RuntimeError('trajectory active or stop unconfirmed; complete stop before stopping joint impedance')
+            def stop_in_sim(sim):
+                if sim.control_mode != 'joint_impedance':
+                    return False
+                self.control.set_mode('hold')
+                return True
+            stopped = self.access.run(stop_in_sim)
+            if stopped:
+                self.planning_generation += 1
+            return stopped
+
+    def start_gravity_compensation(self) -> str:
+        """核查资源与停止状态后切入重力补偿;禁止从 joint_impedance 直跳."""
+        with self.lock:
+            if self.active.busy or self.gripper.busy or self.stop_unconfirmed:
+                raise RuntimeError('arm/gripper resources reserved or stop unconfirmed')
+            def start_in_sim(sim):
+                if sim.control_mode == 'joint_impedance':
+                    raise RuntimeError('joint impedance active; enter hold before starting gravity compensation')
+                return self.control.set_mode('gravity_comp')
+            result = self.access.run(start_in_sim)
+            self.planning_generation += 1
+            return result
+
+    def stop_gravity_compensation(self) -> bool:
+        """退出重力补偿并回到 hold;未激活时幂等返回 False."""
+        with self.lock:
+            if self.active.busy or self.gripper.busy or self.stop_unconfirmed:
+                raise RuntimeError('trajectory active or stop unconfirmed; complete stop before stopping gravity compensation')
+            def stop_in_sim(sim):
+                if sim.control_mode != 'gravity_comp':
+                    return False
+                self.control.set_mode('hold')
+                return True
+            stopped = self.access.run(stop_in_sim)
+            if stopped:
+                self.planning_generation += 1
+            return stopped
+
     def status_snapshot(self):
         with self.lock:
-            return ExecutionStatus('TRAJ_PREPARING' if self.preparation else
-                'TRAJ_RUNNING' if self.active.busy else 'IDLE', self.scene_revision, self.stop_unconfirmed)
+            control_mode = self.access.run(lambda sim: str(sim.control_mode))
+            if self.preparation:
+                phase = 'TRAJ_PREPARING'
+            elif self.active.busy:
+                phase = 'TRAJ_RUNNING'
+            elif control_mode == 'gravity_comp':
+                phase = 'GRAVITY_COMP'
+            elif control_mode == 'joint_impedance':
+                phase = 'JOINT_IMPEDANCE'
+            else:
+                phase = 'IDLE'
+            arm_mode = 'mit' if control_mode in ('gravity_comp', 'joint_impedance', 'raw_torque') else 'pos_vel'
+            return ExecutionStatus(
+                phase,
+                self.scene_revision,
+                self.stop_unconfirmed,
+                control_mode=control_mode,
+                arm_mode=arm_mode,
+            )

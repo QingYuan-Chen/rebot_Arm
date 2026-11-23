@@ -68,11 +68,14 @@ entrypoint, including keyboard and RViz. It uses the same continuous execution
 contract as the hardware backend, with its own simulation clock. The teach package owns record preparation and replay policy,
 while MuJoCo teach-preview execution and Viewer lifecycle belong to simulation.
 
-`rebotarm_force_control` owns gravity compensation models, numerical state and joint
-impedance torque computation. Hardware retains feedback verification, mode handover,
-the single device writer and protection. MuJoCo owns the initial joint impedance runtime:
-static joint references, per-axis stiffness/damping, bounded torque and slew rate,
-simulation-time expiry to Hold, and mutual exclusion with trajectory execution.
+`rebotarm_force_control` owns gravity compensation models, numerical state, bounded MIT
+evaluation and joint impedance state transitions. Hardware retains feedback verification,
+mode handover, the single device writer and protection. MuJoCo owns the initial joint
+impedance runtime: dual-rate MIT control (100 Hz outer-loop command latching + 500 Hz
+physics-step inner loop), static joint references, per-axis stiffness/damping, bounded
+torque and slew rate, continuous stateful start/stop (explicit hold or hot-update without
+watchdog renewal), unified `ArmStatus` reporting, and mutual exclusion with trajectory,
+gripper and gravity compensation modes.
 The force-control package has no hardware, ROS node or simulation runtime dependency.
 
 FollowJointTrajectory accepts exactly the six arm joints (rad); finger and seven-axis

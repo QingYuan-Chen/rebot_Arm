@@ -134,12 +134,15 @@ Pinocchio 重力模型加载（`gravity_model.py`）、重力补偿运行状态�
 
 关节阻抗采用静态平衡点：`tau = g(q) + K*(q_ref-q) - D*q_dot`，
 六轴刚度和阻尼分别以 N·m/rad、N·m·s/rad 表示；状态机提供纯力矩步进 `compute_torque_step`
-与 MIT 步进 `compute_mit_step`，并在后端确认施加后通过 `commit` 提交实际输出与控制时刻。
-MuJoCo 以独立零速度动力学数据求纯重力项，按既定控制拍推进并委托 `JointImpedanceSession`
-执行限位/溢出准入、高频续期、看门狗到期及退出交接限速，同时保留仿真独立推荐增益与预算诊断入口。
-ROS 统一服务契约为 `/<ns>/joint_impedance/set`（`SetJointImpedance`），已有六轴轨迹、
-夹爪任务与阻抗模式互斥。使用和验证步骤见
-[MuJoCo 使用说明](../../src/rebotarm_simulation/README_mujoco.md)。
+与 MIT 步进 `compute_mit_step`（配合纯计算内环求值 `evaluate_mit_torque`），并在后端确认施加后通过 `commit`
+提交实际输出、控制时刻与锁存的 MIT 命令。
+MuJoCo 以独立零速度动力学数据求纯重力项，按双频 MIT 控制运行：**100 Hz 外环**调 `compute_mit_step`
+计算并锁存有界 `(q_ref, Kp, Kd, tau_ff)`，**500 Hz 物理步内环**按实时 `(q, qd)` 求值写入执行器；
+状态机取消看门狗强制续期，进入后持续运行并支持热更新，直至显式 `stop`、切 `hold` 或保护退出。
+ROS 统一服务契约为 `/<ns>/joint_impedance/start|stop`（`SetJointImpedance` / `Trigger`）与
+`/<ns>/gravity_compensation/start|stop`（`Trigger`），`ArmStatus` 同步发布真实 `mode`（`pos_vel`/`mit`）
+与 `state_machine`（含 `GRAVITY_COMP`/`JOINT_IMPEDANCE`），已有六轴轨迹、夹爪任务、重力补偿与阻抗模式互斥。
+使用和验证步骤见 [MuJoCo 使用说明](../../src/rebotarm_simulation/README_mujoco.md)。
 关节阻抗当前执行入口位于仿真后端；真机重力补偿沿用原设备适配与显式使能流程，
 后续真机阻抗的刚度/阻尼上限配置与设备适配边界另行设计。
 

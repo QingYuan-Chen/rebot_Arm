@@ -65,6 +65,24 @@ class ImpedanceMitOutput:
     requested_torques: tuple[float, ...]
     saturated: tuple[bool, ...]
 
+    def __post_init__(self) -> None:
+        for name in (
+            "target",
+            "velocity",
+            "kp",
+            "kd",
+            "feedforward_torques",
+            "estimated_torques",
+            "requested_torques",
+        ):
+            values = six_vector(getattr(self, name), name)
+            if name in ("kp", "kd") and (values < 0.0).any():
+                raise ValueError(f"{name} must be nonnegative")
+            object.__setattr__(self, name, tuple(float(v) for v in values))
+        if len(self.saturated) != 6 or any(not isinstance(v, (bool, np.bool_)) for v in self.saturated):
+            raise ValueError("saturated must contain exactly 6 booleans")
+        object.__setattr__(self, "saturated", tuple(bool(v) for v in self.saturated))
+
 
 def scale_impedance_command(
     command: JointImpedanceCommand, torque_scale: float

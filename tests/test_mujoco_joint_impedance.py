@@ -35,7 +35,7 @@ def advance(sim, seconds):
 ])
 def test_impedance_gravity_holds_three_poses(sim, pose):
     sim.reset_joint_positions(pose)
-    sim.command_joint_impedance(pose, STIFFNESS, DAMPING, timeout_s=2.)
+    sim.command_joint_impedance(pose, STIFFNESS, DAMPING)
     state = advance(sim, .5)
     assert max(abs(q - reference) for q, reference in zip(state.joint_positions, pose)) < 1e-4
     assert sim.control_mode == 'joint_impedance'
@@ -45,7 +45,7 @@ def test_step_and_external_disturbance_return_to_equilibrium(sim):
     # 增益按额定力矩与协议上限取值后比旧配置软,观测窗口相应延长;
     # 判定阈值保持原值,只说明"能回稳",不因此放宽精度要求.
     target = np.asarray(sim.get_state().joint_positions[:6]) + (.05, .02, -.02, .03, 0., 0.)
-    sim.command_joint_impedance(target, STIFFNESS, DAMPING, timeout_s=10.)
+    sim.command_joint_impedance(target, STIFFNESS, DAMPING)
     state = advance(sim, 6.)
     assert max(abs(np.asarray(state.joint_positions[:6]) - target)) < .003
     model, data = sim.borrow_viewer_handles()
@@ -57,6 +57,29 @@ def test_step_and_external_disturbance_return_to_equilibrium(sim):
     assert displaced > .005
     assert abs(restored.joint_positions[0] - target[0]) < .002
     assert max(abs(np.asarray(restored.joint_positions[:6]) - target)) < .003
+
+
+def test_dual_rate_mit_inner_loop_updates_at_500hz_and_stabilizes_j6(sim):
+    target = np.asarray(sim.get_state().joint_positions[:6]) + (.15, 0., 0., 0., 0., .2)
+    sim.command_joint_impedance(target, STIFFNESS, DAMPING)
+    # 跳过 t=0 首个静止外环拍,在 t=0.01 (phase=0) 产生非零运动与非零 Kp/Kd 锁存.
+    sim.step(6)
+    model, data = sim.borrow_viewer_handles()
+    assert sim.save_state().control_phase == 1
+    outer_time = sim.save_state().last_control_time
+    latched = sim.save_state().impedance_mit_output
+    assert latched is not None and latched.kp[0] > 0. and latched.kp[5] > 0.
+    substep_torques = [np.asarray(sim.get_control_status().applied_torques)]
+    for _ in range(4):
+        sim.step()
+        snap = sim.save_state()
+        assert snap.last_control_time == outer_time
+        substep_torques.append(np.asarray(sim.get_control_status().applied_torques))
+    # 500 Hz 内环随实时 (q, qd) 更新 data.ctrl,不锁死在同一常值力矩.
+    assert np.max(np.abs(substep_torques[-1] - substep_torques[0])) > 1e-4
+    settled = advance(sim, 1.5)
+    assert abs(settled.joint_positions[5] - target[5]) < .002
+    assert abs(settled.joint_velocities[5]) < .02
 
 
 def test_pure_gravity_uses_zero_velocity_copy(sim):
@@ -71,9 +94,9 @@ def test_pure_gravity_uses_zero_velocity_copy(sim):
     assert np.array_equal(data.qvel, before)
 
 
-def test_renewal_keeps_cadence_and_rate_budget(sim):
+def test_hot_update_keeps_cadence_and_rate_budget(sim):
     target = np.asarray(sim.get_state().joint_positions[:6]) + (.2, 0., 0., 0., 0., 0.)
-    sim.command_joint_impedance(target, STIFFNESS, DAMPING, timeout_s=1.)
+    sim.command_joint_impedance(target, STIFFNESS, DAMPING)
     initial = sim.get_control_status().applied_torques
     sim.step()
     assert sim.get_control_status().applied_torques == initial
@@ -85,7 +108,7 @@ def test_renewal_keeps_cadence_and_rate_budget(sim):
     for _ in range(29):
         previous = sim.get_control_status().applied_torques
         phase = sim.save_state().control_phase
-        sim.command_joint_impedance(target, STIFFNESS, DAMPING, timeout_s=1.)
+        sim.command_joint_impedance(target, STIFFNESS, DAMPING)
         assert sim.get_control_status().applied_torques == previous
         assert sim.save_state().control_phase == phase
         renewed = sim.step()
@@ -96,34 +119,46 @@ def test_renewal_keeps_cadence_and_rate_budget(sim):
 def test_final_torque_and_rate_limits_survive_randomization_and_handoff(sim):
     sim.apply_randomization(RandomizationSample(1, 1., 1., 1., 2., 0, 0., 0., 0.))
     target = np.asarray(sim.get_state().joint_positions[:6]) + (.8, 0., 0., 0., 0., 0.)
-    sim.command_joint_impedance(target, (10000.,) * 6, DAMPING, timeout_s=.2)
+    sim.command_joint_impedance(target, (500.,) * 6, DAMPING)
     effort = np.asarray(sim._control._motor_parameters.arm.effort_limit)
     rate = np.asarray(sim._control._motor_parameters.arm.torque_rate_limit_nm_s)
     previous = np.asarray(sim.get_control_status().applied_torques)
     previous_time = sim.save_state().last_control_time
     saturated = False
-    for _ in range(200):
+    for _ in range(60):
         sim.step()
         status, snapshot = sim.get_control_status(), sim.save_state()
         torque = np.asarray(status.applied_torques)
         assert np.all(abs(torque) <= effort + 1e-12)
-        assert np.all(abs(torque - previous) <= rate * (snapshot.last_control_time - previous_time) + 1e-10)
-        previous, previous_time = torque, snapshot.last_control_time
+        if snapshot.last_control_time > previous_time:
+            dt = snapshot.last_control_time - previous_time
+            assert np.all(abs(torque - previous) <= rate * dt + 1e-10)
+            previous_time = snapshot.last_control_time
+        previous = torque
         saturated |= any(status.saturated)
+    sim.set_mode('hold')
+    for _ in range(10):
+        sim.step()
+        status, snapshot = sim.get_control_status(), sim.save_state()
+        torque = np.asarray(status.applied_torques)
+        assert np.all(abs(torque) <= effort + 1e-12)
+        if snapshot.last_control_time > previous_time:
+            dt = snapshot.last_control_time - previous_time
+            assert np.all(abs(torque - previous) <= rate * dt + 1e-10)
+            previous_time = snapshot.last_control_time
+        previous = torque
     assert saturated and sim.control_mode == 'hold'
 
 
-@pytest.mark.parametrize('explicit', [False, True])
-def test_expiry_or_explicit_hold_preserves_output_and_allows_position(sim, explicit):
+def test_continuous_impedance_stays_active_until_explicit_hold_and_allows_position(sim):
     target = np.asarray(sim.get_state().joint_positions[:6]) + (.05, 0., 0., 0., 0., 0.)
-    sim.command_joint_impedance(target, STIFFNESS, DAMPING, timeout_s=.025)
-    sim.step(7)
-    if explicit:
-        previous = sim.get_control_status().applied_torques
-        sim.set_mode('hold')
-        assert sim.get_control_status().applied_torques == previous
-    else:
-        advance(sim, .014)
+    sim.command_joint_impedance(target, STIFFNESS, DAMPING)
+    advance(sim, 1.0)
+    assert sim.control_mode == 'joint_impedance'
+    assert sim.get_control_status().watchdog_remaining_s is None
+    previous = sim.get_control_status().applied_torques
+    sim.set_mode('hold')
+    assert sim.get_control_status().applied_torques == previous
     assert sim.control_mode == 'hold'
     saved = sim.save_state()
     sim.set_mode('hold')
@@ -151,11 +186,12 @@ def test_conflicting_commands_preserve_impedance(sim, operation):
 @pytest.mark.parametrize('change', [
     {'targets': (99.,) * 6}, {'targets': (float('nan'),) * 6},
     {'stiffness': (-1.,) * 6}, {'damping': (float('inf'),) * 6},
-    {'timeout_s': 0.}, {'timeout_s': float('nan')},
+    {'stiffness': (501.,) * 6}, {'damping': (5.1,) * 6},
+    {'stiffness': (1e308,) * 6},
 ])
 def test_invalid_impedance_command_rejected_without_mutation(sim, change):
     args = dict(targets=sim.get_state().joint_positions[:6], stiffness=STIFFNESS,
-                damping=DAMPING, timeout_s=.1)
+                damping=DAMPING)
     args.update(change)
     before = sim.save_state()
     with pytest.raises(ValueError):
@@ -175,11 +211,16 @@ def test_joint_impedance_requires_explicit_command_and_hold_admission(sim):
     assert sim.save_state() == before
 
 
-def test_impedance_snapshot_replays_across_deadline_and_rejects_forgery(sim):
+def test_impedance_snapshot_replays_mid_substep_and_rejects_forgery(sim):
     target = np.asarray(sim.get_state().joint_positions[:6]) + (.05, 0., 0., 0., 0., 0.)
-    sim.command_joint_impedance(target, STIFFNESS, DAMPING, timeout_s=.045)
-    sim.step(7)
+    sim.command_joint_impedance(target, STIFFNESS, DAMPING)
+    sim.step(8)
+    assert sim.save_state().control_phase == 3
+    # 在子步中间热更新目标后立刻快照,验证 command 与 latched_mit 差异时的快照兼容性.
+    hot_target = target + (.02, 0., 0., 0., 0., 0.)
+    sim.command_joint_impedance(hot_target, STIFFNESS, DAMPING)
     checkpoint = sim.save_state()
+    assert checkpoint.impedance_mit_output is not None
     continued = sim.step(29)
     expected = sim.save_state()
     sim.restore_state(checkpoint)
@@ -189,9 +230,8 @@ def test_impedance_snapshot_replays_across_deadline_and_rejects_forgery(sim):
     with pytest.raises(ValueError, match='outside limits'):
         sim.restore_state(bad)
     assert sim.save_state() == expected
-    bad = replace(checkpoint)
-    object.__setattr__(bad, 'impedance_deadline', float('nan'))
-    with pytest.raises(ValueError, match='finite'):
+    bad = replace(checkpoint, impedance_command=JointImpedanceCommand(target, (600.,) * 6, DAMPING))
+    with pytest.raises(ValueError, match='stiffness'):
         sim.restore_state(bad)
     assert sim.save_state() == expected
     bad = replace(checkpoint, last_control_time=100.)
@@ -208,11 +248,12 @@ def test_reset_clears_impedance_command_and_history(sim):
     assert status.mode == 'hold' and status.impedance_command is None
     assert status.watchdog_remaining_s is None
     assert sim.save_state().last_control_time == 0.
+    assert sim.save_state().impedance_mit_output is None
 
 
 def test_position_after_impedance_hold_waits_for_original_control_tick(sim):
     target = np.asarray(sim.get_state().joint_positions[:6]) + (.4, 0., 0., 0., 0., 0.)
-    sim.command_joint_impedance(target, (1000.,) * 6, (1.,) * 6, timeout_s=1.)
+    sim.command_joint_impedance(target, (500.,) * 6, (1.,) * 6)
     sim.step(11)
     assert sim.get_state().simulation_time == pytest.approx(.022)
     before = sim.save_state()
@@ -239,10 +280,10 @@ def test_position_after_impedance_hold_waits_for_original_control_tick(sim):
     assert sim.save_state() == completed
 
 
-@pytest.mark.parametrize('steps', [0, 7])
+@pytest.mark.parametrize('steps', [0, 2, 7])
 @pytest.mark.parametrize('field', ['qpos', 'qvel', 'time'])
 def test_invalid_feedback_fails_before_physics_or_output_mutation(sim, steps, field):
-    sim.command_joint_impedance(sim.get_state().joint_positions[:6], STIFFNESS, DAMPING, timeout_s=1.)
+    sim.command_joint_impedance(sim.get_state().joint_positions[:6], STIFFNESS, DAMPING)
     if steps:
         sim.step(steps)
     model, data = sim.borrow_viewer_handles()
@@ -260,21 +301,3 @@ def test_invalid_feedback_fails_before_physics_or_output_mutation(sim, steps, fi
     assert np.array_equal(data.ctrl, output_before)
     assert np.array_equal(data.qpos, position_before, equal_nan=True)
     assert np.isnan(data.time) if field == 'time' else data.time == time_before
-
-
-def test_overflowing_gains_rejected_on_entry_renewal_and_restore(sim):
-    target = list(sim.get_state().joint_positions[:6])
-    target[0] = 2.8
-    before = sim.save_state()
-    with pytest.raises(ValueError, match='overflowed'):
-        sim.command_joint_impedance(target, (1e308,)*6, DAMPING, timeout_s=1.)
-    assert sim.save_state() == before
-    sim.command_joint_impedance(sim.get_state().joint_positions[:6], STIFFNESS, DAMPING, timeout_s=1.)
-    checkpoint = sim.save_state()
-    with pytest.raises(ValueError, match='overflowed'):
-        sim.command_joint_impedance(target, (1e308,)*6, DAMPING, timeout_s=1.)
-    assert sim.save_state() == checkpoint
-    bad = replace(checkpoint, impedance_command=JointImpedanceCommand(target, (1e308,)*6, DAMPING))
-    with pytest.raises(ValueError, match='overflowed'):
-        sim.restore_state(bad)
-    assert sim.save_state() == checkpoint

@@ -1,9 +1,10 @@
-"""职责:仿真控制目标,关节阻抗会话接线,控制器记忆及控制周期.
+"""职责:仿真控制目标,关节阻抗双频MIT会话接线,控制器记忆及控制周期.
 
 对外接口:位置,力矩,关节阻抗命令和模式切换;物理实例由调用者持有.
-安全约束:阻抗准入/看门狗/交接限速委托 rebotarm_force_control.JointImpedanceSession,
-          写入 data.ctrl 确认后再提交会话状态;过期切回当前位置保持.
-文件结构:状态与快照 → 命令准入与验证 → 逐拍控制 → 交接,到期与重力辅助函数.
+安全约束:阻抗准入/两阶段MIT计算/交接限速委托 rebotarm_force_control.JointImpedanceSession,
+          100 Hz 外环写 data.ctrl 确认后提交锁存,500 Hz 内环按锁存增益实时求值;
+          退出经 handoff 平滑交接回 hold.
+文件结构:状态与快照 → 命令准入与验证 → 逐拍控制(外环/内环) → 交接与重力辅助函数.
 """
 from __future__ import annotations
 
@@ -12,8 +13,11 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+from rebotarm_force_control.contracts import package_file
 from rebotarm_force_control.joint_impedance import JointImpedanceCommand
 from rebotarm_force_control.joint_impedance_session import JointImpedanceSession
+from rebotarm_force_control.joint_impedance_settings import JointImpedanceSettings
+from rebotarm_force_control.mit_command import evaluate_mit_torque
 from rebotarm_simulation.control.motor_control import PosVelController
 from rebotarm_simulation.control.sim_gripper import gripper_joint_positions_for_width
 from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES, JOINT_NAMES
@@ -25,7 +29,15 @@ CONTROL_MODES = ("position", "hold", "gravity_comp", "raw_torque", "joint_impeda
 
 
 class SimControlRuntime:
-    def __init__(self, parameters, timestep, joint_ids, actuator_ids, gravity_torque):
+    def __init__(
+        self,
+        parameters,
+        timestep,
+        joint_ids,
+        actuator_ids,
+        gravity_torque,
+        impedance_settings: JointImpedanceSettings | None = None,
+    ):
         self._motor_parameters = parameters
         self._arm_controller = PosVelController(parameters.arm)
         self._control_steps_per_update = max(1, int(round((1.0 / parameters.control_rate_hz) / timestep)))
@@ -44,6 +56,13 @@ class SimControlRuntime:
         self._actuator_ids = actuator_ids
         self._randomization_torque_scale = 1.0
         self._gravity_torque = gravity_torque
+        self._impedance_settings = (
+            impedance_settings
+            if impedance_settings is not None
+            else JointImpedanceSettings.from_yaml(
+                package_file("rebotarm_force_control", "config/joint_impedance.yaml")
+            )
+        )
         self._impedance = JointImpedanceSession()
 
     @property
@@ -142,10 +161,9 @@ class SimControlRuntime:
         mj.mj_forward(model, data)
 
     def before_step(self, model, data) -> None:
-        """物理步开始前检查期限,在控制相位起点更新输出,其余步保持上一拍控制量."""
+        """物理步开始前核对反馈;100 Hz 外环更新控制量,其余 500 Hz 步仅在 MIT 阻抗下运行内环."""
         if self._control_mode == "joint_impedance" or self._impedance.handoff:
             self._validate_impedance_feedback(data)
-        self._expire_impedance_if_needed(model, data)
         if self._raw_torque_watchdog_expired(model, data):
             self._expire_raw_torque(model, data)
             self._control_phase = 0
@@ -154,13 +172,14 @@ class SimControlRuntime:
             # 后继位置任务沿用原定拍完成首次交接,随后恢复既有位置控制语义.
             if self._impedance.handoff and self._control_mode == "position":
                 self._impedance.clear_handoff()
+        elif self._control_mode == "joint_impedance":
+            self._apply_mit_inner_loop(model, data)
 
     def after_step(self, model, data) -> None:
-        """物理时间推进后再次核对期限,保证跨过截止点的一步立即切回保持."""
+        """物理时间推进后核对反馈与相位;raw_torque 到期立即切回保持."""
         if self._control_mode == "joint_impedance" or self._impedance.handoff:
             self._validate_impedance_feedback(data)
         self._control_phase = (self._control_phase + 1) % self._control_steps_per_update
-        self._expire_impedance_if_needed(model, data)
         if self._raw_torque_watchdog_expired(model, data):
             self._expire_raw_torque(model, data)
             self._control_phase = 0
@@ -183,12 +202,12 @@ class SimControlRuntime:
         return snapshot
 
     def validate_saved_impedance_state(self, model, candidate, state) -> None:
-        """由状态机统一校验检查点内的阻抗命令,有效期与溢出边界."""
+        """由状态机统一校验检查点内的阻抗命令,协议界限与溢出边界."""
         qpos_addresses, qvel_addresses = self._arm_addresses(model)
         torque = np.asarray(candidate.ctrl)[list(self.arm_actuator_ids)]
         self._impedance.validate_snapshot_state(
             command=state.impedance_command,
-            deadline=state.impedance_deadline,
+            mit_output=state.impedance_mit_output,
             requested_torques=state.impedance_requested_torques,
             handoff=state.impedance_handoff,
             last_control_time=state.last_control_time,
@@ -202,6 +221,7 @@ class SimControlRuntime:
             rate_limits=self._motor_parameters.arm.torque_rate_limit_nm_s,
             nominal_dt=1.0 / self._motor_parameters.control_rate_hz,
             torque_scale=self._randomization_torque_scale,
+            settings=self._impedance_settings,
         )
 
     def restore(self, state, model, data) -> None:
@@ -212,7 +232,7 @@ class SimControlRuntime:
         )
         self._impedance.restore(
             command=state.impedance_command,
-            deadline=state.impedance_deadline,
+            mit_output=state.impedance_mit_output,
             requested_torques=state.impedance_requested_torques,
             handoff=state.impedance_handoff,
             last_control_time=state.last_control_time,
@@ -226,6 +246,7 @@ class SimControlRuntime:
             rate_limits=self._motor_parameters.arm.torque_rate_limit_nm_s,
             nominal_dt=1.0 / self._motor_parameters.control_rate_hz,
             torque_scale=self._randomization_torque_scale,
+            settings=self._impedance_settings,
         )
         self._position_targets[:] = np.asarray(state.control_targets, dtype=float)
         self._arm_controller.position_integral[:] = np.asarray(state.position_integral, dtype=float)
@@ -258,12 +279,10 @@ class SimControlRuntime:
         )
 
     def get_control_status(self, state) -> ControlStatus:
-        """复制不可变诊断快照;看门狗剩余量与传入物理状态使用同一时间基准."""
+        """复制不可变诊断快照;仅 raw_torque 报告剩余看门狗秒数."""
         remaining = None
         if self._control_mode == "raw_torque" and self._raw_torque_deadline is not None:
             remaining = max(0.0, self._raw_torque_deadline - state.simulation_time)
-        elif self._control_mode == "joint_impedance":
-            remaining = self._impedance.watchdog_remaining(state.simulation_time)
         return ControlStatus(
             mode=self._control_mode,
             joint_targets=tuple(float(value) for value in self._position_targets[:6]),
@@ -369,18 +388,29 @@ class SimControlRuntime:
         return tuple(float(value) for value in self._raw_torque_command)
 
     def command_joint_impedance(
-        self, model, data, targets, stiffness, damping, timeout_s
+        self,
+        model,
+        data,
+        targets,
+        stiffness,
+        damping,
+        *,
+        allow_from_position: bool = False,
     ) -> tuple[float, ...]:
-        """登记静态平衡点;重复更新保持控制相位和上一拍实际力矩."""
+        """登记静态平衡点与增益;热更新保持控制相位和上一拍实际力矩."""
         command = JointImpedanceCommand(targets, stiffness, damping)
-        if self._control_mode not in ("hold", "joint_impedance"):
+        allowed_modes = (
+            ("hold", "joint_impedance", "position")
+            if allow_from_position
+            else ("hold", "joint_impedance")
+        )
+        if self._control_mode not in allowed_modes:
             raise RuntimeError("enter hold before starting joint impedance")
         self._validate_impedance_feedback(data)
         qpos_addresses, qvel_addresses = self._arm_addresses(model)
         accepted = self._impedance.accept(
             command,
             now=float(data.time),
-            timeout_s=timeout_s,
             position_limits=self.impedance_position_limits(model),
             position=data.qpos[qpos_addresses],
             velocity=data.qvel[qvel_addresses],
@@ -390,6 +420,7 @@ class SimControlRuntime:
             previous_torque=self._applied_arm_torque,
             nominal_dt=1.0 / self._motor_parameters.control_rate_hz,
             torque_scale=self._randomization_torque_scale,
+            settings=self._impedance_settings,
         )
         self._position_targets[:6] = accepted
         self._control_mode = "joint_impedance"
@@ -434,8 +465,9 @@ class SimControlRuntime:
         position = np.asarray([data.qpos[address] for address in qpos_addresses], dtype=float)
         velocity = np.asarray([data.qvel[address] for address in qvel_addresses], dtype=float)
         gravity = self._gravity_compensation_torque(model, data, qvel_addresses)
+        mit_output = None
         if self._control_mode == "joint_impedance":
-            result = self._impedance.compute_torque_step(
+            mit_output = self._impedance.compute_mit_step(
                 position,
                 velocity,
                 self._gravity_torque(qvel_addresses, data),
@@ -445,9 +477,10 @@ class SimControlRuntime:
                 float(data.time),
                 previous_requested=self._requested_arm_torque,
                 torque_scale=self._randomization_torque_scale,
+                settings=self._impedance_settings,
             )
-            requested_torque = np.asarray(result.requested_torques, dtype=float)
-            arm_torque = np.asarray(result.applied_torques, dtype=float)
+            requested_torque = np.asarray(mit_output.requested_torques, dtype=float)
+            arm_torque = np.asarray(mit_output.estimated_torques, dtype=float)
             self._arm_controller.applied_torque[:] = arm_torque
         elif self._control_mode == "raw_torque":
             requested_torque = self._raw_torque_requested.copy()
@@ -488,11 +521,12 @@ class SimControlRuntime:
         )
         for actuator_id, torque in zip(self._actuator_ids[:6], applied_torque):
             data.ctrl[actuator_id] = torque
-        # 执行器写入完成后再提交本拍阻抗/交接状态.
+        # 执行器写入完成后再提交本拍阻抗/MIT锁存与交接状态.
         self._impedance.commit(
             requested_torques=requested_torque,
             applied_torques=applied_torque,
             now=float(data.time),
+            mit_output=mit_output,
         )
         self._requested_arm_torque[:] = requested_torque
         self._applied_arm_torque[:] = applied_torque
@@ -548,13 +582,42 @@ class SimControlRuntime:
         )
         self._control_mode = "hold"
 
+    def _apply_mit_inner_loop(self, model, data) -> None:
+        """500 Hz 物理子步内环:沿用最近 100 Hz 锁存的 MIT 参数与当前 (q, qd) 实时求值."""
+        mit = self._impedance.latched_mit
+        if mit is None:
+            return
+        qpos_addresses, qvel_addresses = self._arm_addresses(model)
+        position = np.asarray([data.qpos[address] for address in qpos_addresses], dtype=float)
+        velocity = np.asarray([data.qvel[address] for address in qvel_addresses], dtype=float)
+        effort_limits = np.asarray(self.impedance_effort_limits(model), dtype=float)
+        raw_torque, bounded_torque = evaluate_mit_torque(
+            mit.target,
+            position,
+            velocity,
+            mit.kp,
+            mit.kd,
+            mit.feedforward_torques,
+            effort_limits,
+        )
+        applied_torque = np.asarray(
+            [
+                self._clamp_actuator_control(model, data, actuator_id, torque)
+                for actuator_id, torque in zip(self._actuator_ids[:6], bounded_torque)
+            ],
+            dtype=float,
+        )
+        for actuator_id, torque in zip(self._actuator_ids[:6], applied_torque):
+            data.ctrl[actuator_id] = torque
+        self._applied_arm_torque[:] = applied_torque
+        self._arm_controller.applied_torque[:] = applied_torque
+        self._arm_torque_saturated[:] = np.asarray(mit.saturated, dtype=bool) | ~np.isclose(
+            raw_torque, applied_torque, atol=1e-12, rtol=0.0
+        )
+
     def _leave_impedance(self, model, data) -> None:
         self._impedance.leave()
         self._enter_handoff_hold(model, data)
-
-    def _expire_impedance_if_needed(self, model, data) -> None:
-        if self._control_mode == "joint_impedance" and self._impedance.expire_if_due(float(data.time)):
-            self._enter_handoff_hold(model, data)
 
     def _raw_torque_watchdog_expired(self, model, data) -> bool:
         return (

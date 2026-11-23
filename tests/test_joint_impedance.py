@@ -14,7 +14,11 @@ from rebotarm_force_control.joint_impedance import (
 from rebotarm_force_control.joint_impedance_budget import budget_violations, evaluate_gains
 from rebotarm_force_control.joint_impedance_session import JointImpedanceSession
 from rebotarm_force_control.joint_impedance_settings import JointImpedanceSettings
-from rebotarm_force_control.mit_command import PROTOCOL_KD_MAX, PROTOCOL_KP_MAX
+from rebotarm_force_control.mit_command import (
+    PROTOCOL_KD_MAX,
+    PROTOCOL_KP_MAX,
+    evaluate_mit_torque,
+)
 
 
 def compute(command, **kwargs):
@@ -120,6 +124,7 @@ def test_settings_loads_repo_yaml_and_rejects_invalid_limits(tmp_path):
     assert settings.max_stiffness_nm_rad == (PROTOCOL_KP_MAX,) * 6
     assert settings.max_damping_nm_s_rad == (PROTOCOL_KD_MAX,) * 6
     assert not hasattr(settings, "default_stiffness")
+    assert not hasattr(settings, "min_timeout_s")
 
     bad_yaml = tmp_path / "bad.yaml"
     bad_yaml.write_text("unknown_key: 1\n", encoding="utf-8")
@@ -130,20 +135,16 @@ def test_settings_loads_repo_yaml_and_rejects_invalid_limits(tmp_path):
         JointImpedanceSettings(max_stiffness_nm_rad=(501.0,) * 6)
     with pytest.raises(ValueError):
         JointImpedanceSettings(max_damping_nm_s_rad=(5.1,) * 6)
-    with pytest.raises(ValueError):
-        JointImpedanceSettings(min_timeout_s=1.0, max_timeout_s=0.5)
 
     guarded = JointImpedanceSettings(
         max_stiffness_nm_rad=(30.0,) * 6,
         max_damping_nm_s_rad=(3.0,) * 6,
-        min_timeout_s=0.05,
-        max_timeout_s=0.5,
     )
-    guarded.validate_command(JointImpedanceCommand((0.0,) * 6, (30.0,) * 6, (3.0,) * 6), 0.1)
+    guarded.validate_command(JointImpedanceCommand((0.0,) * 6, (30.0,) * 6, (3.0,) * 6))
     with pytest.raises(ValueError, match="stiffness"):
-        guarded.validate_command(JointImpedanceCommand((0.0,) * 6, (31.0,) * 6, (1.0,) * 6), 0.1)
-    with pytest.raises(ValueError, match="timeout_s"):
-        guarded.validate_command(JointImpedanceCommand((0.0,) * 6, (10.0,) * 6, (1.0,) * 6), 1.0)
+        guarded.validate_command(JointImpedanceCommand((0.0,) * 6, (31.0,) * 6, (1.0,) * 6))
+    with pytest.raises(ValueError, match="damping"):
+        guarded.validate_command(JointImpedanceCommand((0.0,) * 6, (10.0,) * 6, (3.1,) * 6))
 
 
 def test_session_accept_two_phase_torque_and_commit_isolation():
@@ -154,12 +155,11 @@ def test_session_accept_two_phase_torque_and_commit_isolation():
     accepted = session.accept(
         cmd,
         position_limits=limits,
-        timeout_s=0.2,
         nominal_dt=0.01,
         **inputs,
     )
     assert accepted == cmd.target
-    assert session.active and session.deadline == pytest.approx(0.3)
+    assert session.active and session.latched_mit is None
     assert session.last_control_time == pytest.approx(0.0)
 
     # 非法溢出命令在 accept 前被拒绝,保留原状态.
@@ -168,11 +168,10 @@ def test_session_accept_two_phase_torque_and_commit_isolation():
         session.accept(
             bad_cmd,
             position_limits=limits,
-            timeout_s=0.5,
             nominal_dt=0.01,
             **_session_inputs(now=0.15),
         )
-    assert session.command == cmd and session.deadline == pytest.approx(0.3)
+    assert session.command == cmd
 
     # 阶段 1 只计算不推进控制时刻或历史请求;未调 commit 前重复调用结果一致.
     step1 = session.compute_torque_step(**_session_inputs(now=0.01))
@@ -189,12 +188,11 @@ def test_session_accept_two_phase_torque_and_commit_isolation():
     assert session.last_control_time == pytest.approx(0.01)
     assert session.last_requested_torques == step1.requested_torques
 
-    # 同拍重入(elapsed <= 0)与高频续期不消耗变化率预算.
+    # 同拍重入(elapsed <= 0)与热更新不消耗变化率预算.
     renew_cmd = JointImpedanceCommand((0.2,) * 6, (20.0,) * 6, (2.0,) * 6)
     session.accept(
         renew_cmd,
         position_limits=limits,
-        timeout_s=0.5,
         nominal_dt=0.01,
         **_session_inputs(now=0.01),
     )
@@ -211,18 +209,34 @@ def test_session_accept_two_phase_torque_and_commit_isolation():
     assert same_tick.applied_torques == step1.applied_torques
 
 
-def test_session_mit_step_matches_bounded_torque_and_checks_protocol_bounds():
+def test_session_mit_step_latching_scale_and_protocol_bounds():
     session = JointImpedanceSession()
     limits = ((-2.8, 2.8),) * 6
-    cmd = JointImpedanceCommand((0.2, -0.1, 0.05, 0.0, 0.0, 0.0), (45.0, 45.0, 45.0, 17.5, 17.5, 17.5), (3.32, 5.0, 5.0, 1.28, 0.78, 0.34))
+    cmd = JointImpedanceCommand(
+        (0.2, -0.1, 0.05, 0.0, 0.0, 0.0),
+        (45.0, 45.0, 45.0, 17.5, 17.5, 17.5),
+        (3.32, 5.0, 5.0, 1.28, 0.78, 0.34),
+    )
     session.accept(
         cmd,
         position_limits=limits,
-        timeout_s=0.5,
         nominal_dt=0.01,
         settings=JointImpedanceSettings(),
         **_session_inputs(now=0.0),
     )
+    # t=0 首次调用时 elapsed == 0,不消耗变化率预算并保持 previous_torque.
+    zero_tick = session.compute_mit_step(
+        position=(0.0,) * 6,
+        velocity=(0.0,) * 6,
+        gravity=(1.0,) * 6,
+        effort_limits=(27.0, 27.0, 27.0, 7.0, 7.0, 7.0),
+        rate_limits=(108.0, 108.0, 108.0, 28.0, 28.0, 28.0),
+        previous_torque=(1.0,) * 6,
+        now=0.0,
+    )
+    assert zero_tick.kp == (0.0,) * 6 and zero_tick.kd == (0.0,) * 6
+    assert zero_tick.estimated_torques == pytest.approx((1.0,) * 6)
+
     mit = session.compute_mit_step(
         position=(0.0,) * 6,
         velocity=(0.2, -0.1, 0.0, 0.0, 0.0, 0.0),
@@ -244,20 +258,56 @@ def test_session_mit_step_matches_bounded_torque_and_checks_protocol_bounds():
     )
     assert mit.estimated_torques == pytest.approx(torque_ref.applied_torques)
     assert mit.requested_torques == pytest.approx(torque_ref.requested_torques)
-    # 当前反馈下 MIT 合成总力矩精确等于 bounded estimated_torques.
-    reconstructed = (
-        np.asarray(mit.kp) * (np.asarray(mit.target) - np.zeros(6))
-        - np.asarray(mit.kd) * np.array([0.2, -0.1, 0.0, 0.0, 0.0, 0.0])
-        + np.asarray(mit.feedforward_torques)
+    # 当前反馈下 MIT 内环合成总力矩精确等于 bounded estimated_torques.
+    raw_eval, bounded_eval = evaluate_mit_torque(
+        mit.target,
+        np.zeros(6),
+        np.array([0.2, -0.1, 0.0, 0.0, 0.0, 0.0]),
+        mit.kp,
+        mit.kd,
+        mit.feedforward_torques,
+        (27.0, 27.0, 27.0, 7.0, 7.0, 7.0),
     )
-    assert reconstructed == pytest.approx(mit.estimated_torques, abs=1e-12)
+    assert raw_eval == pytest.approx(mit.estimated_torques, abs=1e-12)
+    assert bounded_eval == pytest.approx(mit.estimated_torques, abs=1e-12)
     assert session.last_control_time == pytest.approx(0.0)
+    assert session.latched_mit is None
+
+    session.commit(
+        requested_torques=mit.requested_torques,
+        applied_torques=mit.estimated_torques,
+        now=0.01,
+        mit_output=mit,
+    )
+    assert session.latched_mit == mit
+
+    # 域随机化 torque_scale 与 compute_torque_step 对齐.
+    scaled_mit = session.compute_mit_step(
+        position=(0.0,) * 6,
+        velocity=(0.0,) * 6,
+        gravity=(1.0,) * 6,
+        effort_limits=(27.0, 27.0, 27.0, 7.0, 7.0, 7.0),
+        rate_limits=(108.0, 108.0, 108.0, 28.0, 28.0, 28.0),
+        previous_torque=mit.estimated_torques,
+        now=0.02,
+        torque_scale=2.0,
+    )
+    scaled_ref = session.compute_torque_step(
+        position=(0.0,) * 6,
+        velocity=(0.0,) * 6,
+        gravity=(1.0,) * 6,
+        effort_limits=(27.0, 27.0, 27.0, 7.0, 7.0, 7.0),
+        rate_limits=(108.0, 108.0, 108.0, 28.0, 28.0, 28.0),
+        previous_torque=mit.estimated_torques,
+        now=0.02,
+        torque_scale=2.0,
+    )
+    assert scaled_mit.estimated_torques == pytest.approx(scaled_ref.applied_torques)
 
     over_session = JointImpedanceSession()
     over_session.accept(
         JointImpedanceCommand((0.0,) * 6, (600.0,) * 6, (1.0,) * 6),
         position_limits=limits,
-        timeout_s=0.2,
         nominal_dt=0.01,
         **_session_inputs(now=0.0),
     )
@@ -265,39 +315,45 @@ def test_session_mit_step_matches_bounded_torque_and_checks_protocol_bounds():
         over_session.compute_mit_step(**_session_inputs(now=0.01))
 
 
-def test_session_expiry_handoff_clamp_and_snapshot_restore():
+def test_session_leave_handoff_clamp_and_snapshot_restore():
     session = JointImpedanceSession()
     limits = ((-2.8, 2.8),) * 6
     cmd = JointImpedanceCommand((0.2,) * 6, (40.0,) * 6, (2.0,) * 6)
-    session.accept(cmd, position_limits=limits, timeout_s=0.1, nominal_dt=0.01, **_session_inputs(now=0.0))
-    step = session.compute_torque_step(**_session_inputs(now=0.01))
-    session.commit(requested_torques=step.requested_torques, applied_torques=step.applied_torques, now=0.01)
+    session.accept(cmd, position_limits=limits, nominal_dt=0.01, **_session_inputs(now=0.0))
+    mit = session.compute_mit_step(**_session_inputs(now=0.01))
+    session.commit(
+        requested_torques=mit.requested_torques,
+        applied_torques=mit.estimated_torques,
+        now=0.01,
+        mit_output=mit,
+    )
     snap = session.snapshot()
-    assert snap["impedance_command"] == cmd and not snap["impedance_handoff"]
+    assert snap["impedance_command"] == cmd
+    assert snap["impedance_mit_output"] == mit
+    assert not snap["impedance_handoff"]
 
-    assert not session.expire_if_due(0.05)
-    assert session.expire_if_due(0.10)
-    assert not session.active and session.handoff
+    session.leave()
+    assert not session.active and session.latched_mit is None and session.handoff
     clamped = session.clamp_handoff_torque(
         (20.0,) * 6,
         (27.0, 27.0, 27.0, 7.0, 7.0, 7.0),
         (100.0,) * 6,
-        step.applied_torques,
+        mit.estimated_torques,
         now=0.02,
     )
-    assert np.all(np.abs(clamped - np.asarray(step.applied_torques)) <= 1.0 + 1e-12)
+    assert np.all(np.abs(clamped - np.asarray(mit.estimated_torques)) <= 1.0 + 1e-12)
     session.commit(requested_torques=clamped, applied_torques=clamped, now=0.02, clear_handoff=True)
     assert not session.handoff
 
     restored = JointImpedanceSession()
     restored.restore(
         command=snap["impedance_command"],
-        deadline=snap["impedance_deadline"],
+        mit_output=snap["impedance_mit_output"],
         requested_torques=snap["impedance_requested_torques"],
         handoff=snap["impedance_handoff"],
         last_control_time=snap["last_control_time"],
         candidate_time=0.01,
-        candidate_torque=step.applied_torques,
+        candidate_torque=mit.estimated_torques,
         position_limits=limits,
         position=(0.0,) * 6,
         velocity=(0.0,) * 6,
@@ -307,6 +363,31 @@ def test_session_expiry_handoff_clamp_and_snapshot_restore():
         nominal_dt=0.01,
     )
     assert restored.snapshot() == snap
+
+    with pytest.raises(ValueError, match="inactive"):
+        restored.validate_snapshot_state(
+            command=None,
+            mit_output=mit,
+            requested_torques=(),
+            handoff=False,
+            last_control_time=0.01,
+            candidate_time=0.01,
+            candidate_torque=(0.0,) * 6,
+            position_limits=limits,
+            position=(0.0,) * 6,
+            velocity=(0.0,) * 6,
+            gravity=(1.0,) * 6,
+            effort_limits=(27.0, 27.0, 27.0, 7.0, 7.0, 7.0),
+            rate_limits=(108.0, 108.0, 108.0, 28.0, 28.0, 28.0),
+            nominal_dt=0.01,
+        )
+
+
+def test_evaluate_mit_torque_validates_inputs_and_overflow():
+    with pytest.raises(ValueError, match="nonnegative"):
+        evaluate_mit_torque((0.,)*6, (0.,)*6, (0.,)*6, (-1.,)*6, (1.,)*6, (0.,)*6, (10.,)*6)
+    with pytest.raises(ValueError, match="overflowed"):
+        evaluate_mit_torque((1e200,)*6, (0.,)*6, (0.,)*6, (1e200,)*6, (1.,)*6, (0.,)*6, (10.,)*6)
 
 
 def test_pure_budget_functions_validate_protocol_and_torque_limits():

@@ -295,12 +295,24 @@ class RebotArmMujoco:
         self._ensure_open()
         return self._control.command_joint_torques(self._model, self._data, torques, timeout_s)
 
-    def command_joint_impedance(self, targets: Sequence[float], stiffness: Sequence[float],
-                                damping: Sequence[float], timeout_s: float = 0.1) -> tuple[float, ...]:
-        """接纳六轴静态平衡点;刚度 N·m/rad,阻尼 N·m·s/rad,期限按仿真时间."""
+    def command_joint_impedance(
+        self,
+        targets: Sequence[float],
+        stiffness: Sequence[float],
+        damping: Sequence[float],
+        *,
+        allow_from_position: bool = False,
+    ) -> tuple[float, ...]:
+        """接纳六轴静态平衡点与增益;刚度 N·m/rad,阻尼 N·m·s/rad,进入后持续运行至显式退出."""
         self._ensure_open()
-        return self._control.command_joint_impedance(self._model, self._data,
-            targets, stiffness, damping, timeout_s)
+        return self._control.command_joint_impedance(
+            self._model,
+            self._data,
+            targets,
+            stiffness,
+            damping,
+            allow_from_position=allow_from_position,
+        )
 
     def _joint_gravity_torque(self, qvel_addresses, data) -> np.ndarray:
         """在独立零速度数据上计算 g(q),避免混入科氏项或改写当前物理状态."""

@@ -9,9 +9,10 @@ string mode
 bool enabled
 # 统一硬件控制环是否在运行：位置/抓取命令要求它为 true，否则硬件层直接报错。
 bool control_loop_active
-# 硬件状态机当前状态，字符串取值："IDLE"（空闲）、"TRAJ_RUNNING"（轨迹执行中）、
-# "LOWLEVEL_STREAMING"（低层直通命令流中）、"GRAVITY_COMP"（手动拖拽/重力补偿中）；
-# 上层据此判断是否允许抢占（例如低层直通命令是否要打断正在执行的轨迹）。
+# 硬件/仿真状态机当前状态，字符串取值："IDLE"（空闲）、"TRAJ_PREPARING"（轨迹准备中）、
+# "TRAJ_RUNNING"（轨迹执行中）、"LOWLEVEL_STREAMING"（低层直通命令流中）、
+# "GRAVITY_COMP"（手动拖拽/重力补偿中）、"JOINT_IMPEDANCE"（关节阻抗控制中）；
+# 上层据此判断是否允许抢占或分模式路由（例如终端键盘是否允许 FJT 点动或单关节调参）。
 string state_machine
 # 关节名列表，顺序与 per_joint_status_code 一一对应。
 string[] joint_names

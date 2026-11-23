@@ -7,6 +7,7 @@
 对外接口
     PROTOCOL_KP_MAX / PROTOCOL_KD_MAX: 达妙 DM 系列 MIT 帧增益硬件范围.
     bounded_mit_command: 合并 PD 与前馈力矩,受总力矩幅值与变化率约束后缩放 Kp/Kd.
+    evaluate_mit_torque: 按当前 feedback 计算并限幅 MIT 内环总力矩.
     LoopTiming: 记录控制周期,单轮执行耗时与连续超时统计.
 
 安全与并发约束
@@ -92,6 +93,46 @@ def bounded_mit_command(
     )
     # 当前反馈下,缩放后的 PD 与重新计算的前馈之和仍等于已限幅的 total.
     return kp * scale, kd * scale, total - pd * scale, total
+
+
+def evaluate_mit_torque(
+    target,
+    q,
+    qd,
+    kp,
+    kd,
+    feedforward,
+    limits,
+) -> tuple[np.ndarray, np.ndarray]:
+    """按 MIT 内环律计算并限幅当前时刻力矩: ``raw = kp*(target-q) - kd*qd + tau_ff``.
+
+    返回 ``(raw_torque, bounded_torque)``,供高频内环在每个物理/控制子步实时求值.
+    """
+    target_v, q_v, qd_v, kp_v, kd_v, ff_v, limits_v = [
+        vector(v, 6, label)
+        for v, label in zip(
+            (target, q, qd, kp, kd, feedforward, limits),
+            (
+                "target",
+                "position",
+                "velocity",
+                "kp",
+                "kd",
+                "feedforward",
+                "torque limits",
+            ),
+        )
+    ]
+    if (limits_v <= 0).any():
+        raise ValueError("torque limits must be finite and positive")
+    if (kp_v < 0).any() or (kd_v < 0).any():
+        raise ValueError("mit gains must be nonnegative")
+    try:
+        with np.errstate(over="raise", invalid="raise"):
+            raw = kp_v * (target_v - q_v) - kd_v * qd_v + ff_v
+    except FloatingPointError as exc:
+        raise ValueError("mit torque calculation overflowed") from exc
+    return raw, np.clip(raw, -limits_v, limits_v)
 
 
 class LoopTiming:

@@ -1,7 +1,10 @@
-# 终端键盘遥操作参数.
+# 终端键盘遥操作公共参数(后端无关).
 #
 # 仅由 rebotarm_teleop/TeleopKeyboardNode 读取.网页端的键盘按钮不是这个节点,
 # 不使用 deadman_required/deadman_key;网页参数在 web_teleop.yaml 中维护.
+# 仿真/真机各自的关节阻抗初始刚度与阻尼配置完全分离:
+# - 仿真请见 keyboard_impedance_sim.yaml (仅 use_hardware:=false 加载);
+# - 真机须在接入时使用独立 YAML 显式注入,严禁写入本文件.
 
 /**:
   ros__parameters:

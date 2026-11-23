@@ -1,4 +1,4 @@
-"""仿真 ROS 执行接口:位置,保持,重力与具期限的关节阻抗命令.
+"""仿真 ROS 执行接口:位置,保持,重力与持续态关节阻抗命令.
 
 职责:只转发到仿真核心;调用方持有目标锁和仿真锁,核心原子校验数值.
 对外接口:normalize_ros_control_mode, SimulationControlApi.
@@ -37,10 +37,11 @@ class SimulationControlApi:
         """仅写入六轴目标;首次切入 position 由核心按需完成,避免每物理步重入控制拍."""
         return tuple(float(value) for value in self.simulation.command_joint_positions(values))
 
-    def command_joint_impedance(self, positions, stiffness, damping, *, timeout_s):
-        """完整命令同时设置平衡点,增益和期限;裸模式切换保持原接口."""
+    def command_joint_impedance(self, positions, stiffness, damping):
+        """完整命令同时设置平衡点与增益;允许由空闲 position 或 hold 切入或原地热更新."""
         return self.simulation.command_joint_impedance(
-            positions, stiffness, damping, timeout_s=timeout_s)
+            positions, stiffness, damping, allow_from_position=True
+        )
 
     def hold_current_position(self) -> None:
         self.simulation.set_mode("hold")

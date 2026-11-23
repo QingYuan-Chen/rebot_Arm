@@ -4,6 +4,3 @@ max_stiffness_nm_rad: [500.0, 500.0, 500.0, 500.0, 500.0, 500.0]
 max_damping_nm_s_rad: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
 # 每轴总力矩变化率上限(N·m/s),顺序与 joint1..joint6 一致,对齐 gravity_compensation.yaml.
 torque_rate_limits_nm_s: [108.0, 108.0, 108.0, 28.0, 28.0, 28.0]
-# 看门狗单次续期期限合法范围(s).
-min_timeout_s: 0.02
-max_timeout_s: 10.0

@@ -238,11 +238,31 @@ def create_node_class():
                 callback_group=self._callback_group,
             )
             self.create_service(
-                SetJointImpedance,
-                f"/{self._arm_namespace}/joint_impedance/set",
-                self._impedance_service,
+                Trigger,
+                f"/{self._arm_namespace}/gravity_compensation/start",
+                self._gravity_start_service,
                 callback_group=self._callback_group,
             )
+            self.create_service(
+                Trigger,
+                f"/{self._arm_namespace}/gravity_compensation/stop",
+                self._gravity_stop_service,
+                callback_group=self._callback_group,
+            )
+            self.create_service(
+                SetJointImpedance,
+                f"/{self._arm_namespace}/joint_impedance/start",
+                self._impedance_start_service,
+                callback_group=self._callback_group,
+            )
+            self.create_service(
+                Trigger,
+                f"/{self._arm_namespace}/joint_impedance/stop",
+                self._impedance_stop_service,
+                callback_group=self._callback_group,
+            )
+            # 先发布一帧初始锁存 ArmStatus,确保晚加入或启动即连接的客户端立刻读到 IDLE.
+            self._publish_arm_status()
             # Each callback advances enough fixed physics steps to match the
             # configured publication period; simulation time remains the
             # authoritative trajectory clock.
@@ -381,9 +401,11 @@ def create_node_class():
                     self._wait_prepared_stop(token)
                 except RuntimeError as exc:
                     response.success, response.message = False, str(exc)
+                    self._publish_arm_status()
                     return response
             response.success = True
             response.message = "simulation trajectory stop requested" if stopped else "no active trajectory"
+            self._publish_arm_status()
             return response
 
         def _publish_diagnostics(self):
@@ -498,17 +520,53 @@ def create_node_class():
                 response.success, response.message = False, f"mode rejected: {exc}"
                 return response
             response.success, response.message = True, f"simulation mode: {reached}"
+            self._publish_arm_status()
             return response
 
-        def _impedance_service(self, request, response):
+        def _gravity_start_service(self, _request, response):
+            """进入重力补偿模式,与真机 /gravity_compensation/start 契约对齐."""
+            try:
+                self._execution.start_gravity_compensation()
+            except (TypeError, ValueError, RuntimeError) as exc:
+                response.success, response.message = False, f"gravity compensation rejected: {exc}"
+                return response
+            response.success, response.message = True, "gravity compensation started"
+            self._publish_arm_status()
+            return response
+
+        def _gravity_stop_service(self, _request, response):
+            """退出重力补偿回到 hold,与真机 /gravity_compensation/stop 幂等契约对齐."""
+            try:
+                self._execution.stop_gravity_compensation()
+            except (TypeError, ValueError, RuntimeError) as exc:
+                response.success, response.message = False, f"gravity compensation stop rejected: {exc}"
+                return response
+            response.success, response.message = True, "gravity compensation stopped"
+            self._publish_arm_status()
+            return response
+
+        def _impedance_start_service(self, request, response):
             """薄协议适配;资源检查,锁序与规划失效统一归执行组件."""
             try:
-                self._execution.command_joint_impedance(request.positions, request.stiffness,
-                    request.damping, timeout_s=request.timeout_s)
+                self._execution.command_joint_impedance(
+                    request.positions, request.stiffness, request.damping
+                )
             except (TypeError, ValueError, RuntimeError) as exc:
                 response.success, response.message = False, f"joint impedance rejected: {exc}"
                 return response
             response.success, response.message = True, "simulation mode: joint_impedance"
+            self._publish_arm_status()
+            return response
+
+        def _impedance_stop_service(self, _request, response):
+            """退出关节阻抗并经平滑交接回到 hold;未处于阻抗态时幂等成功."""
+            try:
+                self._execution.stop_joint_impedance()
+            except (TypeError, ValueError, RuntimeError) as exc:
+                response.success, response.message = False, f"joint impedance stop rejected: {exc}"
+                return response
+            response.success, response.message = True, "joint impedance stopped"
+            self._publish_arm_status()
             return response
 
         @staticmethod
@@ -630,6 +688,26 @@ def create_node_class():
                 with execution.lock:
                     del self._goal_tokens[goal_key]
 
+        def _publish_arm_status(self, stamp_msg=None) -> None:
+            """发布锁存 ArmStatus(含真实 mode 与 state_machine)."""
+            if stamp_msg is None:
+                sim_time = self._sim_access.run(lambda sim: float(sim.get_state().simulation_time))
+                seconds, nanoseconds = self._stamp.update(sim_time)
+                stamp = Clock()
+                stamp.clock.sec = seconds
+                stamp.clock.nanosec = nanoseconds
+                stamp_msg = stamp.clock
+            status = ArmStatus()
+            status.header.stamp = stamp_msg
+            execution_status = self._execution.status_snapshot()
+            status.mode = execution_status.arm_mode
+            status.enabled, status.control_loop_active = True, True
+            status.state_machine = execution_status.phase
+            status.joint_names = list(ARM_JOINT_NAMES)
+            status.per_joint_status_code = [1]*6
+            status.error_codes = ['SIM_STOP_UNCONFIRMED'] if execution_status.stop_unconfirmed else []
+            self._status_pub.publish(status)
+
         def _timer_callback(self) -> None:
             """物理定时器串行推进仿真;一个定时回调含多步时也在每个物理步重采参考."""
             state = self._execution.step(self._steps_per_tick, self._trace.record)
@@ -655,15 +733,7 @@ def create_node_class():
             gripper.torque = float(sum(abs(v) for v in state.actuator_forces[-2:]))
             gripper.status_code = 1
             self._gripper_pub.publish(gripper)
-            status = ArmStatus()
-            status.header.stamp = stamp.clock
-            status.mode, status.enabled, status.control_loop_active = 'pos_vel', True, True
-            execution_status = self._execution.status_snapshot()
-            status.state_machine = execution_status.phase
-            status.joint_names = list(ARM_JOINT_NAMES)
-            status.per_joint_status_code = [1]*6
-            status.error_codes = ['SIM_STOP_UNCONFIRMED'] if execution_status.stop_unconfirmed else []
-            self._status_pub.publish(status)
+            self._publish_arm_status(stamp.clock)
 
 
         def destroy_node(self):

@@ -1,7 +1,7 @@
 """职责:仿真观测,控制诊断和可恢复快照的不可变数值契约.
 
 对外接口:SimulationState,ControlStatus,SavedSimulationState 等值对象.
-安全约束:有限性和阻抗模式/命令/期限一致性在构造时校验.
+安全约束:有限性和阻抗模式/命令/MIT锁存一致性在构造时校验.
 文件结构:向量校验,观测与诊断,接触信息,完整快照.
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 import math
 from types import MappingProxyType
 from typing import Mapping
-from rebotarm_force_control.joint_impedance import JointImpedanceCommand
+from rebotarm_force_control.joint_impedance import ImpedanceMitOutput, JointImpedanceCommand
 
 
 Vector3 = tuple[float, float, float]
@@ -206,7 +206,7 @@ class SavedSimulationState:
     raw_torque_deadline: float | None = None
     gripper_max_force_n: float | None = None
     impedance_command: JointImpedanceCommand | None = None
-    impedance_deadline: float | None = None
+    impedance_mit_output: ImpedanceMitOutput | None = None
     impedance_requested_torques: tuple[float, ...] = ()
     impedance_handoff: bool = False
     last_control_time: float = 0.0
@@ -226,15 +226,20 @@ class SavedSimulationState:
         object.__setattr__(self, "raw_torque_requested", _float_tuple(
             self.raw_torque_requested, label="raw_torque_requested"
         ))
-        # 恢复前重新构造命令,连同快照被外部篡改的数值一起验证.
+        # 恢复前重新构造命令与锁存 MIT 输出,连同快照被外部篡改的数值一起验证.
         if self.impedance_command is not None:
             if not isinstance(self.impedance_command, JointImpedanceCommand):
                 raise TypeError("impedance_command must be a JointImpedanceCommand")
             object.__setattr__(self, "impedance_command", replace(self.impedance_command))
         active_impedance = self.control_mode == "joint_impedance"
-        if (active_impedance != (self.impedance_command is not None)
-                or active_impedance != (self.impedance_deadline is not None)):
-            raise ValueError("impedance mode, command and deadline must agree")
+        if active_impedance != (self.impedance_command is not None):
+            raise ValueError("impedance mode and command must agree")
+        if self.impedance_mit_output is not None:
+            if not active_impedance:
+                raise ValueError("inactive impedance cannot carry mit output")
+            if not isinstance(self.impedance_mit_output, ImpedanceMitOutput):
+                raise TypeError("impedance_mit_output must be an ImpedanceMitOutput")
+            object.__setattr__(self, "impedance_mit_output", replace(self.impedance_mit_output))
         if (type(self.impedance_handoff) is not bool
                 or (self.impedance_handoff and self.control_mode not in ("hold", "position"))):
             raise ValueError("impedance handoff requires hold/position mode")
@@ -245,12 +250,10 @@ class SavedSimulationState:
         object.__setattr__(self, "impedance_requested_torques", _float_tuple(
             self.impedance_requested_torques, length=6 if active_impedance else 0,
             label="impedance_requested_torques"))
-        for field_name in ("raw_torque_deadline", "gripper_max_force_n", "impedance_deadline"):
+        for field_name in ("raw_torque_deadline", "gripper_max_force_n"):
             value = getattr(self, field_name)
             if value is not None:
                 value = float(value)
                 if not math.isfinite(value):
                     raise ValueError(f"{field_name} must be finite")
-                if field_name == "impedance_deadline" and value <= 0.0:
-                    raise ValueError("impedance_deadline must be positive")
                 object.__setattr__(self, field_name, value)
