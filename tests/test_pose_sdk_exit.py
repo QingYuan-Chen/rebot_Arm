@@ -131,7 +131,7 @@ def test_fixed_sdk_comparison_vectors(case):
 def test_owned_resource_uses_source_when_install_index_is_missing(monkeypatch, package, relative):
     """只隔离安装索引,确保目录迁移后的源码回退深度仍能找到实际资源."""
     import ament_index_python.packages
-    from rebotarm_force_control.gravity_control import package_file
+    from rebotarm_force_control.contracts import package_file
 
     def missing_index(name):
         raise LookupError(name)
@@ -149,7 +149,7 @@ def test_owned_resource_uses_source_when_install_index_is_missing(monkeypatch, p
 def test_owned_resource_prefers_install_index_to_existing_source(tmp_path, monkeypatch, package, relative):
     """让源码与安装资源同时存在,必须选安装索引,避免本机源码掩盖安装错误."""
     import ament_index_python.packages
-    from rebotarm_force_control.gravity_control import package_file
+    from rebotarm_force_control.contracts import package_file
 
     share = tmp_path/'share'/package
     installed = share/relative
@@ -168,16 +168,16 @@ def test_owned_resource_prefers_install_index_to_existing_source(tmp_path, monke
 ])
 def test_missing_owned_resource_fails_without_legacy_fallback(tmp_path, monkeypatch, package, relative):
     import ament_index_python.packages
-    from rebotarm_force_control import gravity_control
+    from rebotarm_force_control import contracts
     from rebotarm_motion import pose_kinematics
     monkeypatch.setattr(ament_index_python.packages, 'get_package_share_directory',
                         lambda name: str(tmp_path/'install/share'/name))
     # 同时隔离源码回退, 否则当前机器的正常资源会掩盖缺失安装文件.
-    monkeypatch.setattr(gravity_control, '__file__',
-                        str(tmp_path/'missing/src/rebotarm_force_control/rebotarm_force_control/gravity_control.py'))
+    monkeypatch.setattr(contracts, '__file__',
+                        str(tmp_path/'missing/src/rebotarm_force_control/rebotarm_force_control/contracts.py'))
     monkeypatch.setattr(pose_kinematics, '__file__', str(tmp_path/'missing/src/pkg/module.py'))
     with pytest.raises(FileNotFoundError):
-        gravity_control.package_file(package, relative)
+        contracts.package_file(package, relative)
     if package == 'rebotarm_moveit_config':
         with pytest.raises(FileNotFoundError):
             pose_kinematics.PoseKinematics()

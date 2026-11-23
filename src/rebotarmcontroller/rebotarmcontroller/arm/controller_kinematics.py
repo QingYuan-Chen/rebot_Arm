@@ -14,7 +14,7 @@
 """
 
 import numpy as np
-from rebotarm_force_control.gravity_control import JOINT_NAMES, vector
+from rebotarm_force_control.contracts import JOINT_NAMES, vector
 
 
 class ArmKinematics:

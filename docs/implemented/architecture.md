@@ -122,18 +122,26 @@ ROS 适配器直接接收职责组件的提交、取消和只读查询端口，�
 
 ### 力控职责（Force control ownership）
 
-`rebotarm_force_control` 拥有重力补偿模型、补偿状态、MIT 输出约束及关节阻抗控制律。
-模型和六轴限位读取规范 URDF；纯计算接口接收关节状态、前馈与实际周期，返回有界力矩。
-本包无 ROS 节点、设备句柄、线程或 MuJoCo 运行时依赖。硬件和仿真单向调用本包；
-反馈采集、时钟、模式生命周期、执行互斥和最终发送分别由各后端拥有。
+`rebotarm_force_control` 拥有共享力控算法与基础数值契约，内部按单一职责拆分为 8 个模块：
+基础契约与 URDF/资源定位（`contracts.py`）、MIT 协议限幅与周期计时（`mit_command.py`）、
+Pinocchio 重力模型加载（`gravity_model.py`）、重力补偿运行状态（`gravity_control.py`）、
+关节阻抗值对象与单拍控制律（`joint_impedance.py`）、准入安全上限配置 `JointImpedanceSettings`
+（`joint_impedance_settings.py`）、离线预算纯函数（`joint_impedance_budget.py`）以及后端无关的
+两阶段状态机 `JointImpedanceSession`（`joint_impedance_session.py`）。
+算法包无 ROS 节点、设备句柄、线程或 MuJoCo 运行时依赖，不预设默认刚度/阻尼回退，
+由硬件和仿真单向调用；模块间保持单向依赖、不保留兼容转发垫片。
+反馈采集、时钟/物理推进、模式生命周期、执行互斥和最终写入/发送分别由各后端拥有。
 
-首版关节阻抗采用静态平衡点：`tau = g(q) + K*(q_ref-q) - D*q_dot`，
-六轴刚度和阻尼分别以 N·m/rad、N·m·s/rad 表示；总力矩与每周期变化率受限。
-MuJoCo 以独立零速度动力学数据求纯重力项，并在既定控制拍推进；命令续期仅更新参数和期限。
-超时或显式退出切回当前位置保持，沿用上一拍实际力矩。仿真专用 ROS 服务与本地 API/CLI
-提供入口；已有六轴轨迹与阻抗模式互斥。使用和验证步骤见
+关节阻抗采用静态平衡点：`tau = g(q) + K*(q_ref-q) - D*q_dot`，
+六轴刚度和阻尼分别以 N·m/rad、N·m·s/rad 表示；状态机提供纯力矩步进 `compute_torque_step`
+与 MIT 步进 `compute_mit_step`，并在后端确认施加后通过 `commit` 提交实际输出与控制时刻。
+MuJoCo 以独立零速度动力学数据求纯重力项，按既定控制拍推进并委托 `JointImpedanceSession`
+执行限位/溢出准入、高频续期、看门狗到期及退出交接限速，同时保留仿真独立推荐增益与预算诊断入口。
+ROS 统一服务契约为 `/<ns>/joint_impedance/set`（`SetJointImpedance`），已有六轴轨迹、
+夹爪任务与阻抗模式互斥。使用和验证步骤见
 [MuJoCo 使用说明](../../src/rebotarm_simulation/README_mujoco.md)。
-关节阻抗当前执行入口位于仿真后端；真机重力补偿沿用原设备适配与显式使能流程。
+关节阻抗当前执行入口位于仿真后端；真机重力补偿沿用原设备适配与显式使能流程，
+后续真机阻抗的刚度/阻尼上限配置与设备适配边界另行设计。
 
 ### 运动职责（Motion ownership）
 

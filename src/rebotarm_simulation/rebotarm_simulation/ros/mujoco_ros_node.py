@@ -239,7 +239,7 @@ def create_node_class():
             )
             self.create_service(
                 SetJointImpedance,
-                f"/{self._arm_namespace}/sim/set_joint_impedance",
+                f"/{self._arm_namespace}/joint_impedance/set",
                 self._impedance_service,
                 callback_group=self._callback_group,
             )

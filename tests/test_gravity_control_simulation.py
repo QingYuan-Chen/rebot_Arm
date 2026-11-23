@@ -4,9 +4,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rebotarm_force_control.gravity_control import (
-    GravitySettings, bounded_mit_command, load_gravity_model,
-)
+from rebotarm_force_control.gravity_model import GravitySettings, load_gravity_model
+from rebotarm_force_control.mit_command import bounded_mit_command
 
 URDF = Path(__file__).resolve().parents[1] / 'src/rebotarm_moveit_config/config/rebotarm.urdf'
 EXTRA_BODIES = ('left_finger_link', 'right_finger_link',

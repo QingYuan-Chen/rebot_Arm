@@ -25,7 +25,7 @@ import pinocchio as pin
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src/rebotarmcontroller'))
 sys.path.insert(0, str(ROOT / 'src/rebotarm_force_control'))
-from rebotarm_force_control.gravity_control import load_gravity_model, GravitySettings
+from rebotarm_force_control.gravity_model import GravitySettings, load_gravity_model
 from rebotarmcontroller.arm.controller_kinematics import ArmKinematics
 
 REFERENCE = ROOT / 'tests/fixtures/controller_fk_reference_v1.json'

@@ -25,7 +25,8 @@ from typing import Optional
 from .configuration import HardwareSettings, load_configuration, default_config
 from .runtime.controller_runtime import ControllerRuntime
 from .arm.controller_kinematics import ArmKinematics
-from rebotarm_force_control.gravity_control import GravitySettings, load_gravity_model, package_file
+from rebotarm_force_control.contracts import package_file
+from rebotarm_force_control.gravity_model import GravitySettings, load_gravity_model
 from .runtime.lifecycle import ControllerLifecycle, LifecyclePorts
 from .arm.arm_controller import ArmController
 from .contracts.component_ports import (

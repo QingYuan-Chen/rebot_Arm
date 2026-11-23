@@ -27,7 +27,7 @@ PACKAGE_ROOT = ROOT / "src" / "rebotarm_force_control"
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-from rebotarm_force_control.gravity_control import apply_gravity_compensation_tau_scale  # type: ignore[import-not-found]
+from rebotarm_force_control.gravity_model import apply_gravity_compensation_tau_scale  # type: ignore[import-not-found]
 
 
 class GravityCompensationCoreTests(unittest.TestCase):

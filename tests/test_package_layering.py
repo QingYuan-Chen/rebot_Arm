@@ -416,8 +416,17 @@ def test_force_control_owns_algorithms_without_device_or_simulation_runtime():
             assert not forbidden.intersection(imports), source
     manifest = ET.parse(package / 'package.xml').getroot()
     assert not forbidden.intersection(child.text for child in manifest)
-    assert (package / 'rebotarm_force_control/gravity_control.py').is_file()
-    assert (package / 'rebotarm_force_control/joint_impedance.py').is_file()
+    for module_name in (
+        'contracts.py',
+        'mit_command.py',
+        'gravity_model.py',
+        'gravity_control.py',
+        'joint_impedance.py',
+        'joint_impedance_settings.py',
+        'joint_impedance_budget.py',
+        'joint_impedance_session.py',
+    ):
+        assert (package / 'rebotarm_force_control' / module_name).is_file(), module_name
     assert not (ROOT / 'src/rebotarmcontroller/rebotarmcontroller/gravity/gravity_control.py').exists()
     for name in ('rebotarmcontroller', 'rebotarm_simulation'):
         manifest = ET.parse(ROOT / 'src' / name / 'package.xml').getroot()

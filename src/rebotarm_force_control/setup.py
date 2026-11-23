@@ -14,7 +14,10 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/rebotarm_force_control"]),
         ("share/rebotarm_force_control", ["package.xml"]),
-        ("share/rebotarm_force_control/config", ["config/gravity_compensation.yaml"]),
+        (
+            "share/rebotarm_force_control/config",
+            ["config/gravity_compensation.yaml", "config/joint_impedance.yaml"],
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,

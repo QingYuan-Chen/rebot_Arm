@@ -195,6 +195,15 @@ def test_ros_service_forwards_complete_request_and_reports_failure():
     assert len(sim.calls) == 1
 
 
+def test_mujoco_node_registers_unified_joint_impedance_service_name():
+    source = (
+        __import__('pathlib').Path(__file__).resolve().parents[1]
+        / 'src/rebotarm_simulation/rebotarm_simulation/ros/mujoco_ros_node.py'
+    ).read_text(encoding='utf-8')
+    assert '/{self._arm_namespace}/joint_impedance/set' in source
+    assert 'sim/set_joint_impedance' not in source
+
+
 @pytest.mark.parametrize('entry', ['reserve', 'start'])
 def test_gripper_entry_rejects_impedance_before_reserving_resources(entry):
     from rebotarm_simulation.execution.gripper_execution import GripperExecution

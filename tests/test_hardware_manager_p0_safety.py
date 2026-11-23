@@ -262,7 +262,7 @@ def configure_gravity_compensation_test(
     manager.test_arm.mode_mit = lambda **_kwargs: True
     mit_commands: list[dict[str, object]] = []
     manager.gravity._send_gravity_mit = lambda **kwargs: mit_commands.append(dict(kwargs))
-    from rebotarm_force_control.gravity_control import GravitySettings
+    from rebotarm_force_control.gravity_model import GravitySettings
     manager.gravity._gc_settings = GravitySettings()
     manager.gravity._gc_torque_limits = np.array([27., 27., 27., 7., 7., 7.])
     manager.gravity._gravity_execution.last_total = np.zeros(6)
@@ -347,7 +347,7 @@ def test_gravity_deadline_fault_keeps_healthy_arm_enabled(monkeypatch):
     q = np.array([.2, -.3, -.4, .1, .2, -.1])
     configure_gravity_compensation_test(manager, positions=q, velocities=np.zeros(6))
     manager.gravity.start_gravity_compensation()
-    from rebotarm_force_control.gravity_control import LoopTiming
+    from rebotarm_force_control.mit_command import LoopTiming
     manager.gravity._gravity_timing = LoopTiming(100.)
     inject_feedback_refresh(monkeypatch, manager, lambda **kwargs: False)
     for i in range(4):

@@ -1,6 +1,6 @@
 # 当前项目状态与关键决定
 
-> 状态：REFERENCE；类型：项目状态；适用范围：当前工作空间及强化学习远端部署；最后核对：2026-11-22（补充交互式 GUI MuJoCo Viewer 与 RViz 桌面渲染验收；统一 continuous，13 包；真机默认失能；实机定量及整机硬件全项验收另行安排）。
+> 状态：REFERENCE；类型：项目状态；适用范围：当前工作空间及强化学习远端部署；最后核对：2026-11-22（完成关节阻抗“共享力控状态机 + 两阶段提交 + 仿真薄适配 + 统一 ROS 服务命名”重构；统一 continuous，13 包；真机默认失能；真机阻抗适配边界及硬件全项验收另行安排）。
 
 本文件是项目状态与进展的唯一文档，保留已完成进展、当前有效决定、验证范围和未解决问题。
 功能、架构、参数与启动命令分别链接到对应手册；不维护历史任务阶段、进度百分比或重复流水。
@@ -11,6 +11,12 @@
 P005 维护整改及软件/仿真验收完成：示教重定时归 motion、控制器使用组合句柄、MuJoCo 执行职责已拆分；功能关闭状态保留。
 
 ## 当前基线
+
+- 2026-11-22 完成关节阻抗共享状态机、仿真薄适配、统一服务命名与 `rebotarm_force_control` 整包单一职责拆分（块 1～3 + 方案 B；真机阻抗适配边界及 `GripperVisualJointStateNode` 等真机接入另行安排）：
+  - **力控包单一职责拆分与状态机补全（`rebotarm_force_control`）**：拆分为 8 个单向依赖、不保留兼容转发垫片的小模块——[contracts.py](../../src/rebotarm_force_control/rebotarm_force_control/contracts.py)（六轴契约/限位/`package_file`）、[mit_command.py](../../src/rebotarm_force_control/rebotarm_force_control/mit_command.py)（MIT 上限 `500/5`/`bounded_mit_command`/`LoopTiming`）、[gravity_model.py](../../src/rebotarm_force_control/rebotarm_force_control/gravity_model.py)（`GravitySettings`/`GravityModel`）、[gravity_control.py](../../src/rebotarm_force_control/rebotarm_force_control/gravity_control.py)（`GravityExecutionState`）、[joint_impedance.py](../../src/rebotarm_force_control/rebotarm_force_control/joint_impedance.py)（命令/输出值对象与 `compute_joint_impedance`）、[joint_impedance_settings.py](../../src/rebotarm_force_control/rebotarm_force_control/joint_impedance_settings.py)（`JointImpedanceSettings` 与 [joint_impedance.yaml](../../src/rebotarm_force_control/config/joint_impedance.yaml)，**仅配安全上限，不设默认刚度/阻尼回退**）、[joint_impedance_budget.py](../../src/rebotarm_force_control/rebotarm_force_control/joint_impedance_budget.py)（离线预算公式）与 [joint_impedance_session.py](../../src/rebotarm_force_control/rebotarm_force_control/joint_impedance_session.py)（两阶段状态机 `JointImpedanceSession`）；保持零 `rclpy`/`mujoco`/`motorbridge`/`threading` 依赖，并同步更新 `rebotarmcontroller` 8 个文件与相关测试/脚本的直接 `import` 路径（未改硬件业务逻辑）。
+  - **仿真薄适配与参数隔离（`rebotarm_simulation`）**：[sim_control_runtime.py](../../src/rebotarm_simulation/rebotarm_simulation/control/sim_control_runtime.py) 与 [state_snapshot.py](../../src/rebotarm_simulation/rebotarm_simulation/core/state_snapshot.py) 收敛为持有 `JointImpedanceSession`，仅保留 MuJoCo 零速度动力学求重力、物理限位提取、域随机化力矩缩放与写入确认提交；[impedance_gain_budget.py](../../src/rebotarm_simulation/rebotarm_simulation/diagnostics/impedance_gain_budget.py) 保留仿真专属推荐增益 `RECOMMENDED_STIFFNESS` / `RECOMMENDED_DAMPING` 与后续真机参数物理隔离；同步清理 [test_package_resources.py](../../tests/test_package_resources.py) 中残留的夹爪旧字段 `firmware_default_kp`/`kd` 断言。
+  - **统一服务命名（`rebotarm_msgs` / `rebotarm_simulation`）**：[SetJointImpedance.srv](../../src/rebotarm_msgs/srv/SetJointImpedance.srv) 与 `mujoco_ros_node.py` 统一切换为 `/<ns>/joint_impedance/set`，移除 `/<ns>/sim/set_joint_impedance`。
+  - **验证结果**：`rebotarm_force_control`、`rebotarmcontroller`、`rebotarm_simulation`（及前置 `rebotarm_msgs`）重建通过；分层 **28 passed**、控制器结构门禁 **13 passed**、`test_joint_impedance*` / `test_mujoco_joint_impedance` / `test_gravity_*` / `test_calibration_gravity*` / `test_package_resources` / `test_pose_sdk_exit` / `test_controller_*` / `test_device_request_arbitration` / `test_hardware_manager_p0_safety` 共 **456 passed**；规定及涉及包 `compileall`、`check_controller_fk.py`、`impedance_gain_budget` CLI、`git diff --check` 通过；前序 `651 passed / 1 skipped`（含 `test_mujoco_*.py`）与隔离域 207 实节点 `/rebotarm/joint_impedance/set`（`rc=0`）联调已覆盖。未运行全仓完整回归、未操作真机。
 
 - 2026-11-22 完成交互式 GUI MuJoCo Viewer 与 RViz 桌面渲染验收（`DISPLAY=:1`，X11 窗口抓帧与视觉核对）：
   - **渲染健康检查**：`rebotarm_mujoco_health --renderer-timeout 30` 在 `MUJOCO_GL=egl`（64×64×3）与桌面默认 GL 后端下均返回 `ok=true`、`renderer_available=true`（`mujoco_version=3.3.0`，8 关节 / 8 执行器）。

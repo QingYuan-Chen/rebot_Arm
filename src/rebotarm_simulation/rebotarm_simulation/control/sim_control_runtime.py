@@ -1,21 +1,28 @@
-"""职责:仿真控制目标,阻抗命令期限,控制器记忆及控制周期.
+"""职责:仿真控制目标,关节阻抗会话接线,控制器记忆及控制周期.
 
 对外接口:位置,力矩,关节阻抗命令和模式切换;物理实例由调用者持有.
-安全约束:阻抗只由完整命令激活,按同一控制拍限矩,过期转当前位置保持.
-文件结构:状态与快照,命令准入,逐拍控制,期限与重力辅助函数.
+安全约束:阻抗准入/看门狗/交接限速委托 rebotarm_force_control.JointImpedanceSession,
+          写入 data.ctrl 确认后再提交会话状态;过期切回当前位置保持.
+文件结构:状态与快照 → 命令准入与验证 → 逐拍控制 → 交接,到期与重力辅助函数.
 """
 from __future__ import annotations
+
 import math
 from typing import Mapping, Sequence
+
 import numpy as np
-from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES, JOINT_NAMES
-from rebotarm_simulation.core.validation import finite_vector as _finite_vector
-from rebotarm_simulation.core.mujoco_types import ControlStatus
+
+from rebotarm_force_control.joint_impedance import JointImpedanceCommand
+from rebotarm_force_control.joint_impedance_session import JointImpedanceSession
 from rebotarm_simulation.control.motor_control import PosVelController
 from rebotarm_simulation.control.sim_gripper import gripper_joint_positions_for_width
-from rebotarm_force_control.joint_impedance import JointImpedanceCommand, compute_joint_impedance
+from rebotarm_simulation.core.model_contract import ARM_JOINT_NAMES, JOINT_NAMES
+from rebotarm_simulation.core.mujoco_types import ControlStatus
+from rebotarm_simulation.core.validation import finite_vector as _finite_vector
+
 
 CONTROL_MODES = ("position", "hold", "gravity_comp", "raw_torque", "joint_impedance")
+
 
 class SimControlRuntime:
     def __init__(self, parameters, timestep, joint_ids, actuator_ids, gravity_torque):
@@ -37,10 +44,7 @@ class SimControlRuntime:
         self._actuator_ids = actuator_ids
         self._randomization_torque_scale = 1.0
         self._gravity_torque = gravity_torque
-        self._impedance_command = None
-        self._impedance_deadline = None
-        self._impedance_handoff = False
-        self._last_control_time = 0.0
+        self._impedance = JointImpedanceSession()
 
     @property
     def control_targets(self):
@@ -66,7 +70,40 @@ class SimControlRuntime:
     def randomization_torque_scale(self, scale: float) -> None:
         self._randomization_torque_scale = float(scale)
 
-    def reset_from_physics(self, mj, model, data, *, gripper_targets: Sequence[float] | None = None) -> None:
+    def _arm_addresses(self, model) -> tuple[list[int], list[int]]:
+        qpos_addresses = [int(model.jnt_qposadr[joint_id]) for joint_id in self._joint_ids[:6]]
+        qvel_addresses = [int(model.jnt_dofadr[joint_id]) for joint_id in self._joint_ids[:6]]
+        return qpos_addresses, qvel_addresses
+
+    def impedance_position_limits(self, model) -> tuple[tuple[float, float], ...]:
+        """提取物理引擎当前模型六轴位置限位供力控状态机校验."""
+        return tuple(
+            (float(model.jnt_range[joint_id][0]), float(model.jnt_range[joint_id][1]))
+            for joint_id in self._joint_ids[:6]
+        )
+
+    def impedance_effort_limits(self, model):
+        """采用模型执行器与标定上限的交集,供接纳,快照和逐拍计算共用."""
+        return tuple(
+            min(
+                limit,
+                -float(model.actuator_ctrlrange[actuator_id][0]),
+                float(model.actuator_ctrlrange[actuator_id][1]),
+            )
+            if model.actuator_ctrllimited[actuator_id]
+            else limit
+            for limit, actuator_id in zip(
+                self._motor_parameters.arm.effort_limit, self._actuator_ids[:6]
+            )
+        )
+
+    def _validate_impedance_feedback(self, data) -> None:
+        """每个物理步先检查反馈,避免非控制拍的坏值被物理引擎自动复位掩盖."""
+        self._impedance.validate_feedback(float(data.time), data.qpos, data.qvel, data.qacc)
+
+    def reset_from_physics(
+        self, mj, model, data, *, gripper_targets: Sequence[float] | None = None
+    ) -> None:
         """物理状态复位后,将目标对齐 qpos,清零控制器/力矩/阻抗记忆并以重力前馈进入 hold."""
         for index, joint_id in enumerate(self._joint_ids):
             qpos_address = int(model.jnt_qposadr[joint_id])
@@ -79,10 +116,7 @@ class SimControlRuntime:
         self._raw_torque_command.fill(0.0)
         self._raw_torque_requested.fill(0.0)
         self._raw_torque_deadline = None
-        self._impedance_command = None
-        self._impedance_deadline = None
-        self._impedance_handoff = False
-        self._last_control_time = float(data.time)
+        self._impedance.reset(float(data.time))
         self._requested_arm_torque.fill(0.0)
         self._applied_arm_torque.fill(0.0)
         self._arm_torque_saturated.fill(False)
@@ -107,9 +141,9 @@ class SimControlRuntime:
         self._apply_motor_control(model, data)
         mj.mj_forward(model, data)
 
-    def before_step(self, model, data):
+    def before_step(self, model, data) -> None:
         """物理步开始前检查期限,在控制相位起点更新输出,其余步保持上一拍控制量."""
-        if self._control_mode == "joint_impedance" or self._impedance_handoff:
+        if self._control_mode == "joint_impedance" or self._impedance.handoff:
             self._validate_impedance_feedback(data)
         self._expire_impedance_if_needed(model, data)
         if self._raw_torque_watchdog_expired(model, data):
@@ -118,12 +152,12 @@ class SimControlRuntime:
         if self._control_phase == 0:
             self._apply_motor_control(model, data)
             # 后继位置任务沿用原定拍完成首次交接,随后恢复既有位置控制语义.
-            if self._impedance_handoff and self._control_mode == "position":
-                self._impedance_handoff = False
+            if self._impedance.handoff and self._control_mode == "position":
+                self._impedance.clear_handoff()
 
-    def after_step(self, model, data):
+    def after_step(self, model, data) -> None:
         """物理时间推进后再次核对期限,保证跨过截止点的一步立即切回保持."""
-        if self._control_mode == "joint_impedance" or self._impedance_handoff:
+        if self._control_mode == "joint_impedance" or self._impedance.handoff:
             self._validate_impedance_feedback(data)
         self._control_phase = (self._control_phase + 1) % self._control_steps_per_update
         self._expire_impedance_if_needed(model, data)
@@ -132,8 +166,8 @@ class SimControlRuntime:
             self._control_phase = 0
             self._apply_motor_control(model, data)
 
-    def capture(self):
-        return dict(
+    def capture(self) -> dict:
+        snapshot = dict(
             control_targets=tuple(float(value) for value in self._position_targets),
             position_integral=tuple(float(value) for value in self._arm_controller.position_integral),
             velocity_integral=tuple(float(value) for value in self._arm_controller.velocity_integral),
@@ -144,15 +178,55 @@ class SimControlRuntime:
             raw_torque_requested=tuple(float(value) for value in self._raw_torque_requested),
             raw_torque_deadline=self._raw_torque_deadline,
             gripper_max_force_n=self._gripper_max_force_n,
-            impedance_command=self._impedance_command,
-            impedance_deadline=self._impedance_deadline,
-            impedance_requested_torques=(tuple(self._requested_arm_torque)
-                if self._impedance_command is not None else ()),
-            impedance_handoff=self._impedance_handoff,
-            last_control_time=self._last_control_time,
+        )
+        snapshot.update(self._impedance.snapshot())
+        return snapshot
+
+    def validate_saved_impedance_state(self, model, candidate, state) -> None:
+        """由状态机统一校验检查点内的阻抗命令,有效期与溢出边界."""
+        qpos_addresses, qvel_addresses = self._arm_addresses(model)
+        torque = np.asarray(candidate.ctrl)[list(self.arm_actuator_ids)]
+        self._impedance.validate_snapshot_state(
+            command=state.impedance_command,
+            deadline=state.impedance_deadline,
+            requested_torques=state.impedance_requested_torques,
+            handoff=state.impedance_handoff,
+            last_control_time=state.last_control_time,
+            candidate_time=float(candidate.time),
+            candidate_torque=torque,
+            position_limits=self.impedance_position_limits(model),
+            position=candidate.qpos[qpos_addresses],
+            velocity=candidate.qvel[qvel_addresses],
+            gravity=self._gravity_torque(qvel_addresses, candidate),
+            effort_limits=self.impedance_effort_limits(model),
+            rate_limits=self._motor_parameters.arm.torque_rate_limit_nm_s,
+            nominal_dt=1.0 / self._motor_parameters.control_rate_hz,
+            torque_scale=self._randomization_torque_scale,
         )
 
-    def restore(self, state, model, data):
+    def restore(self, state, model, data) -> None:
+        qpos_addresses, qvel_addresses = self._arm_addresses(model)
+        restored_torque = np.asarray(
+            [data.ctrl[actuator_id] for actuator_id in self._actuator_ids[:6]],
+            dtype=float,
+        )
+        self._impedance.restore(
+            command=state.impedance_command,
+            deadline=state.impedance_deadline,
+            requested_torques=state.impedance_requested_torques,
+            handoff=state.impedance_handoff,
+            last_control_time=state.last_control_time,
+            candidate_time=float(data.time),
+            candidate_torque=restored_torque,
+            position_limits=self.impedance_position_limits(model),
+            position=data.qpos[qpos_addresses],
+            velocity=data.qvel[qvel_addresses],
+            gravity=self._gravity_torque(qvel_addresses, data),
+            effort_limits=self.impedance_effort_limits(model),
+            rate_limits=self._motor_parameters.arm.torque_rate_limit_nm_s,
+            nominal_dt=1.0 / self._motor_parameters.control_rate_hz,
+            torque_scale=self._randomization_torque_scale,
+        )
         self._position_targets[:] = np.asarray(state.control_targets, dtype=float)
         self._arm_controller.position_integral[:] = np.asarray(state.position_integral, dtype=float)
         self._arm_controller.velocity_integral[:] = np.asarray(state.velocity_integral, dtype=float)
@@ -163,17 +237,13 @@ class SimControlRuntime:
         self._raw_torque_requested[:] = np.asarray(state.raw_torque_requested, dtype=float)
         self._raw_torque_deadline = state.raw_torque_deadline
         self._gripper_max_force_n = state.gripper_max_force_n
-        self._impedance_command = state.impedance_command
-        self._impedance_deadline = state.impedance_deadline
-        self._impedance_handoff = state.impedance_handoff
-        self._last_control_time = state.last_control_time
-        self._applied_arm_torque[:] = np.asarray(
-            [data.ctrl[actuator_id] for actuator_id in self._actuator_ids[:6]],
-            dtype=float,
-        )
+        self._applied_arm_torque[:] = restored_torque
         if self._control_mode in ("raw_torque", "joint_impedance"):
-            self._requested_arm_torque[:] = (state.impedance_requested_torques
-                if self._control_mode == "joint_impedance" else self._raw_torque_requested)
+            self._requested_arm_torque[:] = (
+                state.impedance_requested_torques
+                if self._control_mode == "joint_impedance"
+                else self._raw_torque_requested
+            )
             self._arm_torque_saturated[:] = ~np.isclose(
                 self._requested_arm_torque,
                 self._applied_arm_torque,
@@ -192,8 +262,8 @@ class SimControlRuntime:
         remaining = None
         if self._control_mode == "raw_torque" and self._raw_torque_deadline is not None:
             remaining = max(0.0, self._raw_torque_deadline - state.simulation_time)
-        if self._control_mode == "joint_impedance":
-            remaining = max(0.0, self._impedance_deadline - state.simulation_time)
+        elif self._control_mode == "joint_impedance":
+            remaining = self._impedance.watchdog_remaining(state.simulation_time)
         return ControlStatus(
             mode=self._control_mode,
             joint_targets=tuple(float(value) for value in self._position_targets[:6]),
@@ -206,9 +276,8 @@ class SimControlRuntime:
             gripper_target_width_m=float(self._position_targets[-2] - self._position_targets[-1]),
             gripper_width_m=state.gripper_width,
             gripper_control_force_n=tuple(float(value) for value in self._gripper_control_force),
-            impedance_command=self._impedance_command,
+            impedance_command=self._impedance.command,
         )
-
 
     def set_mode(self, model, data, mode: str) -> str:
         mode = str(mode)
@@ -224,12 +293,12 @@ class SimControlRuntime:
         # 键盘重复 hold 时沿用原目标与积分,反复捕获当前位置会引入目标和支撑力矩跳变.
         if mode == "hold" and self._control_mode == "hold":
             return self._control_mode
-        if self._impedance_handoff and mode in ("position", "hold"):
+        if self._impedance.handoff and mode in ("position", "hold"):
             if mode == "hold":
                 self._sync_arm_targets_to_current_position(model, data)
             self._control_mode = mode
             return mode
-        self._impedance_handoff = False
+        self._impedance.clear_handoff()
         if mode == "hold":
             self._sync_arm_targets_to_current_position(model, data)
         if mode != "raw_torque":
@@ -247,7 +316,6 @@ class SimControlRuntime:
         self._control_mode = mode
         self._apply_motor_control(model, data)
         return self._control_mode
-
 
     def command_joint_positions(
         self, model, data, targets: Mapping[str, float] | Sequence[float]
@@ -275,10 +343,9 @@ class SimControlRuntime:
         self._position_targets[:6] = current
         # 高频参考只更新目标,PI 的积分与力矩更新仍由配置控制频率推进.
         # 每次写目标都调用 set_mode 会额外执行控制计算,使高频轨迹改变有效增益.
-        if self._control_mode != 'position':
+        if self._control_mode != "position":
             self.set_mode(model, data, "position")
         return tuple(current)
-
 
     def command_joint_torques(
         self, model, data, torques: Sequence[float], timeout_s: float = 0.1
@@ -295,74 +362,42 @@ class SimControlRuntime:
         self._raw_torque_requested[:] = requested
         self._raw_torque_command[:] = np.clip(requested, -effort, effort)
         self._raw_torque_deadline = float(data.time) + timeout
-        self._impedance_handoff = False
+        self._impedance.clear_handoff()
         self._arm_controller.reset()
         self._control_mode = "raw_torque"
         self._apply_motor_control(model, data)
         return tuple(float(value) for value in self._raw_torque_command)
 
-    def validate_impedance_target(self, model, command):
-        """整批验证目标;命令接纳和快照恢复共用相同限位."""
-        for name, joint_id, target in zip(ARM_JOINT_NAMES, self._joint_ids[:6], command.target):
-            lower, upper = model.jnt_range[joint_id]
-            if not lower <= target <= upper:
-                raise ValueError(f"impedance target outside limits: {name}")
-
-    def impedance_effort_limits(self, model):
-        """采用模型执行器与标定上限的交集,供接纳,快照和逐拍计算共用."""
-        return tuple(min(limit, -float(model.actuator_ctrlrange[actuator_id][0]),
-            float(model.actuator_ctrlrange[actuator_id][1]))
-            if model.actuator_ctrllimited[actuator_id] else limit
-            for limit, actuator_id in zip(self._motor_parameters.arm.effort_limit, self._actuator_ids[:6]))
-
-    def _validate_impedance_feedback(self, data):
-        """每个物理步先检查反馈,避免非控制拍的坏值被物理引擎自动复位掩盖."""
-        if (not math.isfinite(float(data.time)) or not np.isfinite(data.qpos).all()
-                or not np.isfinite(data.qvel).all() or not np.isfinite(data.qacc).all()):
-            raise ValueError('joint impedance feedback and time must be finite')
-        if float(data.time) < self._last_control_time:
-            raise ValueError('joint impedance simulation time moved backwards')
-
-    def compute_impedance_output(self, model, data, command, previous, dt):
-        """接纳,快照复核和控制拍共用计算;只读取给定状态,写入由调用方决定."""
-        qpos_addresses = [int(model.jnt_qposadr[j]) for j in self._joint_ids[:6]]
-        qvel_addresses = [int(model.jnt_dofadr[j]) for j in self._joint_ids[:6]]
-        scale = self._randomization_torque_scale
-        # 随机化先作用于请求,最终执行输出统一受力矩及变化率约束.
-        command = JointImpedanceCommand(command.target,
-            tuple(value * scale for value in command.stiffness),
-            tuple(value * scale for value in command.damping))
-        return compute_joint_impedance(command, data.qpos[qpos_addresses],
-            data.qvel[qvel_addresses], self._gravity_torque(qvel_addresses, data) * scale,
-            self.impedance_effort_limits(model), self._motor_parameters.arm.torque_rate_limit_nm_s,
-            previous, dt)
-
-    def command_joint_impedance(self, model, data, targets, stiffness, damping, timeout_s):
+    def command_joint_impedance(
+        self, model, data, targets, stiffness, damping, timeout_s
+    ) -> tuple[float, ...]:
         """登记静态平衡点;重复更新保持控制相位和上一拍实际力矩."""
         command = JointImpedanceCommand(targets, stiffness, damping)
-        self.validate_impedance_target(model, command)
-        timeout = float(timeout_s)
-        deadline = float(data.time) + timeout
-        if (not math.isfinite(timeout) or timeout <= 0.0 or not math.isfinite(deadline)
-                or deadline <= float(data.time)):
-            raise ValueError("timeout_s must be finite and positive")
         if self._control_mode not in ("hold", "joint_impedance"):
             raise RuntimeError("enter hold before starting joint impedance")
-        if np.any(abs(self._applied_arm_torque) > self.impedance_effort_limits(model)):
-            raise ValueError("previous torque exceeds impedance effort limits")
         self._validate_impedance_feedback(data)
-        # 在修改模式/目标/期限前拒绝当前状态下已经溢出的控制律;预检不发送输出.
-        self.compute_impedance_output(model, data, command, self._applied_arm_torque,
-            1.0 / self._motor_parameters.control_rate_hz)
-        self._impedance_command = command
-        self._impedance_deadline = deadline
-        self._impedance_handoff = False
-        self._position_targets[:6] = command.target
+        qpos_addresses, qvel_addresses = self._arm_addresses(model)
+        accepted = self._impedance.accept(
+            command,
+            now=float(data.time),
+            timeout_s=timeout_s,
+            position_limits=self.impedance_position_limits(model),
+            position=data.qpos[qpos_addresses],
+            velocity=data.qvel[qvel_addresses],
+            gravity=self._gravity_torque(qvel_addresses, data),
+            effort_limits=self.impedance_effort_limits(model),
+            rate_limits=self._motor_parameters.arm.torque_rate_limit_nm_s,
+            previous_torque=self._applied_arm_torque,
+            nominal_dt=1.0 / self._motor_parameters.control_rate_hz,
+            torque_scale=self._randomization_torque_scale,
+        )
+        self._position_targets[:6] = accepted
         self._control_mode = "joint_impedance"
-        return command.target
+        return accepted
 
-
-    def command_gripper_width(self, model, data, width_m: float, max_force_n: float | None = None) -> float:
+    def command_gripper_width(
+        self, model, data, width_m: float, max_force_n: float | None = None
+    ) -> float:
         value = float(width_m)
         if not math.isfinite(value):
             raise ValueError("Gripper width must be finite")
@@ -379,38 +414,40 @@ class SimControlRuntime:
 
     def command_gripper_position(self, model, data, width, torque_cap):
         """独立夹爪开口命令,电机限矩按冻结传动参数折算;时间生命周期由调用者持有."""
-        if not math.isfinite(width) or not 0 <= width <= .09:
-            raise ValueError('gripper opening outside limits')
+        if not math.isfinite(width) or not 0 <= width <= 0.09:
+            raise ValueError("gripper opening outside limits")
         p = self._motor_parameters.gripper
         if not math.isfinite(torque_cap) or not 0 < torque_cap <= p.motor_torque_limit_nm:
-            raise ValueError('coordinated torque cap outside configured simulation capability')
-        force = torque_cap*abs(p.motor_radians_per_opening_m)*p.transmission_efficiency
-        return self.command_gripper_width(model,data,width,max_force_n=force)
+            raise ValueError("coordinated torque cap outside configured simulation capability")
+        force = torque_cap * abs(p.motor_radians_per_opening_m) * p.transmission_efficiency
+        return self.command_gripper_width(model, data, width, max_force_n=force)
 
-    def release_gripper_position(self, model, data):
+    def release_gripper_position(self, model, data) -> None:
         """协同位置任务结束后中性释放;保留目标记录而将实际输出归零."""
-        self._gripper_max_force_n = 0.
-        self._gripper_control_force.fill(0.)
+        self._gripper_max_force_n = 0.0
+        self._gripper_control_force.fill(0.0)
         for actuator in self._actuator_ids[-2:]:
-            data.ctrl[actuator] = 0.
-
+            data.ctrl[actuator] = 0.0
 
     def _apply_motor_control(self, model, data) -> None:
-        qpos_addresses = [int(model.jnt_qposadr[joint_id]) for joint_id in self._joint_ids[:6]]
-        qvel_addresses = [int(model.jnt_dofadr[joint_id]) for joint_id in self._joint_ids[:6]]
+        qpos_addresses, qvel_addresses = self._arm_addresses(model)
         position = np.asarray([data.qpos[address] for address in qpos_addresses], dtype=float)
         velocity = np.asarray([data.qvel[address] for address in qvel_addresses], dtype=float)
         gravity = self._gravity_compensation_torque(model, data, qvel_addresses)
-        elapsed = float(data.time) - self._last_control_time
-        if self._control_mode == "joint_impedance" and elapsed <= 0.0:
-            # 同一物理时刻首次激活或重入计算都保持已有输出,避免凭空消耗变化率预算.
-            requested_torque = self._requested_arm_torque.copy()
-            arm_torque = self._applied_arm_torque.copy()
-        elif self._control_mode == "joint_impedance":
-            result = self.compute_impedance_output(model, data, self._impedance_command,
-                self._applied_arm_torque, elapsed)
-            requested_torque = np.asarray(result.requested_torques)
-            arm_torque = np.asarray(result.applied_torques)
+        if self._control_mode == "joint_impedance":
+            result = self._impedance.compute_torque_step(
+                position,
+                velocity,
+                self._gravity_torque(qvel_addresses, data),
+                self.impedance_effort_limits(model),
+                self._motor_parameters.arm.torque_rate_limit_nm_s,
+                self._applied_arm_torque,
+                float(data.time),
+                previous_requested=self._requested_arm_torque,
+                torque_scale=self._randomization_torque_scale,
+            )
+            requested_torque = np.asarray(result.requested_torques, dtype=float)
+            arm_torque = np.asarray(result.applied_torques, dtype=float)
             self._arm_controller.applied_torque[:] = arm_torque
         elif self._control_mode == "raw_torque":
             requested_torque = self._raw_torque_requested.copy()
@@ -432,13 +469,16 @@ class SimControlRuntime:
             requested_torque = arm_torque.copy()
         requested_torque = np.asarray(requested_torque, dtype=float)
         scaled_torque = np.asarray(arm_torque, dtype=float) * (
-            1.0 if self._control_mode == "joint_impedance" else self._randomization_torque_scale)
-        if self._impedance_handoff:
-            allowance = np.asarray(self._motor_parameters.arm.torque_rate_limit_nm_s) * max(0.0, elapsed)
-            effort = np.asarray(self.impedance_effort_limits(model))
-            scaled_torque = np.clip(scaled_torque, -effort, effort)
-            scaled_torque = np.clip(scaled_torque,
-                self._applied_arm_torque - allowance, self._applied_arm_torque + allowance)
+            1.0 if self._control_mode == "joint_impedance" else self._randomization_torque_scale
+        )
+        if self._impedance.handoff:
+            scaled_torque = self._impedance.clamp_handoff_torque(
+                scaled_torque,
+                self.impedance_effort_limits(model),
+                self._motor_parameters.arm.torque_rate_limit_nm_s,
+                self._applied_arm_torque,
+                float(data.time),
+            )
         applied_torque = np.asarray(
             [
                 self._clamp_actuator_control(model, data, actuator_id, torque)
@@ -446,25 +486,34 @@ class SimControlRuntime:
             ],
             dtype=float,
         )
-        self._requested_arm_torque[:] = requested_torque
-        self._applied_arm_torque[:] = applied_torque
-        self._last_control_time = float(data.time)
-        if self._impedance_handoff:
-            self._arm_controller.applied_torque[:] = applied_torque / self._randomization_torque_scale
-        self._arm_torque_saturated[:] = ~np.isclose(requested_torque, applied_torque, atol=1e-12, rtol=0.0)
         for actuator_id, torque in zip(self._actuator_ids[:6], applied_torque):
             data.ctrl[actuator_id] = torque
+        # 执行器写入完成后再提交本拍阻抗/交接状态.
+        self._impedance.commit(
+            requested_torques=requested_torque,
+            applied_torques=applied_torque,
+            now=float(data.time),
+        )
+        self._requested_arm_torque[:] = requested_torque
+        self._applied_arm_torque[:] = applied_torque
+        if self._impedance.handoff:
+            self._arm_controller.applied_torque[:] = applied_torque / self._randomization_torque_scale
+        self._arm_torque_saturated[:] = ~np.isclose(
+            requested_torque, applied_torque, atol=1e-12, rtol=0.0
+        )
 
         left_qpos = float(data.qpos[int(model.jnt_qposadr[self._joint_ids[-2]])])
         right_qpos = float(data.qpos[int(model.jnt_qposadr[self._joint_ids[-1]])])
         left_qvel = float(data.qvel[int(model.jnt_dofadr[self._joint_ids[-2]])])
         right_qvel = float(data.qvel[int(model.jnt_dofadr[self._joint_ids[-1]])])
         gripper_params = self._motor_parameters.gripper
-        target_width = float(np.clip(
-            float(self._position_targets[-2] - self._position_targets[-1]),
-            gripper_params.displacement_min_m,
-            gripper_params.displacement_max_m,
-        ))
+        target_width = float(
+            np.clip(
+                float(self._position_targets[-2] - self._position_targets[-1]),
+                gripper_params.displacement_min_m,
+                gripper_params.displacement_max_m,
+            )
+        )
         finger_force = self._stable_gripper_force(
             model,
             data,
@@ -473,15 +522,14 @@ class SimControlRuntime:
             current_velocity=left_qvel - right_qvel,
         )
         if self._gripper_max_force_n is not None:
-            finger_force = float(np.clip(
-                finger_force, -self._gripper_max_force_n, self._gripper_max_force_n
-            ))
+            finger_force = float(
+                np.clip(finger_force, -self._gripper_max_force_n, self._gripper_max_force_n)
+            )
         left_force = self._clamp_actuator_control(model, data, self._actuator_ids[-2], finger_force)
         right_force = self._clamp_actuator_control(model, data, self._actuator_ids[-1], -finger_force)
         self._gripper_control_force[:] = (left_force, right_force)
         data.ctrl[self._actuator_ids[-2]] = left_force
         data.ctrl[self._actuator_ids[-1]] = right_force
-
 
     def _expire_raw_torque(self, model, data) -> None:
         self._raw_torque_command.fill(0.0)
@@ -491,20 +539,22 @@ class SimControlRuntime:
         self._arm_controller.reset()
         self._control_mode = "hold"
 
-    def _leave_impedance(self, model, data):
-        """退出时保留实际支撑力矩;下一原定控制拍平滑接入位置保持."""
+    def _enter_handoff_hold(self, model, data) -> None:
+        """保留上一拍实际支撑力矩切入 hold,下一原定控制拍平滑过渡."""
         self._sync_arm_targets_to_current_position(model, data)
         self._arm_controller.reset()
-        self._arm_controller.applied_torque[:] = self._applied_arm_torque / self._randomization_torque_scale
-        self._impedance_command = None
-        self._impedance_deadline = None
-        self._impedance_handoff = True
+        self._arm_controller.applied_torque[:] = (
+            self._applied_arm_torque / self._randomization_torque_scale
+        )
         self._control_mode = "hold"
 
-    def _expire_impedance_if_needed(self, model, data):
-        if self._control_mode == "joint_impedance" and float(data.time) >= self._impedance_deadline:
-            self._leave_impedance(model, data)
+    def _leave_impedance(self, model, data) -> None:
+        self._impedance.leave()
+        self._enter_handoff_hold(model, data)
 
+    def _expire_impedance_if_needed(self, model, data) -> None:
+        if self._control_mode == "joint_impedance" and self._impedance.expire_if_due(float(data.time)):
+            self._enter_handoff_hold(model, data)
 
     def _raw_torque_watchdog_expired(self, model, data) -> bool:
         return (
@@ -513,9 +563,10 @@ class SimControlRuntime:
             and float(data.time) >= self._raw_torque_deadline
         )
 
-
     def _stable_gripper_force(
-        self, model, data,
+        self,
+        model,
+        data,
         *,
         target_width: float,
         current_width: float,
@@ -530,11 +581,7 @@ class SimControlRuntime:
         ):
             return 0.0
         # MuJoCo 手指执行器直接施加 N;电机限矩先换算为线性力上限,滑动关节以米制 PD 稳定.
-        return (
-            gripper.sim_force_kp_n_per_m * error
-            - gripper.sim_force_kd_n_s_per_m * velocity
-        )
-
+        return gripper.sim_force_kp_n_per_m * error - gripper.sim_force_kd_n_s_per_m * velocity
 
     def _clamp_actuator_control(self, model, data, actuator_id: int, value: float) -> float:
         if int(model.actuator_ctrllimited[actuator_id]):
@@ -542,19 +589,23 @@ class SimControlRuntime:
             return min(max(float(value), lower), upper)
         return float(value)
 
-
     def _seed_arm_torque_from_gravity(self, model, data) -> None:
         qvel_addresses = [int(model.jnt_dofadr[joint_id]) for joint_id in self._joint_ids[:6]]
-        self._arm_controller.applied_torque[:] = self._gravity_compensation_torque(model, data, qvel_addresses)
-
+        self._arm_controller.applied_torque[:] = self._gravity_compensation_torque(
+            model, data, qvel_addresses
+        )
 
     def _sync_arm_targets_to_current_position(self, model, data) -> None:
         for index, joint_id in enumerate(self._joint_ids[:6]):
             self._position_targets[index] = float(data.qpos[int(model.jnt_qposadr[joint_id])])
 
-
-    def _gravity_compensation_torque(self, model, data, qvel_addresses: Sequence[int]) -> np.ndarray:
+    def _gravity_compensation_torque(
+        self, model, data, qvel_addresses: Sequence[int]
+    ) -> np.ndarray:
         scale = float(self._motor_parameters.arm.gravity_compensation_scale)
         if scale == 0.0:
             return np.zeros(len(ARM_JOINT_NAMES), dtype=float)
-        return np.asarray([data.qfrc_bias[address] for address in qvel_addresses], dtype=float) * scale
+        return (
+            np.asarray([data.qfrc_bias[address] for address in qvel_addresses], dtype=float)
+            * scale
+        )

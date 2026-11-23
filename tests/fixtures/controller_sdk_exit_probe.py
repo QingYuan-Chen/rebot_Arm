@@ -19,9 +19,9 @@ class BlockDevices(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockDevices())
 import rebotarmcontroller.hardware_manager as hardware
 import rebotarm_motion.pose_kinematics as motion
-import rebotarm_force_control.gravity_control as force_control
+import rebotarm_force_control.contracts as force_control
 from rebotarmcontroller.configuration import default_config
-from rebotarm_force_control.gravity_control import package_file
+from rebotarm_force_control.contracts import package_file
 from rebotarm_motion.cartesian_trajectory import plan_cartesian
 from rebotarm_motion.pose_compat_node import PoseCompatNode
 

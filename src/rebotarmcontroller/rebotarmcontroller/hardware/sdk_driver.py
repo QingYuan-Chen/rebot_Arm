@@ -25,7 +25,7 @@ import time
 import logging
 import numpy as np
 from ..contracts.controller_contracts import CommandReceipt, MotorFeedback
-from rebotarm_force_control.gravity_control import vector, POSITION_LIMITS
+from rebotarm_force_control.contracts import POSITION_LIMITS, vector
 
 _AUDIT = logging.getLogger('rebotarm.audit')
 

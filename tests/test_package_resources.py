@@ -106,8 +106,10 @@ def test_motor_parameters_load_from_install_without_source_tree(tmp_path, monkey
     assert values.arm.pos_kp == (150., 150., 150., 50., 50., 50.)
     assert values.arm.vel_kp == (.0125, .0125, .0125, .0008, .0008, .0008)
     assert values.arm.velocity_limit == (5., 5., 5., 3., 3., 3.)
-    assert values.gripper.firmware_default_kp == 8.
-    assert values.gripper.firmware_default_kd == 1.
+    assert values.gripper.motor_torque_limit_nm == 1.5
+    assert values.gripper.finger_force_limit_n == 1.5
+    assert values.gripper.sim_force_kp_n_per_m == 250.
+    assert values.gripper.sim_force_kd_n_s_per_m == 6.
 
 
 def test_internal_imports_launch_nodes_and_resource_owners_are_declared():
@@ -165,7 +167,7 @@ def test_hardware_has_no_teach_file_or_workflow_dependency():
 
 def test_package_file_reports_selected_install_path_when_resource_missing(tmp_path, monkeypatch):
     """已选安装位置缺文件时报告实际路径, 不回退到源码目录.\n"""
-    from rebotarm_force_control import gravity_control
+    from rebotarm_force_control import contracts
 
     share = tmp_path / "install" / "rebotarmcontroller"
     share.mkdir(parents=True)
@@ -175,4 +177,4 @@ def test_package_file_reports_selected_install_path_when_resource_missing(tmp_pa
     )
     missing = share / "config" / "missing.yaml"
     with pytest.raises(FileNotFoundError, match=str(missing)):
-        gravity_control.package_file("rebotarmcontroller", "config/missing.yaml")
+        contracts.package_file("rebotarmcontroller", "config/missing.yaml")

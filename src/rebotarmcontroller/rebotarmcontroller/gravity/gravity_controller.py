@@ -21,10 +21,10 @@ from __future__ import annotations
 from ..contracts.component_ports import ArmGravityPort, CyclePort, GravityFeedbackPort, ProtectionPort
 from ..runtime.command_guard import failure_decision
 from ..hardware.sdk_driver import CommandTransportError
-from rebotarm_force_control.gravity_control import (
-    GravityExecutionState, LoopTiming, bounded_mit_command,
-    vector, apply_gravity_compensation_tau_scale,
-)
+from rebotarm_force_control.contracts import vector
+from rebotarm_force_control.gravity_control import GravityExecutionState
+from rebotarm_force_control.gravity_model import apply_gravity_compensation_tau_scale
+from rebotarm_force_control.mit_command import LoopTiming, bounded_mit_command
 from ..runtime.device_requests import device_request
 import numpy as np
 import time

@@ -161,7 +161,7 @@ with RebotArmMujoco() as sim:
 
 ```bash
 ros2 service call /rebotarm/sim/set_mode rebotarm_msgs/srv/SetMode "{mode: hold}"
-ros2 service call /rebotarm/sim/set_joint_impedance rebotarm_msgs/srv/SetJointImpedance \
+ros2 service call /rebotarm/joint_impedance/set rebotarm_msgs/srv/SetJointImpedance \
   "{positions: [0.0, -0.8, -1.0, 0.3, 0.0, 0.0], stiffness: [45.0, 45.0, 45.0, 17.5, 17.5, 17.5], damping: [3.32, 5.0, 5.0, 1.28, 0.78, 0.34], timeout_s: 1.0}"
 ```
 
@@ -345,7 +345,7 @@ ros2 launch rebotarm_simulation mujoco_sim.launch.py
 - Topic：`/rebotarm/gripper/state`
 - Service：`/rebotarm/trajectory_stop`
 - Service：`/rebotarm/sim/set_mode`（只接受 `position/hold/gravity_comp`）
-- Service：`/rebotarm/sim/set_joint_impedance`（完整六轴平衡点、增益与仿真时间期限）
+- Service：`/rebotarm/joint_impedance/set`（完整六轴平衡点、增益与看门狗期限，仿真使用仿真时间）
 - Topic：`/diagnostics`
 - Topic：`/clock`
 
