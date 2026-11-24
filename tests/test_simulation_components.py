@@ -32,6 +32,7 @@ def test_snapshot_replays_physics_and_controller_at_nonzero_phase(sim, mode):
     {"model_dimensions": (0,)}, {"state_spec": -1}, {"state": ()},
     {"control_targets": ()}, {"position_integral": ()},
     {"velocity_integral": ()}, {"applied_torque": ()},
+    {"pos_vel_outer_torque": ()},
     {"control_mode": "invalid"},
 ])
 def test_invalid_snapshot_is_rejected_without_mutation(sim, change):

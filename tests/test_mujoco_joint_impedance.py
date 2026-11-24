@@ -301,3 +301,27 @@ def test_invalid_feedback_fails_before_physics_or_output_mutation(sim, steps, fi
     assert np.array_equal(data.ctrl, output_before)
     assert np.array_equal(data.qpos, position_before, equal_nan=True)
     assert np.isnan(data.time) if field == 'time' else data.time == time_before
+
+
+@pytest.mark.parametrize('joint_index', [0, 5])
+def test_low_passive_damping_exposes_active_kd_sensitivity(sim, joint_index):
+    # 验证阶段 B 分级机械阻尼([0.5*3, 0.2, 0.12, 0.06])与柔顺阻抗刚度下,
+    # 大关节 J1 与腕部小关节 J6 在 Kd=0 时均呈现清晰欠阻尼超调,投入推荐 Kd 后平顺收敛.
+    home = np.asarray(sim.get_state().joint_positions[:6], dtype=float)
+    step_rad = 0.15
+    target = home.copy()
+    target[joint_index] += step_rad
+
+    sim.reset_joint_positions(home)
+    sim.command_joint_impedance(target, STIFFNESS, (0.0,) * 6)
+    q_zero_kd = np.asarray([sim.step().joint_positions[joint_index] for _ in range(1000)], dtype=float)
+    overshoot_zero_kd = float(np.max(q_zero_kd - target[joint_index]) / step_rad)
+
+    sim.reset_joint_positions(home)
+    sim.command_joint_impedance(target, STIFFNESS, DAMPING)
+    q_rec_kd = np.asarray([sim.step().joint_positions[joint_index] for _ in range(1000)], dtype=float)
+    overshoot_rec_kd = float(np.max(q_rec_kd - target[joint_index]) / step_rad)
+
+    assert overshoot_zero_kd > 0.25
+    assert overshoot_rec_kd < 0.05
+    assert abs(q_rec_kd[-1] - target[joint_index]) < 0.002

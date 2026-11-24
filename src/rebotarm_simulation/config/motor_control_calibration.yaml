@@ -45,16 +45,19 @@ motor_specs:
 # 机械臂仿真标定与模型动力学.
 arm:
   # 逐关节标定:
-  #   motor_model              该关节所用电机型号(键指向 motor_specs)
-  #   firmware_to_torque_scale 固件速度环输出 → 物理力矩的比例系数(无量纲,随型号不同)
-  #   torque_rate_limit_nm_s   力矩变化率限幅(N·m/s):越大越接近阶跃,也越易激发振荡
-  #   torque_lowpass_alpha     力矩一阶低通系数,取值范围 (0, 1];越小越平滑但相位滞后越大
-  joint1: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
-  joint2: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
-  joint3: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
-  joint4: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
-  joint5: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
-  joint6: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
+  #   motor_model                    该关节所用电机型号(键指向 motor_specs)
+  #   firmware_to_torque_scale       固件速度环输出 → 物理力矩的比例系数(无量纲,随型号不同)
+  #   velocity_damping_nm_s_per_rad  位置控制环(PosVelController)内部 500 Hz 高频速度阻尼(N·m·s/rad),
+  #                                  自足保证 position/hold 闭环稳定,不依赖 MJCF 机械阻尼补偿,
+  #                                  也不作用于 gravity_comp/joint_impedance/raw_torque 模式
+  #   torque_rate_limit_nm_s         外环力矩变化率限幅(N·m/s):越大越接近阶跃,也越易激发振荡
+  #   torque_lowpass_alpha           外环力矩一阶低通系数,取值范围 (0, 1];越小越平滑但相位滞后越大
+  joint1: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, velocity_damping_nm_s_per_rad: 9.3, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
+  joint2: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, velocity_damping_nm_s_per_rad: 9.3, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
+  joint3: {motor_model: DM4340P, firmware_to_torque_scale: 200.0, velocity_damping_nm_s_per_rad: 9.3, torque_rate_limit_nm_s: 180.0, torque_lowpass_alpha: 0.35}
+  joint4: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, velocity_damping_nm_s_per_rad: 2.6, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
+  joint5: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, velocity_damping_nm_s_per_rad: 2.6, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
+  joint6: {motor_model: DM4310_V1_2, firmware_to_torque_scale: 500.0, velocity_damping_nm_s_per_rad: 1.0, torque_rate_limit_nm_s: 90.0, torque_lowpass_alpha: 0.35}
   # 位置环积分累加值限幅:防止长时间偏差把积分项灌满(抗积分饱和).
   # 注意键名写作 rad_s,实际量纲是 位置误差(rad) × 时间(s) 的积分结果.
   position_integral_limit_rad_s: 5.0
@@ -63,17 +66,19 @@ arm:
   # 重力补偿前馈缩放系数:1.0 为全量补偿,0.0 为关闭(用于做纯反馈对照实验).
   gravity_compensation_scale: 1.0
 
-# MuJoCo 关节级模型动力学参数(由 URDF→MJCF 转换时写入模型).
-#   damping      关节粘性阻尼(N·m·s/rad 或 N·s/m):越大动作越"黏",抑制振荡也拖慢响应
-#   armature     关节等效转动惯量(kg·m² 或 kg):模拟电机转子+减速器折算惯量,提升数值稳定性
+# MuJoCo 关节级纯机械模型动力学参数(由 URDF→MJCF 转换时写入模型,全模式常驻).
+#   damping      机械粘性阻尼(N·m·s/rad 或 N·s/m):阶段 B 在官方 DM 0.8 基准上按大小电机惯量与
+#                柔顺阻抗刚度分级微调为 [0.5, 0.5, 0.5, 0.2, 0.12, 0.06],不承担位置伺服阻尼补偿;
+#                夹爪维持 20.0 保障接触稳定
+#   armature     关节等效转动惯量(kg·m² 或 kg):按电机型号保留分级折算惯量,维持预算惯量一致
 #   frictionloss 干摩擦损失(N·m 或 N):静摩擦量级,影响低速爬行与到位精度
 model_dynamics:
-  joint1: {damping: 10.0, armature: 0.02, frictionloss: 0.02}
-  joint2: {damping: 10.0, armature: 0.02, frictionloss: 0.02}
-  joint3: {damping: 10.0, armature: 0.02, frictionloss: 0.02}
-  joint4: {damping: 3.0, armature: 0.005, frictionloss: 0.01}
-  joint5: {damping: 3.0, armature: 0.005, frictionloss: 0.01}
-  joint6: {damping: 1.0, armature: 0.002, frictionloss: 0.005}
+  joint1: {damping: 0.5, armature: 0.02, frictionloss: 0.02}
+  joint2: {damping: 0.5, armature: 0.02, frictionloss: 0.02}
+  joint3: {damping: 0.5, armature: 0.02, frictionloss: 0.02}
+  joint4: {damping: 0.2, armature: 0.005, frictionloss: 0.01}
+  joint5: {damping: 0.12, armature: 0.005, frictionloss: 0.01}
+  joint6: {damping: 0.06, armature: 0.002, frictionloss: 0.005}
   left_finger_joint: {damping: 20.0, armature: 0.001, frictionloss: 0.1}
   right_finger_joint: {damping: 20.0, armature: 0.001, frictionloss: 0.1}
 

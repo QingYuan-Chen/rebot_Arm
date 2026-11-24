@@ -27,8 +27,8 @@ from .contracts import JOINT_NAMES, finite_scalar, six_vector
 from .mit_command import PROTOCOL_KD_MAX, PROTOCOL_KP_MAX
 
 
-# 关节阻抗整定规则基准:额定力矩对应的参考偏角与目标阻尼比.
-REFERENCE_DEFLECTION_RAD = 0.2
+# 关节阻抗整定规则基准:额定力矩对应的参考偏角(1.0 rad 柔顺区间)与目标阻尼比.
+REFERENCE_DEFLECTION_RAD = 1.0
 DAMPING_RATIO = 0.7
 
 

@@ -91,6 +91,7 @@ class StateSnapshot:
             and len(state.position_integral) == len(ARM_JOINT_NAMES)
             and len(state.velocity_integral) == len(ARM_JOINT_NAMES)
             and len(state.applied_torque) == len(ARM_JOINT_NAMES)
+            and len(state.pos_vel_outer_torque) == len(ARM_JOINT_NAMES)
             and len(state.raw_torque_command) == len(ARM_JOINT_NAMES)
             and len(state.raw_torque_requested) == len(ARM_JOINT_NAMES)
             and state.control_mode in CONTROL_MODES

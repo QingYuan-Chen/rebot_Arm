@@ -127,7 +127,7 @@ Python 底层入口要求先处于 `hold`，ROS 入口支持从 `hold` 或空闲
 ```bash
 ros2 run rebotarm_simulation rebotarm_mujoco_cli impedance \
   --positions 0 -0.8 -1.0 0.3 0 0 \
-  --stiffness 45 45 45 17.5 17.5 17.5 --damping 3.32 5 5 1.28 0.78 0.34 \
+  --stiffness 9 9 9 3.5 3.5 3.5 --damping 1.48 2.56 2.42 0.57 0.35 0.15 \
   --duration 2
 ```
 
@@ -135,7 +135,7 @@ CLI 创建独立仿真实例并复位到 Home+Hold，进入 `joint_impedance` �
 后显式 `hold` 退出，输出激活态 `active_control`、退出后 `control` 及
 `explicit_stop_entered_hold=true`。
 示例增益来自[关节阻抗增益整定](../../docs/implemented/features/joint_impedance_gains.md)：
-刚度按电机额定力矩除以 0.2 rad 参考偏角取，阻尼按目标阻尼比换算并受达妙 MIT 协议
+刚度按电机额定力矩除以 1.0 rad 柔顺参考偏角取，阻尼按目标阻尼比换算并受达妙 MIT 协议
 `Kp<=500 / Kd<=5` 约束。模型惯量、末端负载或控制周期变化后须重新整定，
 可用下面的诊断命令复算力矩预算，低惯量腕关节的阻尼仍须通过响应与振荡检查确认：
 
@@ -152,8 +152,8 @@ from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
 with RebotArmMujoco() as sim:
     state = sim.reset()
     sim.command_joint_impedance(
-        state.joint_positions[:6], [45, 45, 45, 17.5, 17.5, 17.5],
-        [3.32, 5, 5, 1.28, 0.78, 0.34],
+        state.joint_positions[:6], [9, 9, 9, 3.5, 3.5, 3.5],
+        [1.48, 2.56, 2.42, 0.57, 0.35, 0.15],
     )
     sim.step(round(0.2 / sim.timestep))
     assert sim.control_mode == "joint_impedance"
@@ -166,7 +166,7 @@ with RebotArmMujoco() as sim:
 
 ```bash
 ros2 service call /rebotarm/joint_impedance/start rebotarm_msgs/srv/SetJointImpedance \
-  "{positions: [0.0, -0.8, -1.0, 0.3, 0.0, 0.0], stiffness: [45.0, 45.0, 45.0, 17.5, 17.5, 17.5], damping: [3.32, 5.0, 5.0, 1.28, 0.78, 0.34]}"
+  "{positions: [0.0, -0.8, -1.0, 0.3, 0.0, 0.0], stiffness: [9.0, 9.0, 9.0, 3.5, 3.5, 3.5], damping: [1.48, 2.56, 2.42, 0.57, 0.35, 0.15]}"
 ros2 service call /rebotarm/joint_impedance/stop std_srvs/srv/Trigger "{}"
 ```
 

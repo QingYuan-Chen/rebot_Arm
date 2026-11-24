@@ -1,25 +1,29 @@
-"""供 MuJoCo 各前端共用的纯电机控制数学库.
+"""职责:供 MuJoCo 各前端共用的机械臂双频位置/速度控制数学库与夹爪标定数据契约.
 
-本模块不访问仿真运行时,也不访问真实硬件,只负责把"固件速度环输出"换算为物理力矩:
-- 机械臂:串级位置/速度 PI 控制器(位置环输出目标速度,速度环输出力矩),
-  带条件式抗积分饱和,力矩变化率限幅与一阶低通平滑;
-- 夹爪:标定与物理力伺服参数数据类(实际指尖力由仿真运行时按米制 PD 计算).
+对外接口:
+    MotorSpec / ArmControlParameters / GripperControlParameters / MotorControlParameters
+        仿真控制参数不可变数据类,由 control_config 模块从 YAML 与权威 URDF 加载组装.
+    PosVelController
+        机械臂双频位置/速度控制器:100 Hz 外环串级 PI(compute_step/compute)更新积分与
+        限速平滑后的 outer_torque,500 Hz 内环速度阻尼(evaluate_inner_torque)按实时速度
+        输出受 effort_limit 裁剪的电机力矩,并提供 seed_torque/sync_outer_after_handoff
+        供复位与力控交接同步内部状态.
 
-固件整定增益(pos_kp/pos_ki/vel_kp/vel_ki 等)以原始形式保留自标定文件;
-而把固件输出换算成物理力矩的比例系数等属于"仿真标定"的参数,单独放在
-配置目录下的 motor_control_calibration.yaml 中.两者分离是为了保证硬件侧
-重新整定不会悄悄改变已经冻结的仿真标定结果.
+安全约束:
+    本模块不访问仿真运行时或真实硬件,不含 ROS/线程/时钟依赖;
+    velocity_damping_nm_s_per_rad 必须为六轴有限非负数,输出力矩始终受 URDF effort_limit 裁剪;
+    位置控制高频阻尼完全自足于本控制器内部,不依赖 MJCF 机械阻尼补偿,也不作用于 MIT/重力补偿模式.
 
-对外主要接口:参数加载由 control_config 模块负责;
-``PosVelController`` 负责机械臂逐控制周期计算控制量.
+文件结构:
+    参数数据类 → 双频位置/速度控制器 PosVelController → 向量形状与有限性校验辅助函数.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import numpy as np
-
 
 
 @dataclass(frozen=True)
@@ -50,11 +54,24 @@ class ArmControlParameters:
     effort_limit: tuple[float, ...]           # 关节力矩上限(N·m),取自 URDF 的 limit effort
     rated_torque: tuple[float, ...]           # 各关节电机额定力矩(N·m),用于重力补偿前馈
     firmware_to_torque_scale: tuple[float, ...]  # 固件速度环输出→物理力矩的比例系数(随电机型号不同)
-    torque_rate_limit_nm_s: tuple[float, ...]  # 力矩变化率限幅(N·m/s),越大越接近阶跃,越易激发振荡
-    torque_lowpass_alpha: tuple[float, ...]    # 力矩一阶低通系数,取值 (0, 1],越小越平滑但相位滞后越大
+    velocity_damping_nm_s_per_rad: tuple[float, ...]  # 位置控制环内部 500 Hz 高频速度阻尼(N·m·s/rad)
+    torque_rate_limit_nm_s: tuple[float, ...]  # 外环力矩变化率限幅(N·m/s),越大越接近阶跃,越易激发振荡
+    torque_lowpass_alpha: tuple[float, ...]    # 外环力矩一阶低通系数,取值 (0, 1],越小越平滑但相位滞后越大
     gravity_compensation_scale: float          # 重力补偿缩放系数,1.0 为全量补偿,0.0 为关闭
     position_integral_limit: float             # 位置环积分限幅(rad·s),抗积分饱和用
     velocity_integral_limit: float             # 速度环积分限幅(rad),抗积分饱和用
+
+    def __post_init__(self) -> None:
+        if len(self.velocity_damping_nm_s_per_rad) != 6:
+            raise ValueError(
+                f"velocity_damping_nm_s_per_rad must have length 6, got {len(self.velocity_damping_nm_s_per_rad)}"
+            )
+        for index, value in enumerate(self.velocity_damping_nm_s_per_rad):
+            numeric = float(value)
+            if not math.isfinite(numeric) or numeric < 0.0:
+                raise ValueError(
+                    f"velocity_damping_nm_s_per_rad[{index}] must be finite and non-negative, got {value}"
+                )
 
 
 @dataclass(frozen=True)
@@ -85,9 +102,10 @@ class MotorControlParameters:
 
 
 class PosVelController:
-    """串级位置/速度 PI 控制器(按标定频率运行,当前为 100 Hz),带条件式抗积分饱和.
+    """双频串级位置/速度控制器(100 Hz 外环 PI + 500 Hz 内环速度阻尼),带条件式抗积分饱和.
 
-    状态跨周期保持:位置环积分,速度环积分,上周期目标速度与实际施加力矩.
+    状态跨周期保持:位置环积分,速度环积分,上周期目标速度,100 Hz 外环基准力矩(outer_torque)
+    与叠加 500 Hz 速度阻尼后的最新电机输出力矩(applied_torque).
     异类控制模式切换时清理记忆;position/hold 交接须保留同一控制器的支撑力矩.
     reset 会清除积分和输出历史,上层不能在普通目标更新或 position→hold 时无条件调用.
     本类不做任何限速/安全判断(限幅只依据标定上限),上层仍需自行保证目标合法.
@@ -98,27 +116,57 @@ class PosVelController:
         self.position_integral = np.zeros(6, dtype=float)
         self.velocity_integral = np.zeros(6, dtype=float)
         self.target_velocity = np.zeros(6, dtype=float)
+        self.outer_torque = np.zeros(6, dtype=float)
         self.applied_torque = np.zeros(6, dtype=float)
 
     def reset(self) -> None:
-        """清空全部积分项与记忆量(目标速度,已施加力矩归零)."""
+        """清空全部积分项与记忆量(目标速度,外环基准力矩与已施加力矩归零)."""
         self.position_integral.fill(0.0)
         self.velocity_integral.fill(0.0)
         self.target_velocity.fill(0.0)
+        self.outer_torque.fill(0.0)
         self.applied_torque.fill(0.0)
 
-    def compute(self, target, position, velocity, dt: float, feedforward=None) -> np.ndarray:
-        """推进一个控制周期,返回限幅后的关节力矩指令(N·m,长度 6).
+    def seed_torque(self, torque, velocity=None) -> None:
+        """用已知力矩播种外环基准与已施加力矩;提供 velocity 时反算 outer_torque 以消除切入跳变."""
+        seeded = _vector6(torque, "torque")
+        self.applied_torque[:] = seeded
+        if velocity is None:
+            self.outer_torque[:] = seeded
+            return
+        vel = _vector6(velocity, "velocity")
+        damping = np.asarray(self.parameters.velocity_damping_nm_s_per_rad, dtype=float)
+        self.outer_torque[:] = seeded + damping * vel
+
+    def sync_outer_after_handoff(self, applied_motor_torque, velocity) -> None:
+        """力控退出 handoff 经外部限速裁剪后,按实际电机侧力矩与实时速度反写 outer_torque 基线."""
+        self.seed_torque(applied_motor_torque, velocity=velocity)
+
+    def evaluate_inner_torque(self, velocity) -> tuple[np.ndarray, np.ndarray]:
+        """500 Hz 物理步内环:基于锁存的 outer_torque 与实时关节速度计算电机力矩.
+
+        返回 ``(requested_torque, bounded_torque)`` 两份拷贝,分别表示裁剪前请求力矩与
+        受 URDF ``effort_limit`` 限幅后的实际电机侧力矩,并刷新 ``self.applied_torque``.
+        """
+        vel = _vector6(velocity, "velocity")
+        damping = np.asarray(self.parameters.velocity_damping_nm_s_per_rad, dtype=float)
+        effort = np.asarray(self.parameters.effort_limit, dtype=float)
+        requested = self.outer_torque - damping * vel
+        bounded = np.clip(requested, -effort, effort)
+        self.applied_torque[:] = bounded
+        return requested.copy(), bounded.copy()
+
+    def compute_step(
+        self, target, position, velocity, dt: float, feedforward=None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """推进一个 100 Hz 外环控制周期并立即执行内环速度阻尼,返回 ``(requested, bounded)``.
 
         参数:
             target: 目标关节角(rad,长度 6).
             position: 当前关节角(rad,长度 6).
             velocity: 当前关节角速度(rad/s,长度 6).
-            dt: 控制周期(s),必须为正,否则抛 ``ValueError``.
+            dt: 外环控制周期(s),必须为正,否则抛 ``ValueError``.
             feedforward: 前馈力矩(N·m,长度 6),典型为重力补偿;``None`` 视为零.
-
-        输入会经 :func:`_vector6` 校验形状;输出是内部状态的一份拷贝,
-        调用方修改返回值不会影响控制器状态.
         """
         if dt <= 0.0:
             raise ValueError("dt must be positive")
@@ -175,23 +223,32 @@ class PosVelController:
         self.velocity_integral = np.where(
             velocity_accept, velocity_candidate, self.velocity_integral
         )
-        # 力矩变化率限幅(N·m/s × dt = 本周期允许的最大增量),抑制力矩阶跃
+        # 外环力矩变化率限幅(N·m/s × dt = 本周期允许的最大增量),抑制外环指令阶跃
         max_delta = np.asarray(self.parameters.torque_rate_limit_nm_s) * float(dt)
-        rate_limited = self.applied_torque + np.clip(
-            clipped_torque - self.applied_torque,
+        rate_limited = self.outer_torque + np.clip(
+            clipped_torque - self.outer_torque,
             -max_delta,
             max_delta,
         )
-        # 一阶低通(指数平滑):alpha 越大跟随越快,越小越平滑
+        # 外环一阶低通(指数平滑):alpha 越大跟随越快,越小越平滑
         alpha = np.asarray(self.parameters.torque_lowpass_alpha)
-        smoothed = self.applied_torque + alpha * (rate_limited - self.applied_torque)
-        self.applied_torque = np.clip(smoothed, -effort, effort)
-        return self.applied_torque.copy()
+        smoothed = self.outer_torque + alpha * (rate_limited - self.outer_torque)
+        self.outer_torque = np.clip(smoothed, -effort, effort)
+        return self.evaluate_inner_torque(velocity)
+
+    def compute(self, target, position, velocity, dt: float, feedforward=None) -> np.ndarray:
+        """推进一个外环控制周期并叠加内环速度阻尼,返回限幅后的关节力矩指令(N·m,长度 6)."""
+        _, bounded = self.compute_step(
+            target, position, velocity, dt, feedforward=feedforward
+        )
+        return bounded
 
 
 def _vector6(value, name: str) -> np.ndarray:
-    """把输入转为 float64 的 (6,) 向量;形状不符时抛 ``ValueError``(错误信息带字段名便于定位)."""
+    """把输入转为 float64 的 (6,) 向量;形状不符或含非有限值时抛 ``ValueError``."""
     result = np.asarray(value, dtype=float)
     if result.shape != (6,):
         raise ValueError(f"{name} must have shape (6,), got {result.shape}")
+    if not np.all(np.isfinite(result)):
+        raise ValueError(f"{name} must contain only finite values")
     return result

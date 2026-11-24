@@ -199,6 +199,7 @@ class SavedSimulationState:
     position_integral: tuple[float, ...] = ()
     velocity_integral: tuple[float, ...] = ()
     applied_torque: tuple[float, ...] = ()
+    pos_vel_outer_torque: tuple[float, ...] = ()
     control_phase: int = 0
     control_mode: str = "hold"
     raw_torque_command: tuple[float, ...] = ()
@@ -218,6 +219,7 @@ class SavedSimulationState:
         object.__setattr__(self, "position_integral", _float_tuple(self.position_integral, label="position_integral"))
         object.__setattr__(self, "velocity_integral", _float_tuple(self.velocity_integral, label="velocity_integral"))
         object.__setattr__(self, "applied_torque", _float_tuple(self.applied_torque, label="applied_torque"))
+        object.__setattr__(self, "pos_vel_outer_torque", _float_tuple(self.pos_vel_outer_torque, label="pos_vel_outer_torque"))
         object.__setattr__(self, "control_phase", int(self.control_phase))
         object.__setattr__(self, "control_mode", str(self.control_mode))
         object.__setattr__(self, "raw_torque_command", _float_tuple(

@@ -30,6 +30,7 @@ def test_parameters_come_from_existing_motor_yaml_and_urdf() -> None:
     assert parameters.arm.effort_limit == pytest.approx((27, 27, 27, 7, 7, 7))
     assert parameters.arm.rated_torque == pytest.approx((9, 9, 9, 3.5, 3.5, 3.5))
     assert parameters.arm.firmware_to_torque_scale == pytest.approx((200, 200, 200, 500, 500, 500))
+    assert parameters.arm.velocity_damping_nm_s_per_rad == pytest.approx((9.3, 9.3, 9.3, 2.6, 2.6, 1.0))
     assert parameters.arm.torque_rate_limit_nm_s == pytest.approx((180, 180, 180, 90, 90, 90))
     assert parameters.arm.torque_lowpass_alpha == pytest.approx((0.35,) * 6)
     assert parameters.arm.gravity_compensation_scale == pytest.approx(1.0)
@@ -95,3 +96,49 @@ def test_pos_vel_controller_saturates_and_reset_clears_integrators() -> None:
     controller.reset()
     assert controller.position_integral == pytest.approx(np.zeros(6))
     assert controller.velocity_integral == pytest.approx(np.zeros(6))
+    assert controller.outer_torque == pytest.approx(np.zeros(6))
+
+
+def test_pos_vel_controller_applies_inner_velocity_damping_and_rejects_invalid_values() -> None:
+    from dataclasses import replace
+
+    parameters = load_motor_control_parameters(ROOT).arm
+    controller = PosVelController(parameters)
+    outer_step = controller.compute(
+        target=np.array((0.01, 0, 0, 0, 0, 0), dtype=float),
+        position=np.zeros(6),
+        velocity=np.zeros(6),
+        dt=0.01,
+    )
+    assert outer_step[0] == pytest.approx(0.63)
+    requested, bounded = controller.evaluate_inner_torque(np.array((0.1, 0, 0, 0, 0, 0), dtype=float))
+    assert requested[0] == pytest.approx(0.63 - 9.3 * 0.1)
+    assert bounded[0] == pytest.approx(0.63 - 9.3 * 0.1)
+    assert controller.outer_torque[0] == pytest.approx(0.63)
+
+    for bad in ((-0.1, 0, 0, 0, 0, 0), (float("nan"), 0, 0, 0, 0, 0), (1.0, 1.0)):
+        with pytest.raises(ValueError, match="velocity_damping_nm_s_per_rad"):
+            replace(parameters, velocity_damping_nm_s_per_rad=bad)
+
+
+def test_pos_vel_inner_damping_stabilizes_step_even_at_near_zero_mechanical_damping() -> None:
+    pytest.importorskip("mujoco")
+    from rebotarm_simulation.core.mujoco_sim import RebotArmMujoco
+
+    with RebotArmMujoco() as sim:
+        model, data = sim.borrow_viewer_handles()
+        for joint_id in sim._joint_ids[:6]:
+            dof = int(model.jnt_dofadr[joint_id])
+            model.dof_damping[dof] = 0.01
+            sim._randomization_baseline["dof_damping"][dof] = 0.01
+        sim._mj.mj_setConst(model, data)
+        sim.reset()
+        target = np.asarray((0.05, -0.85, -1.05, 0.25, 0.05, -0.08), dtype=float)
+        sim.command_joint_positions(target)
+        max_speed = 0.0
+        for _ in range(3000):
+            state = sim.step()
+            max_speed = max(max_speed, float(np.max(np.abs(state.joint_velocities[:6]))))
+        final_error = float(np.max(np.abs(np.asarray(state.joint_positions[:6]) - target)))
+        assert final_error < 0.01
+        assert max_speed < 1.0

@@ -1,4 +1,16 @@
-"""Load versioned simulation control parameters without changing controller math."""
+"""职责:读取仿真电机标定 YAML 与权威 URDF 力矩上限,组装不可变控制参数集合.
+
+对外接口:
+    load_motor_control_parameters(repo_root=None, *, calibration_path=None, urdf_path=None) -> MotorControlParameters
+
+安全约束:
+    不读取真机硬件配置,严禁在缺项或非法值时静默回退默认值;
+    torque_lowpass_alpha 须在 (0, 1],velocity_damping_nm_s_per_rad 须为有限非负数.
+
+文件结构:
+    参数装配主入口 load_motor_control_parameters → YAML/URDF 只读解析辅助函数.
+"""
+import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import yaml
@@ -59,6 +71,7 @@ def load_motor_control_parameters(
     effort_limit: list[float] = []
     rated_torque: list[float] = []
     firmware_to_torque_scale: list[float] = []
+    velocity_damping_nm_s_per_rad: list[float] = []
     torque_rate_limit_nm_s: list[float] = []
     torque_lowpass_alpha: list[float] = []
     for name in (f"joint{index}" for index in range(1, 7)):
@@ -76,6 +89,12 @@ def load_motor_control_parameters(
         effort_limit.append(float(urdf_efforts[name]))
         rated_torque.append(float(motor_spec.rated_torque_nm))
         firmware_to_torque_scale.append(float(calibration_entry["firmware_to_torque_scale"]))
+        velocity_damping = float(calibration_entry["velocity_damping_nm_s_per_rad"])
+        if not math.isfinite(velocity_damping) or velocity_damping < 0.0:
+            raise ValueError(
+                f"velocity_damping_nm_s_per_rad for {name} must be finite and non-negative"
+            )
+        velocity_damping_nm_s_per_rad.append(velocity_damping)
         torque_rate_limit_nm_s.append(float(calibration_entry["torque_rate_limit_nm_s"]))
         alpha = float(calibration_entry["torque_lowpass_alpha"])
         if not 0.0 < alpha <= 1.0:
@@ -100,6 +119,7 @@ def load_motor_control_parameters(
             effort_limit=tuple(effort_limit),
             rated_torque=tuple(rated_torque),
             firmware_to_torque_scale=tuple(firmware_to_torque_scale),
+            velocity_damping_nm_s_per_rad=tuple(velocity_damping_nm_s_per_rad),
             torque_rate_limit_nm_s=tuple(torque_rate_limit_nm_s),
             torque_lowpass_alpha=tuple(torque_lowpass_alpha),
             gravity_compensation_scale=float(arm_calibration["gravity_compensation_scale"]),

@@ -130,9 +130,9 @@ def test_generated_model_adds_mujoco_control_and_observation_contract() -> None:
     assert actuators[-2].attrib["ctrlrange"] == "-1.5 1.5"
     assert actuators[-1].attrib["forcerange"] == "-1.5 1.5"
     dynamics = {joint.attrib["name"]: joint for joint in root.findall("worldbody//joint")}
-    assert dynamics["joint1"].attrib["damping"] == "10"
-    assert dynamics["joint4"].attrib["damping"] == "3"
-    assert dynamics["joint6"].attrib["damping"] == "1"
+    assert dynamics["joint1"].attrib["damping"] == "0.5"
+    assert dynamics["joint4"].attrib["damping"] == "0.2"
+    assert dynamics["joint6"].attrib["damping"] == "0.06"
     assert dynamics["left_finger_joint"].attrib["damping"] == "20"
 
     coupling = root.find("equality/joint")

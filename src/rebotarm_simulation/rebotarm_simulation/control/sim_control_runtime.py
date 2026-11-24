@@ -1,10 +1,11 @@
-"""职责:仿真控制目标,关节阻抗双频MIT会话接线,控制器记忆及控制周期.
+"""职责:仿真控制目标,位置/保持双频内环与关节阻抗双频MIT会话接线,控制器记忆及控制周期.
 
 对外接口:位置,力矩,关节阻抗命令和模式切换;物理实例由调用者持有.
 安全约束:阻抗准入/两阶段MIT计算/交接限速委托 rebotarm_force_control.JointImpedanceSession,
-          100 Hz 外环写 data.ctrl 确认后提交锁存,500 Hz 内环按锁存增益实时求值;
-          退出经 handoff 平滑交接回 hold.
-文件结构:状态与快照 → 命令准入与验证 → 逐拍控制(外环/内环) → 交接与重力辅助函数.
+          位置/保持 500 Hz 高频速度阻尼委托 PosVelController.evaluate_inner_torque;
+          100 Hz 外环写 data.ctrl 确认后提交状态,500 Hz 物理子步分别执行 MIT/PosVel 内环;
+          退出阻抗经 handoff 限速裁剪并回写 PosVelController 外环基线平滑交接回 hold.
+文件结构:状态与快照 → 命令准入与验证 → 逐拍控制(外环/MIT内环/PosVel内环) → 交接与重力辅助函数.
 """
 from __future__ import annotations
 
@@ -161,7 +162,7 @@ class SimControlRuntime:
         mj.mj_forward(model, data)
 
     def before_step(self, model, data) -> None:
-        """物理步开始前核对反馈;100 Hz 外环更新控制量,其余 500 Hz 步仅在 MIT 阻抗下运行内环."""
+        """物理步开始前核对反馈;100 Hz 外环更新控制量,其余 500 Hz 步按当前模式运行内环."""
         if self._control_mode == "joint_impedance" or self._impedance.handoff:
             self._validate_impedance_feedback(data)
         if self._raw_torque_watchdog_expired(model, data):
@@ -174,6 +175,9 @@ class SimControlRuntime:
                 self._impedance.clear_handoff()
         elif self._control_mode == "joint_impedance":
             self._apply_mit_inner_loop(model, data)
+        elif self._control_mode in ("position", "hold") and not self._impedance.handoff:
+            # 退出阻抗的 handoff 过渡子步保持外环已限速力矩,避免越过变化率约束.
+            self._apply_pos_vel_inner_loop(model, data)
 
     def after_step(self, model, data) -> None:
         """物理时间推进后核对反馈与相位;raw_torque 到期立即切回保持."""
@@ -191,6 +195,7 @@ class SimControlRuntime:
             position_integral=tuple(float(value) for value in self._arm_controller.position_integral),
             velocity_integral=tuple(float(value) for value in self._arm_controller.velocity_integral),
             applied_torque=tuple(float(value) for value in self._arm_controller.applied_torque),
+            pos_vel_outer_torque=tuple(float(value) for value in self._arm_controller.outer_torque),
             control_phase=self._control_phase,
             control_mode=self._control_mode,
             raw_torque_command=tuple(float(value) for value in self._raw_torque_command),
@@ -252,6 +257,7 @@ class SimControlRuntime:
         self._arm_controller.position_integral[:] = np.asarray(state.position_integral, dtype=float)
         self._arm_controller.velocity_integral[:] = np.asarray(state.velocity_integral, dtype=float)
         self._arm_controller.applied_torque[:] = np.asarray(state.applied_torque, dtype=float)
+        self._arm_controller.outer_torque[:] = np.asarray(state.pos_vel_outer_torque, dtype=float)
         self._control_phase = int(state.control_phase) % self._control_steps_per_update
         self._control_mode = state.control_mode
         self._raw_torque_command[:] = np.asarray(state.raw_torque_command, dtype=float)
@@ -481,25 +487,25 @@ class SimControlRuntime:
             )
             requested_torque = np.asarray(mit_output.requested_torques, dtype=float)
             arm_torque = np.asarray(mit_output.estimated_torques, dtype=float)
-            self._arm_controller.applied_torque[:] = arm_torque
+            self._arm_controller.seed_torque(arm_torque)
         elif self._control_mode == "raw_torque":
             requested_torque = self._raw_torque_requested.copy()
             arm_torque = self._raw_torque_command.copy()
-            self._arm_controller.applied_torque[:] = arm_torque
+            self._arm_controller.seed_torque(arm_torque)
         elif self._control_mode == "gravity_comp":
             requested_torque = gravity
             arm_torque = requested_torque.copy()
-            self._arm_controller.applied_torque[:] = arm_torque
+            self._arm_controller.seed_torque(arm_torque)
         else:
-            # position 与 hold 共用同一串级 PI 控制器;hold 固定进入时捕获的位置目标.
-            arm_torque = self._arm_controller.compute(
+            # position 与 hold 共用同一双频位置控制器;hold 固定进入时捕获的位置目标.
+            requested_motor_torque, arm_torque = self._arm_controller.compute_step(
                 target=self._position_targets[:6],
                 position=position,
                 velocity=velocity,
                 dt=1.0 / self._motor_parameters.control_rate_hz,
                 feedforward=gravity,
             )
-            requested_torque = arm_torque.copy()
+            requested_torque = requested_motor_torque * self._randomization_torque_scale
         requested_torque = np.asarray(requested_torque, dtype=float)
         scaled_torque = np.asarray(arm_torque, dtype=float) * (
             1.0 if self._control_mode == "joint_impedance" else self._randomization_torque_scale
@@ -531,7 +537,10 @@ class SimControlRuntime:
         self._requested_arm_torque[:] = requested_torque
         self._applied_arm_torque[:] = applied_torque
         if self._impedance.handoff:
-            self._arm_controller.applied_torque[:] = applied_torque / self._randomization_torque_scale
+            self._arm_controller.sync_outer_after_handoff(
+                applied_torque / self._randomization_torque_scale,
+                velocity,
+            )
         self._arm_torque_saturated[:] = ~np.isclose(
             requested_torque, applied_torque, atol=1e-12, rtol=0.0
         )
@@ -577,10 +586,35 @@ class SimControlRuntime:
         """保留上一拍实际支撑力矩切入 hold,下一原定控制拍平滑过渡."""
         self._sync_arm_targets_to_current_position(model, data)
         self._arm_controller.reset()
-        self._arm_controller.applied_torque[:] = (
-            self._applied_arm_torque / self._randomization_torque_scale
+        _, qvel_addresses = self._arm_addresses(model)
+        velocity = np.asarray([data.qvel[address] for address in qvel_addresses], dtype=float)
+        self._arm_controller.sync_outer_after_handoff(
+            self._applied_arm_torque / self._randomization_torque_scale,
+            velocity,
         )
         self._control_mode = "hold"
+
+    def _apply_pos_vel_inner_loop(self, model, data) -> None:
+        """500 Hz 物理子步内环:委托 PosVelController 按实时速度施加位置控制高频速度阻尼."""
+        _, qvel_addresses = self._arm_addresses(model)
+        velocity = np.asarray([data.qvel[address] for address in qvel_addresses], dtype=float)
+        requested_motor, bounded_motor = self._arm_controller.evaluate_inner_torque(velocity)
+        requested_torque = requested_motor * self._randomization_torque_scale
+        scaled_torque = bounded_motor * self._randomization_torque_scale
+        applied_torque = np.asarray(
+            [
+                self._clamp_actuator_control(model, data, actuator_id, torque)
+                for actuator_id, torque in zip(self._actuator_ids[:6], scaled_torque)
+            ],
+            dtype=float,
+        )
+        for actuator_id, torque in zip(self._actuator_ids[:6], applied_torque):
+            data.ctrl[actuator_id] = torque
+        self._requested_arm_torque[:] = requested_torque
+        self._applied_arm_torque[:] = applied_torque
+        self._arm_torque_saturated[:] = ~np.isclose(
+            requested_torque, applied_torque, atol=1e-12, rtol=0.0
+        )
 
     def _apply_mit_inner_loop(self, model, data) -> None:
         """500 Hz 物理子步内环:沿用最近 100 Hz 锁存的 MIT 参数与当前 (q, qd) 实时求值."""
@@ -610,7 +644,7 @@ class SimControlRuntime:
         for actuator_id, torque in zip(self._actuator_ids[:6], applied_torque):
             data.ctrl[actuator_id] = torque
         self._applied_arm_torque[:] = applied_torque
-        self._arm_controller.applied_torque[:] = applied_torque
+        self._arm_controller.seed_torque(applied_torque)
         self._arm_torque_saturated[:] = np.asarray(mit.saturated, dtype=bool) | ~np.isclose(
             raw_torque, applied_torque, atol=1e-12, rtol=0.0
         )
@@ -654,8 +688,8 @@ class SimControlRuntime:
 
     def _seed_arm_torque_from_gravity(self, model, data) -> None:
         qvel_addresses = [int(model.jnt_dofadr[joint_id]) for joint_id in self._joint_ids[:6]]
-        self._arm_controller.applied_torque[:] = self._gravity_compensation_torque(
-            model, data, qvel_addresses
+        self._arm_controller.seed_torque(
+            self._gravity_compensation_torque(model, data, qvel_addresses)
         )
 
     def _sync_arm_targets_to_current_position(self, model, data) -> None:

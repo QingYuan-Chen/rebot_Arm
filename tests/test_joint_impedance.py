@@ -392,8 +392,8 @@ def test_evaluate_mit_torque_validates_inputs_and_overflow():
 
 def test_pure_budget_functions_validate_protocol_and_torque_limits():
     report = evaluate_gains(
-        stiffness=(45.0, 45.0, 45.0, 17.5, 17.5, 17.5),
-        damping=(3.32, 5.0, 5.0, 1.28, 0.78, 0.34),
+        stiffness=(9.0, 9.0, 9.0, 3.5, 3.5, 3.5),
+        damping=(1.48, 2.56, 2.42, 0.57, 0.35, 0.15),
         rated=(9.0, 9.0, 9.0, 3.5, 3.5, 3.5),
         effort=(27.0, 27.0, 27.0, 7.0, 7.0, 7.0),
         gravity=(0.0, 3.6, 8.5, 2.6, 0.0, 0.0),

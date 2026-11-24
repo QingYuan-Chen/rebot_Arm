@@ -1,14 +1,15 @@
 # 终端键盘仿真专用关节阻抗初始参数与调参步长.
 # 仅在 use_hardware:=false 时由 teleop_keyboard.launch.py 加载;
 # 真机阻抗刚度/阻尼参数必须独立配置,严禁复用本文件.
+# 初始增益取自 θ_ref=1.0 rad 柔顺区间预算;J6 键盘最大阻尼限为 3.0 以避开 500 Hz 离散稳定界(2*M6/dt≈3.45).
 
 /**:
   ros__parameters:
     impedance_profile: simulation
-    impedance_initial_stiffness: [45.0, 45.0, 45.0, 17.5, 17.5, 17.5]
-    impedance_initial_damping: [3.32, 5.0, 5.0, 1.28, 0.78, 0.34]
+    impedance_initial_stiffness: [9.0, 9.0, 9.0, 3.5, 3.5, 3.5]
+    impedance_initial_damping: [1.48, 2.56, 2.42, 0.57, 0.35, 0.15]
     impedance_max_stiffness: [500.0, 500.0, 500.0, 500.0, 500.0, 500.0]
-    impedance_max_damping: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
-    impedance_kp_step: 2.0
-    impedance_kd_step: 0.1
+    impedance_max_damping: [5.0, 5.0, 5.0, 5.0, 5.0, 3.0]
+    impedance_kp_step: 0.5
+    impedance_kd_step: 0.05
     impedance_q_step_rad: 0.02

@@ -59,9 +59,9 @@ REFERENCE_POSES = (
     (0.0, -1.2, -0.6, 0.6, 0.0, 0.0),
 )
 
-# 仿真推导结果;K 取额定 9/3.5 N·m 除以 0.2 rad,D 取目标阻尼比并截断到协议上限.
-RECOMMENDED_STIFFNESS = (45.0, 45.0, 45.0, 17.5, 17.5, 17.5)
-RECOMMENDED_DAMPING = (3.32, 5.0, 5.0, 1.28, 0.78, 0.34)
+# 仿真推导结果;K 取额定 9/3.5 N·m 除以 1.0 rad 柔顺参考偏角,D 取目标阻尼比 ζ=0.7 并截断到协议上限.
+RECOMMENDED_STIFFNESS = (9.0, 9.0, 9.0, 3.5, 3.5, 3.5)
+RECOMMENDED_DAMPING = (1.48, 2.56, 2.42, 0.57, 0.35, 0.15)
 
 
 def reference_dynamics(model_path=None):

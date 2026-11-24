@@ -200,6 +200,11 @@ def test_keyboard_launch_isolates_sim_impedance_yaml_from_hardware_mode() -> Non
         "/**"
     ]["ros__parameters"]
     assert sim_impedance["impedance_profile"] == "simulation"
+    assert sim_impedance["impedance_initial_stiffness"] == [9.0, 9.0, 9.0, 3.5, 3.5, 3.5]
+    assert sim_impedance["impedance_initial_damping"] == [1.48, 2.56, 2.42, 0.57, 0.35, 0.15]
+    assert sim_impedance["impedance_max_damping"] == [5.0, 5.0, 5.0, 5.0, 5.0, 3.0]
+    assert sim_impedance["impedance_kp_step"] == 0.5
+    assert sim_impedance["impedance_kd_step"] == 0.05
 
 
 def test_teleop_system_forwards_execution_mode_to_dashboard() -> None:
