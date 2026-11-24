@@ -11,11 +11,12 @@
 | 功能域 | 当前实现 | 主要所有者 | 当前边界 | 运行入口 |
 |---|---|---|---|---|
 | 真实硬件通信 | MotorBridge/串口连接、六轴与夹爪反馈、状态发布、失能启动、显式 enable/disable、停止和 safe home | `rebotarmcontroller` | 需要设备、串口唯一占用、现场安全检查；软件测试不等于硬件验收 | [系统运行命令](../../reference/commands/system_runtime.md) |
-| 关节轨迹执行 | `FollowJointTrajectory`、轨迹停止、反馈跟踪、超时/通信异常保护 | `rebotarmcontroller` + `rebotarm_motion` | Execute 必须有真实或仿真控制器；Plan 成功不等于 Execute | [功能命令](../../reference/commands/rebotarm_feature_commands.md) |
+| 关节轨迹执行 | `continuous` 连续轨迹曲线整定、规划起点绑定、`FollowJointTrajectory`、轨迹停止、反馈跟踪、超时/通信异常保护 | `rebotarm_trajectory` + `rebotarm_motion` + `rebotarmcontroller` / `rebotarm_simulation` | Execute 必须有真实或仿真控制器；Plan 成功不等于 Execute | [连续轨迹说明](continuous_trajectory_retiming.md) |
+| 共享力控与关节阻抗 | 重力补偿模型/计算、有界 MIT 命令与柔顺关节阻抗状态机；仿真端提供 100/500 Hz 双频 MIT 内环与 `/joint_impedance/start\|stop` 服务 | `rebotarm_force_control` + `rebotarmcontroller` / `rebotarm_simulation` | 重力补偿已接真机与仿真；关节阻抗当前仅在 MuJoCo 仿真实现，真机阻抗适配与实机标定另行安排 | [关节阻抗整定](joint_impedance_gains.md) |
 | 夹爪控制 | 独立位置开合、MoveIt GripperCommand 适配、反馈新鲜度、到位/超时和中性释放；网页可与六轴组成任务 | `rebotarmcontroller`、`rebotarm_teleop` | 示教回放仅执行六轴；夹持效果及开口/TCP 需物理标定 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | MoveIt 规划 | URDF/SRDF、规划组、IK、状态有效性/碰撞检查、RViz MotionPlanning Plan/Execute | `rebotarm_moveit_config`、`rebotarm_motion` | 真机 Execute 需要显式授权和 `moveit_simple_controller_manager` | [功能命令](../../reference/commands/rebotarm_feature_commands.md) |
 | 网页 Dashboard | 状态面板、SSE、关节 Preview/Execute/Stop、夹爪、Safe Home、Enable/Disable、示教与标定页面 | `rebotarm_dashboard` | Dashboard 是本地 UI/API，不是视觉传输层；不直接访问电机 SDK | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
-| 键盘/RViz 操作 | 键盘小步调姿、夹爪可视关节状态、RViz 原生 MotionPlanning 拖动 | `rebotarm_teleop` | 不得与另一个真机控制器并行占用串口 | [功能命令](../../reference/commands/rebotarm_feature_commands.md) |
+| 键盘/RViz 操作 | 键盘单步点动、分模式力控调参（`IDLE`/`GRAVITY_COMP`/`JOINT_IMPEDANCE`，仿真阻抗配置与真机隔离）、夹爪可视关节状态、RViz 原生 MotionPlanning 拖动 | `rebotarm_teleop` | 不得与另一个真机控制器并行占用串口；仿真阻抗配置仅 `use_hardware:=false` 加载 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 示教录制 | 重力补偿录制、原子反馈批次、JSONL 文件、文件列表和记录状态 | `rebotarm_teach` | 录制不自动代表轨迹可执行；真机重力补偿需现场授权 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 示教检查与回放 | 滤波、重采样、重定时、速度/加速度/jerk 检查、MoveIt 起点对齐、碰撞预检、dry-run/execute、运行时跟踪门 | `rebotarm_teach` + `rebotarm_motion` | 原始记录不能直接下发；回放通过不等于真实运动安全 | [遥操作命令](../../reference/commands/rebotarm_common_commands.md) |
 | 网页手眼/TCP 标定 | 会话保存恢复、同步采样、五方法求解、独立验证、质量门、导出和审计 | `rebotarm_calibration` + `rebotarm_dashboard` | 外参须显式部署；真实设备与物理精度的验证进展见项目状态 | [网页标定命令](../../reference/commands/calibration_web.md) |

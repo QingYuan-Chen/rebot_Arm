@@ -15,4 +15,4 @@ motion 负责生成系数、重定时、段内限值及碰撞检查；控制器�
 执行时间轴、取消和最终接纳。调用方取得数值载荷后仍须执行自己的状态及资源检查。
 
 接口关系见[架构说明](../../docs/implemented/architecture.md#共享轨迹内核)，
-操作与准备流程见[P005 执行说明](../../docs/implemented/features/p005_prepared_trajectory.md)。
+操作与准备流程见[连续轨迹曲线整定与执行](../../docs/implemented/features/continuous_trajectory_retiming.md)。

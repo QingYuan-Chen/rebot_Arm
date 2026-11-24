@@ -51,7 +51,8 @@
 ### 当前操作
 
 - [`implemented/features/hardware_execution.md`](implemented/features/hardware_execution.md)：真机控制器、反馈、夹爪和执行边界。
-- [`implemented/features/p005_prepared_trajectory.md`](implemented/features/p005_prepared_trajectory.md)：共享轨迹、continuous 执行和验证范围。
+- [`implemented/features/continuous_trajectory_retiming.md`](implemented/features/continuous_trajectory_retiming.md)：连续轨迹曲线整定、起点绑定、continuous 执行和验证范围。
+- [`implemented/features/joint_impedance_gains.md`](implemented/features/joint_impedance_gains.md)：仿真关节阻抗增益整定、柔顺参考偏角与力矩预算。
 - [`implemented/features/moveit_planning.md`](implemented/features/moveit_planning.md)：MoveIt 规划、碰撞和轨迹执行。
 - [`implemented/features/operator_control.md`](implemented/features/operator_control.md)：网页、键盘和 RViz 操作。
 - [`implemented/features/teach_replay.md`](implemented/features/teach_replay.md)：示教录制、准备和回放。
@@ -71,10 +72,8 @@
 
 ## 设计文档和历史说明
 
-- [`design/visual_grasp_cleanup_scope.md`](design/visual_grasp_cleanup_scope.md)：视觉执行及通用夹爪力夹取/握持的结构剔除清单；保留候选筛选、显示及共享运动功能。
-- [`design/controller_refactor_plan.md`](design/controller_refactor_plan.md)：Python 控制器结构整理记录；原 C++ 迁移计划已废弃，后续迁移由另一个仓库承担。
 - [`design/calibration_web_plan.md`](design/calibration_web_plan.md)：网页手眼标定完整技术路线；软件链路已实现，真实设备和物理精度仍在后续开发/验收范围。
-- 历史迁移快照和已删除文档当前不在工作树；需要追溯时从 Git 历史恢复，不作为当前源码清单。
+- 已完成的历史规划、阶段范围清单和已删除文档不再保留在工作树；需要追溯时从 Git 历史恢复，不作为当前源码清单。
 
 ## 用户维护
 

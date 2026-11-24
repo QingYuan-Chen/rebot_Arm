@@ -16,7 +16,7 @@ source install/setup.bash
 只读检查当前工作区是否能发现包：
 
 ```bash
-ros2 pkg list | grep -E 'rebotarm(controller|_bringup|_motion|_teach|_teleop|_dashboard|_vision|_calibration|_simulation|_moveit_config)$'
+ros2 pkg list | grep -E 'rebotarm(controller|_msgs|_trajectory|_force_control|_bringup|_motion|_teach|_teleop|_dashboard|_vision|_calibration|_simulation|_moveit_config)$'
 ```
 
 ## 操作步骤：真机控制器（仅连接，不代表已使能）
@@ -96,16 +96,15 @@ ros2 topic echo --once /rebotarm/joint_states
 ros2 run rebotarm_simulation rebotarm_mujoco_health -- --skip-renderer
 
 # 无头短时运行，检查 CLI 和物理步进
-ros2 run rebotarm_simulation rebotarm_mujoco_cli -- --headless --duration 5
+ros2 run rebotarm_simulation rebotarm_mujoco_cli run --duration 5
 
 # 检查生成的 MJCF 是否与 URDF/资源一致
 ros2 run rebotarm_simulation rebotarm_urdf_to_mjcf -- --repo-root . --check
 ```
 
-`rebotarm_mujoco_cli` 是无头交互式 MuJoCo CLI。`rebotarm_mujoco_node` 是 MuJoCo
-物理后端；`rebotarm_sim_trajectory_controller` 是不加载物理引擎的 RViz 轨迹插值预演后端，
-用于无硬件键盘和 RViz 拖动。两者由各自的组合 launch 启动，同一命名空间
-只运行一个轨迹 Action 服务端。CLI 使用独立模型实例，不发布 ROS 控制器接口。
+`rebotarm_mujoco_cli` 是无头交互式 MuJoCo CLI，使用独立模型实例，不发布 ROS 控制器接口。
+`rebotarm_mujoco_node` 是无硬件 ROS 执行（含 MoveIt、键盘与 RViz 拖动）的唯一 MuJoCo
+物理后端，由组合 launch 启动；旧无物理引擎预演后端已退役。同一命名空间只运行一个轨迹 Action 服务端。
 
 ## 验证：纯软件与分层检查
 

@@ -214,13 +214,17 @@ MoveIt 联动验收需要先按下文启动 MuJoCo 后端和 MoveIt，再单独�
 ## 当前仿真核验与已知问题
 
 仿真核验记录、当前问题和实机验收统一维护在
-[项目状态](../../docs/reference/project_status.md)。P005 的执行契约与维护验收见
-[P005 执行说明](../../docs/implemented/features/p005_prepared_trajectory.md)。
+[项目状态](../../docs/reference/project_status.md)。连续轨迹曲线整定与执行契约见
+[连续轨迹曲线整定与执行](../../docs/implemented/features/continuous_trajectory_retiming.md)。
 
-2026-10-01 核验发现的两项控制问题已在 P005 修复，当前实现如下：
+当前仿真控制与执行实现要点如下：
 
 - 轨迹接纳校验完整六轴、数值和时间；continuous 准备检查整条曲线限位，并核对准确曲线、
   能力、场景与规划起点绑定。底层位置命令在修改目标前逐轴检查模型范围，越界时抛错。
+- 位置控制（`PosVelController`）采用 100 Hz 外环串级 PI 与 500 Hz 内环自足速度阻尼
+  （`motor_control_calibration.yaml` 中 `velocity_damping_nm_s_per_rad = [9.3, 9.3, 9.3, 2.6, 2.6, 1.0]`），
+  使位置伺服与常驻 MJCF 机械被动阻尼解耦；六轴机械阻尼按大小电机惯量设为
+  `model_dynamics.damping = [0.5, 0.5, 0.5, 0.2, 0.12, 0.06]`，不再掩盖重力补偿或柔顺关节阻抗的物理响应。
 - `position -> hold` 复用位置控制器的积分和上一拍支撑力矩，保持切换延续已有控制状态。
   重复进入 hold 保持幂等；continuous 的停止和取消继续等待实际仿真反馈确认。
 - 六轴执行和独立夹爪执行分别由 `execution/trajectory_execution.py`、
@@ -362,7 +366,7 @@ MoveIt、RViz 和状态发布节点使用 `use_sim_time:=true` 跟随 `/clock`�
 发布者不会反过来等待自己尚未发布的仿真时间。
 
 六轴请求由 MoveIt、网页或诊断工具生成并绑定最终轨迹，操作契约见
-[P005 执行说明](../../docs/implemented/features/p005_prepared_trajectory.md)。
+[连续轨迹曲线整定与执行](../../docs/implemented/features/continuous_trajectory_retiming.md)。
 执行异常先停止并确认物理保持，停止未确认时保留预约。失败结果和日志保留原执行、
 停止及终态错误；迟到回调只处理原目标身份。持续 abort 失败时返回
 `status=UNKNOWN`、`error_code=INVALID_GOAL`，故障服务端拒绝新目标并保留结果供迟到查询。

@@ -10,7 +10,8 @@
 
 - 网页状态、Preview/Execute/Stop、Safe Home、Enable/Disable；
 - 网页夹爪控制和实时状态；
-- 键盘关节小步调姿；
+- 终端键盘关节小步调姿与分模式力控调参（`IDLE` 点动与 `g`/`i` 切入、`GRAVITY_COMP` 拦截运动与 `h`/空格退出、`JOINT_IMPEDANCE` 仿真单关节刚度/阻尼/平衡角在线微调与遥测打印）；
+- 仿真专用 `keyboard_impedance_sim.yaml` 参数物理隔离（仅 `use_hardware:=false` 加载，真机启动拒绝仿真阻抗配置；`teleop_keyboard.launch.py` 仿真分支默认 `use_mujoco_viewer:=true`、`use_rviz:=false`）；
 - RViz 夹爪可视关节状态；
 - RViz 原生 MotionPlanning 末端拖动；
 - 操作命令校验、状态聚合和错误反馈。

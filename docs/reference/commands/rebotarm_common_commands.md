@@ -65,12 +65,18 @@ ros2 param get /teleop_keyboard_node trajectory_duration
 键盘入口不能与另一套占用同一串口的控制器并行运行：
 
 ```bash
+# 默认打开 MuJoCo 原生 Viewer，不自动启动 RViz；如需 RViz 可追加 use_rviz:=true
 ros2 launch rebotarm_bringup teleop_keyboard.launch.py \
-  use_hardware:=false \
-  use_local_rviz:=true
+  use_hardware:=false
 ```
 
-需要真机时，在完成现场检查和授权后将 `use_hardware:=true channel:=/dev/ttyACM0` 传入。键盘操作用于小范围调姿，不作为示教数据来源。
+无硬件仿真分支默认 `use_mujoco_viewer:=true`、`use_rviz:=false`，并仅在 `use_hardware:=false` 时条件加载仿真专用 `keyboard_impedance_sim.yaml`（严格与真机隔离）。终端键盘订阅 `/rebotarm/arm_status` 按模式工作：
+
+- `IDLE`：关节单步点动（`0.02 rad / 0.4 s`），按 `g` 进入重力补偿，按 `i` 进入仿真关节阻抗；
+- `GRAVITY_COMP`：拦截点动命令，支持 `h`/空格 退出回 Hold、`p` 打印状态；
+- `JOINT_IMPEDANCE`：`1..6` 选轴、`[`/`]` 调整刚度 `kp`、`,`/`. ` 调整阻尼 `kd`、`-`/`=` 调整平衡角 `q_ref`、`0`/`l` 对齐当前角、`h`/空格 退出回 Hold、`p` 打印六轴遥测。
+
+需要真机时，在完成现场检查和授权后将 `use_hardware:=true channel:=/dev/ttyACM0` 传入（真机分支不加载仿真阻抗配置）。键盘操作用于小范围调姿，不作为示教数据来源。
 
 需要键盘、Dashboard 和示教录制时，使用组合入口：
 
@@ -92,9 +98,9 @@ ros2 launch rebotarm_bringup teleop_keyboard.launch.py \
 ```
 
 真机键盘分支复用已有 MoveIt 组合；无硬件键盘和 RViz 执行使用 MuJoCo。两类组合
-均提供唯一后端、碰撞场景与准备服务。物理仿真入口见 [MuJoCo 组合](../../implemented/features/p005_prepared_trajectory.md#模式与启动)。
+均提供唯一后端、碰撞场景与准备服务。物理仿真入口见 [MuJoCo 组合](../../implemented/features/continuous_trajectory_retiming.md#模式与启动)。
 
-## P005 用户实机功能验证
+## 连续轨迹曲线整定用户实机功能验证
 
 continuous 的“联合预览”显示六轴重定时后的时长、独立夹爪目标和生效力矩上限。
 机械臂保留关键点；夹爪仅单次开合，不再支持延迟或多关键点。组合按钮通过一个
@@ -103,7 +109,7 @@ ExecuteTeleopMotion 同周期登记两侧，分别限速和到位，整体结果
 页面“按闭合夹爪模型检查”仅代表本次计算副本，实际张开手指的碰撞范围未检查；
 实际开度和公共 MoveIt 场景仍用真实反馈。修改目标后须重新预览；重新进入预览从当前反馈
 初始化。界面的“再次执行条件”来自只读诊断，过期为未知，不代表某次 REJECT 的精确原因。
-关键点格式和时序约束见 [P005 协同接口](../../implemented/features/p005_prepared_trajectory.md#修订协同接口)。
+关键点格式和时序约束见 [连续轨迹曲线整定协同接口](../../implemented/features/continuous_trajectory_retiming.md#协同接口)。
 
 先完成现场净空、支撑、急停、唯一串口和新鲜反馈检查，记录当次可安全恢复的基线。
 确认后端能力为 continuous，且准备服务就绪后，再显式 Enable。

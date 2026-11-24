@@ -4,14 +4,14 @@
 唯一串口/总线会话、已校验反馈和最后一道执行安全检查. 支持 Ubuntu 24.04 / ROS 2 Jazzy.
 当前实施及验收范围以[项目状态](../../docs/reference/project_status.md)为准.
 
-P005 网页组合路径由 `runtime/coordinated_trajectory.py` 持有整体任务，同一设备周期
+网页 continuous 组合路径由 `runtime/coordinated_trajectory.py` 持有整体任务，同一设备周期
 登记六轴曲线和独立夹爪目标，复用原六轴采样及夹爪限速、到位、超时和中性释放。
 FJT 只接受完整六轴；网页 continuous 使用 `/rebotarm/execute_teleop_motion`。
 真机节点固定使用 `continuous`，模式话题只读，运行参数中已移除模式选择。完整真机组合提供 motion 准备服务，
 单独运行底层控制器时须另外提供该服务。启动和运动准入见下文。
 整体成功等待两侧完成与清理，不保证同时到达；部分发送失败保留真实回执，停止确认前不释放两侧资源。
 机械臂保持命令终点；健康任务失败不自动失能。接口见
-[P005 协同位置](../../docs/implemented/features/p005_prepared_trajectory.md#修订协同接口)。
+[连续轨迹曲线整定协同接口](../../docs/implemented/features/continuous_trajectory_retiming.md#协同接口)。
 
 ## 职责与执行关系
 

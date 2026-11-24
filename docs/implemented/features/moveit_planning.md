@@ -24,7 +24,7 @@
 `ompl_reference` 仅供中间段保留虚拟起点，不可直接 Execute。插件匹配 MoveIt 重编码值后
 发送服务缓存的权威纳秒轨迹，准备不再替换首点。后续运动带入新鲜真实
 夹爪开度，执行准备全段固定它检查完整机器人和附着物。接口及兼容等级见
-[P005 接口](p005_prepared_trajectory.md#修订协同接口)。
+[连续轨迹曲线整定](continuous_trajectory_retiming.md#协同接口)。
 
 ## 验证结果
 

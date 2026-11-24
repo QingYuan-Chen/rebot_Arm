@@ -92,7 +92,7 @@ mujoco_moveit_sim.launch.py                    MuJoCo + MoveIt + 准备服务
 | `mujoco_moveit_sim.launch.py` | MuJoCo + MoveIt 组合 | 唯一 MuJoCo 后端、MoveIt 与轨迹准备服务；使用 continuous，可选 Dashboard |
 | `interactive_system.launch.py` | 共享实现 | 真机硬件片段与 MoveIt 组合的唯一接线；负责可选 RViz，不再保留无硬件分支 |
 | `rebotarm_app.launch.py` | 完整真机入口 | 包含真机 MoveIt 组合，再增加示教录制、Dashboard 和状态 RViz；不启动键盘节点 |
-| `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布和 RViz；默认使用 MuJoCo。两类后端均提供 MoveIt 场景与准备服务 |
+| `teleop_keyboard.launch.py` | 遥操作入口 | 可选硬件、键盘关节点动、状态发布与可选 RViz；默认使用 MuJoCo（默认 `use_mujoco_viewer:=true`、`use_rviz:=false`），仅仿真分支条件加载 `keyboard_impedance_sim.yaml` 支持分模式力控调参。两类后端均提供 MoveIt 场景与准备服务 |
 | `teleop_system.launch.py` | 遥操作组合 | 包含键盘入口，再增加示教录制和默认只读 Dashboard；默认使用 MuJoCo |
 | `visual_perception_system.launch.py` | 唯一视觉入口 | 感知、抓取候选生成、筛选及显示；默认 `robot_context=offline`，也可接入外部环境 |
 
@@ -102,8 +102,8 @@ mujoco_moveit_sim.launch.py                    MuJoCo + MoveIt + 准备服务
 
 轨迹执行方式统一为 `continuous`，`trajectory_execution_mode` 启动/节点参数已删除；
 同名话题保留为后端只读能力声明。网页和终端键盘自动核对能力，默认单步为 0.02 rad / 0.4 s。
-能力不匹配或未知时拒绝；契约与验收见
-[P005 执行接入](../../../docs/implemented/features/p005_prepared_trajectory.md)。
+能力不匹配或未知时拒绝；契约与边界见
+[连续轨迹曲线整定与执行](../../../docs/implemented/features/continuous_trajectory_retiming.md)。
 
 `moveit_hardware`、`rebotarm_app`、`teleop_keyboard`（及 `teleop_system`）自动提供准备服务。
 底层 `hardware_controller` 和 `mujoco_sim` 片段的准备服务由上层组合提供。
@@ -121,7 +121,7 @@ MoveIt 对象仍执行正常清理，不捕获段错误或改写退出码。
 插件由 ament 索引定位，已有 `LD_PRELOAD` 保留，缺失插件在启动前报错；
 不修改系统 ROS 库，也不把环境变量传播给硬件控制器或其他节点。
 配套 MoveIt 修复析构顺序并通过退出回归后，可移除此兼容处理；诊断及范围见
-[退出修复记录](../../../docs/implemented/features/p005_prepared_trajectory.md#moveitmoveitpy-退出段错误修复)。
+[退出修复记录](../../../docs/implemented/features/continuous_trajectory_retiming.md#moveitmoveitpy-退出段错误兼容)。
 
 ## 两组容易混淆的入口
 
@@ -129,7 +129,7 @@ MoveIt 对象仍执行正常清理，不捕获段错误或改写退出码。
 |---|---|---|
 | 只需真机 MoveIt 规划/执行 | `moveit_hardware.launch.py` | Dashboard、键盘遥操、示教录制 |
 | 需要真机 MoveIt + 示教录制 + Dashboard 完整工作台 | `rebotarm_app.launch.py` | 键盘遥操 |
-| 只需键盘点动和 RViz | `teleop_keyboard.launch.py` | Dashboard、示教录制 |
+| 只需键盘点动（及仿真力控调参/Viewer/可选 RViz） | `teleop_keyboard.launch.py` | Dashboard、示教录制 |
 | 需要键盘 + 示教录制 + Dashboard | `teleop_system.launch.py` | 默认关闭网页执行，需显式设置 `web_execute_enabled:=true` |
 
 因此它们共享部分界面，但不是重复实现。`moveit_hardware.launch.py` 和

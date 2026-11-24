@@ -6,9 +6,6 @@
 
 当前设计路线：
 
-- [`engineering_audit_scope.md`](engineering_audit_scope.md)：工程规范审核与分类消融范围；附三项错误契约整改及工程中文注释完善方案。
-- [`visual_grasp_cleanup_scope.md`](visual_grasp_cleanup_scope.md)：视觉执行与通用夹爪力夹取/握持剔除范围，区分整文件删除、共享定义迁移和保留项。
-- [`controller_refactor_plan.md`](controller_refactor_plan.md)：Python 控制器结构整理记录；原 C++ 迁移计划已废弃，后续迁移由另一个仓库承担。
 - [`calibration_web_plan.md`](calibration_web_plan.md)：网页手眼标定的完整路线。软件链路已实现，但真实相机、真实机械臂和物理精度验收仍是后续工作。
 
-技术路线完成后，应将已采用内容同步到当前架构/操作文档，未采用内容标为历史，而不是继续伪装成当前计划。
+已完成的历史规划和阶段范围清单（如工程规范审核范围、视觉执行剔除清单、Python 控制器整理记录等）不再保留在工作树中，已采用内容同步到 `docs/implemented/` 与 `docs/reference/project_status.md`，历史过程可在 Git 记录中追溯。

@@ -13,7 +13,7 @@
   `/rebotarm/gripper/moveit_command`，按左指位移请求，后端转换为双指总开口。
 - 真机及 MuJoCo 执行统一使用 `continuous`：motion 负责最终起点绑定、重定时及执行前准备，
   后端复核会话、代次、能力与场景后执行。接口见
-  [P005 执行说明](../../docs/implemented/features/p005_prepared_trajectory.md)。
+  [连续轨迹曲线整定与执行](../../docs/implemented/features/continuous_trajectory_retiming.md)。
 
 启动组合由 `rebotarm_bringup` 拥有。真机由唯一硬件控制器执行，MuJoCo 由唯一仿真后端执行；
 同一机械臂命名空间只运行一个轨迹执行服务端。RViz 无硬件执行同样使用 MuJoCo 后端。

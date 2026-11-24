@@ -26,7 +26,7 @@ rebotarm_bringup/
 | `hardware_controller.launch.py` | 唯一直接启动真实 `reBotArmController` 的底层入口 |
 | `moveit_hardware.launch.py` | 真机 MoveIt 规划/执行入口 |
 | `rebotarm_app.launch.py` | 真机 MoveIt、示教录制和 Dashboard 工作台 |
-| `teleop_keyboard.launch.py` | 键盘点动、MoveIt 和 RViz，默认使用 MuJoCo |
+| `teleop_keyboard.launch.py` | 键盘点动、仿真分模式力控调参与 MoveIt；默认 MuJoCo（默认打开 Viewer、关闭 RViz） |
 | `teleop_system.launch.py` | 键盘点动、示教和 Dashboard 组合 |
 | `visual_perception_system.launch.py` | 视觉感知、候选筛选和显示组合 |
 

@@ -30,7 +30,7 @@
 | `rebotarm_bringup hardware_controller.launch.py` | 用户入口：真机底层连接 | [system_runtime.md](system_runtime.md) |
 | `rebotarm_bringup moveit_hardware.launch.py` | 用户入口：真机 MoveIt | [rebotarm_feature_commands.md](rebotarm_feature_commands.md) |
 | `rebotarm_bringup rebotarm_app.launch.py` | 用户入口：完整工作台 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
-| `rebotarm_bringup teleop_keyboard.launch.py` | 用户入口：键盘点动 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
+| `rebotarm_bringup teleop_keyboard.launch.py` | 用户入口：键盘点动与仿真分模式力控调参 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
 | `rebotarm_bringup teleop_system.launch.py` | 用户入口：键盘 + Dashboard + 示教 | [rebotarm_common_commands.md](rebotarm_common_commands.md) |
 | `rebotarm_bringup visual_perception_system.launch.py` | 用户入口：视觉候选生成、筛选与显示 | [visual_grasp_commands.md](visual_grasp_commands.md) |
 | `rebotarm_bringup interactive_system.launch.py` | 组合内部：真机硬件与 MoveIt 共享实现 | [src/rebotarm_bringup/launch/README.md](../../../src/rebotarm_bringup/launch/README.md) |
@@ -45,8 +45,7 @@
 |---|---|---|
 | 标定用户/维护 | `rebotarm_handeye_capture`、`rebotarm_handeye_calibration`、`rebotarm_handeye_residual`、`rebotarm_tcp_calibration` | 网页采样、离线求解、残差报告、TCP 交互；见 [calibration_web.md](calibration_web.md) |
 | MuJoCo 维护 | `rebotarm_mujoco_health`、`rebotarm_mujoco_cli`、`rebotarm_urdf_to_mjcf`、`rebotarm_mujoco_teach_preview` | 启动前健康检查、无头 CLI、URDF→MJCF 生成/一致性检查及示教预演；见 [system_runtime.md](system_runtime.md) 和 [mujoco_teach_preview.md](mujoco_teach_preview.md) |
-| MuJoCo 组合内部 | `rebotarm_mujoco_node` | 由 MuJoCo launch 启动，执行物理仿真 |
-| RViz 预演组合内部 | `rebotarm_sim_trajectory_controller` | 无硬件键盘和 RViz 拖动的轨迹插值预演，无物理引擎 |
+| MuJoCo 组合内部 | `rebotarm_mujoco_node` | 由 MuJoCo / 无硬件组合 launch 启动，执行物理仿真与轨迹/力控后端 |
 | 视觉组合内部/维护 | `rebotarm_vision_node`、`rebotarm_graspnet_baseline_node`、`rebotarm_grasp_candidate_ik_filter`、`rebotarm_visual_grasp_markers` 等 | 由 `visual_perception_system.launch.py` 按参数组合；不重复维护逐节点启动文档 |
 | 操作与示教 | `TeleopKeyboardNode`、`TeleopStatusPanelNode`、`TeachRecorderNode` | 通过对应组合 launch 使用 |
 | 控制器示例 | `GravityCompensation`、`GripperControl`、`MoveTo`、`MoveToPose` | 示例客户端，不是推荐的正式用户入口；正式流程使用 Dashboard/MoveIt/视觉命令 |

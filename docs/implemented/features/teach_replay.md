@@ -26,8 +26,8 @@ dry-run token、对齐、执行和停止状态，Dashboard 不复制回放实现
 历史 `time_parameterization_method` 继续可读并保留请求值，实际方法按字段等级报告
 `c0/c1/c2_waypoint_retime`；请求 `ruckig` 时同时说明当前未提供 waypoint 适配器。
 旧局部维度差分重定时、反向注入回调和未实现 Ruckig 分支已删除。位置处理、源节点、
-统一缩放及完整曲线的解析限值/碰撞复核继续沿用现有流程。 维护整改后使用现有 306 行原始记录完成
-MuJoCo C1 对齐、完整碰撞检查、取消和再次回放；证据见 [P005 维护整改验收](p005_prepared_trajectory.md#维护整改验收2026-11-04)。
+统一缩放及完整曲线的解析限值/碰撞复核继续沿用现有流程。维护整改后使用现有 306 行原始记录完成
+MuJoCo C1 对齐、完整碰撞检查、取消和再次回放，详见[连续轨迹曲线整定与执行](continuous_trajectory_retiming.md)与[项目状态](../../reference/project_status.md)。
 
 录制格式保留夹爪总开口、源时间和有效性供查看；回放只按关节名称提取完整六轴，
 页面明确提示“夹爪不参与回放”。旧六轴记录与含第七轴的记录均不覆盖原始文件，
@@ -38,7 +38,7 @@ MuJoCo C1 对齐、完整碰撞检查、取消和再次回放；证据见 [P005 
 MoveIt 对齐使用 `ompl_reference` 保留指定起点；最终对齐、示教段和保持段拼接后，
 统一绑定后端保持起点、重定时并复核实际曲线极值。执行准备不再改节点或时间。
 夹爪需提前独立设置并完成，起点对齐和全路径碰撞检查使用新鲜实际开度，全段固定。
-dry-run 令牌仍绑定执行能力，重连后须重做。详见 [P005 接口](p005_prepared_trajectory.md#修订协同接口)。
+dry-run 令牌仍绑定执行能力，重连后须重做。详见[连续轨迹曲线整定协同接口](continuous_trajectory_retiming.md#协同接口)。
 自动对齐时长随当前反馈重新计算，不作为用户设置参与令牌等值比较；手动时长、速度与
 步数仍须一致。execute 无论如何都重新规划、检查最终曲线和碰撞，不复用旧碰撞结论。
 
@@ -112,50 +112,16 @@ ROS_DOMAIN_ID=74 python3 scripts/validate_p005_simulation.py --ros \
 证据：`log/teach_c1_20261104/numerical_record_report.json`、`targeted_tests.log`、
 `isolated_imports.json`、`acceptance_delivery/teach_web_preview.json`、
 对应 dry-run/execute/终态和反馈报告、`simulation_delivery.log`。
-未运行完整 pytest、重认 P005 单步物理指标或进行实机操作；未扩展处理已有退出协程警告。
-此前 C2/v4 仅保留历史证据。当时实机默认 legacy、默认失能，网页需重新加载并重新检查。
-当前入口默认模式见 [P005 执行接入](p005_prepared_trajectory.md)。
-
-### 缺少加速度记录修复验收（2026-11-04）
-
-**历史 C2 方案，已由上面的 C1 修订撤销。以下结果仅保留历史证据，不代表现行 C1 已验收。**
-
-原始 `teleop_records/teach_record.jsonl` 为 309 帧六轴 q/v、无 a。此前预处理只产生 q/v，
-MoveIt 对齐保留 q/v/a，拼接按不同导数等级拒绝；旧错误被统一包装成 collision unknown，
-完整碰撞检查实际未执行。派生文件缺少 a 是另一个持久化缺陷，不是本次内存拒绝的直接原因。
-
-- 数值验证：保留 309 个滤波后源位置控制节点，示教段由 7.4093 s 录制生成约 72.6306 s
-  的 C2 曲线。模型限值检查通过，最大 v/a/jerk 约为 0.13110 rad/s、0.57405 rad/s²、
-  19.99988 rad/s³，jerk 限值仍为 20。内部 C2 边界最大差约 4.84e-15，单独示教段
-  401 个碰撞采样。既有滤波相对原记录的节点最大改动约 0.04681 rad；五次曲线相对滤波
-  节点折线的采样最大偏离约 0.001647 rad（每段 21 点的观察值，不是严格误差上界）。
-  整条实际曲线均重新检查，不能把保留源节点理解为原始折线完全不变。
-- 软件验证：六组必要定向检查 **232 passed**，分层 **27 passed**；包含旧六轴兼容、
-  q/v 缺 a、MoveIt 中间导数保留、拼接连续性、v4 往返、内部位置越界拒绝、限值/碰撞覆盖、
-  阶段错误区分、取消及自动对齐设置绑定。规定 compileall、网页模块脚本与 import map
-  语法、`git diff --check` 通过，未运行完整 pytest。
-- 安装与仿真：13 包全新非软链接构建；隔离域 74、真实串口隔离，只加载 Jazzy 与本轮
-  独立安装区；隐藏源码与旧安装区的导入/资源检查通过，相关四包日常安装区已重建。
-  通过现有网页 API 对上述记录完成真实 MoveIt 起点对齐、完整碰撞预检、
-  回放取消，再次检查与完整执行。最终执行时长约 **79.9717 s**（包含对齐/保持），
-  碰撞预检 **470/470**，终态 SUCCEEDED/错误码 0；正式准备约 **0.664–0.694 s**，
-  2 s 期限及所有动态限值不变。保存 1570 帧 Action 反馈；MoveIt/MoveItPy 正常退出。
-  仿真 executor 在退出时仍打印一条未 await 协程警告，全部进程为正常退出且无残留；
-  本轮未扩大为 executor 关闭流程修复。
-
-验收产物位于 `log/teach_c2_20261104/`：`numerical_record_report.json`、
-`acceptance_delivery/teach_ros_acceptance.json`、对应的 dry-run/execute 与反馈 JSON、
-`simulation_launch_delivery.log`。原记录 SHA256 保持
-`322515d00649a7bd5d2ab17453048e3f136ed0b7f9ad8e8deedf0c54917e1837`。
-本轮不重认 P005 单步物理指标，不进行实机验证。
+未运行完整 pytest、重认连续轨迹单步物理指标或进行实机操作；未扩展处理已有退出协程警告。
+当前入口默认模式见[连续轨迹曲线整定与执行](continuous_trajectory_retiming.md)。
 
 ### 规划起点绑定复核（2026-11-04）
 
 对齐预览改用 `ompl_reference`，保留调用方指定起点；完整 C1 拼接后才取得后端快照，
 规范化首点、重定时并绑定最终纳秒曲线。执行准备不再替换该首点，q/v 不补 a。
 当前 306 点记录完成真实 MoveIt 对齐、取消后完整回放，历史 309 点原记录副本完成本地
-对齐、取消后回放；后端均明确接纳三次曲线，两份原文件校验值未变。对应最终时长、
-碰撞覆盖及验证边界见 [P005 起点绑定验收](p005_prepared_trajectory.md#规划起点绑定验收2026-11-04)。
+对齐、取消后回放；后端均明确接纳三次曲线，两份原文件校验值未变。规划起点绑定契约与验证边界见
+[连续轨迹曲线整定与执行](continuous_trajectory_retiming.md#规划起点绑定)。
 
 ## 边界与未完成
 

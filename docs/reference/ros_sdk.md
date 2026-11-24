@@ -24,16 +24,18 @@
 提供 topic、service 和 action，作为二次开发、规划、可视化和单电机调试入口。
 厂商 Python SDK 仅保留为参考，生产路径不再导入；不建立第二份通用 SDK。
 
-当前工作空间包含12个 ROS2 包：
+当前工作空间包含 13 个 ROS2 包：
 
 | 包 | 作用 |
 |---|---|
 | `rebotarm_msgs` | 自定义 msg / srv / action 接口 |
+| `rebotarm_trajectory` | 纯数值共享连续轨迹内核与能力/规划绑定契约 |
+| `rebotarm_force_control` | 共享重力补偿、有界 MIT 计算与关节阻抗状态机 |
 | `rebotarmcontroller` | 控制节点包，提供 `reBotArmController` 节点 |
 | `rebotarm_bringup` | launch 组合、配置与后端选择 |
-| `rebotarm_motion` | 轨迹、MoveIt 适配与运动校验 |
+| `rebotarm_motion` | 轨迹重定时、碰撞准备、MoveIt 适配与运动校验 |
 | `rebotarm_teach` | 示教录制、文件与回放流程 |
-| `rebotarm_teleop` | 键盘、网页及 RViz 操作者输入适配 |
+| `rebotarm_teleop` | 键盘（含仿真分模式力控调参）、网页及 RViz 操作者输入适配 |
 | `rebotarm_dashboard` | Web UI、HTTP 与状态展示 |
 | `rebotarm_moveit_config` | URDF、网格、SRDF 与规划模型 |
 | `rebotarm_vision` | 相机、识别与抓取候选 |
@@ -68,7 +70,8 @@ sudo apt install ros-jazzy-moveit-simple-controller-manager
 - 支持笛卡尔目标：`MoveToPoseIK` service、`MoveToPose` action
 - 支持标准轨迹接口：`control_msgs/action/FollowJointTrajectory`
 - 支持夹爪控制：`SetGripper` service、`GripperCommand` action
-- 支持 controller 内部重力补偿：`gravity_compensation/start`、`gravity_compensation/stop`
+- 支持重力补偿服务：`gravity_compensation/start`、`gravity_compensation/stop`（真机与 MuJoCo 仿真）
+- 支持关节阻抗服务：`joint_impedance/start`、`joint_impedance/stop`（当前仅 MuJoCo 仿真实现，真机阻抗适配另行安排）
 - 支持 per-joint sparse raw command：`JointMotorCmd`
 - 本地配置与 MotorBridge 驱动；规范模型 FK/IK 和笛卡尔采样由 Pinocchio 与本地运动实现承接
 

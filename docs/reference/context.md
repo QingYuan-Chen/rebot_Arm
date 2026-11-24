@@ -88,7 +88,7 @@ always remain real, with separate arm/gripper source timestamps. MoveIt arm and 
 execute independently; teach replay is six-axis. Real
 hardware stays disabled by default. Continuous is the only trajectory execution path;
 the mode topic is read-only and no mode parameter is exposed.
-See [P005 coordination](../implemented/features/p005_prepared_trajectory.md#修订协同接口).
+See [continuous trajectory retiming](../implemented/features/continuous_trajectory_retiming.md#协同接口).
 
 The visual entrypoint owns perception, candidate filtering and display. Offline mode
 uses passive robot state and MoveIt queries; external mode reuses an existing robot

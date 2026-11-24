@@ -20,6 +20,8 @@
 | `architecture.md` | 包所有权、依赖方向和长期架构约束 |
 | `features/system_capabilities.md` | 功能总表和完成/未完成边界 |
 | `features/hardware_execution.md` | 真机控制器、反馈、夹爪和执行安全 |
+| `features/continuous_trajectory_retiming.md` | 连续轨迹曲线整定、起点绑定、碰撞准备与执行 |
+| `features/joint_impedance_gains.md` | 仿真关节阻抗增益整定、力矩预算与控制带宽约束 |
 | `features/moveit_planning.md` | MoveIt、轨迹、碰撞和执行适配 |
 | `features/operator_control.md` | Dashboard、键盘和 RViz 操作 |
 | `features/teach_replay.md` | 示教录制、准备、检查和回放 |

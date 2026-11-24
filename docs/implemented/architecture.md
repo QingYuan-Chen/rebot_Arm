@@ -25,7 +25,7 @@ motion 保留系数生成、边界规范化、段内极值/限值和碰撞检查
 后端原子复核会话、代次、已发送保持目标、新鲜反馈、夹爪起始状态与场景版本后使用原系数；
 机械臂新任务准入不要求连续静止窗口，停止事务仍需完成其静止确认。
 准备等待不占设备周期；已观察到的相关场景变化使曲线停止保持。本批不提供动态避障。
-模式、期限和验证边界见 [P005 执行接入](features/p005_prepared_trajectory.md)。
+模式、期限和验证边界见 [连续轨迹曲线整定与执行](features/continuous_trajectory_retiming.md)。
 
 七轴、单手指及额外携带右指的 FJT 均明确拒绝。共享包保留六轴分级插值和具名系数，
 能力契约 v3 声明六轴 FJT、网页 Action v1、独立位置夹爪及规划绑定版本。
@@ -83,8 +83,8 @@ ROS 适配器直接接收职责组件的提交、取消和只读查询端口，�
 `gravity/` 负责将力控算法接入唯一硬件周期，
 `ros/` 负责协议与消息适配。根目录只保留节点入口、装配、配置和参数模块，`examples/` 保留原路径。
 子包不汇总导入，旧平铺模块不保留转发；Python 调用方使用新路径，ROS 名称与入口不变。
-目录整理保留既有模块依赖，公共数值函数归位及核心层 ROS 依赖清理另行规划。控制器结构整理记录见
-[控制器说明](../design/controller_refactor_plan.md)。
+目录整理保留既有模块依赖，公共数值函数归位及核心层 ROS 依赖清理另行规划。控制器文件结构见
+[控制器说明](../../src/rebotarmcontroller/README.md#文件结构)。
 
 `command_guard.py` 已接管透传准入与故障保护锁存，位置边界统一读取规范 URDF。
 `HardwareManager` 只有构造函数，创建唯一运行时、生命周期及六个职责组件并接线，
@@ -289,13 +289,13 @@ ROS 与离线轨迹执行共用 `TrajectorySampler`；模型和配置统一通�
 位置阶跃通过正式控制器执行；抓取试验必须指定目标、双指和执行过程，
 以目标双指接触和抬升共同判定。ROS 协议适配仍由 `ros/mujoco_ros_node.py` 持有；目标收敛、轨迹准入、反馈限流、单目标状态、命令闸门、异常清理和仿真访问串行化分别归入 `execution/trajectory_state.py`、`goal_policy.py`、`feedback_timing.py`、`simulation_access.py`；ROS消息转换与时间戳归 `ros/message_codec.py`。
 
-P005 准备预约、规划代次、上下文复核、六轴采样、组合终态及停止确认归
+连续轨迹的准备预约、规划代次、上下文复核、六轴采样、组合终态及停止确认归
 `execution/trajectory_execution.py`；独立夹爪的任务、限速、到位、超时和中性释放归
 `execution/gripper_execution.py`。准备与活动曲线采用具名数据对象，节点只做消息转换、
 服务 Future 等待、Action 反馈/终态映射和物理调度。执行组件复用活动目标及命令闸门，
 锁序保持目标锁→仿真锁，准备期限用单调时间，参考采样用仿真时间。
-执行状态只有一个写入所有者，诊断与记录读取快照。维护整理的验证结果见
-[P005 代码和文档审查](features/p005_prepared_trajectory.md#代码和文档审查2026-11-04)。
+执行状态只有一个写入所有者，诊断与记录读取快照。连续轨迹契约与边界见
+[连续轨迹曲线整定与执行](features/continuous_trajectory_retiming.md)。
 
 ### 无硬件执行与 RViz
 
@@ -501,8 +501,13 @@ RViz 拖动控制现在采用原生 MoveIt MotionPlanning 工作流。不再使�
 
 控制目标、模式、控制节拍、积分和力矩记忆统一归
 `control/sim_control_runtime.py::SimControlRuntime`，每次调用借用 model/data，
-不加载、步进或释放物理引擎。快照校验和物理/控制状态的成套保存恢复归
-`core/state_snapshot.py::StateSnapshot`，只接受同一模型实例的内存快照，
+不加载、步进或释放物理引擎。仿真执行层在 500 Hz 物理步内实现两类双频控制闭环：
+位置控制（`PosVelController`）以 100 Hz 外环串级 PI 输出 `outer_torque`、500 Hz 内环叠加
+自足速度阻尼（`velocity_damping_nm_s_per_rad`），使位置伺服不再依赖过大的常驻 MJCF
+机械被动阻尼；关节阻抗（`JointImpedanceSession`）以 100 Hz 外环锁存有界 MIT 命令、
+500 Hz 物理步内环按实时反馈求值。快照校验和物理/控制状态的成套保存恢复归
+`core/state_snapshot.py::StateSnapshot`（含 `pos_vel_outer_torque` 与
+`impedance_mit_output` 子步校验），只接受同一模型实例的内存快照，
 全部输入校验通过后才修改运行状态；没有新增文件格式或版本兼容层。
 `RebotArmMujoco` 保留原有控制、step、reset、save/restore 入口，并唯一管理模型生命周期。
 Viewer 通过 `borrow_viewer_handles()` 借用可变原生句柄，不转移所有权也不隐式加锁；

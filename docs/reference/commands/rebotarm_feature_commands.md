@@ -113,7 +113,7 @@ ros2 topic echo --once /rebotarm/trajectory_scene_revision std_msgs/msg/String \
 `arm` 下发六轴 FJT；`gripper` 通过独立 GripperCommand 执行，适配器将左指位置转换为双指总开口。
 夹爪完成后再规划机械臂，起始状态使用新鲜实际开度。六轴最终计划在规划阶段绑定保持起点并
 统一重定时，Execute 不再改节点或时间；旧绑定失效须重新规划。生效夹爪速度、力矩上限查看
-上述能力快照。完整契约见 [P005 接口](../../implemented/features/p005_prepared_trajectory.md#修订协同接口)。
+上述能力快照。完整契约见 [连续轨迹曲线整定协同接口](../../implemented/features/continuous_trajectory_retiming.md#协同接口)。
 
 ## 相关文档
 
